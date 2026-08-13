@@ -1,0 +1,43 @@
+<!--
+  Autocapture Analytics - Installation Snippet
+  Paste this inside <head>. That's the entire installation.
+  No other code, imports, or DOM changes are required.
+
+  Configuration happens entirely in the analytics.init({...}) call below -
+  NOT in the script URL. It's safe to call init() immediately, before the
+  real SDK has finished loading: the loader creates a queue stub first,
+  so init() just buffers onto that queue and gets replayed for real once
+  the actual SDK script executes.
+-->
+<script>
+(function (w, d, s, u) {
+  w.analytics = w.analytics || {
+    q: [],
+    init: function () { this.q.push(["init", ...arguments]); }
+  };
+
+  // Queue every public method so calls made before the SDK loads are safe.
+  ["start", "stop", "destroy", "event", "identify", "page", "defineFunnel", "enableDebug", "disableDebug"]
+    .forEach(function (method) {
+      w.analytics[method] = w.analytics[method] || function () {
+        w.analytics.q.push([method, ...arguments]);
+      };
+    });
+
+  var script = d.createElement(s);
+  script.async = true;
+  script.src = u;
+
+  var first = d.getElementsByTagName(s)[0];
+  first.parentNode.insertBefore(script, first);
+})(window, document, "script", "https://cdn.yourdomain.com/sdk.js");
+
+// This object is your entire configuration surface - siteId, endpoint,
+// which collectors run, session replay, everything.
+analytics.init({
+  siteId: "YOUR_SITE_ID",
+  endpoint: "https://api.yourdomain.com", // base URL - Transport derives /public/sites/{siteId}/events and /replay itself
+  // debug: true,                         // logs every captured + sent event to the console
+  // sessionReplay: { enabled: true },    // off by default; lazily loads a separate rrweb bundle only if turned on
+});
+</script>

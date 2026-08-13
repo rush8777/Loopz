@@ -1,0 +1,47 @@
+{
+  "name": "loopz",
+  "version": "0.1.0",
+  "description": "Hotjar-style autocapture behavioral analytics SDK (Click Maps, Scroll Maps, Move Maps, Rage Clicks, Funnels)",
+  "type": "module",
+  "main": "./dist/sdk.esm.js",
+  "module": "./dist/sdk.esm.js",
+  "types": "./dist/types/module.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/module.d.ts",
+      "import": "./dist/sdk.esm.js",
+      "default": "./dist/sdk.esm.js"
+    },
+    "./cdn/sdk.js": "./dist/sdk.js",
+    "./cdn/sdk.min.js": "./dist/sdk.min.js",
+    "./cdn/sdk-replay.js": "./dist/sdk-replay.js",
+    "./cdn/sdk-replay.min.js": "./dist/sdk-replay.min.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": [
+    "dist/sdk.js",
+    "dist/sdk.min.js",
+    "dist/sdk-replay.js",
+    "dist/sdk-replay.min.js"
+  ],
+  "scripts": {
+    "build": "vite build && vite build --mode minify && vite build --mode replay && vite build --mode replay-minify && vite build --mode module && tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "dev": "vite"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.1",
+    "terser": "^5.31.6",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0",
+    "vitest": "^2.0.5"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "rrweb": "^2.1.1"
+  }
+}

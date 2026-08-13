@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Persistent To-Do List</title>
+    <link rel="stylesheet" href="style.css">
+
+    <script>
+(function (w, d, s, u) {
+  w.analytics = w.analytics || {
+    q: [],
+    init: function () { this.q.push(["init", ...arguments]); }
+  };
+  ["start", "stop", "destroy", "event", "identify", "page", "defineFunnel", "enableDebug", "disableDebug"]
+    .forEach(function (method) {
+      w.analytics[method] = w.analytics[method] || function () {
+        w.analytics.q.push([method, ...arguments]);
+      };
+    });
+  var script = d.createElement(s);
+  script.async = true;
+  script.src = u + "?siteId=demo_site";
+  var first = d.getElementsByTagName(s)[0];
+  first.parentNode.insertBefore(script, first);
+})(window, document, "script", "../../dist/sdk.js");
+
+analytics.init({ siteId: "site_7kgzdjamm91nfh2zpr8yihot", debug: true, endpoint:"http://localhost:3000", sessionReplay: { enabled: true } });
+
+// Define a page-based funnel once. Navigating the anchors above (which just
+// change location.hash) simulates SPA-style route changes.
+analytics.defineFunnel("checkout", ["/cart", "/shipping", "/payment", "/success"]);
+</script>
+
+
+</head>
+<body>
+    <div class="todo-box">
+        <h2>My Tasks</h2>
+        <div class="input-container">
+            <input type="text" id="todo-input" placeholder="Add a new task...">
+            <button id="add-btn">Add</button>
+        </div>
+        <ul id="todo-list">
+            </ul>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
