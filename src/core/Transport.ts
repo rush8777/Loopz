@@ -1,4 +1,4 @@
-import type { AnalyticsEvent, AnyPayload, SessionReplayEventPayload } from "../types/events";
+import type { AnalyticsEvent, AnyPayload, SessionReplayEventPayload, CrawledElement } from "../types/events";
 import { mapToBackendEvent, mapToBackendReplayEvent, groupBySessionId } from "./backendMapping";
 
 export interface TransportResult {
@@ -15,6 +15,7 @@ export interface TransportResult {
  * the two real routes itself:
  *   {apiBase}/public/sites/{siteId}/events   - interaction events
  *   {apiBase}/public/sites/{siteId}/replay   - rrweb session replay
+ *   {apiBase}/public/sites/{siteId}/elements - crawled element catalog (see sendElements)
  *
  * A single flush batch can span multiple sessions (rare, but possible
  * right at a session-expiry boundary) and mixes ordinary events with
@@ -48,6 +49,24 @@ export class Transport {
 
   private replayUrl(): string {
     return `${this.apiBase}/public/sites/${this.siteId}/replay`;
+  }
+
+  private elementsUrl(): string {
+    return `${this.apiBase}/public/sites/${this.siteId}/elements`;
+  }
+
+  /**
+   * Sends a batch of crawled elements (see ElementCrawler.ts) to their
+   * own endpoint - a page-level catalog snapshot, not a per-session
+   * interaction stream, so it deliberately bypasses the batched
+   * event queue/retry machinery `send`/`sendBeacon` use: crawls are
+   * infrequent (page load + route change), so a simple best-effort
+   * POST per crawl is the right amount of machinery, not the queue
+   * built for continuous click/hover/scroll/cursor telemetry.
+   */
+  async sendElements(elements: CrawledElement[]): Promise<TransportResult> {
+    if (!this.apiBase || elements.length === 0) return { ok: true, retryable: false };
+    return this.postJson(this.elementsUrl(), { elements });
   }
 
   /** Best-effort async send used during normal operation. */

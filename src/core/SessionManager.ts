@@ -15,6 +15,8 @@ export class SessionManager {
   private pageViewId: string;
   private lastActivity: number;
   private inactivityMs: number;
+  /** True from construction (genuinely new session) or from a touch()-triggered rotation, until consumeSessionStarted() reads and clears it. */
+  private sessionJustStarted: boolean;
 
   constructor(inactivityMs = 30 * 60 * 1000) {
     this.inactivityMs = inactivityMs;
@@ -22,6 +24,7 @@ export class SessionManager {
     const restored = this.loadOrCreateSessionId();
     this.sessionId = restored.id;
     this.lastActivity = restored.lastActive;
+    this.sessionJustStarted = restored.isNew;
     this.pageViewId = generateId("pv");
   }
 
@@ -34,20 +37,20 @@ export class SessionManager {
     return id;
   }
 
-  private loadOrCreateSessionId(): { id: string; lastActive: number } {
+  private loadOrCreateSessionId(): { id: string; lastActive: number; isNew: boolean } {
     const existingId = sessionStore.get(SESSION_ID_KEY);
     const existingLastActive = Number(sessionStore.get(SESSION_LAST_ACTIVE_KEY) || 0);
     const fresh = now();
 
     if (existingId && fresh - existingLastActive < this.inactivityMs) {
       sessionStore.set(SESSION_LAST_ACTIVE_KEY, String(fresh));
-      return { id: existingId, lastActive: fresh };
+      return { id: existingId, lastActive: fresh, isNew: false };
     }
 
     const id = generateId("sess");
     sessionStore.set(SESSION_ID_KEY, id);
     sessionStore.set(SESSION_LAST_ACTIVE_KEY, String(fresh));
-    return { id, lastActive: fresh };
+    return { id, lastActive: fresh, isNew: true };
   }
 
   /** Call on any behavioral event to keep the session alive and rotate if expired. */
@@ -56,9 +59,22 @@ export class SessionManager {
     if (t - this.lastActivity >= this.inactivityMs) {
       this.sessionId = generateId("sess");
       sessionStore.set(SESSION_ID_KEY, this.sessionId);
+      this.sessionJustStarted = true;
     }
     this.lastActivity = t;
     sessionStore.set(SESSION_LAST_ACTIVE_KEY, String(t));
+  }
+
+  /**
+   * Reads and clears the "a new session just began" flag - call once
+   * per touch() to decide whether to emit a session_start event before
+   * the event that triggered the touch (see Analytics.enqueueEvent).
+   * Idempotent: calling it again before the next rotation returns false.
+   */
+  consumeSessionStarted(): boolean {
+    const started = this.sessionJustStarted;
+    this.sessionJustStarted = false;
+    return started;
   }
 
   /** Call on SPA route changes to start a new page view context. */

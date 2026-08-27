@@ -12,6 +12,7 @@ import type {
   FunnelEventPayload,
   CustomEventPayload,
   IdentifyEventPayload,
+  SessionStartEventPayload,
   SessionReplayEventPayload,
   PageContext,
 } from "../src/types/events";
@@ -48,7 +49,14 @@ function makeEvent<T extends AnyPayload>(
 describe("mapToBackendEvent", () => {
   it("maps page_view with no coordinates", () => {
     const event = makeEvent("page_view", { title: "Pricing" });
-    expect(mapToBackendEvent(event)).toEqual({ type: "page_view", timestamp: event.timestamp });
+    expect(mapToBackendEvent(event)).toEqual({
+      type: "page_view",
+      timestamp: event.timestamp,
+      anonymousId: "anon_1",
+      eventId: "evt_1",
+      pageViewId: "pv_1",
+      path: "/pricing",
+    });
   });
 
   it("maps click using clientX/clientY and the page's viewport size", () => {
@@ -64,7 +72,34 @@ describe("mapToBackendEvent", () => {
     expect(mapToBackendEvent(event)).toEqual({
       type: "click",
       timestamp: event.timestamp,
+      anonymousId: "anon_1",
+      eventId: "evt_1",
+      pageViewId: "pv_1",
       element: { selector: "#cta" },
+      x: 120,
+      y: 340,
+      viewportWidth: 1440,
+      viewportHeight: 900,
+    });
+  });
+
+  it("includes element label/role in the click mapping when the SDK computed them", () => {
+    const payload: ClickEventPayload = {
+      coordinates: { clientX: 120, clientY: 340, pageX: 120, pageY: 1340 },
+      viewport: { width: 1440, height: 900 },
+      scroll: { x: 0, y: 1000 },
+      element: { tagName: "button", selector: "#cta", label: "Save changes", role: "button" },
+      interactive: true,
+    };
+    const event = makeEvent("click", payload);
+
+    expect(mapToBackendEvent(event)).toEqual({
+      type: "click",
+      timestamp: event.timestamp,
+      anonymousId: "anon_1",
+      eventId: "evt_1",
+      pageViewId: "pv_1",
+      element: { selector: "#cta", label: "Save changes", role: "button" },
       x: 120,
       y: 340,
       viewportWidth: 1440,
@@ -86,8 +121,37 @@ describe("mapToBackendEvent", () => {
     expect(mapToBackendEvent(event)).toEqual({
       type: "hover",
       timestamp: event.timestamp,
+      anonymousId: "anon_1",
+      eventId: "evt_1",
+      pageViewId: "pv_1",
       element: { selector: "#hero" },
       durationMs: 60000,
+      x: 700,
+      y: 220,
+      viewportWidth: 1440,
+      viewportHeight: 900,
+    });
+  });
+
+  it("includes element label/role in the hover mapping when the SDK computed them", () => {
+    const payload: HoverEventPayload = {
+      element: { tagName: "a", selector: 'a[href="/dashboard/incidents/:id"]', label: "View", role: "link" },
+      hoverStart: 1000,
+      hoverEnd: 1500,
+      durationMs: 500,
+      x: 700,
+      y: 220,
+    };
+    const event = makeEvent("hover", payload);
+
+    expect(mapToBackendEvent(event)).toEqual({
+      type: "hover",
+      timestamp: event.timestamp,
+      anonymousId: "anon_1",
+      eventId: "evt_1",
+      pageViewId: "pv_1",
+      element: { selector: 'a[href="/dashboard/incidents/:id"]', label: "View", role: "link" },
+      durationMs: 500,
       x: 700,
       y: 220,
       viewportWidth: 1440,
@@ -123,6 +187,9 @@ describe("mapToBackendEvent", () => {
     expect(mapToBackendEvent(event)).toEqual({
       type: "scroll",
       timestamp: event.timestamp,
+      anonymousId: "anon_1",
+      eventId: "evt_1",
+      pageViewId: "pv_1",
       scrollPercent: 55,
       viewportWidth: 1440,
       viewportHeight: 900,
@@ -136,6 +203,9 @@ describe("mapToBackendEvent", () => {
     expect(mapToBackendEvent(event)).toEqual({
       type: "cursor",
       timestamp: event.timestamp,
+      anonymousId: "anon_1",
+      eventId: "evt_1",
+      pageViewId: "pv_1",
       x: 300,
       y: 400,
       viewportWidth: 375,
@@ -157,11 +227,40 @@ describe("mapToBackendEvent", () => {
       status: "step_completed",
     });
     const custom = makeEvent<CustomEventPayload>("custom", { name: "video_played" });
-    const identify = makeEvent<IdentifyEventPayload>("identify", { userId: "u1" });
 
-    for (const event of [move, rageClick, funnel, custom, identify]) {
+    for (const event of [move, rageClick, funnel, custom]) {
       expect(mapToBackendEvent(event)).toBeNull();
     }
+  });
+
+  it("maps identify with the anonymousId, external user id, and traits", () => {
+    const identify = makeEvent<IdentifyEventPayload>("identify", {
+      userId: "user_123",
+      traits: { plan: "pro", name: "Sarah" },
+    });
+
+    expect(mapToBackendEvent(identify)).toEqual({
+      type: "identify",
+      timestamp: identify.timestamp,
+      anonymousId: "anon_1",
+      eventId: "evt_1",
+      pageViewId: "pv_1",
+      externalUserId: "user_123",
+      traits: { plan: "pro", name: "Sarah" },
+    });
+  });
+
+  it("maps identify with no traits by omitting the traits field", () => {
+    const identify = makeEvent<IdentifyEventPayload>("identify", { userId: "user_123" });
+
+    expect(mapToBackendEvent(identify)).toEqual({
+      type: "identify",
+      timestamp: identify.timestamp,
+      anonymousId: "anon_1",
+      eventId: "evt_1",
+      pageViewId: "pv_1",
+      externalUserId: "user_123",
+    });
   });
 
   it("returns null for session_replay_event (handled by mapToBackendReplayEvent instead)", () => {
@@ -171,6 +270,58 @@ describe("mapToBackendEvent", () => {
       rrwebEvent: { type: 2, timestamp: 1000, data: {} },
     });
     expect(mapToBackendEvent(event)).toBeNull();
+  });
+});
+
+describe("mapToBackendEvent - session_start", () => {
+  it("maps a full environment snapshot", () => {
+    const payload: SessionStartEventPayload = {
+      browserName: "Chrome",
+      browserVersion: "128.0.0.0",
+      osName: "Windows",
+      osVersion: "10.0",
+      deviceType: "desktop",
+      language: "en-US",
+      timezone: "America/New_York",
+      screenWidth: 1920,
+      screenHeight: 1080,
+      referrer: "https://google.com/",
+    };
+    const event = makeEvent("session_start", payload);
+
+    expect(mapToBackendEvent(event)).toEqual({
+      type: "session_start",
+      timestamp: event.timestamp,
+      anonymousId: "anon_1",
+      eventId: "evt_1",
+      pageViewId: "pv_1",
+      ...payload,
+    });
+  });
+
+  it("omits fields the environment snapshot couldn't determine, rather than sending them as null/undefined keys", () => {
+    const payload: SessionStartEventPayload = {
+      deviceType: "mobile",
+      language: "en-US",
+      timezone: "America/New_York",
+      screenWidth: 390,
+      screenHeight: 844,
+      // browserName/browserVersion/osName/osVersion/referrer all unset - an unrecognized UA, no referrer.
+    };
+    const event = makeEvent("session_start", payload);
+
+    expect(mapToBackendEvent(event)).toEqual({
+      type: "session_start",
+      timestamp: event.timestamp,
+      anonymousId: "anon_1",
+      eventId: "evt_1",
+      pageViewId: "pv_1",
+      deviceType: "mobile",
+      language: "en-US",
+      timezone: "America/New_York",
+      screenWidth: 390,
+      screenHeight: 844,
+    });
   });
 });
 

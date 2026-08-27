@@ -69,14 +69,96 @@ class PrivacyFilter {
     return this.shouldCapture(el);
   }
 }
+const MAX_LABEL_LENGTH = 60;
+const OVERRIDE_ATTR = "data-loopz-name";
+const detector = new SensitiveElementDetector();
+function clean(text) {
+  if (!text) return void 0;
+  const trimmed = text.replace(/\s+/g, " ").trim();
+  if (!trimmed) return void 0;
+  return trimmed.length > MAX_LABEL_LENGTH ? `${trimmed.slice(0, MAX_LABEL_LENGTH - 1)}…` : trimmed;
+}
+function computeElementLabel(el) {
+  const override = clean(el.getAttribute(OVERRIDE_ATTR));
+  if (override) return override;
+  const ariaLabel = clean(el.getAttribute("aria-label"));
+  if (ariaLabel) return ariaLabel;
+  const labelledBy = el.getAttribute("aria-labelledby");
+  if (labelledBy) {
+    const labelText = labelledBy.split(/\s+/).map((id) => {
+      var _a;
+      return (_a = document.getElementById(id)) == null ? void 0 : _a.textContent;
+    }).filter(Boolean).join(" ");
+    const cleaned = clean(labelText);
+    if (cleaned) return cleaned;
+  }
+  if (!detector.isWithinPrivateSubtree(el)) {
+    const text = clean(el.textContent);
+    if (text) return text;
+  }
+  const alt = clean(el.getAttribute("alt"));
+  if (alt) return alt;
+  const title = clean(el.getAttribute("title"));
+  if (title) return title;
+  const placeholder = clean(el.getAttribute("placeholder"));
+  if (placeholder) return placeholder;
+  return semanticFallback(el);
+}
+function semanticFallback(el) {
+  const tag = el.tagName.toLowerCase();
+  const role = el.getAttribute("role");
+  if (tag === "button" || role === "button") {
+    return el.getAttribute("type") === "submit" ? "Submit button" : "Button";
+  }
+  if (tag === "a" || role === "link") return "Link";
+  if (tag === "input") {
+    const type = (el.getAttribute("type") || "text").toLowerCase();
+    return `${type.charAt(0).toUpperCase()}${type.slice(1)} field`;
+  }
+  if (tag === "select") return "Dropdown";
+  if (tag === "textarea") return "Text field";
+  return tag.charAt(0).toUpperCase() + tag.slice(1);
+}
+function computeElementRole(el) {
+  const explicit = el.getAttribute("role");
+  if (explicit) return explicit;
+  const tag = el.tagName.toLowerCase();
+  if (tag === "button") return "button";
+  if (tag === "a") return "link";
+  if (tag === "input") return `input:${(el.getAttribute("type") || "text").toLowerCase()}`;
+  if (tag === "select") return "select";
+  if (tag === "textarea") return "textarea";
+  return void 0;
+}
 const STABLE_DATA_ATTRS = ["data-testid", "data-test", "data-qa", "data-cy", "data-analytics-id"];
 const SEMANTIC_ATTRS = ["role", "aria-label", "name", "type", "href"];
 const DYNAMIC_CLASS_PATTERN = /^(css-|sc-|jsx-|_|[a-z0-9]{6,}$)/i;
+const TAILWIND_UTILITY_PATTERN = /^(-?(m|p)[trblxy]?-|w-|h-|min-|max-|inset-|top-|right-|bottom-|left-|z-|order-|col-|row-|gap-|space-|grid-|flex-\d|flex$|inline-flex$|inline-block$|inline$|block$|hidden$|table|items-|justify-|content-|self-|place-|text-|font-|leading-|tracking-|whitespace-|break-|truncate$|bg-|from-|via-|to-|border|divide-|rounded|shadow|opacity-|blur-|brightness-|contrast-|grayscale|invert|saturate|sepia|backdrop-|transition|duration-|ease-|delay-|animate-|cursor-|select-|resize-|scroll-|snap-|touch-|pointer-events-|will-change-|appearance-|outline-|ring-|overflow-|overscroll-|absolute$|relative$|fixed$|sticky$|static$|visible$|invisible$|float-|clear-|isolate$|object-|aspect-|columns-|underline$|line-through$|no-underline$|uppercase$|lowercase$|capitalize$|normal-case$|italic$|not-italic$|antialiased$)/;
+const TAILWIND_VARIANT_PREFIX_PATTERN = /^(sm|md|lg|xl|2xl|hover|focus|active|disabled|dark|group-hover|focus-visible|first|last|odd|even):/;
+function isTailwindUtilityClass(cls) {
+  const unescaped = cls.replace(/\\/g, "");
+  return TAILWIND_UTILITY_PATTERN.test(unescaped) || TAILWIND_VARIANT_PREFIX_PATTERN.test(unescaped);
+}
 function isStableClass(cls) {
   if (!cls) return false;
   if (DYNAMIC_CLASS_PATTERN.test(cls)) return false;
   if (/^\d/.test(cls)) return false;
+  if (isTailwindUtilityClass(cls)) return false;
   return true;
+}
+const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const NUMERIC_SEGMENT = /^\d+$/;
+const PREFIXED_HEX_ID_SEGMENT = /^[a-z]{1,12}_[0-9a-f]{6,}$/i;
+const BARE_HEX_ID_SEGMENT = /^[0-9a-f]{12,}$/i;
+function canonicalizePathSegment(segment) {
+  if (UUID_SEGMENT.test(segment) || NUMERIC_SEGMENT.test(segment) || PREFIXED_HEX_ID_SEGMENT.test(segment) || BARE_HEX_ID_SEGMENT.test(segment)) {
+    return ":id";
+  }
+  return segment;
+}
+function canonicalizeHref(href) {
+  const path = href.split("?")[0].split("#")[0];
+  return path.split("/").map((segment) => segment ? canonicalizePathSegment(segment) : segment).join("/");
 }
 class SelectorGenerator {
   generate(el) {
@@ -91,8 +173,10 @@ class SelectorGenerator {
       }
     }
     for (const attr of SEMANTIC_ATTRS) {
-      const value = el.getAttribute(attr);
-      if (value && value.length < 100) {
+      const rawValue = el.getAttribute(attr);
+      if (!rawValue) continue;
+      const value = attr === "href" ? canonicalizeHref(rawValue) : rawValue;
+      if (value.length < 100) {
         return `${el.tagName.toLowerCase()}[${attr}="${cssEscape(value)}"]`;
       }
     }
@@ -108,7 +192,9 @@ class SelectorGenerator {
       tagName: el.tagName.toLowerCase(),
       id: el.getAttribute("id") || void 0,
       classes: classes.length ? classes : void 0,
-      selector: this.generate(el)
+      selector: this.generate(el),
+      label: computeElementLabel(el),
+      role: computeElementRole(el)
     };
   }
   getClassList(el) {
@@ -641,6 +727,36 @@ class FunnelTracker {
     return [...this.progress.values()];
   }
 }
+const INTERACTIVE_SELECTOR = 'a[href], button, input, select, textarea, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [onclick], [tabindex]:not([tabindex="-1"])';
+const MAX_ELEMENTS_PER_CRAWL = 500;
+class ElementCrawler {
+  constructor(bus, privacy) {
+    this.bus = bus;
+    this.privacy = privacy;
+    this.selectorGenerator = new SelectorGenerator();
+  }
+  crawl() {
+    if (typeof document === "undefined") return;
+    const candidates = document.querySelectorAll(INTERACTIVE_SELECTOR);
+    const seenSelectors = /* @__PURE__ */ new Set();
+    const elements = [];
+    for (const el of Array.from(candidates)) {
+      if (elements.length >= MAX_ELEMENTS_PER_CRAWL) break;
+      if (!this.privacy.shouldCapture(el)) continue;
+      const descriptor = this.selectorGenerator.describe(el);
+      if (seenSelectors.has(descriptor.selector)) continue;
+      seenSelectors.add(descriptor.selector);
+      elements.push({
+        selector: descriptor.selector,
+        tagName: descriptor.tagName,
+        ...descriptor.label && { label: descriptor.label },
+        ...descriptor.role && { role: descriptor.role }
+      });
+    }
+    if (elements.length === 0) return;
+    this.bus.emit("elements_seen", { elements });
+  }
+}
 function generateId(prefix) {
   const rand = randomHex(16);
   const time = Date.now().toString(36);
@@ -811,6 +927,7 @@ class AutoCaptureEngine {
     this.hover = new HoverCollector(this.bus, this.privacy, config.hover);
     this.cursor = new CursorCollector(this.bus, config.cursor);
     this.funnel = new FunnelTracker(this.bus);
+    this.elementCrawler = new ElementCrawler(this.bus, this.privacy);
     this.sessionReplay = new RRWebRecorder(this.bus, config.sessionReplay);
   }
   start() {
@@ -823,7 +940,17 @@ class AutoCaptureEngine {
     if (ac.rageClick && ac.click) this.rageClick.start();
     if (ac.hover) this.hover.start();
     if (ac.cursor) this.cursor.start();
+    if (ac.elementCrawler) this.scheduleInitialCrawl();
     if (this.config.sessionReplay.enabled) void this.sessionReplay.start();
+  }
+  /** Runs the first crawl once the DOM actually has content - a crawl fired before parsing finishes would just find nothing. */
+  scheduleInitialCrawl() {
+    if (typeof document === "undefined") return;
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", () => this.elementCrawler.crawl(), { once: true });
+    } else {
+      this.elementCrawler.crawl();
+    }
   }
   stop() {
     if (!this.started) return;
@@ -840,6 +967,7 @@ class AutoCaptureEngine {
   onRouteChange(path) {
     this.scroll.reset();
     this.funnel.onPageView(path);
+    if (this.config.autocapture.elementCrawler) this.elementCrawler.crawl();
   }
   isRunning() {
     return this.started;
@@ -895,6 +1023,7 @@ class SessionManager {
     const restored = this.loadOrCreateSessionId();
     this.sessionId = restored.id;
     this.lastActivity = restored.lastActive;
+    this.sessionJustStarted = restored.isNew;
     this.pageViewId = generateId("pv");
   }
   loadOrCreateAnonymousId() {
@@ -911,12 +1040,12 @@ class SessionManager {
     const fresh = now();
     if (existingId && fresh - existingLastActive < this.inactivityMs) {
       sessionStore.set(SESSION_LAST_ACTIVE_KEY, String(fresh));
-      return { id: existingId, lastActive: fresh };
+      return { id: existingId, lastActive: fresh, isNew: false };
     }
     const id = generateId("sess");
     sessionStore.set(SESSION_ID_KEY, id);
     sessionStore.set(SESSION_LAST_ACTIVE_KEY, String(fresh));
-    return { id, lastActive: fresh };
+    return { id, lastActive: fresh, isNew: true };
   }
   /** Call on any behavioral event to keep the session alive and rotate if expired. */
   touch() {
@@ -924,9 +1053,21 @@ class SessionManager {
     if (t - this.lastActivity >= this.inactivityMs) {
       this.sessionId = generateId("sess");
       sessionStore.set(SESSION_ID_KEY, this.sessionId);
+      this.sessionJustStarted = true;
     }
     this.lastActivity = t;
     sessionStore.set(SESSION_LAST_ACTIVE_KEY, String(t));
+  }
+  /**
+   * Reads and clears the "a new session just began" flag - call once
+   * per touch() to decide whether to emit a session_start event before
+   * the event that triggered the touch (see Analytics.enqueueEvent).
+   * Idempotent: calling it again before the next rotation returns false.
+   */
+  consumeSessionStarted() {
+    const started = this.sessionJustStarted;
+    this.sessionJustStarted = false;
+    return started;
   }
   /** Call on SPA route changes to start a new page view context. */
   newPageView() {
@@ -997,14 +1138,28 @@ const _EventQueue = class _EventQueue {
 };
 _EventQueue.LOW_PRIORITY_TYPES = /* @__PURE__ */ new Set(["move", "scroll", "cursor"]);
 let EventQueue = _EventQueue;
-const UNSUPPORTED_BY_BACKEND = /* @__PURE__ */ new Set(["move", "rage_click", "funnel", "custom", "identify"]);
+const UNSUPPORTED_BY_BACKEND = /* @__PURE__ */ new Set(["move", "rage_click", "funnel", "custom"]);
+function toBackendElement(descriptor) {
+  return {
+    selector: descriptor.selector,
+    ...descriptor.label && { label: descriptor.label },
+    ...descriptor.role && { role: descriptor.role }
+  };
+}
 function mapToBackendEvent(event) {
   if (UNSUPPORTED_BY_BACKEND.has(event.type) || event.type === "session_replay_event") return null;
   const viewportWidth = event.page.viewportWidth > 0 ? event.page.viewportWidth : void 0;
   const viewportHeight = event.page.viewportHeight > 0 ? event.page.viewportHeight : void 0;
   switch (event.type) {
     case "page_view":
-      return { type: "page_view", timestamp: event.timestamp };
+      return {
+        type: "page_view",
+        timestamp: event.timestamp,
+        anonymousId: event.anonymousId,
+        eventId: event.eventId,
+        pageViewId: event.pageViewId,
+        path: event.page.path
+      };
     case "click": {
       const p = event.payload;
       const x = Math.max(0, Math.min(2e4, Math.floor(p.coordinates.clientX)));
@@ -1012,7 +1167,10 @@ function mapToBackendEvent(event) {
       return {
         type: "click",
         timestamp: event.timestamp,
-        element: { selector: p.element.selector },
+        anonymousId: event.anonymousId,
+        eventId: event.eventId,
+        pageViewId: event.pageViewId,
+        element: toBackendElement(p.element),
         x,
         y,
         ...viewportWidth !== void 0 && { viewportWidth },
@@ -1026,7 +1184,10 @@ function mapToBackendEvent(event) {
       return {
         type: "hover",
         timestamp: event.timestamp,
-        element: { selector: p.element.selector },
+        anonymousId: event.anonymousId,
+        eventId: event.eventId,
+        pageViewId: event.pageViewId,
+        element: toBackendElement(p.element),
         durationMs: p.durationMs,
         ...x !== void 0 && { x },
         ...y !== void 0 && { y },
@@ -1040,6 +1201,9 @@ function mapToBackendEvent(event) {
       return {
         type: "scroll",
         timestamp: event.timestamp,
+        anonymousId: event.anonymousId,
+        eventId: event.eventId,
+        pageViewId: event.pageViewId,
         scrollPercent,
         ...viewportWidth !== void 0 && { viewportWidth },
         ...viewportHeight !== void 0 && { viewportHeight }
@@ -1054,10 +1218,45 @@ function mapToBackendEvent(event) {
       return {
         type: "cursor",
         timestamp: event.timestamp,
+        anonymousId: event.anonymousId,
+        eventId: event.eventId,
+        pageViewId: event.pageViewId,
         x,
         y,
         ...cursorViewportWidth !== void 0 && { viewportWidth: cursorViewportWidth },
         ...cursorViewportHeight !== void 0 && { viewportHeight: cursorViewportHeight }
+      };
+    }
+    case "identify": {
+      const p = event.payload;
+      return {
+        type: "identify",
+        timestamp: event.timestamp,
+        anonymousId: event.anonymousId,
+        eventId: event.eventId,
+        pageViewId: event.pageViewId,
+        externalUserId: p.userId,
+        ...p.traits !== void 0 && { traits: p.traits }
+      };
+    }
+    case "session_start": {
+      const p = event.payload;
+      return {
+        type: "session_start",
+        timestamp: event.timestamp,
+        anonymousId: event.anonymousId,
+        eventId: event.eventId,
+        pageViewId: event.pageViewId,
+        ...p.browserName !== void 0 && { browserName: p.browserName },
+        ...p.browserVersion !== void 0 && { browserVersion: p.browserVersion },
+        ...p.osName !== void 0 && { osName: p.osName },
+        ...p.osVersion !== void 0 && { osVersion: p.osVersion },
+        ...p.deviceType !== void 0 && { deviceType: p.deviceType },
+        ...p.language !== void 0 && { language: p.language },
+        ...p.timezone !== void 0 && { timezone: p.timezone },
+        ...p.screenWidth !== void 0 && { screenWidth: p.screenWidth },
+        ...p.screenHeight !== void 0 && { screenHeight: p.screenHeight },
+        ...p.referrer !== void 0 && { referrer: p.referrer }
       };
     }
     default:
@@ -1094,6 +1293,22 @@ class Transport {
   }
   replayUrl() {
     return `${this.apiBase}/public/sites/${this.siteId}/replay`;
+  }
+  elementsUrl() {
+    return `${this.apiBase}/public/sites/${this.siteId}/elements`;
+  }
+  /**
+   * Sends a batch of crawled elements (see ElementCrawler.ts) to their
+   * own endpoint - a page-level catalog snapshot, not a per-session
+   * interaction stream, so it deliberately bypasses the batched
+   * event queue/retry machinery `send`/`sendBeacon` use: crawls are
+   * infrequent (page load + route change), so a simple best-effort
+   * POST per crawl is the right amount of machinery, not the queue
+   * built for continuous click/hover/scroll/cursor telemetry.
+   */
+  async sendElements(elements) {
+    if (!this.apiBase || elements.length === 0) return { ok: true, retryable: false };
+    return this.postJson(this.elementsUrl(), { elements });
   }
   /** Best-effort async send used during normal operation. */
   async send(events) {
@@ -1271,8 +1486,89 @@ function getPageContext() {
     devicePixelRatio: window.devicePixelRatio || 1
   };
 }
+function captureEnvironmentSnapshot() {
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+  const browser = parseBrowser(ua);
+  const os = parseOS(ua);
+  return {
+    browserName: browser == null ? void 0 : browser.name,
+    browserVersion: browser == null ? void 0 : browser.version,
+    osName: os == null ? void 0 : os.name,
+    osVersion: os == null ? void 0 : os.version,
+    deviceType: parseDeviceType(ua),
+    language: safeLanguage(),
+    timezone: safeTimezone(),
+    screenWidth: safeScreenDimension("width"),
+    screenHeight: safeScreenDimension("height"),
+    referrer: typeof document !== "undefined" ? document.referrer || void 0 : void 0
+  };
+}
+function parseBrowser(ua) {
+  const patterns = [
+    [/Edg\/([\d.]+)/, "Edge"],
+    [/OPR\/([\d.]+)/, "Opera"],
+    [/CriOS\/([\d.]+)/, "Chrome"],
+    // Chrome on iOS
+    [/FxiOS\/([\d.]+)/, "Firefox"],
+    // Firefox on iOS
+    [/Firefox\/([\d.]+)/, "Firefox"],
+    [/Chrome\/([\d.]+)/, "Chrome"],
+    [/Version\/([\d.]+).*Safari\//, "Safari"]
+  ];
+  for (const [re, name] of patterns) {
+    const match = ua.match(re);
+    if (match) return { name, version: match[1] };
+  }
+  return null;
+}
+function parseOS(ua) {
+  const patterns = [
+    [/Windows NT ([\d.]+)/, "Windows"],
+    [/CrOS \S+ ([\d.]+)/, "ChromeOS"],
+    [/Mac OS X ([\d_.]+)/, "macOS", dotted],
+    [/iPad; CPU OS ([\d_]+)/, "iPadOS", dotted],
+    [/iPhone OS ([\d_]+)/, "iOS", dotted],
+    [/Android ([\d.]+)/, "Android"],
+    [/Linux/, "Linux"]
+  ];
+  for (const [re, name, transform] of patterns) {
+    const match = ua.match(re);
+    if (match) return { name, version: transform ? transform(match[1] ?? "") : match[1] ?? "" };
+  }
+  return null;
+}
+function dotted(raw) {
+  return raw.replace(/_/g, ".");
+}
+function parseDeviceType(ua) {
+  if (/iPad|Android(?!.*Mobile)|Tablet/i.test(ua)) return "tablet";
+  if (/Mobi|iPhone|iPod|Android.*Mobile/i.test(ua)) return "mobile";
+  return "desktop";
+}
+function safeLanguage() {
+  try {
+    return navigator.language || void 0;
+  } catch {
+    return void 0;
+  }
+}
+function safeTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return void 0;
+  }
+}
+function safeScreenDimension(dim) {
+  var _a;
+  try {
+    return ((_a = window.screen) == null ? void 0 : _a[dim]) || void 0;
+  } catch {
+    return void 0;
+  }
+}
 function resolveConfig(input) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G, _H, _I, _J;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G, _H, _I, _J, _K;
   if (!input || !input.siteId) {
     throw new Error("[Analytics] init() requires a `siteId`");
   }
@@ -1288,54 +1584,55 @@ function resolveConfig(input) {
       move: ((_c = input.autocapture) == null ? void 0 : _c.move) ?? true,
       rageClick: ((_d = input.autocapture) == null ? void 0 : _d.rageClick) ?? true,
       hover: ((_e = input.autocapture) == null ? void 0 : _e.hover) ?? true,
-      cursor: ((_f = input.autocapture) == null ? void 0 : _f.cursor) ?? true
+      cursor: ((_f = input.autocapture) == null ? void 0 : _f.cursor) ?? true,
+      elementCrawler: ((_g = input.autocapture) == null ? void 0 : _g.elementCrawler) ?? true
     },
     rageClick: {
-      minClicks: ((_g = input.rageClick) == null ? void 0 : _g.minClicks) ?? 4,
-      timeWindowMs: ((_h = input.rageClick) == null ? void 0 : _h.timeWindowMs) ?? 1e3,
-      radiusPx: ((_i = input.rageClick) == null ? void 0 : _i.radiusPx) ?? 40,
-      ignoreDoubleClickMs: ((_j = input.rageClick) == null ? void 0 : _j.ignoreDoubleClickMs) ?? 250
+      minClicks: ((_h = input.rageClick) == null ? void 0 : _h.minClicks) ?? 4,
+      timeWindowMs: ((_i = input.rageClick) == null ? void 0 : _i.timeWindowMs) ?? 1e3,
+      radiusPx: ((_j = input.rageClick) == null ? void 0 : _j.radiusPx) ?? 40,
+      ignoreDoubleClickMs: ((_k = input.rageClick) == null ? void 0 : _k.ignoreDoubleClickMs) ?? 250
     },
     move: {
-      samplesPerSecond: ((_k = input.move) == null ? void 0 : _k.samplesPerSecond) ?? 12,
-      minMovementPx: ((_l = input.move) == null ? void 0 : _l.minMovementPx) ?? 2
+      samplesPerSecond: ((_l = input.move) == null ? void 0 : _l.samplesPerSecond) ?? 12,
+      minMovementPx: ((_m = input.move) == null ? void 0 : _m.minMovementPx) ?? 2
     },
     scroll: {
-      throttleMs: ((_m = input.scroll) == null ? void 0 : _m.throttleMs) ?? 100,
-      milestones: ((_n = input.scroll) == null ? void 0 : _n.milestones) ?? [25, 50, 75, 90, 100]
+      throttleMs: ((_n = input.scroll) == null ? void 0 : _n.throttleMs) ?? 100,
+      milestones: ((_o = input.scroll) == null ? void 0 : _o.milestones) ?? [25, 50, 75, 90, 100]
     },
     hover: {
-      minHoverMs: ((_o = input.hover) == null ? void 0 : _o.minHoverMs) ?? 150
+      minHoverMs: ((_p = input.hover) == null ? void 0 : _p.minHoverMs) ?? 150
     },
     cursor: {
-      sampleInterval: ((_p = input.cursor) == null ? void 0 : _p.sampleInterval) ?? 50,
-      minimumDistance: ((_q = input.cursor) == null ? void 0 : _q.minimumDistance) ?? 12,
-      pauseThreshold: ((_r = input.cursor) == null ? void 0 : _r.pauseThreshold) ?? 300
+      sampleInterval: ((_q = input.cursor) == null ? void 0 : _q.sampleInterval) ?? 50,
+      minimumDistance: ((_r = input.cursor) == null ? void 0 : _r.minimumDistance) ?? 12,
+      pauseThreshold: ((_s = input.cursor) == null ? void 0 : _s.pauseThreshold) ?? 300
     },
     queue: {
-      maxBatchSize: ((_s = input.queue) == null ? void 0 : _s.maxBatchSize) ?? 50,
-      maxWaitMs: ((_t = input.queue) == null ? void 0 : _t.maxWaitMs) ?? 5e3,
-      maxQueueSize: ((_u = input.queue) == null ? void 0 : _u.maxQueueSize) ?? 2e3,
-      maxRetries: ((_v = input.queue) == null ? void 0 : _v.maxRetries) ?? 3,
-      retryBaseDelayMs: ((_w = input.queue) == null ? void 0 : _w.retryBaseDelayMs) ?? 1e3
+      maxBatchSize: ((_t = input.queue) == null ? void 0 : _t.maxBatchSize) ?? 50,
+      maxWaitMs: ((_u = input.queue) == null ? void 0 : _u.maxWaitMs) ?? 5e3,
+      maxQueueSize: ((_v = input.queue) == null ? void 0 : _v.maxQueueSize) ?? 2e3,
+      maxRetries: ((_w = input.queue) == null ? void 0 : _w.maxRetries) ?? 3,
+      retryBaseDelayMs: ((_x = input.queue) == null ? void 0 : _x.retryBaseDelayMs) ?? 1e3
     },
     sessionReplay: {
       // Recording must never start unless a site explicitly opts in.
-      enabled: ((_x = input.sessionReplay) == null ? void 0 : _x.enabled) ?? false,
-      sampleMouseMovement: ((_y = input.sessionReplay) == null ? void 0 : _y.sampleMouseMovement) ?? true,
-      maskAllInputs: ((_z = input.sessionReplay) == null ? void 0 : _z.maskAllInputs) ?? true,
-      maskTextSelector: (_A = input.sessionReplay) == null ? void 0 : _A.maskTextSelector,
-      blockSelector: (_B = input.sessionReplay) == null ? void 0 : _B.blockSelector,
-      recordCanvas: ((_C = input.sessionReplay) == null ? void 0 : _C.recordCanvas) ?? false,
-      collectFonts: ((_D = input.sessionReplay) == null ? void 0 : _D.collectFonts) ?? false,
-      checkoutEveryNms: ((_E = input.sessionReplay) == null ? void 0 : _E.checkoutEveryNms) ?? 2 * 60 * 1e3,
-      bundleUrl: (_F = input.sessionReplay) == null ? void 0 : _F.bundleUrl
+      enabled: ((_y = input.sessionReplay) == null ? void 0 : _y.enabled) ?? false,
+      sampleMouseMovement: ((_z = input.sessionReplay) == null ? void 0 : _z.sampleMouseMovement) ?? true,
+      maskAllInputs: ((_A = input.sessionReplay) == null ? void 0 : _A.maskAllInputs) ?? true,
+      maskTextSelector: (_B = input.sessionReplay) == null ? void 0 : _B.maskTextSelector,
+      blockSelector: (_C = input.sessionReplay) == null ? void 0 : _C.blockSelector,
+      recordCanvas: ((_D = input.sessionReplay) == null ? void 0 : _D.recordCanvas) ?? false,
+      collectFonts: ((_E = input.sessionReplay) == null ? void 0 : _E.collectFonts) ?? false,
+      checkoutEveryNms: ((_F = input.sessionReplay) == null ? void 0 : _F.checkoutEveryNms) ?? 2 * 60 * 1e3,
+      bundleUrl: (_G = input.sessionReplay) == null ? void 0 : _G.bundleUrl
     },
     feedback: {
-      enabled: ((_G = input.feedback) == null ? void 0 : _G.enabled) ?? false,
-      apiBase: ((_H = input.feedback) == null ? void 0 : _H.apiBase) ?? "https://platform.example.com",
-      flushIntervalMs: ((_I = input.feedback) == null ? void 0 : _I.flushIntervalMs) ?? 3e3,
-      autoDismissMs: ((_J = input.feedback) == null ? void 0 : _J.autoDismissMs) ?? 12e3
+      enabled: ((_H = input.feedback) == null ? void 0 : _H.enabled) ?? false,
+      apiBase: ((_I = input.feedback) == null ? void 0 : _I.apiBase) ?? "https://platform.example.com",
+      flushIntervalMs: ((_J = input.feedback) == null ? void 0 : _J.flushIntervalMs) ?? 3e3,
+      autoDismissMs: ((_K = input.feedback) == null ? void 0 : _K.autoDismissMs) ?? 12e3
     }
   };
 }
@@ -1547,6 +1844,12 @@ class Analytics {
         this.log(`session replay event: seq ${p.seq}`);
       })
     );
+    this.unsubscribers.push(
+      bus.on("elements_seen", (p) => {
+        void this.transport.sendElements(p.elements);
+        this.log(`elements crawled: ${p.elements.length}`);
+      })
+    );
   }
   trackPageView() {
     this.enqueueEvent("page_view", { title: document.title });
@@ -1560,6 +1863,12 @@ class Analytics {
   }
   enqueueEvent(type, payload) {
     this.session.touch();
+    if (this.session.consumeSessionStarted()) {
+      this.buildAndEnqueue("session_start", captureEnvironmentSnapshot());
+    }
+    this.buildAndEnqueue(type, payload);
+  }
+  buildAndEnqueue(type, payload) {
     const event = {
       eventId: generateId("evt"),
       type,
@@ -1593,10 +1902,18 @@ function installUnloadHandlers(analytics) {
   });
   window.addEventListener("pagehide", flush);
 }
+let activeInstance = null;
 function createAnalytics(config) {
+  if (activeInstance) return activeInstance;
   const analytics = new Analytics();
   analytics.init(config);
   installUnloadHandlers(analytics);
+  activeInstance = analytics;
+  const baseDestroy = analytics.destroy.bind(analytics);
+  analytics.destroy = () => {
+    if (activeInstance === analytics) activeInstance = null;
+    baseDestroy();
+  };
   return analytics;
 }
 export {

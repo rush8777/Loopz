@@ -4,6 +4,7 @@ import { EventQueue } from "./EventQueue";
 import { Transport } from "./Transport";
 import { Batcher } from "./Batcher";
 import { getPageContext } from "./PageContext";
+import { captureEnvironmentSnapshot } from "./EnvironmentContext";
 import { generateId } from "./ids";
 import { resolveConfig } from "./defaultConfig";
 import type { AnalyticsConfig, ResolvedAnalyticsConfig } from "../types/config";
@@ -20,6 +21,8 @@ import type {
   CustomEventPayload,
   IdentifyEventPayload,
   SessionReplayEventPayload,
+  SessionStartEventPayload,
+  ElementsSeenPayload,
   EventType,
 } from "../types/events";
 import type { FunnelStep } from "../types/funnel";
@@ -216,6 +219,17 @@ export class Analytics {
         this.log(`session replay event: seq ${p.seq}`);
       })
     );
+
+    this.unsubscribers.push(
+      bus.on<ElementsSeenPayload>("elements_seen", (p) => {
+        // Deliberately not enqueueEvent()/the batched queue - see
+        // Transport.sendElements's doc comment. Best-effort, fire-and-
+        // forget; a failed crawl upload just means the catalog is
+        // slightly stale until the next route change re-crawls.
+        void this.transport.sendElements(p.elements);
+        this.log(`elements crawled: ${p.elements.length}`);
+      })
+    );
   }
 
   private trackPageView(): void {
@@ -232,6 +246,18 @@ export class Analytics {
 
   private enqueueEvent<T extends AnyPayload>(type: EventType, payload: T): void {
     this.session.touch();
+    if (this.session.consumeSessionStarted()) {
+      // Emitted before the event that triggered it, so a session's
+      // first row in the log is always its environment context - see
+      // EnvironmentContext.ts. touch() above already brought the
+      // session id/lastActivity up to date, so this call doesn't
+      // re-touch or risk re-triggering itself.
+      this.buildAndEnqueue<SessionStartEventPayload>("session_start", captureEnvironmentSnapshot());
+    }
+    this.buildAndEnqueue(type, payload);
+  }
+
+  private buildAndEnqueue<T extends AnyPayload>(type: EventType, payload: T): void {
     const event: AnalyticsEvent<T> = {
       eventId: generateId("evt"),
       type,

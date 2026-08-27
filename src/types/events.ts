@@ -30,6 +30,36 @@ export interface ElementDescriptor {
   id?: string;
   classes?: string[];
   selector: string;
+  /** Human-readable display label - see ElementLabeler.ts. Purely for display; selector remains the identity/matching mechanism. */
+  label?: string;
+  /** Coarse semantic role (explicit role="" attribute, or a tag-based fallback) - see ElementLabeler.ts. */
+  role?: string;
+}
+
+/**
+ * One element discovered by ElementCrawler.ts during a DOM scan -
+ * deliberately a subset of ElementDescriptor (no `id`/`classes`, which
+ * are internal to selector generation and not useful once selector is
+ * already computed). Sent as a batch (see ElementsSeenPayload), not
+ * one event per element.
+ */
+export interface CrawledElement {
+  selector: string;
+  tagName: string;
+  label?: string;
+  role?: string;
+}
+
+/**
+ * Payload for the "elements_seen" bus topic - a batch from one crawl.
+ * Deliberately NOT part of `AnyPayload`/`EventType` below: it doesn't
+ * fit the per-session, per-interaction `AnalyticsEvent` shape those
+ * exist for (see backendMapping.ts), and is delivered via its own
+ * side-channel (Transport.sendElements) rather than the batched event
+ * queue - see Analytics.ts's wiring and Transport.ts's module doc.
+ */
+export interface ElementsSeenPayload {
+  elements: CrawledElement[];
 }
 
 export type EventType =
@@ -43,6 +73,7 @@ export type EventType =
   | "funnel"
   | "custom"
   | "identify"
+  | "session_start"
   | "session_replay_event";
 
 export interface ClickEventPayload {
@@ -151,6 +182,30 @@ export interface PageViewEventPayload {
 }
 
 /**
+ * Automatically-collected environment context, captured once per
+ * session (not per event - browser/OS/screen/etc. don't change
+ * mid-session) and sent as a dedicated "session_start" event the first
+ * time a session is touched. See EnvironmentContext.ts.
+ *
+ * Deliberately limited to information equivalent to what a server
+ * already gets for free from the User-Agent header, plus a couple of
+ * JS-only reads (language, timezone, screen size) - no canvas/audio/
+ * font fingerprinting, no IP address, no hardware identifiers.
+ */
+export interface SessionStartEventPayload {
+  browserName?: string;
+  browserVersion?: string;
+  osName?: string;
+  osVersion?: string;
+  deviceType?: "desktop" | "mobile" | "tablet";
+  language?: string;
+  timezone?: string;
+  screenWidth?: number;
+  screenHeight?: number;
+  referrer?: string;
+}
+
+/**
  * Wraps a single raw rrweb event for transport through the existing
  * pipeline. The rrweb payload is stored in its original structure -
  * the SDK does not interpret or transform it, that happens in the
@@ -175,6 +230,7 @@ export type AnyPayload =
   | CustomEventPayload
   | IdentifyEventPayload
   | PageViewEventPayload
+  | SessionStartEventPayload
   | SessionReplayEventPayload;
 
 export interface AnalyticsEvent<T = AnyPayload> {

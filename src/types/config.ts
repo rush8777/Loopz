@@ -90,6 +90,8 @@ export interface AnalyticsConfig {
     rageClick?: boolean;
     hover?: boolean;
     cursor?: boolean;
+    /** Scans the DOM for interactive elements on start + route change, so the dashboard can catalog every element on the site, not just ones someone has clicked/hovered. See ElementCrawler.ts. */
+    elementCrawler?: boolean;
   };
   rageClick?: Partial<RageClickConfig>;
   move?: Partial<MoveCollectorConfig>;

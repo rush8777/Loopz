@@ -18,6 +18,7 @@ export function resolveConfig(input: AnalyticsConfig): ResolvedAnalyticsConfig {
       rageClick: input.autocapture?.rageClick ?? true,
       hover: input.autocapture?.hover ?? true,
       cursor: input.autocapture?.cursor ?? true,
+      elementCrawler: input.autocapture?.elementCrawler ?? true,
     },
     rageClick: {
       minClicks: input.rageClick?.minClicks ?? 4,

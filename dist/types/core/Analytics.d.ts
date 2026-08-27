@@ -33,6 +33,7 @@ export declare class Analytics {
     private trackPageView;
     private onRouteChange;
     private enqueueEvent;
+    private buildAndEnqueue;
     /** Called by bootstrap on visibilitychange/pagehide for unload-safe delivery. */
     flushOnUnload(): void;
     private log;

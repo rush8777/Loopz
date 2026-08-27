@@ -39,17 +39,40 @@ export { Analytics };
  * snippet. This is the recommended entry point for most framework
  * integrations - see examples/react and examples/nextjs.
  *
- * Guards against the double-invocation that React 18 StrictMode (and Next.js
- * dev fast refresh) can cause in effects: calling this twice for the same
- * instance is harmless because Analytics.init() itself is idempotent
- * (duplicate init() calls are logged and ignored, not double-applied), and
- * installUnloadHandlers only ever adds new listeners for the new instance
- * returned here - it never touches window.analytics or any other instance.
+ * Idempotent across repeated calls: if an instance created by this
+ * function is still active (i.e. destroy() hasn't been called on it),
+ * calling createAnalytics() again returns that same instance instead of
+ * creating a second one. This is what actually makes the function safe
+ * under React 18 StrictMode's double-invoked effects (and Next.js dev
+ * fast refresh) - without it, each call spins up its own
+ * AutoCaptureEngine with its own DOM listeners, so every click, scroll,
+ * hover, and page view on the page gets captured - and sent - twice.
+ * Analytics.init()'s own idempotency guard doesn't help here: it only
+ * protects a single instance against being init()'d twice, and each
+ * `new Analytics()` here is a different instance.
+ *
+ * Only one createAnalytics()-managed instance is tracked at a time -
+ * this matches the CDN build's single `window.analytics` global. If you
+ * need multiple independent instances on one page (e.g. multiple
+ * siteIds), construct `new Analytics()` and call `.init()` directly
+ * instead of using this factory.
  */
+let activeInstance: Analytics | null = null;
+
 export function createAnalytics(config: AnalyticsConfig): Analytics {
+  if (activeInstance) return activeInstance;
+
   const analytics = new Analytics();
   analytics.init(config);
   installUnloadHandlers(analytics);
+
+  activeInstance = analytics;
+  const baseDestroy = analytics.destroy.bind(analytics);
+  analytics.destroy = () => {
+    if (activeInstance === analytics) activeInstance = null;
+    baseDestroy();
+  };
+
   return analytics;
 }
 

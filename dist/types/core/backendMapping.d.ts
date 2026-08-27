@@ -5,12 +5,32 @@ import type { AnalyticsEvent, AnyPayload, SessionReplayEventPayload } from "../t
  * SDK's own event model. Kept in sync by hand since the backend is a
  * separate deployable; see src/lib/patterns/event.ts and validation.ts
  * on the backend for the source of truth this must match.
+ *
+ * `anonymousId` is carried on every event (not just identify) - it's
+ * what the backend's identity layer joins session_events against
+ * tracked_user_aliases with, so a profile's activity/sessions include
+ * everything a visitor did before they were ever identified.
+ *
+ * `eventId`/`pageViewId` are carried on every event too - both are
+ * already generated for every `AnalyticsEvent` (see
+ * core/Analytics.ts's buildAndEnqueue and SessionManager's
+ * getPageViewId()/newPageView(), the SDK's sole owner of the page-view
+ * lifecycle). `eventId` is what lets the backend dedupe a retried
+ * event/batch (see Transport's at-least-once delivery note above) into
+ * zero duplicate rows; `pageViewId` is what lets every persisted event
+ * carry the page view it was captured under without this backend ever
+ * generating or advancing one itself.
  */
 export interface BackendIncomingEvent {
-    type: "page_view" | "hover" | "click" | "scroll" | "cursor";
+    type: "page_view" | "hover" | "click" | "scroll" | "cursor" | "identify" | "session_start";
     timestamp: number;
+    anonymousId: string;
+    eventId: string;
+    pageViewId: string;
     element?: {
         selector: string;
+        label?: string;
+        role?: string;
     };
     durationMs?: number;
     scrollPercent?: number;
@@ -18,26 +38,28 @@ export interface BackendIncomingEvent {
     y?: number;
     viewportWidth?: number;
     viewportHeight?: number;
+    /** page_view only - PageContext.path, e.g. "/pricing". */
+    path?: string;
+    /** identify only. */
+    externalUserId?: string;
+    traits?: Record<string, unknown>;
+    /** session_start only - see SessionStartEventPayload. */
+    browserName?: string;
+    browserVersion?: string;
+    osName?: string;
+    osVersion?: string;
+    deviceType?: "desktop" | "mobile" | "tablet";
+    language?: string;
+    timezone?: string;
+    screenWidth?: number;
+    screenHeight?: number;
+    referrer?: string;
 }
 export interface BackendReplayEvent {
     type: number;
     timestamp: number;
     data: unknown;
 }
-/**
- * Maps one SDK event to the backend's flattened shape, or null if this
- * backend has nowhere to put it (see UNSUPPORTED_BY_BACKEND) or it's a
- * replay event (handled separately by mapToBackendReplayEvent).
- *
- * Coordinate frame note: x/y are viewport-relative (clientX/clientY,
- * and for hover the hovered element's bounding-box center in the same
- * frame) - NOT page-relative/scroll-adjusted. This matches the
- * dashboard's current Heatmaps rendering, which draws a fixed-size
- * snapshot without simulating scroll position. A more complete version
- * would carry scroll offset too (PageContext already captures it) and
- * let the dashboard reconstruct true document-relative position - left
- * as a known simplification for this pass.
- */
 export declare function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendIncomingEvent | null;
 export declare function mapToBackendReplayEvent(event: AnalyticsEvent<SessionReplayEventPayload>): BackendReplayEvent;
 /** Groups events by sessionId, preserving relative order within each group. */

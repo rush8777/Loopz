@@ -344,7 +344,7 @@
     first.parentNode.insertBefore(script, first);
   })(window, document, "script", "../../dist/sdk.js");
 
-  analytics.init({ siteId: "site_7kgzdjamm91nfh2zpr8yihot", debug: true, endpoint:"http://localhost:3000", sessionReplay: { enabled: true } });
+  analytics.init({ siteId: "site_tlh00zlo4buy61twqjccpmik", debug: true, endpoint:"http://localhost:3000", sessionReplay: { enabled: false }, autocapture: {cursor: false} });
 
   // Define a page-based funnel once. Navigating the anchors above (which just
   // change location.hash) simulates SPA-style route changes.
@@ -352,3 +352,4 @@
   </script>
 </body>
 </html>
+

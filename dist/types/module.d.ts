@@ -29,20 +29,6 @@ import type { AnalyticsConfig } from "./types/config";
  *   analytics.init({ siteId: "YOUR_SITE_ID" });
  */
 export { Analytics };
-/**
- * Convenience factory: creates an Analytics instance, calls init(config)
- * immediately, and wires the same unload-safe flush behavior (visibility
- * change / pagehide) that the CDN build gets for free via the bootstrap
- * snippet. This is the recommended entry point for most framework
- * integrations - see examples/react and examples/nextjs.
- *
- * Guards against the double-invocation that React 18 StrictMode (and Next.js
- * dev fast refresh) can cause in effects: calling this twice for the same
- * instance is harmless because Analytics.init() itself is idempotent
- * (duplicate init() calls are logged and ignored, not double-applied), and
- * installUnloadHandlers only ever adds new listeners for the new instance
- * returned here - it never touches window.analytics or any other instance.
- */
 export declare function createAnalytics(config: AnalyticsConfig): Analytics;
 export type { AnalyticsConfig, ResolvedAnalyticsConfig, RageClickConfig, MoveCollectorConfig, ScrollCollectorConfig, HoverCollectorConfig, CursorCollectorConfig, QueueConfig, SessionReplayConfig, FeedbackConfig, } from "./types/config";
 export type { FunnelStep } from "./types/funnel";

@@ -68,7 +68,10 @@ describe("Transport", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.test/public/sites/site_abc/events");
     const body = JSON.parse((init as RequestInit).body as string);
-    expect(body).toEqual({ sessionId: "sess_1", events: [{ type: "page_view", timestamp: 1000 }] });
+    expect(body).toEqual({
+      sessionId: "sess_1",
+      events: [{ type: "page_view", timestamp: 1000, anonymousId: "anon_1", eventId: "e1", pageViewId: "pv_1", path: "/" }],
+    });
   });
 
   it("posts replay events to the /replay route, separately from standard events", async () => {
@@ -130,5 +133,40 @@ describe("Transport", () => {
     transport.setEndpoint("https://new.test");
     await transport.send([pageView("sess_1", "e1")]);
     expect(fetchMock.mock.calls[0][0]).toBe("https://new.test/public/sites/site_abc/events");
+  });
+
+  describe("sendElements", () => {
+    it("posts crawled elements to {apiBase}/public/sites/{siteId}/elements with { elements }", async () => {
+      const transport = new Transport("https://api.test", "site_abc");
+      await transport.sendElements([{ selector: "#cta", tagName: "button", label: "Save", role: "button" }]);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe("https://api.test/public/sites/site_abc/elements");
+      const body = JSON.parse((init as RequestInit).body as string);
+      expect(body).toEqual({ elements: [{ selector: "#cta", tagName: "button", label: "Save", role: "button" }] });
+    });
+
+    it("is a no-op for an empty element list", async () => {
+      const transport = new Transport("https://api.test", "site_abc");
+      const result = await transport.sendElements([]);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result).toEqual({ ok: true, retryable: false });
+    });
+
+    it("is a no-op when apiBase is empty", async () => {
+      const transport = new Transport("", "site_abc");
+      const result = await transport.sendElements([{ selector: "#cta", tagName: "button" }]);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result).toEqual({ ok: true, retryable: false });
+    });
+
+    it("never touches the events or replay endpoints", async () => {
+      const transport = new Transport("https://api.test", "site_abc");
+      await transport.sendElements([{ selector: "#cta", tagName: "button" }]);
+      const [url] = fetchMock.mock.calls[0];
+      expect(url).not.toContain("/events");
+      expect(url).not.toContain("/replay");
+    });
   });
 });
