@@ -5,6 +5,7 @@ import type {
   HoverEventPayload,
   ScrollEventPayload,
   CursorEventPayload,
+  CustomEventPayload,
   IdentifyEventPayload,
   SessionStartEventPayload,
   SessionReplayEventPayload,
@@ -31,9 +32,18 @@ import type {
  * zero duplicate rows; `pageViewId` is what lets every persisted event
  * carry the page view it was captured under without this backend ever
  * generating or advancing one itself.
+ *
+ * `custom` is the developer-defined event contract (`analytics.event(name,
+ * properties?)` - see Analytics.ts). It travels as its own top-level
+ * `type`, never encoded as a click/hover/etc. payload: `name` identifies
+ * *which* application event this is (e.g. "checkout_completed"), and
+ * `properties` is whatever JSON-serializable data the caller passed,
+ * carried through untouched - this backend treats it as an opaque bag,
+ * never flattening it into typed fields the way DOM-interaction events
+ * are.
  */
 export interface BackendIncomingEvent {
-  type: "page_view" | "hover" | "click" | "scroll" | "cursor" | "identify" | "session_start";
+  type: "page_view" | "hover" | "click" | "scroll" | "cursor" | "identify" | "session_start" | "custom";
   timestamp: number;
   anonymousId: string;
   eventId: string;
@@ -61,6 +71,10 @@ export interface BackendIncomingEvent {
   screenWidth?: number;
   screenHeight?: number;
   referrer?: string;
+  /** custom only - the developer-chosen event name, e.g. "checkout_completed". */
+  name?: string;
+  /** custom only - whatever JSON-serializable properties the caller passed to analytics.event(). */
+  properties?: Record<string, unknown>;
 }
 
 export interface BackendReplayEvent {
@@ -81,8 +95,13 @@ export interface BackendReplayEvent {
  * `identify` is deliberately NOT in this set (anymore) - the backend's
  * tracked-user identity layer consumes it directly, see
  * resolveIdentity() there and the "identify" case below.
+ *
+ * `custom` is deliberately NOT in this set (anymore) either - developer-
+ * defined events (`analytics.event(name, properties?)`) are now a
+ * first-class ingested event type, see the "custom" case below and
+ * BackendIncomingEvent's doc comment.
  */
-const UNSUPPORTED_BY_BACKEND = new Set(["move", "rage_click", "funnel", "custom"]);
+const UNSUPPORTED_BY_BACKEND = new Set(["move", "rage_click", "funnel"]);
 
 /**
  * Maps one SDK event to the backend's flattened shape, or null if this
@@ -231,6 +250,19 @@ export function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendInc
         ...(p.screenWidth !== undefined && { screenWidth: p.screenWidth }),
         ...(p.screenHeight !== undefined && { screenHeight: p.screenHeight }),
         ...(p.referrer !== undefined && { referrer: p.referrer }),
+      };
+    }
+
+    case "custom": {
+      const p = event.payload as CustomEventPayload;
+      return {
+        type: "custom",
+        timestamp: event.timestamp,
+        anonymousId: event.anonymousId,
+        eventId: event.eventId,
+        pageViewId: event.pageViewId,
+        name: p.name,
+        ...(p.properties !== undefined && { properties: p.properties }),
       };
     }
 

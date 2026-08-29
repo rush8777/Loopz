@@ -1140,7 +1140,7 @@
   };
   _EventQueue.LOW_PRIORITY_TYPES = /* @__PURE__ */ new Set(["move", "scroll", "cursor"]);
   let EventQueue = _EventQueue;
-  const UNSUPPORTED_BY_BACKEND = /* @__PURE__ */ new Set(["move", "rage_click", "funnel", "custom"]);
+  const UNSUPPORTED_BY_BACKEND = /* @__PURE__ */ new Set(["move", "rage_click", "funnel"]);
   function toBackendElement(descriptor) {
     return {
       selector: descriptor.selector,
@@ -1259,6 +1259,18 @@
           ...p.screenWidth !== void 0 && { screenWidth: p.screenWidth },
           ...p.screenHeight !== void 0 && { screenHeight: p.screenHeight },
           ...p.referrer !== void 0 && { referrer: p.referrer }
+        };
+      }
+      case "custom": {
+        const p = event.payload;
+        return {
+          type: "custom",
+          timestamp: event.timestamp,
+          anonymousId: event.anonymousId,
+          eventId: event.eventId,
+          pageViewId: event.pageViewId,
+          name: p.name,
+          ...p.properties !== void 0 && { properties: p.properties }
         };
       }
       default:

@@ -20,9 +20,18 @@ import type { AnalyticsEvent, AnyPayload, SessionReplayEventPayload } from "../t
  * zero duplicate rows; `pageViewId` is what lets every persisted event
  * carry the page view it was captured under without this backend ever
  * generating or advancing one itself.
+ *
+ * `custom` is the developer-defined event contract (`analytics.event(name,
+ * properties?)` - see Analytics.ts). It travels as its own top-level
+ * `type`, never encoded as a click/hover/etc. payload: `name` identifies
+ * *which* application event this is (e.g. "checkout_completed"), and
+ * `properties` is whatever JSON-serializable data the caller passed,
+ * carried through untouched - this backend treats it as an opaque bag,
+ * never flattening it into typed fields the way DOM-interaction events
+ * are.
  */
 export interface BackendIncomingEvent {
-    type: "page_view" | "hover" | "click" | "scroll" | "cursor" | "identify" | "session_start";
+    type: "page_view" | "hover" | "click" | "scroll" | "cursor" | "identify" | "session_start" | "custom";
     timestamp: number;
     anonymousId: string;
     eventId: string;
@@ -54,6 +63,10 @@ export interface BackendIncomingEvent {
     screenWidth?: number;
     screenHeight?: number;
     referrer?: string;
+    /** custom only - the developer-chosen event name, e.g. "checkout_completed". */
+    name?: string;
+    /** custom only - whatever JSON-serializable properties the caller passed to analytics.event(). */
+    properties?: Record<string, unknown>;
 }
 export interface BackendReplayEvent {
     type: number;

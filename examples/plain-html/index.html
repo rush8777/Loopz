@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lumina | Next-Gen Productivity</title>
+
     <style>
         :root {
             --primary: #6366f1;
@@ -49,7 +50,11 @@
         .logo {
             font-size: 1.5rem;
             font-weight: 800;
-            background: linear-gradient(to right, var(--primary), var(--secondary));
+            background: linear-gradient(
+                to right,
+                var(--primary),
+                var(--secondary)
+            );
             -webkit-background-clip: text;
             color: transparent;
         }
@@ -76,12 +81,18 @@
             text-decoration: none;
             font-weight: 600;
             transition: transform 0.2s, box-shadow 0.2s;
+            display: inline-block;
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            background: linear-gradient(
+                135deg,
+                var(--primary),
+                var(--secondary)
+            );
             color: white;
             box-shadow: 0 4px 14px 0 rgba(99, 102, 241, 0.39);
+            border: none;
         }
 
         .btn-primary:hover {
@@ -104,8 +115,14 @@
             min-height: 100vh;
             display: flex;
             align-items: center;
+            justify-content: space-between;
+            gap: 3rem;
             padding: 0 5%;
-            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            background: linear-gradient(
+                135deg,
+                #0f172a 0%,
+                #1e1b4b 100%
+            );
             color: white;
             position: relative;
             overflow: hidden;
@@ -119,11 +136,15 @@
             width: 800px;
             height: 800px;
             border-radius: 50%;
-            background: radial-gradient(circle, rgba(99,102,241,0.2) 0%, rgba(0,0,0,0) 70%);
+            background: radial-gradient(
+                circle,
+                rgba(99,102,241,0.2) 0%,
+                rgba(0,0,0,0) 70%
+            );
         }
 
         .hero-content {
-            max-width: 600px;
+            max-width: 50%;
             position: relative;
             z-index: 1;
         }
@@ -146,6 +167,86 @@
             gap: 1rem;
         }
 
+        /* Sign-in Form */
+        .sign-in-card {
+            width: 100%;
+            max-width: 420px;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            padding: 2.5rem;
+            border-radius: 1.25rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            z-index: 1;
+        }
+
+        .sign-in-card h2 {
+            font-size: 1.75rem;
+            margin-bottom: 0.5rem;
+            font-weight: 700;
+        }
+
+        .sign-in-card p.subtitle {
+            color: #cbd5e1;
+            margin-bottom: 2rem;
+            font-size: 0.95rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.875rem;
+            color: #e2e8f0;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(15, 23, 42, 0.6);
+            color: white;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+        }
+
+        .sign-in-btn {
+            width: 100%;
+            margin-top: 1rem;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .form-footer {
+            margin-top: 1.5rem;
+            text-align: center;
+            font-size: 0.875rem;
+            color: #cbd5e1;
+        }
+
+        .form-footer a {
+            color: var(--secondary);
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.3s ease;
+        }
+
+        .form-footer a:hover {
+            color: var(--primary);
+        }
+
         /* Features Section */
         .features {
             padding: 8rem 5%;
@@ -160,7 +261,10 @@
 
         .features-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            grid-template-columns: repeat(
+                auto-fit,
+                minmax(300px, 1fr)
+            );
             gap: 3rem;
         }
 
@@ -194,7 +298,11 @@
         .cta {
             padding: 6rem 5%;
             text-align: center;
-            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            background: linear-gradient(
+                135deg,
+                var(--primary),
+                var(--secondary)
+            );
             color: white;
         }
 
@@ -218,138 +326,486 @@
         }
 
         /* Responsive Design */
+        @media (max-width: 900px) {
+            .hero {
+                flex-direction: column;
+                justify-content: center;
+                padding-top: 8rem;
+                padding-bottom: 4rem;
+                text-align: center;
+            }
+
+            .hero-content {
+                max-width: 100%;
+            }
+
+            .hero-buttons {
+                justify-content: center;
+            }
+
+            .sign-in-card {
+                margin-top: 2rem;
+            }
+        }
+
         @media (max-width: 768px) {
             .nav-links {
-                display: none; /* Hide on mobile for simplicity */
+                display: none;
             }
+
             .hero h1 {
                 font-size: 2.5rem;
             }
+
             .hero-buttons {
                 flex-direction: column;
             }
+
             .btn {
                 text-align: center;
             }
         }
     </style>
+
+    <!-- Analytics SDK -->
+    <script>
+        (function (w, d, s, u) {
+            w.analytics = w.analytics || {
+                q: [],
+                init: function () {
+                    this.q.push(["init", ...arguments]);
+                }
+            };
+
+            [
+                "start",
+                "stop",
+                "destroy",
+                "event",
+                "identify",
+                "page",
+                "defineFunnel",
+                "enableDebug",
+                "disableDebug"
+            ].forEach(function (method) {
+                w.analytics[method] =
+                    w.analytics[method] ||
+                    function () {
+                        w.analytics.q.push([
+                            method,
+                            ...arguments
+                        ]);
+                    };
+            });
+
+            var script = d.createElement(s);
+
+            script.async = true;
+            script.src = u + "?siteId=demo_site";
+
+            var first = d.getElementsByTagName(s)[0];
+
+            first.parentNode.insertBefore(script, first);
+        })(
+            window,
+            document,
+            "script",
+            "../../dist/sdk.js"
+        );
+
+        /*
+         * Initialize Analytics
+         */
+        analytics.init({
+            siteId: "site_tlh00zlo4buy61twqjccpmik",
+            debug: true,
+            endpoint: "http://localhost:3000",
+
+            sessionReplay: {
+                enabled: false
+            },
+
+            autocapture: {
+                cursor: false
+            }
+        });
+
+        /*
+         * Define checkout funnel
+         */
+        analytics.defineFunnel("checkout", [
+            "/cart",
+            "/shipping",
+            "/payment",
+            "/success"
+        ]);
+    </script>
 </head>
+
 <body>
 
     <!-- Navigation -->
     <nav id="navbar">
-        <div class="logo">Lumina</div>
+
+        <div class="logo">
+            Lumina
+        </div>
+
         <div class="nav-links">
             <a href="#home">Home</a>
             <a href="#features">Features</a>
             <a href="#pricing">Pricing</a>
         </div>
-        <a href="#signup" class="btn btn-primary">Get Started</a>
+
+        <a href="#signup" class="btn btn-primary">
+            Get Started
+        </a>
+
     </nav>
 
-    <!-- Hero Section -->
+
+    <!-- Hero -->
     <section id="home" class="hero">
+
         <div class="hero-content">
-            <h1>Work at the speed of thought.</h1>
-            <p>Lumina combines AI-driven analytics with intuitive design to help your team build, ship, and scale faster than ever before.</p>
+
+            <h1>
+                Work at the speed of thought.
+            </h1>
+
+            <p>
+                Lumina combines AI-driven analytics with
+                intuitive design to help your team build,
+                ship, and scale faster than ever before.
+            </p>
+
             <div class="hero-buttons">
-                <a href="#signup" class="btn btn-primary">Start for free</a>
-                <a href="#demo" class="btn btn-outline">Watch demo</a>
+                <a href="#demo" class="btn btn-outline">
+                    Watch demo
+                </a>
             </div>
+
         </div>
+
+
+        <!-- Sign In -->
+        <div class="sign-in-card">
+
+            <h2>
+                Welcome back
+            </h2>
+
+            <p class="subtitle">
+                Sign in to your Lumina workspace
+            </p>
+
+            <form
+                id="sign-in-form"
+                action="#"
+                method="POST"
+            >
+
+                <div class="form-group">
+
+                    <label for="email">
+                        Work Email
+                    </label>
+
+                    <input
+                        type="email"
+                        id="email"
+                        name="email"
+                        placeholder="name@company.com"
+                        required
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="password">
+                        Password
+                    </label>
+
+                    <input
+                        type="password"
+                        id="password"
+                        name="password"
+                        placeholder="••••••••"
+                        required
+                    >
+
+                </div>
+
+
+                <button
+                    type="submit"
+                    class="btn btn-primary sign-in-btn"
+                >
+                    Sign In
+                </button>
+
+            </form>
+
+
+            <div class="form-footer">
+
+                Don't have an account?
+
+                <a href="#signup">
+                    Start for free
+                </a>
+
+            </div>
+
+        </div>
+
     </section>
 
-    <!-- Features Section -->
+
+    <!-- Features -->
     <section id="features" class="features">
-        <h2 class="section-title">Everything you need to scale</h2>
+
+        <h2 class="section-title">
+            Everything you need to scale
+        </h2>
+
         <div class="features-grid">
+
             <div class="feature-card">
-                <div class="feature-icon">⚡</div>
-                <h3>Lightning Fast</h3>
-                <p>Optimized for speed. Load times are reduced by up to 80% thanks to our globally distributed edge network.</p>
+
+                <div class="feature-icon">
+                    ⚡
+                </div>
+
+                <h3>
+                    Lightning Fast
+                </h3>
+
+                <p>
+                    Optimized for speed. Load times are
+                    reduced by up to 80% thanks to our
+                    globally distributed edge network.
+                </p>
+
             </div>
+
+
             <div class="feature-card">
-                <div class="feature-icon">🛡️</div>
-                <h3>Bank-grade Security</h3>
-                <p>Your data is encrypted at rest and in transit. We maintain SOC2 Type II compliance so you can sleep easy.</p>
+
+                <div class="feature-icon">
+                    🛡️
+                </div>
+
+                <h3>
+                    Bank-grade Security
+                </h3>
+
+                <p>
+                    Your data is encrypted at rest and in
+                    transit. We maintain SOC2 Type II
+                    compliance so you can sleep easy.
+                </p>
+
             </div>
+
+
             <div class="feature-card">
-                <div class="feature-icon">🤖</div>
-                <h3>AI Assistant</h3>
-                <p>Automate the boring stuff. Our AI learns your workflow and suggests optimizations in real-time.</p>
+
+                <div class="feature-icon">
+                    🤖
+                </div>
+
+                <h3>
+                    AI Assistant
+                </h3>
+
+                <p>
+                    Automate the boring stuff. Our AI learns
+                    your workflow and suggests optimizations
+                    in real-time.
+                </p>
+
             </div>
+
         </div>
+
     </section>
 
-    <!-- Call to Action -->
+
+    <!-- CTA -->
     <section class="cta">
-        <h2>Ready to transform your workflow?</h2>
-        <p>Join 10,000+ teams already using Lumina to build better products.</p>
-        <a href="#signup" class="btn btn-outline" style="background: white; color: var(--primary);">Get Started Now</a>
+
+        <h2>
+            Ready to transform your workflow?
+        </h2>
+
+        <p>
+            Join 10,000+ teams already using Lumina
+            to build better products.
+        </p>
+
+        <a
+            href="#signup"
+            class="btn btn-outline"
+            style="background: white; color: var(--primary);"
+        >
+            Get Started Now
+        </a>
+
     </section>
+
 
     <!-- Footer -->
     <footer>
-        <p>&copy; 2026 Lumina Technologies. All rights reserved.</p>
+
+        <p>
+            &copy; 2026 Lumina Technologies.
+            All rights reserved.
+        </p>
+
     </footer>
 
-    <!-- Interactivity -->
+
+    <!-- Page Behavior + Identify -->
     <script>
-        // Sticky Navbar Effect
-        const navbar = document.getElementById('navbar');
-        const navLinks = document.querySelectorAll('.nav-links a');
 
-        window.addEventListener('scroll', () => {
+        /*
+         * Sticky Navbar Effect
+         */
+
+        const navbar =
+            document.getElementById("navbar");
+
+        const navLinks =
+            document.querySelectorAll(".nav-links a");
+
+        window.addEventListener("scroll", () => {
+
             if (window.scrollY > 50) {
-                navbar.classList.add('scrolled');
-                // Change text color for dark text on light background when scrolled
-                document.querySelector('.logo').style.color = 'var(--primary)';
+
+                navbar.classList.add("scrolled");
+
             } else {
-                navbar.classList.remove('scrolled');
-                // Revert text color on dark hero background
-                document.querySelector('.logo').style.color = 'transparent';
+
+                navbar.classList.remove("scrolled");
+
             }
+
         });
 
-        // Smooth Scrolling for anchor links
-        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-            anchor.addEventListener('click', function (e) {
-                e.preventDefault();
-                const target = document.querySelector(this.getAttribute('href'));
-                if(target) {
-                    target.scrollIntoView({
-                        behavior: 'smooth'
-                    });
-                }
+
+        /*
+         * Smooth Scrolling
+         */
+
+        document
+            .querySelectorAll('a[href^="#"]')
+            .forEach(anchor => {
+
+                anchor.addEventListener("click", function (e) {
+
+                    e.preventDefault();
+
+                    const target =
+                        document.querySelector(
+                            this.getAttribute("href")
+                        );
+
+                    if (target) {
+
+                        target.scrollIntoView({
+                            behavior: "smooth"
+                        });
+
+                    }
+
+                });
+
             });
+
+
+        /*
+         * Identify User
+         *
+         * In a real application, the user ID should come
+         * from your authentication system.
+         *
+         * For this demo we generate a deterministic ID
+         * from the email address.
+         */
+
+        const signInForm =
+            document.getElementById("sign-in-form");
+
+        signInForm.addEventListener("submit", function (e) {
+
+            e.preventDefault();
+
+            const email =
+                document.getElementById("email").value
+                    .trim()
+                    .toLowerCase();
+
+            if (!email) {
+                return;
+            }
+
+
+            /*
+             * Demo user ID
+             *
+             * Production:
+             * analytics.identify(realUser.id, {...})
+             */
+
+            const userId =
+                "user_" + email;
+
+
+            /*
+             * Send identity to your SDK
+             */
+
+            analytics.identify(userId, {
+
+                email: email,
+
+                name: email
+                    .split("@")[0]
+                    .replace(/[._-]/g, " "),
+
+                company: "Lumina Technologies",
+
+                plan: "pro"
+
+            });
+
+
+            /*
+             * Optional event so you can verify the
+             * identity transition in your analytics data.
+             */
+
+            analytics.event("user_signed_in", {
+
+                user_id: userId
+
+            });
+
+
+            /*
+             * Demo feedback
+             */
+
+            alert(
+                "Signed in successfully as " + email
+            );
+
         });
+
     </script>
 
-    <script>
-  (function (w, d, s, u) {
-    w.analytics = w.analytics || {
-      q: [],
-      init: function () { this.q.push(["init", ...arguments]); }
-    };
-    ["start", "stop", "destroy", "event", "identify", "page", "defineFunnel", "enableDebug", "disableDebug"]
-      .forEach(function (method) {
-        w.analytics[method] = w.analytics[method] || function () {
-          w.analytics.q.push([method, ...arguments]);
-        };
-      });
-    var script = d.createElement(s);
-    script.async = true;
-    script.src = u + "?siteId=demo_site";
-    var first = d.getElementsByTagName(s)[0];
-    first.parentNode.insertBefore(script, first);
-  })(window, document, "script", "../../dist/sdk.js");
-
-  analytics.init({ siteId: "site_tlh00zlo4buy61twqjccpmik", debug: true, endpoint:"http://localhost:3000", sessionReplay: { enabled: false }, autocapture: {cursor: false} });
-
-  // Define a page-based funnel once. Navigating the anchors above (which just
-  // change location.hash) simulates SPA-style route changes.
-  analytics.defineFunnel("checkout", ["/cart", "/shipping", "/payment", "/success"]);
-  </script>
 </body>
 </html>
-

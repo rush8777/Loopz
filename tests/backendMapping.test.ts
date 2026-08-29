@@ -226,9 +226,8 @@ describe("mapToBackendEvent", () => {
       stepLabel: "start",
       status: "step_completed",
     });
-    const custom = makeEvent<CustomEventPayload>("custom", { name: "video_played" });
 
-    for (const event of [move, rageClick, funnel, custom]) {
+    for (const event of [move, rageClick, funnel]) {
       expect(mapToBackendEvent(event)).toBeNull();
     }
   });
@@ -322,6 +321,65 @@ describe("mapToBackendEvent - session_start", () => {
       screenWidth: 390,
       screenHeight: 844,
     });
+  });
+});
+
+describe("mapToBackendEvent - custom", () => {
+  it("maps a custom event with properties, unmodified", () => {
+    const payload: CustomEventPayload = { name: "checkout_completed", properties: { plan: "pro", amount: 49, currency: "USD" } };
+    const event = makeEvent("custom", payload);
+
+    expect(mapToBackendEvent(event)).toEqual({
+      type: "custom",
+      timestamp: event.timestamp,
+      anonymousId: "anon_1",
+      eventId: "evt_1",
+      pageViewId: "pv_1",
+      name: "checkout_completed",
+      properties: { plan: "pro", amount: 49, currency: "USD" },
+    });
+  });
+
+  it("maps a custom event with no properties by omitting the properties field", () => {
+    const payload: CustomEventPayload = { name: "video_played" };
+    const event = makeEvent("custom", payload);
+
+    expect(mapToBackendEvent(event)).toEqual({
+      type: "custom",
+      timestamp: event.timestamp,
+      anonymousId: "anon_1",
+      eventId: "evt_1",
+      pageViewId: "pv_1",
+      name: "video_played",
+    });
+  });
+
+  it("preserves nested/array JSON-serializable property values", () => {
+    const payload: CustomEventPayload = {
+      name: "cart_updated",
+      properties: { items: [{ sku: "A1", qty: 2 }, { sku: "B2", qty: 1 }], discounts: null, total: 87.5 },
+    };
+    const event = makeEvent("custom", payload);
+
+    expect(mapToBackendEvent(event)).toEqual({
+      type: "custom",
+      timestamp: event.timestamp,
+      anonymousId: "anon_1",
+      eventId: "evt_1",
+      pageViewId: "pv_1",
+      name: "cart_updated",
+      properties: payload.properties,
+    });
+  });
+
+  it("never travels through a click/hover-shaped payload - no element/x/y/durationMs fields", () => {
+    const event = makeEvent<CustomEventPayload>("custom", { name: "signed_up", properties: { plan: "free" } });
+    const mapped = mapToBackendEvent(event);
+    expect(mapped).not.toHaveProperty("element");
+    expect(mapped).not.toHaveProperty("x");
+    expect(mapped).not.toHaveProperty("y");
+    expect(mapped).not.toHaveProperty("durationMs");
+    expect(mapped).not.toHaveProperty("scrollPercent");
   });
 });
 
