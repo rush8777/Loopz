@@ -146,8 +146,12 @@ export class CursorCollector {
       timestamp,
       x,
       y,
+      documentX: x + window.scrollX,
+      documentY: y + window.scrollY,
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
+      documentWidth: Math.max(document.documentElement.scrollWidth, document.documentElement.clientWidth),
+      documentHeight: Math.max(document.documentElement.scrollHeight, document.documentElement.clientHeight),
     };
 
     this.bus.emit("cursor", payload);

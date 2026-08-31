@@ -156,9 +156,22 @@ function canonicalizePathSegment(segment) {
   }
   return segment;
 }
-function canonicalizeHref(href) {
-  const path = href.split("?")[0].split("#")[0];
+const SAFE_FRAGMENT_ID = /^[a-z][a-z0-9_.:-]{0,99}$/i;
+const SAFE_HASH_ROUTE = /^\/[a-z0-9_./:-]{0,199}$/i;
+function canonicalizePath(path) {
   return path.split("/").map((segment) => segment ? canonicalizePathSegment(segment) : segment).join("/");
+}
+function canonicalizeHref(href) {
+  if (href.startsWith("#/")) {
+    const hashPath = href.slice(1).split("?")[0].split("#")[0];
+    return SAFE_HASH_ROUTE.test(hashPath) ? `#${canonicalizePath(hashPath)}` : null;
+  }
+  if (href.startsWith("#")) {
+    const fragment = href.slice(1);
+    return SAFE_FRAGMENT_ID.test(fragment) ? `#${fragment}` : null;
+  }
+  const path = href.split("?")[0].split("#")[0];
+  return path ? canonicalizePath(path) : null;
 }
 class SelectorGenerator {
   generate(el) {
@@ -176,6 +189,7 @@ class SelectorGenerator {
       const rawValue = el.getAttribute(attr);
       if (!rawValue) continue;
       const value = attr === "href" ? canonicalizeHref(rawValue) : rawValue;
+      if (!value) continue;
       if (value.length < 100) {
         return `${el.tagName.toLowerCase()}[${attr}="${cssEscape(value)}"]`;
       }
@@ -281,7 +295,9 @@ class ClickCollector {
         clientX: e.clientX,
         clientY: e.clientY,
         pageX: e.pageX,
-        pageY: e.pageY
+        pageY: e.pageY,
+        documentX: e.clientX + window.scrollX,
+        documentY: e.clientY + window.scrollY
       },
       viewport: { width: window.innerWidth, height: window.innerHeight },
       scroll: { x: window.scrollX, y: window.scrollY },
@@ -536,7 +552,9 @@ class HoverCollector {
     this.active.set(interactiveEl, {
       startedAt: Date.now(),
       x: Math.round(rect.left + rect.width / 2),
-      y: Math.round(rect.top + rect.height / 2)
+      y: Math.round(rect.top + rect.height / 2),
+      documentX: Math.round(rect.left + rect.width / 2 + window.scrollX),
+      documentY: Math.round(rect.top + rect.height / 2 + window.scrollY)
     });
   }
   handleLeave(e) {
@@ -558,7 +576,9 @@ class HoverCollector {
       hoverEnd,
       durationMs,
       x: active.x,
-      y: active.y
+      y: active.y,
+      documentX: active.documentX,
+      documentY: active.documentY
     };
     this.bus.emit("hover", payload);
   }
@@ -647,8 +667,12 @@ class CursorCollector {
       timestamp,
       x,
       y,
+      documentX: x + window.scrollX,
+      documentY: y + window.scrollY,
       viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight
+      viewportHeight: window.innerHeight,
+      documentWidth: Math.max(document.documentElement.scrollWidth, document.documentElement.clientWidth),
+      documentHeight: Math.max(document.documentElement.scrollHeight, document.documentElement.clientHeight)
     };
     this.bus.emit("cursor", payload);
   }
@@ -754,7 +778,7 @@ class ElementCrawler {
       });
     }
     if (elements.length === 0) return;
-    this.bus.emit("elements_seen", { elements });
+    this.bus.emit("elements_seen", { pagePath: location.pathname, elements });
   }
 }
 function generateId(prefix) {
@@ -920,6 +944,8 @@ class AutoCaptureEngine {
     this.bus = new EventBus();
     this.privacy = new PrivacyFilter();
     this.started = false;
+    this.discoveryInitialized = false;
+    this.pendingInitialCrawl = null;
     this.click = new ClickCollector(this.bus, this.privacy);
     this.scroll = new ScrollCollector(this.bus, config.scroll);
     this.move = new MoveCollector(this.bus, config.move);
@@ -940,16 +966,36 @@ class AutoCaptureEngine {
     if (ac.rageClick && ac.click) this.rageClick.start();
     if (ac.hover) this.hover.start();
     if (ac.cursor) this.cursor.start();
-    if (ac.elementCrawler) this.scheduleInitialCrawl();
     if (this.config.sessionReplay.enabled) void this.sessionReplay.start();
+  }
+  /**
+   * Starts structural Page/Element discovery for the initialized SDK.
+   * This lifecycle is intentionally independent of behavioral start/stop.
+   */
+  initializeElementDiscovery() {
+    if (this.discoveryInitialized || !this.config.autocapture.elementCrawler) return;
+    this.discoveryInitialized = true;
+    this.scheduleInitialCrawl();
   }
   /** Runs the first crawl once the DOM actually has content - a crawl fired before parsing finishes would just find nothing. */
   scheduleInitialCrawl() {
     if (typeof document === "undefined") return;
     if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", () => this.elementCrawler.crawl(), { once: true });
+      this.pendingInitialCrawl = () => {
+        this.pendingInitialCrawl = null;
+        if (this.discoveryInitialized) this.elementCrawler.crawl();
+      };
+      document.addEventListener("DOMContentLoaded", this.pendingInitialCrawl, { once: true });
     } else {
       this.elementCrawler.crawl();
+    }
+  }
+  /** Completely tears down discovery scheduling during Analytics.destroy(). */
+  destroyElementDiscovery() {
+    this.discoveryInitialized = false;
+    if (this.pendingInitialCrawl && typeof document !== "undefined") {
+      document.removeEventListener("DOMContentLoaded", this.pendingInitialCrawl);
+      this.pendingInitialCrawl = null;
     }
   }
   stop() {
@@ -963,11 +1009,13 @@ class AutoCaptureEngine {
     this.cursor.stop();
     this.sessionReplay.stop();
   }
-  /** Called on SPA route changes - resets per-page-view collector state. */
-  onRouteChange(path) {
-    this.scroll.reset();
-    this.funnel.onPageView(path);
-    if (this.config.autocapture.elementCrawler) this.elementCrawler.crawl();
+  /** Called on SPA route changes; discovery remains active even when behavioral capture is stopped. */
+  onRouteChange(path, behavioralCaptureActive = true) {
+    if (behavioralCaptureActive) {
+      this.scroll.reset();
+      this.funnel.onPageView(path);
+    }
+    if (this.discoveryInitialized) this.elementCrawler.crawl();
   }
   isRunning() {
     return this.started;
@@ -1147,9 +1195,17 @@ function toBackendElement(descriptor) {
   };
 }
 function mapToBackendEvent(event) {
+  var _a, _b;
   if (UNSUPPORTED_BY_BACKEND.has(event.type) || event.type === "session_replay_event") return null;
   const viewportWidth = event.page.viewportWidth > 0 ? event.page.viewportWidth : void 0;
   const viewportHeight = event.page.viewportHeight > 0 ? event.page.viewportHeight : void 0;
+  const heatmapContext = {
+    path: event.page.path,
+    ...event.page.documentWidth > 0 && { documentWidth: event.page.documentWidth },
+    ...event.page.documentHeight > 0 && { documentHeight: event.page.documentHeight },
+    ...((_a = event.heatmap) == null ? void 0 : _a.deviceClass) && { deviceClass: event.heatmap.deviceClass },
+    ...((_b = event.heatmap) == null ? void 0 : _b.stateId) && { heatmapStateId: event.heatmap.stateId }
+  };
   switch (event.type) {
     case "page_view":
       return {
@@ -1158,7 +1214,7 @@ function mapToBackendEvent(event) {
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
-        path: event.page.path
+        ...heatmapContext
       };
     case "click": {
       const p = event.payload;
@@ -1170,9 +1226,12 @@ function mapToBackendEvent(event) {
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
+        ...heatmapContext,
         element: toBackendElement(p.element),
         x,
         y,
+        documentX: Math.max(0, Math.min(2e4, Math.floor(p.coordinates.documentX ?? p.coordinates.pageX))),
+        documentY: Math.max(0, Math.min(2e5, Math.floor(p.coordinates.documentY ?? p.coordinates.pageY))),
         ...viewportWidth !== void 0 && { viewportWidth },
         ...viewportHeight !== void 0 && { viewportHeight }
       };
@@ -1187,10 +1246,13 @@ function mapToBackendEvent(event) {
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
+        ...heatmapContext,
         element: toBackendElement(p.element),
         durationMs: p.durationMs,
         ...x !== void 0 && { x },
         ...y !== void 0 && { y },
+        ...p.documentX !== void 0 && { documentX: Math.max(0, Math.min(2e4, Math.floor(p.documentX))) },
+        ...p.documentY !== void 0 && { documentY: Math.max(0, Math.min(2e5, Math.floor(p.documentY))) },
         ...viewportWidth !== void 0 && { viewportWidth },
         ...viewportHeight !== void 0 && { viewportHeight }
       };
@@ -1204,6 +1266,7 @@ function mapToBackendEvent(event) {
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
+        ...heatmapContext,
         scrollPercent,
         ...viewportWidth !== void 0 && { viewportWidth },
         ...viewportHeight !== void 0 && { viewportHeight }
@@ -1221,8 +1284,13 @@ function mapToBackendEvent(event) {
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
+        ...heatmapContext,
         x,
         y,
+        documentX: Math.max(0, Math.min(2e4, Math.floor(p.documentX ?? p.x))),
+        documentY: Math.max(0, Math.min(2e5, Math.floor(p.documentY ?? p.y))),
+        ...p.documentWidth !== void 0 && { documentWidth: p.documentWidth },
+        ...p.documentHeight !== void 0 && { documentHeight: p.documentHeight },
         ...cursorViewportWidth !== void 0 && { viewportWidth: cursorViewportWidth },
         ...cursorViewportHeight !== void 0 && { viewportHeight: cursorViewportHeight }
       };
@@ -1318,9 +1386,9 @@ class Transport {
    * POST per crawl is the right amount of machinery, not the queue
    * built for continuous click/hover/scroll/cursor telemetry.
    */
-  async sendElements(elements) {
+  async sendElements(pagePath, elements) {
     if (!this.apiBase || elements.length === 0) return { ok: true, retryable: false };
-    return this.postJson(this.elementsUrl(), { elements });
+    return this.postJson(this.elementsUrl(), { pagePath, elements });
   }
   /** Best-effort async send used during normal operation. */
   async send(events) {
@@ -1587,6 +1655,7 @@ function resolveConfig(input) {
   return {
     siteId: input.siteId,
     endpoint: input.endpoint || "https://api.example.com",
+    heatmapSnapshotBundleUrl: input.heatmapSnapshotBundleUrl ?? "",
     debug: input.debug ?? false,
     sessionInactivityMs: input.sessionInactivityMs ?? 30 * 60 * 1e3,
     respectDoNotTrack: input.respectDoNotTrack ?? false,
@@ -1702,6 +1771,87 @@ class RouteObserver {
     }, 0);
   }
 }
+function classifyHeatmapDevice(viewportWidth) {
+  if (viewportWidth < 768) return "mobile";
+  if (viewportWidth < 1024) return "tablet";
+  return "desktop";
+}
+class HeatmapManager {
+  constructor(apiBase, siteId, bundleUrl) {
+    this.apiBase = apiBase;
+    this.siteId = siteId;
+    this.bundleUrl = bundleUrl;
+    this.states = [];
+    this.lastResolvedAt = 0;
+    this.loadPromise = null;
+  }
+  initialize() {
+    if (!this.apiBase || typeof fetch === "undefined") return;
+    void fetch(`${this.apiBase}/public/config/${this.siteId}`, { credentials: "omit" }).then((r) => r.ok ? r.json() : null).then((body) => {
+      this.states = Array.isArray(body == null ? void 0 : body.heatmapStates) ? body.heatmapStates : [];
+    }).catch(() => void 0);
+  }
+  context() {
+    return { stateId: this.resolveVisibleState(), deviceClass: classifyHeatmapDevice(window.innerWidth) };
+  }
+  async captureReference(captureToken) {
+    try {
+      const capture = await this.loadCaptureFunction();
+      if (!capture) return { ok: false, error: "snapshot_library_unavailable" };
+      const imageDataUrl = await capture();
+      const doc = document.documentElement;
+      const response = await fetch(`${this.apiBase}/public/sites/${this.siteId}/heatmap-snapshots/${encodeURIComponent(captureToken)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "omit",
+        body: JSON.stringify({ pagePath: location.pathname, deviceClass: classifyHeatmapDevice(window.innerWidth), viewportWidth: window.innerWidth, viewportHeight: window.innerHeight, documentWidth: Math.max(doc.scrollWidth, doc.clientWidth), documentHeight: Math.max(doc.scrollHeight, doc.clientHeight), imageDataUrl })
+      });
+      return response.ok ? { ok: true } : { ok: false, error: "snapshot_upload_failed" };
+    } catch {
+      return { ok: false, error: "snapshot_capture_failed" };
+    }
+  }
+  resolveVisibleState() {
+    const now2 = Date.now();
+    if (now2 - this.lastResolvedAt < 200) return this.cachedStateId;
+    this.lastResolvedAt = now2;
+    this.cachedStateId = void 0;
+    for (const state of this.states) {
+      try {
+        const el = document.querySelector(state.selector);
+        if (!el) continue;
+        const style = getComputedStyle(el);
+        if (style.display !== "none" && style.visibility !== "hidden" && el.getClientRects().length > 0) {
+          this.cachedStateId = state.id;
+          break;
+        }
+      } catch {
+      }
+    }
+    return this.cachedStateId;
+  }
+  loadCaptureFunction() {
+    if (window.__loopzHeatmapCapture__) return Promise.resolve(window.__loopzHeatmapCapture__);
+    if (this.loadPromise) return this.loadPromise;
+    const url = this.bundleUrl || deriveHeatmapBundleUrl(currentScriptUrl);
+    if (!url) return Promise.resolve(null);
+    this.loadPromise = new Promise((resolve) => {
+      const script = document.createElement("script");
+      script.src = url;
+      script.async = true;
+      script.onload = () => resolve(window.__loopzHeatmapCapture__ ?? null);
+      script.onerror = () => resolve(null);
+      document.head.appendChild(script);
+    });
+    return this.loadPromise;
+  }
+}
+function deriveHeatmapBundleUrl(url) {
+  if (!url) return null;
+  if (url.includes("sdk.min.js")) return url.replace("sdk.min.js", "sdk-heatmap.min.js");
+  if (url.includes("sdk.js")) return url.replace("sdk.js", "sdk-heatmap.js");
+  return null;
+}
 class Analytics {
   constructor() {
     this.routeObserver = new RouteObserver();
@@ -1732,13 +1882,16 @@ class Analytics {
       (msg, ...args) => this.log(msg, ...args)
     );
     this.engine = new AutoCaptureEngine(this.config);
+    this.heatmaps = new HeatmapManager(this.config.endpoint, this.config.siteId, this.config.heatmapSnapshotBundleUrl);
+    this.heatmaps.initialize();
     this.wireCollectorsToPipeline();
     this.initialized = true;
     this.log("initialized", { siteId: this.config.siteId });
+    this.engine.initializeElementDiscovery();
+    this.unsubscribers.push(this.routeObserver.onChange(() => this.onRouteChange()));
+    this.routeObserver.start();
     this.start();
     this.trackPageView();
-    this.routeObserver.start();
-    this.routeObserver.onChange(() => this.onRouteChange());
   }
   start() {
     if (!this.initialized || this.running) return;
@@ -1755,12 +1908,13 @@ class Analytics {
     this.log("autocapture stopped");
   }
   destroy() {
-    var _a;
+    var _a, _b;
     this.stop();
     this.routeObserver.stop();
+    (_a = this.engine) == null ? void 0 : _a.destroyElementDiscovery();
     for (const unsub of this.unsubscribers) unsub();
     this.unsubscribers = [];
-    (_a = this.queue) == null ? void 0 : _a.clear();
+    (_b = this.queue) == null ? void 0 : _b.clear();
     this.initialized = false;
     this.log("destroyed");
   }
@@ -1795,6 +1949,10 @@ class Analytics {
   disableDebug() {
     this.log("debug mode disabled");
     this.debugEnabled = false;
+  }
+  captureHeatmapReference(captureToken) {
+    if (!this.requireInit()) return Promise.resolve({ ok: false, error: "not_initialized" });
+    return this.heatmaps.captureReference(captureToken);
   }
   // -------------------------------------------------------------------
   // Internal wiring
@@ -1858,7 +2016,7 @@ class Analytics {
     );
     this.unsubscribers.push(
       bus.on("elements_seen", (p) => {
-        void this.transport.sendElements(p.elements);
+        void this.transport.sendElements(p.pagePath, p.elements);
         this.log(`elements crawled: ${p.elements.length}`);
       })
     );
@@ -1868,9 +2026,13 @@ class Analytics {
     this.engine.funnel.onPageView(location.pathname);
   }
   onRouteChange() {
-    this.session.newPageView();
-    this.engine.onRouteChange(location.pathname);
-    this.trackPageView();
+    if (this.running) {
+      this.session.newPageView();
+      this.engine.onRouteChange(location.pathname, true);
+      this.trackPageView();
+    } else {
+      this.engine.onRouteChange(location.pathname, false);
+    }
     this.log("route changed", location.pathname);
   }
   enqueueEvent(type, payload) {
@@ -1889,6 +2051,7 @@ class Analytics {
       sessionId: this.session.getSessionId(),
       pageViewId: this.session.getPageViewId(),
       page: getPageContext(),
+      heatmap: this.heatmaps.context(),
       payload
     };
     this.batcher.enqueue(event);

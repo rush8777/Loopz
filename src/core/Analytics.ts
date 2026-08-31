@@ -27,6 +27,7 @@ import type {
 } from "../types/events";
 import type { FunnelStep } from "../types/funnel";
 import { RouteObserver } from "../dom/RouteObserver";
+import { HeatmapManager } from "../heatmaps/HeatmapManager";
 
 /**
  * The core SDK instance. Owns configuration, session identity, the
@@ -42,6 +43,7 @@ export class Analytics {
   private transport!: Transport;
   private batcher!: Batcher;
   private routeObserver = new RouteObserver();
+  private heatmaps!: HeatmapManager;
 
   private debugEnabled = false;
   private initialized = false;
@@ -70,17 +72,26 @@ export class Analytics {
       this.log(msg, ...args)
     );
     this.engine = new AutoCaptureEngine(this.config);
+    this.heatmaps = new HeatmapManager(this.config.endpoint, this.config.siteId, this.config.heatmapSnapshotBundleUrl);
+    this.heatmaps.initialize();
 
     this.wireCollectorsToPipeline();
 
     this.initialized = true;
     this.log("initialized", { siteId: this.config.siteId });
+    this.engine.initializeElementDiscovery();
+
+    // Page/Element discovery belongs to the initialized SDK lifecycle,
+    // so route observation remains active when behavioral capture stops.
+    this.unsubscribers.push(this.routeObserver.onChange(() => this.onRouteChange()));
+    this.routeObserver.start();
+
+    // Preserve the SDK's established auto-start behavior for behavioral
+    // collectors, without making discovery depend on start().
     this.start();
 
     // Fire the initial page view + funnel evaluation.
     this.trackPageView();
-    this.routeObserver.start();
-    this.routeObserver.onChange(() => this.onRouteChange());
   }
 
   start(): void {
@@ -102,6 +113,7 @@ export class Analytics {
   destroy(): void {
     this.stop();
     this.routeObserver.stop();
+    this.engine?.destroyElementDiscovery();
     for (const unsub of this.unsubscribers) unsub();
     this.unsubscribers = [];
     this.queue?.clear();
@@ -146,6 +158,11 @@ export class Analytics {
   disableDebug(): void {
     this.log("debug mode disabled");
     this.debugEnabled = false;
+  }
+
+  captureHeatmapReference(captureToken: string): Promise<{ ok: boolean; error?: string }> {
+    if (!this.requireInit()) return Promise.resolve({ ok: false, error: "not_initialized" });
+    return this.heatmaps.captureReference(captureToken);
   }
 
   // -------------------------------------------------------------------
@@ -226,7 +243,7 @@ export class Analytics {
         // Transport.sendElements's doc comment. Best-effort, fire-and-
         // forget; a failed crawl upload just means the catalog is
         // slightly stale until the next route change re-crawls.
-        void this.transport.sendElements(p.elements);
+        void this.transport.sendElements(p.pagePath, p.elements);
         this.log(`elements crawled: ${p.elements.length}`);
       })
     );
@@ -238,9 +255,13 @@ export class Analytics {
   }
 
   private onRouteChange(): void {
-    this.session.newPageView();
-    this.engine.onRouteChange(location.pathname);
-    this.trackPageView();
+    if (this.running) {
+      this.session.newPageView();
+      this.engine.onRouteChange(location.pathname, true);
+      this.trackPageView();
+    } else {
+      this.engine.onRouteChange(location.pathname, false);
+    }
     this.log("route changed", location.pathname);
   }
 
@@ -266,6 +287,7 @@ export class Analytics {
       sessionId: this.session.getSessionId(),
       pageViewId: this.session.getPageViewId(),
       page: getPageContext(),
+      heatmap: this.heatmaps.context(),
       payload,
     };
     this.batcher.enqueue(event as AnalyticsEvent<AnyPayload>);

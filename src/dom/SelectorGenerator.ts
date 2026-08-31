@@ -69,18 +69,38 @@ function canonicalizePathSegment(segment: string): string {
   return segment;
 }
 
-/**
- * Canonicalizes the path portion of an href for use in a selector.
- * Query string and fragment are dropped entirely (never meaningful for
- * element identity, and query strings can carry incidental PII) rather
- * than canonicalized.
- */
-function canonicalizeHref(href: string): string {
-  const path = href.split("?")[0].split("#")[0];
+// Conservative allowlists prevent fragments that resemble arbitrary user
+// data from becoming selector metadata. Unsafe values fall through to the
+// existing class/structural selector strategy.
+const SAFE_FRAGMENT_ID = /^[a-z][a-z0-9_.:-]{0,99}$/i;
+const SAFE_HASH_ROUTE = /^\/[a-z0-9_./:-]{0,199}$/i;
+
+function canonicalizePath(path: string): string {
   return path
     .split("/")
     .map((segment) => (segment ? canonicalizePathSegment(segment) : segment))
     .join("/");
+}
+
+/**
+ * Produces a privacy-conscious href identity. Ordinary URLs retain their
+ * path-only behavior. Fragment-only anchors and hash-router paths need
+ * special handling because dropping their leading hash used to turn every
+ * one into the same empty `a[href=""]` selector.
+ */
+function canonicalizeHref(href: string): string | null {
+  if (href.startsWith("#/")) {
+    const hashPath = href.slice(1).split("?")[0].split("#")[0];
+    return SAFE_HASH_ROUTE.test(hashPath) ? `#${canonicalizePath(hashPath)}` : null;
+  }
+
+  if (href.startsWith("#")) {
+    const fragment = href.slice(1);
+    return SAFE_FRAGMENT_ID.test(fragment) ? `#${fragment}` : null;
+  }
+
+  const path = href.split("?")[0].split("#")[0];
+  return path ? canonicalizePath(path) : null;
 }
 
 /**
@@ -109,6 +129,7 @@ export class SelectorGenerator {
       const rawValue = el.getAttribute(attr);
       if (!rawValue) continue;
       const value = attr === "href" ? canonicalizeHref(rawValue) : rawValue;
+      if (!value) continue;
       if (value.length < 100) {
         return `${el.tagName.toLowerCase()}[${attr}="${cssEscape(value)}"]`;
       }

@@ -54,5 +54,7 @@ describe("HoverCollector position capture", () => {
     // center of {left:100, top:200, width:160, height:40} -> (180, 220)
     expect(received[0].x).toBe(180);
     expect(received[0].y).toBe(220);
+    expect(received[0].documentX).toBe(180 + window.scrollX);
+    expect(received[0].documentY).toBe(220 + window.scrollY);
   });
 });

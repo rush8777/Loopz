@@ -29,8 +29,8 @@ export class AutoCaptureEngine {
   readonly cursor: CursorCollector;
   readonly funnel: FunnelTracker;
   /**
-   * Not a start/stop collector like the others - a one-shot `.crawl()`
-   * triggered from `start()` (initial page) and `onRouteChange()` (SPA
+   * Not a behavioral start/stop collector like the others - a one-shot
+   * `.crawl()` triggered from SDK initialization and `onRouteChange()` (SPA
    * navigation) rather than any continuous listener. See ElementCrawler.ts.
    */
   readonly elementCrawler: ElementCrawler;
@@ -43,6 +43,8 @@ export class AutoCaptureEngine {
   readonly sessionReplay: RRWebRecorder;
 
   private started = false;
+  private discoveryInitialized = false;
+  private pendingInitialCrawl: (() => void) | null = null;
 
   constructor(private config: ResolvedAnalyticsConfig) {
     this.click = new ClickCollector(this.bus, this.privacy);
@@ -69,19 +71,41 @@ export class AutoCaptureEngine {
     if (ac.rageClick && ac.click) this.rageClick.start();
     if (ac.hover) this.hover.start();
     if (ac.cursor) this.cursor.start();
-    if (ac.elementCrawler) this.scheduleInitialCrawl();
     // Fire-and-forget: replay may need to fetch its bundle first, and must
     // never block or delay the rest of autocapture from starting.
     if (this.config.sessionReplay.enabled) void this.sessionReplay.start();
+  }
+
+  /**
+   * Starts structural Page/Element discovery for the initialized SDK.
+   * This lifecycle is intentionally independent of behavioral start/stop.
+   */
+  initializeElementDiscovery(): void {
+    if (this.discoveryInitialized || !this.config.autocapture.elementCrawler) return;
+    this.discoveryInitialized = true;
+    this.scheduleInitialCrawl();
   }
 
   /** Runs the first crawl once the DOM actually has content - a crawl fired before parsing finishes would just find nothing. */
   private scheduleInitialCrawl(): void {
     if (typeof document === "undefined") return;
     if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", () => this.elementCrawler.crawl(), { once: true });
+      this.pendingInitialCrawl = () => {
+        this.pendingInitialCrawl = null;
+        if (this.discoveryInitialized) this.elementCrawler.crawl();
+      };
+      document.addEventListener("DOMContentLoaded", this.pendingInitialCrawl, { once: true });
     } else {
       this.elementCrawler.crawl();
+    }
+  }
+
+  /** Completely tears down discovery scheduling during Analytics.destroy(). */
+  destroyElementDiscovery(): void {
+    this.discoveryInitialized = false;
+    if (this.pendingInitialCrawl && typeof document !== "undefined") {
+      document.removeEventListener("DOMContentLoaded", this.pendingInitialCrawl);
+      this.pendingInitialCrawl = null;
     }
   }
 
@@ -97,11 +121,13 @@ export class AutoCaptureEngine {
     this.sessionReplay.stop();
   }
 
-  /** Called on SPA route changes - resets per-page-view collector state. */
-  onRouteChange(path: string): void {
-    this.scroll.reset();
-    this.funnel.onPageView(path);
-    if (this.config.autocapture.elementCrawler) this.elementCrawler.crawl();
+  /** Called on SPA route changes; discovery remains active even when behavioral capture is stopped. */
+  onRouteChange(path: string, behavioralCaptureActive = true): void {
+    if (behavioralCaptureActive) {
+      this.scroll.reset();
+      this.funnel.onPageView(path);
+    }
+    if (this.discoveryInitialized) this.elementCrawler.crawl();
   }
 
   isRunning(): boolean {

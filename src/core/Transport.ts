@@ -64,9 +64,9 @@ export class Transport {
    * POST per crawl is the right amount of machinery, not the queue
    * built for continuous click/hover/scroll/cursor telemetry.
    */
-  async sendElements(elements: CrawledElement[]): Promise<TransportResult> {
+  async sendElements(pagePath: string, elements: CrawledElement[]): Promise<TransportResult> {
     if (!this.apiBase || elements.length === 0) return { ok: true, retryable: false };
-    return this.postJson(this.elementsUrl(), { elements });
+    return this.postJson(this.elementsUrl(), { pagePath, elements });
   }
 
   /** Best-effort async send used during normal operation. */

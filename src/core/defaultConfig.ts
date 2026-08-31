@@ -8,6 +8,7 @@ export function resolveConfig(input: AnalyticsConfig): ResolvedAnalyticsConfig {
   return {
     siteId: input.siteId,
     endpoint: input.endpoint || "https://api.example.com",
+    heatmapSnapshotBundleUrl: input.heatmapSnapshotBundleUrl ?? "",
     debug: input.debug ?? false,
     sessionInactivityMs: input.sessionInactivityMs ?? 30 * 60 * 1000,
     respectDoNotTrack: input.respectDoNotTrack ?? false,

@@ -430,15 +430,8 @@
             }
         });
 
-        /*
-         * Define checkout funnel
-         */
-        analytics.defineFunnel("checkout", [
-            "/cart",
-            "/shipping",
-            "/payment",
-            "/success"
-        ]);
+        
+    
     </script>
 </head>
 
@@ -781,6 +774,7 @@
                 plan: "pro"
 
             });
+            analytics.start();
 
 
             /*

@@ -1,21 +1,24 @@
 import { defineConfig } from "vite";
 import { resolve } from "path";
 
-// Builds five artifacts:
+// Builds seven artifacts:
 //   dist/sdk.js              - core SDK, readable IIFE build (CDN <script> tag)
 //   dist/sdk.min.js          - core SDK, minified IIFE build (terser)
 //   dist/sdk-replay.js       - rrweb, readable IIFE build
 //   dist/sdk-replay.min.js   - rrweb, minified IIFE build (terser)
+//   dist/sdk-heatmap.js      - modern-screenshot capture bundle, readable IIFE
+//   dist/sdk-heatmap.min.js  - modern-screenshot capture bundle, minified IIFE
 //   dist/sdk.esm.js          - core SDK, real ES module (npm/bundler import)
 //
-// The core SDK never imports rrweb directly - session replay (RRWebRecorder)
+// The core SDK never imports rrweb or modern-screenshot directly. Session replay (RRWebRecorder)
 // lazily injects a <script src="sdk-replay(.min).js"> only when a site has
 // sessionReplay.enabled and actually starts recording. This keeps rrweb's
 // weight (which dwarfs the rest of this SDK) off every site that doesn't
 // use replay, in EVERY build target - the ESM build included, since that
 // lazy-load is a runtime DOM script injection, not a module-graph import,
 // so it behaves identically whether the surrounding code is a global IIFE
-// or bundled into a React/Next.js app.
+// or bundled into a React/Next.js app. The heatmap capture bundle follows
+// the same runtime injection model and loads only for an explicit capture.
 //
 // The IIFE builds are self-executing global scripts with zero runtime
 // dependencies, safe to drop into any site via a plain <script> tag. The
@@ -30,15 +33,18 @@ import { resolve } from "path";
 export default defineConfig(({ mode }) => {
   const minify = mode.endsWith("minify");
   const isReplay = mode.startsWith("replay");
+  const isHeatmap = mode.startsWith("heatmap");
   const isModule = mode === "module";
 
   const entry = isModule
     ? "src/module.ts"
     : isReplay
       ? "src/session/replayBundleEntry.ts"
+      : isHeatmap
+        ? "src/heatmaps/snapshotBundleEntry.ts"
       : "src/index.ts";
-  const name = isReplay ? "AutocaptureAnalyticsSDKReplay" : "AutocaptureAnalyticsSDK";
-  const baseName = isReplay ? "sdk-replay" : "sdk";
+  const name = isReplay ? "AutocaptureAnalyticsSDKReplay" : isHeatmap ? "LoopzHeatmapSnapshot" : "AutocaptureAnalyticsSDK";
+  const baseName = isReplay ? "sdk-replay" : isHeatmap ? "sdk-heatmap" : "sdk";
   const fileName = isModule ? "sdk.esm.js" : minify ? `${baseName}.min.js` : `${baseName}.js`;
 
   return {

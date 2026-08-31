@@ -28,6 +28,12 @@ const basePage: PageContext = {
   devicePixelRatio: 2,
 };
 
+const heatmapPageContext = {
+  path: "/pricing",
+  documentWidth: 1440,
+  documentHeight: 3200,
+};
+
 function makeEvent<T extends AnyPayload>(
   type: AnalyticsEvent<T>["type"],
   payload: T,
@@ -55,7 +61,7 @@ describe("mapToBackendEvent", () => {
       anonymousId: "anon_1",
       eventId: "evt_1",
       pageViewId: "pv_1",
-      path: "/pricing",
+      ...heatmapPageContext,
     });
   });
 
@@ -75,9 +81,12 @@ describe("mapToBackendEvent", () => {
       anonymousId: "anon_1",
       eventId: "evt_1",
       pageViewId: "pv_1",
+      ...heatmapPageContext,
       element: { selector: "#cta" },
       x: 120,
       y: 340,
+      documentX: 120,
+      documentY: 1340,
       viewportWidth: 1440,
       viewportHeight: 900,
     });
@@ -99,9 +108,12 @@ describe("mapToBackendEvent", () => {
       anonymousId: "anon_1",
       eventId: "evt_1",
       pageViewId: "pv_1",
+      ...heatmapPageContext,
       element: { selector: "#cta", label: "Save changes", role: "button" },
       x: 120,
       y: 340,
+      documentX: 120,
+      documentY: 1340,
       viewportWidth: 1440,
       viewportHeight: 900,
     });
@@ -124,6 +136,7 @@ describe("mapToBackendEvent", () => {
       anonymousId: "anon_1",
       eventId: "evt_1",
       pageViewId: "pv_1",
+      ...heatmapPageContext,
       element: { selector: "#hero" },
       durationMs: 60000,
       x: 700,
@@ -150,6 +163,7 @@ describe("mapToBackendEvent", () => {
       anonymousId: "anon_1",
       eventId: "evt_1",
       pageViewId: "pv_1",
+      ...heatmapPageContext,
       element: { selector: 'a[href="/dashboard/incidents/:id"]', label: "View", role: "link" },
       durationMs: 500,
       x: 700,
@@ -190,6 +204,7 @@ describe("mapToBackendEvent", () => {
       anonymousId: "anon_1",
       eventId: "evt_1",
       pageViewId: "pv_1",
+      ...heatmapPageContext,
       scrollPercent: 55,
       viewportWidth: 1440,
       viewportHeight: 900,
@@ -206,8 +221,11 @@ describe("mapToBackendEvent", () => {
       anonymousId: "anon_1",
       eventId: "evt_1",
       pageViewId: "pv_1",
+      ...heatmapPageContext,
       x: 300,
       y: 400,
+      documentX: 300,
+      documentY: 400,
       viewportWidth: 375,
       viewportHeight: 812,
     });

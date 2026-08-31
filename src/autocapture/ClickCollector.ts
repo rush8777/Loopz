@@ -52,6 +52,8 @@ export class ClickCollector {
         clientY: e.clientY,
         pageX: e.pageX,
         pageY: e.pageY,
+        documentX: e.clientX + window.scrollX,
+        documentY: e.clientY + window.scrollY,
       },
       viewport: { width: window.innerWidth, height: window.innerHeight },
       scroll: { x: window.scrollX, y: window.scrollY },

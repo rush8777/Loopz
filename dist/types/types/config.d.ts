@@ -74,6 +74,8 @@ export interface AnalyticsConfig {
      *   {endpoint}/public/sites/{siteId}/replay   - rrweb session replay
      */
     endpoint?: string;
+    /** Optional URL for the separately lazy-loaded sdk-heatmap bundle (useful for ESM/bundled integrations). */
+    heatmapSnapshotBundleUrl?: string;
     debug?: boolean;
     autocapture?: {
         click?: boolean;
@@ -82,7 +84,7 @@ export interface AnalyticsConfig {
         rageClick?: boolean;
         hover?: boolean;
         cursor?: boolean;
-        /** Scans the DOM for interactive elements on start + route change, so the dashboard can catalog every element on the site, not just ones someone has clicked/hovered. See ElementCrawler.ts. */
+        /** Scans the DOM for interactive elements on SDK initialization + route change, so Pages can catalog their elements without depending on behavioral capture. See ElementCrawler.ts. */
         elementCrawler?: boolean;
     };
     rageClick?: Partial<RageClickConfig>;

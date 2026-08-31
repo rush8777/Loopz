@@ -16,6 +16,8 @@
     "./cdn/sdk.min.js": "./dist/sdk.min.js",
     "./cdn/sdk-replay.js": "./dist/sdk-replay.js",
     "./cdn/sdk-replay.min.js": "./dist/sdk-replay.min.js",
+    "./cdn/sdk-heatmap.js": "./dist/sdk-heatmap.js",
+    "./cdn/sdk-heatmap.min.js": "./dist/sdk-heatmap.min.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -26,10 +28,12 @@
     "dist/sdk.js",
     "dist/sdk.min.js",
     "dist/sdk-replay.js",
-    "dist/sdk-replay.min.js"
+    "dist/sdk-replay.min.js",
+    "dist/sdk-heatmap.js",
+    "dist/sdk-heatmap.min.js"
   ],
   "scripts": {
-    "build": "vite build && vite build --mode minify && vite build --mode replay && vite build --mode replay-minify && vite build --mode module && tsc -p tsconfig.build.json",
+    "build": "vite build && vite build --mode minify && vite build --mode replay && vite build --mode replay-minify && vite build --mode heatmap && vite build --mode heatmap-minify && vite build --mode module && tsc -p tsconfig.build.json",
     "test": "vitest run",
     "dev": "vite"
   },
@@ -42,6 +46,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "modern-screenshot": "^4.6.6",
     "rrweb": "^2.1.1"
   }
 }

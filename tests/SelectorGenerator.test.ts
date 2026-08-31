@@ -51,6 +51,35 @@ describe("href canonicalization (dynamic-id fragmentation fix)", () => {
     expect(selector).not.toContain("results");
   });
 
+  it("keeps safe fragment-only anchors distinct instead of collapsing them to an empty href", () => {
+    const home = el(`<a href="#home">Home</a>`);
+    const pricing = el(`<a href="#pricing">Pricing</a>`);
+
+    expect(gen.generate(home)).not.toBe(gen.generate(pricing));
+    expect(gen.generate(home)).toContain("home");
+    expect(gen.generate(pricing)).toContain("pricing");
+    expect(gen.generate(home)).not.toBe('a[href=""]');
+  });
+
+  it("normalizes dynamic ids and drops query data in hash-router links", () => {
+    const first = el(`<a href="#/products/123?token=secret">First product</a>`);
+    const second = el(`<a href="#/products/456?token=other-secret">Second product</a>`);
+
+    expect(gen.generate(first)).toBe(gen.generate(second));
+    expect(gen.generate(first)).toContain(":id");
+    expect(gen.generate(first)).not.toContain("token");
+    expect(gen.generate(first)).not.toContain("secret");
+  });
+
+  it("falls through for unsafe or empty fragments rather than exposing them or creating an empty href selector", () => {
+    const unsafe = el(`<a href="#jane@example.com" class="account-link">Account</a>`);
+    const empty = el(`<a href="#" class="placeholder-link">Placeholder</a>`);
+
+    expect(gen.generate(unsafe)).toBe("a.account-link");
+    expect(gen.generate(unsafe)).not.toContain("jane");
+    expect(gen.generate(empty)).toBe("a.placeholder-link");
+  });
+
   it("still prefers a stable id or data-testid over href when present", () => {
     const a = el(`<a id="primary-nav-incidents" href="/dashboard/incidents/trc_96fa356cd0b5439e">View</a>`);
     expect(gen.generate(a)).toBe("a#primary-nav-incidents");

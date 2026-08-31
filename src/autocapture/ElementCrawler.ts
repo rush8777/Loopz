@@ -21,7 +21,7 @@ const MAX_ELEMENTS_PER_CRAWL = 500;
  * crawled element and a clicked element for the same physical thing
  * always produce the same selector/label.
  *
- * Triggered externally (on start + route change, see
+ * Triggered externally (on SDK initialization + route change, see
  * `AutoCaptureEngine.ts`) rather than on a timer - the DOM only
  * meaningfully changes shape on navigation for most apps, and a
  * polling interval would be pure overhead for the common case.
@@ -59,6 +59,6 @@ export class ElementCrawler {
 
     if (elements.length === 0) return;
 
-    this.bus.emit("elements_seen", { elements });
+    this.bus.emit("elements_seen", { pagePath: location.pathname, elements });
   }
 }

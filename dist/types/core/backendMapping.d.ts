@@ -47,7 +47,13 @@ export interface BackendIncomingEvent {
     y?: number;
     viewportWidth?: number;
     viewportHeight?: number;
-    /** page_view only - PageContext.path, e.g. "/pricing". */
+    documentX?: number;
+    documentY?: number;
+    documentWidth?: number;
+    documentHeight?: number;
+    deviceClass?: "desktop" | "tablet" | "mobile";
+    heatmapStateId?: string;
+    /** Raw PageContext.path for every event. */
     path?: string;
     /** identify only. */
     externalUserId?: string;

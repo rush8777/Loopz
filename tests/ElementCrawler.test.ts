@@ -11,13 +11,13 @@ function setBody(html: string): void {
 describe("ElementCrawler", () => {
   let bus: EventBus;
   let crawler: ElementCrawler;
-  let received: { elements: CrawledElement[] }[];
+  let received: { pagePath: string; elements: CrawledElement[] }[];
 
   beforeEach(() => {
     bus = new EventBus();
     crawler = new ElementCrawler(bus, new PrivacyFilter());
     received = [];
-    bus.on<{ elements: CrawledElement[] }>("elements_seen", (p) => received.push(p));
+    bus.on<{ pagePath: string; elements: CrawledElement[] }>("elements_seen", (p) => received.push(p));
   });
 
   afterEach(() => {
@@ -47,6 +47,14 @@ describe("ElementCrawler", () => {
     expect(el.selector).toBeTruthy();
   });
 
+  it("includes the current raw pathname with each crawl", () => {
+    history.replaceState({}, "", "/settings/profile?tab=security");
+    setBody(`<button>Save</button>`);
+    crawler.crawl();
+
+    expect(received[0].pagePath).toBe("/settings/profile");
+  });
+
   it("discovers elements with an explicit interactive role, not just native interactive tags", () => {
     setBody(`<div role="button" tabindex="0">Custom button</div>`);
     crawler.crawl();
@@ -73,6 +81,14 @@ describe("ElementCrawler", () => {
 
     const selectors = received[0].elements.map((e) => e.selector);
     expect(new Set(selectors).size).toBe(selectors.length);
+  });
+
+  it("reports distinct fragment navigation links separately", () => {
+    setBody(`<nav><a href="#home">Home</a><a href="#features">Features</a><a href="#pricing">Pricing</a></nav>`);
+    crawler.crawl();
+
+    expect(received[0].elements.map((element) => element.label)).toEqual(["Home", "Features", "Pricing"]);
+    expect(new Set(received[0].elements.map((element) => element.selector)).size).toBe(3);
   });
 
   it("respects the privacy filter - skips elements within a private subtree", () => {

@@ -50,6 +50,8 @@ export interface CrawledElement {
  * queue - see Analytics.ts's wiring and Transport.ts's module doc.
  */
 export interface ElementsSeenPayload {
+    /** Raw pathname used by the existing backend PageDefinition matcher. */
+    pagePath: string;
     elements: CrawledElement[];
 }
 export type EventType = "click" | "scroll" | "move" | "rage_click" | "hover" | "cursor" | "page_view" | "funnel" | "custom" | "identify" | "session_start" | "session_replay_event";
@@ -59,6 +61,8 @@ export interface ClickEventPayload {
         clientY: number;
         pageX: number;
         pageY: number;
+        documentX?: number;
+        documentY?: number;
     };
     viewport: Viewport;
     scroll: ScrollPosition;
@@ -89,6 +93,8 @@ export interface HoverEventPayload {
      */
     x?: number;
     y?: number;
+    documentX?: number;
+    documentY?: number;
 }
 /**
  * Minimal cursor sample for later path reconstruction / cursor maps.
@@ -100,8 +106,12 @@ export interface CursorEventPayload {
     timestamp: number;
     x: number;
     y: number;
+    documentX?: number;
+    documentY?: number;
     viewportWidth: number;
     viewportHeight: number;
+    documentWidth?: number;
+    documentHeight?: number;
 }
 export interface ScrollEventPayload {
     scrollPercent: number;
@@ -195,5 +205,9 @@ export interface AnalyticsEvent<T = AnyPayload> {
     sessionId: string;
     pageViewId: string;
     page: PageContext;
+    heatmap?: {
+        stateId?: string;
+        deviceClass: "desktop" | "tablet" | "mobile";
+    };
     payload: T;
 }

@@ -14,6 +14,7 @@ export declare class Analytics {
     private transport;
     private batcher;
     private routeObserver;
+    private heatmaps;
     private debugEnabled;
     private initialized;
     private running;
@@ -28,6 +29,10 @@ export declare class Analytics {
     defineFunnel(name: string, steps: FunnelStep[]): void;
     enableDebug(): void;
     disableDebug(): void;
+    captureHeatmapReference(captureToken: string): Promise<{
+        ok: boolean;
+        error?: string;
+    }>;
     private requireInit;
     private wireCollectorsToPipeline;
     private trackPageView;

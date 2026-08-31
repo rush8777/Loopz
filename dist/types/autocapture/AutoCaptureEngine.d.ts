@@ -28,8 +28,8 @@ export declare class AutoCaptureEngine {
     readonly cursor: CursorCollector;
     readonly funnel: FunnelTracker;
     /**
-     * Not a start/stop collector like the others - a one-shot `.crawl()`
-     * triggered from `start()` (initial page) and `onRouteChange()` (SPA
+     * Not a behavioral start/stop collector like the others - a one-shot
+     * `.crawl()` triggered from SDK initialization and `onRouteChange()` (SPA
      * navigation) rather than any continuous listener. See ElementCrawler.ts.
      */
     readonly elementCrawler: ElementCrawler;
@@ -41,12 +41,21 @@ export declare class AutoCaptureEngine {
      */
     readonly sessionReplay: RRWebRecorder;
     private started;
+    private discoveryInitialized;
+    private pendingInitialCrawl;
     constructor(config: ResolvedAnalyticsConfig);
     start(): void;
+    /**
+     * Starts structural Page/Element discovery for the initialized SDK.
+     * This lifecycle is intentionally independent of behavioral start/stop.
+     */
+    initializeElementDiscovery(): void;
     /** Runs the first crawl once the DOM actually has content - a crawl fired before parsing finishes would just find nothing. */
     private scheduleInitialCrawl;
+    /** Completely tears down discovery scheduling during Analytics.destroy(). */
+    destroyElementDiscovery(): void;
     stop(): void;
-    /** Called on SPA route changes - resets per-page-view collector state. */
-    onRouteChange(path: string): void;
+    /** Called on SPA route changes; discovery remains active even when behavioral capture is stopped. */
+    onRouteChange(path: string, behavioralCaptureActive?: boolean): void;
     isRunning(): boolean;
 }

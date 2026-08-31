@@ -43,6 +43,7 @@ export function bootstrap(
     "defineFunnel",
     "enableDebug",
     "disableDebug",
+    "captureHeatmapReference",
   ]) {
     if (!(method in stub)) {
       (stub as any)[method] = function (this: { q: unknown[][] }, ...args: unknown[]) {

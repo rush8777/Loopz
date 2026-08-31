@@ -55,7 +55,13 @@ export interface BackendIncomingEvent {
   y?: number;
   viewportWidth?: number;
   viewportHeight?: number;
-  /** page_view only - PageContext.path, e.g. "/pricing". */
+  documentX?: number;
+  documentY?: number;
+  documentWidth?: number;
+  documentHeight?: number;
+  deviceClass?: "desktop" | "tablet" | "mobile";
+  heatmapStateId?: string;
+  /** Raw PageContext.path for every event. */
   path?: string;
   /** identify only. */
   externalUserId?: string;
@@ -108,14 +114,10 @@ const UNSUPPORTED_BY_BACKEND = new Set(["move", "rage_click", "funnel"]);
  * backend has nowhere to put it (see UNSUPPORTED_BY_BACKEND) or it's a
  * replay event (handled separately by mapToBackendReplayEvent).
  *
- * Coordinate frame note: x/y are viewport-relative (clientX/clientY,
- * and for hover the hovered element's bounding-box center in the same
- * frame) - NOT page-relative/scroll-adjusted. This matches the
- * dashboard's current Heatmaps rendering, which draws a fixed-size
- * snapshot without simulating scroll position. A more complete version
- * would carry scroll offset too (PageContext already captures it) and
- * let the dashboard reconstruct true document-relative position - left
- * as a known simplification for this pass.
+ * Coordinate frame note: x/y remain viewport-relative for backward
+ * compatibility. documentX/documentY are the primary full-page heatmap
+ * coordinates, paired with document and viewport dimensions so the Page
+ * heatmap can align them to a reference snapshot after scrolling.
  */
 /**
  * Builds the backend's `element` field, including `label`/`role` only
@@ -136,6 +138,13 @@ export function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendInc
 
   const viewportWidth = event.page.viewportWidth > 0 ? event.page.viewportWidth : undefined;
   const viewportHeight = event.page.viewportHeight > 0 ? event.page.viewportHeight : undefined;
+  const heatmapContext = {
+    path: event.page.path,
+    ...(event.page.documentWidth > 0 && { documentWidth: event.page.documentWidth }),
+    ...(event.page.documentHeight > 0 && { documentHeight: event.page.documentHeight }),
+    ...(event.heatmap?.deviceClass && { deviceClass: event.heatmap.deviceClass }),
+    ...(event.heatmap?.stateId && { heatmapStateId: event.heatmap.stateId }),
+  };
 
   switch (event.type) {
     case "page_view":
@@ -145,7 +154,7 @@ export function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendInc
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
-        path: event.page.path,
+        ...heatmapContext,
       };
 
     case "click": {
@@ -158,9 +167,12 @@ export function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendInc
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
+        ...heatmapContext,
         element: toBackendElement(p.element),
         x,
         y,
+        documentX: Math.max(0, Math.min(20000, Math.floor(p.coordinates.documentX ?? p.coordinates.pageX))),
+        documentY: Math.max(0, Math.min(200000, Math.floor(p.coordinates.documentY ?? p.coordinates.pageY))),
         ...(viewportWidth !== undefined && { viewportWidth }),
         ...(viewportHeight !== undefined && { viewportHeight }),
       };
@@ -176,10 +188,13 @@ export function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendInc
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
+        ...heatmapContext,
         element: toBackendElement(p.element),
         durationMs: p.durationMs,
         ...(x !== undefined && { x }),
         ...(y !== undefined && { y }),
+        ...(p.documentX !== undefined && { documentX: Math.max(0, Math.min(20000, Math.floor(p.documentX))) }),
+        ...(p.documentY !== undefined && { documentY: Math.max(0, Math.min(200000, Math.floor(p.documentY))) }),
         ...(viewportWidth !== undefined && { viewportWidth }),
         ...(viewportHeight !== undefined && { viewportHeight }),
       };
@@ -194,6 +209,7 @@ export function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendInc
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
+        ...heatmapContext,
         scrollPercent,
         ...(viewportWidth !== undefined && { viewportWidth }),
         ...(viewportHeight !== undefined && { viewportHeight }),
@@ -212,8 +228,13 @@ export function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendInc
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
+        ...heatmapContext,
         x,
         y,
+        documentX: Math.max(0, Math.min(20000, Math.floor(p.documentX ?? p.x))),
+        documentY: Math.max(0, Math.min(200000, Math.floor(p.documentY ?? p.y))),
+        ...(p.documentWidth !== undefined && { documentWidth: p.documentWidth }),
+        ...(p.documentHeight !== undefined && { documentHeight: p.documentHeight }),
         ...(cursorViewportWidth !== undefined && { viewportWidth: cursorViewportWidth }),
         ...(cursorViewportHeight !== undefined && { viewportHeight: cursorViewportHeight }),
       };

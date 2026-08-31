@@ -47,7 +47,7 @@ export declare class Transport {
      * POST per crawl is the right amount of machinery, not the queue
      * built for continuous click/hover/scroll/cursor telemetry.
      */
-    sendElements(elements: CrawledElement[]): Promise<TransportResult>;
+    sendElements(pagePath: string, elements: CrawledElement[]): Promise<TransportResult>;
     /** Best-effort async send used during normal operation. */
     send(events: AnalyticsEvent<AnyPayload>[]): Promise<TransportResult>;
     private postJson;

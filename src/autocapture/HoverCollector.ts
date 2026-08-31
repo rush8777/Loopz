@@ -28,7 +28,7 @@ import type { HoverEventPayload } from "../types/events";
  */
 export class HoverCollector {
   private selectorGenerator = new SelectorGenerator();
-  private active = new Map<Element, { startedAt: number; x: number; y: number }>();
+  private active = new Map<Element, { startedAt: number; x: number; y: number; documentX: number; documentY: number }>();
   private onEnter = (e: PointerEvent) => this.handleEnter(e);
   private onLeave = (e: PointerEvent) => this.handleLeave(e);
   private running = false;
@@ -74,6 +74,8 @@ export class HoverCollector {
       startedAt: Date.now(),
       x: Math.round(rect.left + rect.width / 2),
       y: Math.round(rect.top + rect.height / 2),
+      documentX: Math.round(rect.left + rect.width / 2 + window.scrollX),
+      documentY: Math.round(rect.top + rect.height / 2 + window.scrollY),
     });
   }
 
@@ -107,6 +109,8 @@ export class HoverCollector {
       durationMs,
       x: active.x,
       y: active.y,
+      documentX: active.documentX,
+      documentY: active.documentY,
     };
 
     this.bus.emit("hover", payload);

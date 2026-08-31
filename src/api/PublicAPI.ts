@@ -26,6 +26,7 @@ const PUBLIC_METHODS = [
   "defineFunnel",
   "enableDebug",
   "disableDebug",
+  "captureHeatmapReference",
 ] as const;
 
 /**
@@ -54,7 +55,7 @@ export function installPublicAPI(globalNames: string[]): Analytics {
 
   const analytics = new Analytics();
 
-  const realApi: Record<string, (...args: unknown[]) => void> = {
+  const realApi: Record<string, (...args: unknown[]) => unknown> = {
     init: (...args) => analytics.init(args[0] as any),
     start: () => analytics.start(),
     stop: () => analytics.stop(),
@@ -65,6 +66,7 @@ export function installPublicAPI(globalNames: string[]): Analytics {
     defineFunnel: (...args) => analytics.defineFunnel(args[0] as string, args[1] as any),
     enableDebug: () => analytics.enableDebug(),
     disableDebug: () => analytics.disableDebug(),
+    captureHeatmapReference: (...args) => analytics.captureHeatmapReference(args[0] as string),
   };
 
   for (const name of globalNames) {
