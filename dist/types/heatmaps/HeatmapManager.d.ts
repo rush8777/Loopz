@@ -17,6 +17,9 @@ export declare class HeatmapManager {
         ok: boolean;
         error?: string;
     }>;
+    private requestAutomaticReference;
+    private enterLiveCapture;
+    private mountToolbar;
     private resolveVisibleState;
     private loadCaptureFunction;
 }

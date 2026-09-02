@@ -31,7 +31,7 @@ import type { AnalyticsEvent, AnyPayload, SessionReplayEventPayload } from "../t
  * are.
  */
 export interface BackendIncomingEvent {
-    type: "page_view" | "hover" | "click" | "scroll" | "cursor" | "identify" | "session_start" | "custom";
+    type: "page_view" | "hover" | "click" | "scroll" | "cursor" | "rage_click" | "identify" | "session_start" | "custom";
     timestamp: number;
     anonymousId: string;
     eventId: string;
@@ -53,6 +53,7 @@ export interface BackendIncomingEvent {
     documentHeight?: number;
     deviceClass?: "desktop" | "tablet" | "mobile";
     heatmapStateId?: string;
+    rageClickCount?: number;
     /** Raw PageContext.path for every event. */
     path?: string;
     /** identify only. */

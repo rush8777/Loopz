@@ -231,7 +231,7 @@ describe("mapToBackendEvent", () => {
     });
   });
 
-  it("returns null for event types this backend has no ingestion path for", () => {
+  it("returns null for event types this backend has no ingestion path for and maps existing rage-click data", () => {
     const move = makeEvent<MoveEventPayload>("move", { points: [] });
     const rageClick = makeEvent<RageClickEventPayload>("rage_click", {
       coordinates: { x: 1, y: 1 },
@@ -245,9 +245,10 @@ describe("mapToBackendEvent", () => {
       status: "step_completed",
     });
 
-    for (const event of [move, rageClick, funnel]) {
+    for (const event of [move, funnel]) {
       expect(mapToBackendEvent(event)).toBeNull();
     }
+    expect(mapToBackendEvent(rageClick)).toMatchObject({ type: "rage_click", x: 1, y: 1, documentX: 1, documentY: 1, rageClickCount: 5, durationMs: 800 });
   });
 
   it("maps identify with the anonymousId, external user id, and traits", () => {

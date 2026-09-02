@@ -29,10 +29,6 @@ export declare class Analytics {
     defineFunnel(name: string, steps: FunnelStep[]): void;
     enableDebug(): void;
     disableDebug(): void;
-    captureHeatmapReference(captureToken: string): Promise<{
-        ok: boolean;
-        error?: string;
-    }>;
     private requireInit;
     private wireCollectorsToPipeline;
     private trackPageView;

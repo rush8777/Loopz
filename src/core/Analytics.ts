@@ -160,11 +160,6 @@ export class Analytics {
     this.debugEnabled = false;
   }
 
-  captureHeatmapReference(captureToken: string): Promise<{ ok: boolean; error?: string }> {
-    if (!this.requireInit()) return Promise.resolve({ ok: false, error: "not_initialized" });
-    return this.heatmaps.captureReference(captureToken);
-  }
-
   // -------------------------------------------------------------------
   // Internal wiring
   // -------------------------------------------------------------------

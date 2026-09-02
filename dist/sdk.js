@@ -308,7 +308,7 @@
         pointerType: e.pointerType || void 0
       };
       this.bus.emit("click", payload);
-      this.bus.emit("click:raw", { x: e.clientX, y: e.clientY, target, timestamp: Date.now() });
+      this.bus.emit("click:raw", { x: e.clientX, y: e.clientY, documentX: payload.coordinates.documentX, documentY: payload.coordinates.documentY, target, timestamp: Date.now() });
     }
   }
   class ScrollCollector {
@@ -501,7 +501,7 @@
       if (first.timestamp <= this.lastEmittedClusterEnd) return;
       const durationMs = last.timestamp - first.timestamp;
       const payload = {
-        coordinates: { x: first.x, y: first.y },
+        coordinates: { x: first.x, y: first.y, documentX: first.documentX, documentY: first.documentY },
         clickCount: this.cluster.length,
         durationMs,
         targetSelector: this.selectorGenerator.generate(last.target)
@@ -1188,7 +1188,7 @@
   };
   _EventQueue.LOW_PRIORITY_TYPES = /* @__PURE__ */ new Set(["move", "scroll", "cursor"]);
   let EventQueue = _EventQueue;
-  const UNSUPPORTED_BY_BACKEND = /* @__PURE__ */ new Set(["move", "rage_click", "funnel"]);
+  const UNSUPPORTED_BY_BACKEND = /* @__PURE__ */ new Set(["move", "funnel"]);
   function toBackendElement(descriptor) {
     return {
       selector: descriptor.selector,
@@ -1295,6 +1295,28 @@
           ...p.documentHeight !== void 0 && { documentHeight: p.documentHeight },
           ...cursorViewportWidth !== void 0 && { viewportWidth: cursorViewportWidth },
           ...cursorViewportHeight !== void 0 && { viewportHeight: cursorViewportHeight }
+        };
+      }
+      case "rage_click": {
+        const p = event.payload;
+        const x = Math.max(0, Math.min(2e4, Math.floor(p.coordinates.x)));
+        const y = Math.max(0, Math.min(2e5, Math.floor(p.coordinates.y)));
+        return {
+          type: "rage_click",
+          timestamp: event.timestamp,
+          anonymousId: event.anonymousId,
+          eventId: event.eventId,
+          pageViewId: event.pageViewId,
+          ...heatmapContext,
+          ...p.targetSelector && { element: { selector: p.targetSelector } },
+          x,
+          y,
+          documentX: Math.max(0, Math.min(2e4, Math.floor(p.coordinates.documentX ?? x))),
+          documentY: Math.max(0, Math.min(2e5, Math.floor(p.coordinates.documentY ?? y))),
+          rageClickCount: p.clickCount,
+          durationMs: p.durationMs,
+          ...viewportWidth !== void 0 && { viewportWidth },
+          ...viewportHeight !== void 0 && { viewportHeight }
         };
       }
       case "identify": {
@@ -1789,8 +1811,14 @@
     }
     initialize() {
       if (!this.apiBase || typeof fetch === "undefined") return;
+      const liveToken = new URL(location.href).searchParams.get("__loopz_heatmap_capture");
+      if (liveToken) {
+        void this.enterLiveCapture(liveToken);
+        return;
+      }
       void fetch(`${this.apiBase}/public/config/${this.siteId}`, { credentials: "omit" }).then((r) => r.ok ? r.json() : null).then((body) => {
         this.states = Array.isArray(body == null ? void 0 : body.heatmapStates) ? body.heatmapStates : [];
+        return this.requestAutomaticReference();
       }).catch(() => void 0);
     }
     context() {
@@ -1812,6 +1840,55 @@
       } catch {
         return { ok: false, error: "snapshot_capture_failed" };
       }
+    }
+    async requestAutomaticReference() {
+      var _a;
+      try {
+        const device = classifyHeatmapDevice(window.innerWidth);
+        const response = await fetch(`${this.apiBase}/public/sites/${this.siteId}/heatmap-reference?path=${encodeURIComponent(location.pathname)}&device=${device}`, { credentials: "omit" });
+        if (!response.ok) return;
+        const body = await response.json();
+        if (typeof ((_a = body == null ? void 0 : body.capture) == null ? void 0 : _a.token) === "string") await this.captureReference(body.capture.token);
+      } catch {
+      }
+    }
+    async enterLiveCapture(token) {
+      try {
+        const response = await fetch(`${this.apiBase}/public/sites/${this.siteId}/heatmap-captures/${encodeURIComponent(token)}`, { credentials: "omit" });
+        if (!response.ok) return;
+        const capture = await response.json();
+        const cleanUrl = new URL(location.href);
+        cleanUrl.searchParams.delete("__loopz_heatmap_capture");
+        history.replaceState(history.state, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+        this.mountToolbar(token, capture);
+      } catch {
+      }
+    }
+    mountToolbar(token, capture) {
+      const host = document.createElement("div");
+      host.setAttribute("data-loopz-heatmap-toolbar", "");
+      const root = host.attachShadow({ mode: "closed" });
+      const wrap = document.createElement("div");
+      wrap.innerHTML = `<style>:host{all:initial}.bar{position:fixed;z-index:2147483647;left:50%;bottom:24px;transform:translateX(-50%);display:flex;align-items:center;gap:18px;min-width:560px;padding:14px 16px;border-radius:12px;background:#111827;color:#fff;box-shadow:0 16px 50px #0007;font:13px/1.4 system-ui,sans-serif}.copy{flex:1}.title{font-weight:700}.sub{color:#cbd5e1;margin-top:2px}.actions{display:flex;gap:8px}button{border:0;border-radius:7px;padding:9px 14px;font:600 13px system-ui;cursor:pointer}.cancel{background:#374151;color:#fff}.capture{background:#7c3aed;color:#fff}.status{color:#d1fae5;font-weight:600}</style><div class="bar"><div class="copy"><div class="title">Loopz · Heatmap capture</div><div class="sub"></div></div><div class="actions"><button class="cancel">Cancel</button><button class="capture">Capture</button></div></div>`;
+      const sub = wrap.querySelector(".sub");
+      sub.textContent = `${capture.pageName ?? "Page"} · ${capture.stateName ?? "Default"} · ${capitalize(capture.device ?? "desktop")} — Arrange this page exactly as you want it shown.`;
+      wrap.querySelector(".cancel").addEventListener("click", () => host.remove());
+      wrap.querySelector(".capture").addEventListener("click", async () => {
+        const button = wrap.querySelector(".capture");
+        button.disabled = true;
+        button.textContent = "Capturing…";
+        host.style.display = "none";
+        const result = await this.captureReference(token);
+        host.style.display = "";
+        if (result.ok) {
+          wrap.querySelector(".actions").innerHTML = `<span class="status">Captured successfully. You can close this tab.</span>`;
+        } else {
+          button.disabled = false;
+          button.textContent = "Try again";
+        }
+      });
+      root.appendChild(wrap);
+      document.documentElement.appendChild(host);
     }
     resolveVisibleState() {
       const now2 = Date.now();
@@ -1847,6 +1924,9 @@
       });
       return this.loadPromise;
     }
+  }
+  function capitalize(value) {
+    return value ? value[0].toUpperCase() + value.slice(1) : value;
   }
   function deriveHeatmapBundleUrl(url) {
     if (!url) return null;
@@ -1951,10 +2031,6 @@
     disableDebug() {
       this.log("debug mode disabled");
       this.debugEnabled = false;
-    }
-    captureHeatmapReference(captureToken) {
-      if (!this.requireInit()) return Promise.resolve({ ok: false, error: "not_initialized" });
-      return this.heatmaps.captureReference(captureToken);
     }
     // -------------------------------------------------------------------
     // Internal wiring
@@ -2089,8 +2165,7 @@
     "page",
     "defineFunnel",
     "enableDebug",
-    "disableDebug",
-    "captureHeatmapReference"
+    "disableDebug"
   ];
   function installPublicAPI(globalNames) {
     const w = window;
@@ -2109,8 +2184,7 @@
       page: () => analytics.page(),
       defineFunnel: (...args) => analytics.defineFunnel(args[0], args[1]),
       enableDebug: () => analytics.enableDebug(),
-      disableDebug: () => analytics.disableDebug(),
-      captureHeatmapReference: (...args) => analytics.captureHeatmapReference(args[0])
+      disableDebug: () => analytics.disableDebug()
     };
     for (const name of globalNames) {
       const existingStub = w[name];

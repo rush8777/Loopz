@@ -65,6 +65,6 @@ export class ClickCollector {
     this.bus.emit("click", payload);
     // Also forward raw coordinates/target for the rage-click detector, which
     // needs every click regardless of privacy-filtered payload shape.
-    this.bus.emit("click:raw", { x: e.clientX, y: e.clientY, target, timestamp: Date.now() });
+    this.bus.emit("click:raw", { x: e.clientX, y: e.clientY, documentX: payload.coordinates.documentX, documentY: payload.coordinates.documentY, target, timestamp: Date.now() });
   }
 }

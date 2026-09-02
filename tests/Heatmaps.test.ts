@@ -67,4 +67,32 @@ describe("heatmap collection", () => {
     window.__loopzHeatmapCapture__ = vi.fn().mockRejectedValue(new Error("capture failed"));
     await expect(manager.captureReference("bad-token")).resolves.toEqual({ ok: false, error: "snapshot_capture_failed" });
   });
+
+  it("automatically captures a missing reference while keeping the snapshot bundle lazy", async () => {
+    window.__loopzHeatmapCapture__ = vi.fn().mockResolvedValue("data:image/webp;base64,AAAA");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ heatmapStates: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ capture: { token: "automatic-token" } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const manager = new HeatmapManager("https://api.example", "site_public", "https://cdn.example/sdk-heatmap.js");
+    manager.initialize();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/heatmap-reference?"), expect.anything());
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/heatmap-snapshots/automatic-token"), expect.objectContaining({ method: "POST" }));
+    expect(document.querySelector('script[src*="sdk-heatmap"]')).toBeNull();
+  });
+
+  it("validates and removes a live-capture token before mounting an isolated toolbar", async () => {
+    history.replaceState({}, "", "/dashboard?tab=reports&__loopz_heatmap_capture=live-token");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ valid: true, pageName: "Dashboard", stateName: "Default", device: "desktop" }) }));
+    const manager = new HeatmapManager("https://api.example", "site_public");
+    manager.initialize();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(location.search).toBe("?tab=reports");
+    const toolbar = document.querySelector("[data-loopz-heatmap-toolbar]") as HTMLElement;
+    expect(toolbar).not.toBeNull();
+    expect(toolbar.shadowRoot).toBeNull();
+    toolbar.remove();
+  });
 });

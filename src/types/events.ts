@@ -164,7 +164,7 @@ export interface MovePoint {
 }
 
 export interface RageClickEventPayload {
-  coordinates: { x: number; y: number };
+  coordinates: { x: number; y: number; documentX?: number; documentY?: number };
   clickCount: number;
   durationMs: number;
   targetSelector?: string;

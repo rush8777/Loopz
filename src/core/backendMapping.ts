@@ -9,6 +9,7 @@ import type {
   IdentifyEventPayload,
   SessionStartEventPayload,
   SessionReplayEventPayload,
+  RageClickEventPayload,
 } from "../types/events";
 
 /**
@@ -43,7 +44,7 @@ import type {
  * are.
  */
 export interface BackendIncomingEvent {
-  type: "page_view" | "hover" | "click" | "scroll" | "cursor" | "identify" | "session_start" | "custom";
+  type: "page_view" | "hover" | "click" | "scroll" | "cursor" | "rage_click" | "identify" | "session_start" | "custom";
   timestamp: number;
   anonymousId: string;
   eventId: string;
@@ -61,6 +62,7 @@ export interface BackendIncomingEvent {
   documentHeight?: number;
   deviceClass?: "desktop" | "tablet" | "mobile";
   heatmapStateId?: string;
+  rageClickCount?: number;
   /** Raw PageContext.path for every event. */
   path?: string;
   /** identify only. */
@@ -107,7 +109,7 @@ export interface BackendReplayEvent {
  * first-class ingested event type, see the "custom" case below and
  * BackendIncomingEvent's doc comment.
  */
-const UNSUPPORTED_BY_BACKEND = new Set(["move", "rage_click", "funnel"]);
+const UNSUPPORTED_BY_BACKEND = new Set(["move", "funnel"]);
 
 /**
  * Maps one SDK event to the backend's flattened shape, or null if this
@@ -237,6 +239,29 @@ export function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendInc
         ...(p.documentHeight !== undefined && { documentHeight: p.documentHeight }),
         ...(cursorViewportWidth !== undefined && { viewportWidth: cursorViewportWidth }),
         ...(cursorViewportHeight !== undefined && { viewportHeight: cursorViewportHeight }),
+      };
+    }
+
+    case "rage_click": {
+      const p = event.payload as RageClickEventPayload;
+      const x = Math.max(0, Math.min(20000, Math.floor(p.coordinates.x)));
+      const y = Math.max(0, Math.min(200000, Math.floor(p.coordinates.y)));
+      return {
+        type: "rage_click",
+        timestamp: event.timestamp,
+        anonymousId: event.anonymousId,
+        eventId: event.eventId,
+        pageViewId: event.pageViewId,
+        ...heatmapContext,
+        ...(p.targetSelector && { element: { selector: p.targetSelector } }),
+        x,
+        y,
+        documentX: Math.max(0, Math.min(20000, Math.floor(p.coordinates.documentX ?? x))),
+        documentY: Math.max(0, Math.min(200000, Math.floor(p.coordinates.documentY ?? y))),
+        rageClickCount: p.clickCount,
+        durationMs: p.durationMs,
+        ...(viewportWidth !== undefined && { viewportWidth }),
+        ...(viewportHeight !== undefined && { viewportHeight }),
       };
     }
 

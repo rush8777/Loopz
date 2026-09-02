@@ -7,6 +7,8 @@ import { SelectorGenerator } from "../dom/SelectorGenerator";
 interface RawClick {
   x: number;
   y: number;
+  documentX?: number;
+  documentY?: number;
   target: Element;
   timestamp: number;
 }
@@ -78,7 +80,7 @@ export class RageClickDetector {
     const durationMs = last.timestamp - first.timestamp;
 
     const payload: RageClickEventPayload = {
-      coordinates: { x: first.x, y: first.y },
+      coordinates: { x: first.x, y: first.y, documentX: first.documentX, documentY: first.documentY },
       clickCount: this.cluster.length,
       durationMs,
       targetSelector: this.selectorGenerator.generate(last.target),

@@ -426,7 +426,7 @@
             },
 
             autocapture: {
-                cursor: false
+                cursor: true
             }
         });
 
@@ -643,6 +643,7 @@
             href="#signup"
             class="btn btn-outline"
             style="background: white; color: var(--primary);"
+            id="btm_started"
         >
             Get Started Now
         </a>
@@ -687,6 +688,10 @@
             }
 
         });
+
+        const getStarted = document.getElementById("btm_started").addEventListener("click" , () => {
+            analytics.event("Activated");
+        })
 
 
         /*
@@ -753,8 +758,7 @@
              * analytics.identify(realUser.id, {...})
              */
 
-            const userId =
-                "user_" + email;
+            const userId = email;
 
 
             /*
@@ -774,7 +778,7 @@
                 plan: "pro"
 
             });
-            analytics.start();
+            
 
 
             /*
