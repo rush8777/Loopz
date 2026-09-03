@@ -17,6 +17,8 @@ export declare class Analytics {
     private heatmaps;
     private experiences;
     private editor;
+    private editorMode;
+    private editorAttempted;
     private debugEnabled;
     private initialized;
     private running;

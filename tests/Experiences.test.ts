@@ -4,6 +4,7 @@ import { ElementPicker } from "../src/experiences/editor/ElementPicker";
 import { ExperienceRenderer } from "../src/experiences/runtime/ExperienceRenderer";
 import { ExperienceLoader } from "../src/experiences/runtime/ExperienceLoader";
 import { SessionManager } from "../src/core/SessionManager";
+import { Analytics } from "../src/core/Analytics";
 import type { DeliveredExperience, ExperienceDesign } from "../src/experiences/types";
 
 const design: ExperienceDesign = { width: "md", theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } };
@@ -36,7 +37,7 @@ describe("experience editor and runtime", () => {
 
   it("uses fallback selectors and does not mount an anchored card without a target", () => {
     const renderer = new ExperienceRenderer(); const callbacks = { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() };
-    const missing = base("anchored_card"); expect(renderer.render(missing, callbacks)).toBe(false); expect(document.querySelector("[data-loopz-experience]")).toBeNull();
+    const missing = base("anchored_card"); expect(renderer.render(missing, callbacks)).toBe(true); expect(document.querySelector("[data-loopz-experience]")).toBeNull(); renderer.destroy();
     const target = document.createElement("button"); target.className = "fallback"; document.body.appendChild(target); const withFallback = base("anchored_card"); if (!("steps" in withFallback.definition)) withFallback.definition.target = { primarySelector: ".missing", fallbackSelectors: [".fallback"], reliability: "moderate" };
     expect(renderer.render(withFallback, callbacks)).toBe(true); expect(document.querySelector("[data-loopz-experience]")).not.toBeNull(); window.dispatchEvent(new Event("resize")); renderer.destroy();
   });
@@ -50,4 +51,29 @@ describe("experience editor and runtime", () => {
     const loader = new ExperienceLoader("https://api.example.com", "site_1", new SessionManager()); await loader.evaluate();
     expect(fetchMock).toHaveBeenCalledTimes(1); expect(String(fetchMock.mock.calls[0][0])).toContain("/experiences?"); loader.destroy();
   });
+
+  it("renders guide steps against their own targets and supports Back/Next", () => {
+    const first = document.createElement("button"); first.id = "first"; const second = document.createElement("button"); second.id = "second"; document.body.append(first, second);
+    const guide: DeliveredExperience = { id: "guide_1", versionId: "v1", kind: "guide", widgetType: null, priority: 1, definition: { design, targeting: { pageRules: [], audience: { type: "all" }, trigger: { type: "page_load" }, frequency: { mode: "once" }, priority: 0 }, steps: [
+      { id: "one", content: { heading: "First", body: "One", primaryAction: { label: "Next", type: "next_step" } }, target: { primarySelector: "#first", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
+      { id: "two", content: { heading: "Second", body: "Two", primaryAction: { label: "Finish", type: "next_step" } }, target: { primarySelector: "#second", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
+    ] } };
+    const renderer = new ExperienceRenderer(); renderer.render(guide, { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() });
+    const root = document.querySelector("[data-loopz-experience]")!.shadowRoot!; expect(root.textContent).toContain("First"); root.querySelector<HTMLButtonElement>("[data-primary]")!.click(); expect(document.querySelector("[data-loopz-experience]")!.shadowRoot!.textContent).toContain("Second"); expect(document.querySelector("[data-loopz-experience]")!.shadowRoot!.querySelector("footer")!.textContent).toContain("Back"); renderer.destroy();
+  });
+
+  it("waits for a delayed SPA target and cleans up on timeout or destroy", async () => {
+    vi.useFakeTimers(); const renderer = new ExperienceRenderer(); const unavailable = vi.fn(); const delayed = base("anchored_card"); if (!isGuide(delayed)) delayed.definition.target = { primarySelector: ".late", fallbackSelectors: [], reliability: "moderate" };
+    expect(renderer.render(delayed, { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn(), onUnavailable: unavailable })).toBe(true); expect(document.querySelector("[data-loopz-experience]")).toBeNull(); const target = document.createElement("button"); target.className = "late"; document.body.appendChild(target); await Promise.resolve(); expect(document.querySelector("[data-loopz-experience]")).not.toBeNull(); renderer.destroy();
+    const missing = base("anchored_card"); if (!isGuide(missing)) missing.definition.target = { primarySelector: ".never", fallbackSelectors: [], reliability: "moderate" }; renderer.render(missing, { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn(), onUnavailable: unavailable }); vi.advanceTimersByTime(5000); expect(unavailable).toHaveBeenCalledTimes(1); renderer.destroy(); document.body.appendChild(document.createElement("i")); await Promise.resolve(); expect(document.querySelector("[data-loopz-experience]")).toBeNull();
+  });
+
+  it("enters validated editor mode before analytics collectors or page views exist", async () => {
+    history.replaceState({}, "", "/?loopz_editor_token=editor-token");
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ sessionId: "ees_1", accessToken: "access", expiresAt: new Date(Date.now() + 60000).toISOString() }) }).mockResolvedValueOnce({ ok: true, json: async () => ({ experience: { id: "exp_1", name: "Draft", kind: "widget", widgetType: "toast" }, version: { id: "v1", versionNumber: 1, definition: { ...base("toast").definition, targeting: { pageRules: [], audience: { type: "all" }, trigger: { type: "page_load" }, frequency: { mode: "once" }, priority: 0 } } } }) });
+    vi.stubGlobal("fetch", fetchMock); const analytics = new Analytics(); analytics.init({ siteId: "site_1", endpoint: "https://api.example.com" }); await vi.runAllTimersAsync(); await vi.dynamicImportSettled();
+    const internals = analytics as unknown as { editor: unknown; engine: unknown; session: unknown }; expect(internals.editor).toBeTruthy(); expect(internals.engine).toBeUndefined(); expect(internals.session).toBeUndefined(); analytics.event("editor-click"); expect(fetchMock.mock.calls.every(([url]) => String(url).includes("experience-editor"))).toBe(true); analytics.destroy();
+  });
 });
+
+function isGuide(value: DeliveredExperience): value is DeliveredExperience & { definition: { steps: unknown[] } } { return "steps" in value.definition; }

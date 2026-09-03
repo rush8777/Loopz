@@ -28,6 +28,7 @@ export class ExperienceLoader {
         onDismiss: () => void this.record(chosen, "dismissed"),
         onAction: (action) => this.handleAction(chosen, action),
         onComplete: () => void this.record(chosen, "completed"),
+        onUnavailable: () => { if (this.activeId === chosen.id) this.activeId = null; },
       });
       if (mounted) this.activeId = chosen.id;
     } catch { /* experience delivery must never affect analytics or host code */ }

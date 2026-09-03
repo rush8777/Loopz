@@ -48,6 +48,8 @@ export class Analytics {
   private heatmaps!: HeatmapManager;
   private experiences: ExperienceLoader | null = null;
   private editor: EditorModeController | null = null;
+  private editorMode = false;
+  private editorAttempted = false;
 
   private debugEnabled = false;
   private initialized = false;
@@ -62,6 +64,29 @@ export class Analytics {
 
     this.config = resolveConfig(userConfig);
     this.debugEnabled = !!this.config.debug;
+
+    const editorToken = new URL(location.href).searchParams.get("loopz_editor_token");
+    if (editorToken && !this.editorAttempted) {
+      // Do not create a SessionManager, collectors, or a page view until the
+      // existing editor token exchange has decided whether this is an editor.
+      this.initialized = true;
+      this.editorAttempted = true;
+      void import("../experiences/editor/EditorModeController").then(async ({ EditorModeController }) => {
+        if (!this.initialized) return;
+        const editor = new EditorModeController(this.config.endpoint);
+        if (await editor.start(editorToken)) {
+          this.editor = editor;
+          this.editorMode = true;
+          this.log("experience editor mode initialized");
+          return;
+        }
+        // Invalid/expired tokens retain the established secure failure path:
+        // no editor is mounted, and the page continues as a normal visit.
+        this.initialized = false;
+        this.init(userConfig);
+      }).catch(() => { this.initialized = false; this.init(userConfig); });
+      return;
+    }
 
     if (this.config.respectDoNotTrack && isDoNotTrackEnabled()) {
       this.log("Do Not Track enabled - autocapture disabled");
@@ -97,14 +122,7 @@ export class Analytics {
     // Fire the initial page view + funnel evaluation.
     this.trackPageView();
 
-    const editorToken = new URL(location.href).searchParams.get("loopz_editor_token");
-    if (editorToken) {
-      void import("../experiences/editor/EditorModeController").then(({ EditorModeController }) => {
-        if (!this.initialized) return;
-        this.editor = new EditorModeController(this.config.endpoint);
-        void this.editor.start(editorToken);
-      }).catch(() => void 0);
-    } else if (this.config.experiences.enabled) {
+    if (this.config.experiences.enabled) {
       void import("../experiences/runtime/ExperienceLoader").then(({ ExperienceLoader }) => {
         if (!this.initialized) return;
         this.experiences = new ExperienceLoader(this.config.endpoint, this.config.siteId, this.session, (name) => this.event(name));
@@ -114,7 +132,7 @@ export class Analytics {
   }
 
   start(): void {
-    if (!this.initialized || this.running) return;
+    if (!this.initialized || this.editorMode || this.running || !this.engine) return;
     this.running = true;
     this.engine.start();
     this.batcher.start();
@@ -140,6 +158,7 @@ export class Analytics {
     this.experiences = null;
     this.editor?.destroy();
     this.editor = null;
+    this.editorMode = false;
     this.initialized = false;
     this.log("destroyed");
   }
@@ -189,7 +208,7 @@ export class Analytics {
   // -------------------------------------------------------------------
 
   private requireInit(): boolean {
-    if (!this.initialized) {
+    if (!this.initialized || this.editorMode || !this.session) {
       // eslint-disable-next-line no-console
       console.warn("[Analytics] call analytics.init(config) before using this method");
       return false;
@@ -315,7 +334,7 @@ export class Analytics {
 
   /** Called by bootstrap on visibilitychange/pagehide for unload-safe delivery. */
   flushOnUnload(): void {
-    if (!this.initialized) return;
+    if (!this.initialized || this.editorMode || !this.batcher) return;
     this.batcher.flushSync();
   }
 

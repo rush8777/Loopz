@@ -1943,6 +1943,8 @@
       this.routeObserver = new RouteObserver();
       this.experiences = null;
       this.editor = null;
+      this.editorMode = false;
+      this.editorAttempted = false;
       this.debugEnabled = false;
       this.initialized = false;
       this.running = false;
@@ -1955,6 +1957,27 @@
       }
       this.config = resolveConfig(userConfig);
       this.debugEnabled = !!this.config.debug;
+      const editorToken = new URL(location.href).searchParams.get("loopz_editor_token");
+      if (editorToken && !this.editorAttempted) {
+        this.initialized = true;
+        this.editorAttempted = true;
+        void Promise.resolve().then(() => EditorModeController$1).then(async ({ EditorModeController: EditorModeController2 }) => {
+          if (!this.initialized) return;
+          const editor = new EditorModeController2(this.config.endpoint);
+          if (await editor.start(editorToken)) {
+            this.editor = editor;
+            this.editorMode = true;
+            this.log("experience editor mode initialized");
+            return;
+          }
+          this.initialized = false;
+          this.init(userConfig);
+        }).catch(() => {
+          this.initialized = false;
+          this.init(userConfig);
+        });
+        return;
+      }
       if (this.config.respectDoNotTrack && isDoNotTrackEnabled()) {
         this.log("Do Not Track enabled - autocapture disabled");
         this.initialized = true;
@@ -1980,14 +2003,7 @@
       this.routeObserver.start();
       this.start();
       this.trackPageView();
-      const editorToken = new URL(location.href).searchParams.get("loopz_editor_token");
-      if (editorToken) {
-        void Promise.resolve().then(() => EditorModeController$1).then(({ EditorModeController: EditorModeController2 }) => {
-          if (!this.initialized) return;
-          this.editor = new EditorModeController2(this.config.endpoint);
-          void this.editor.start(editorToken);
-        }).catch(() => void 0);
-      } else if (this.config.experiences.enabled) {
+      if (this.config.experiences.enabled) {
         void Promise.resolve().then(() => ExperienceLoader$1).then(({ ExperienceLoader: ExperienceLoader2 }) => {
           if (!this.initialized) return;
           this.experiences = new ExperienceLoader2(this.config.endpoint, this.config.siteId, this.session, (name) => this.event(name));
@@ -1996,7 +2012,7 @@
       }
     }
     start() {
-      if (!this.initialized || this.running) return;
+      if (!this.initialized || this.editorMode || this.running || !this.engine) return;
       this.running = true;
       this.engine.start();
       this.batcher.start();
@@ -2021,6 +2037,7 @@
       this.experiences = null;
       (_d = this.editor) == null ? void 0 : _d.destroy();
       this.editor = null;
+      this.editorMode = false;
       this.initialized = false;
       this.log("destroyed");
     }
@@ -2062,7 +2079,7 @@
     // Internal wiring
     // -------------------------------------------------------------------
     requireInit() {
-      if (!this.initialized) {
+      if (!this.initialized || this.editorMode || !this.session) {
         console.warn("[Analytics] call analytics.init(config) before using this method");
         return false;
       }
@@ -2164,7 +2181,7 @@
     }
     /** Called by bootstrap on visibilitychange/pagehide for unload-safe delivery. */
     flushOnUnload() {
-      if (!this.initialized) return;
+      if (!this.initialized || this.editorMode || !this.batcher) return;
       this.batcher.flushSync();
     }
     log(message, ...args) {
@@ -2344,6 +2361,46 @@
     }
     return null;
   }
+  function waitForTarget(target, onFound, onUnavailable, timeoutMs = 5e3) {
+    const immediate = findTarget(target);
+    if (immediate) {
+      onFound(immediate);
+      return () => void 0;
+    }
+    let stopped = false;
+    let observer = null;
+    let timer = 0;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      observer == null ? void 0 : observer.disconnect();
+      clearTimeout(timer);
+    };
+    const check = () => {
+      if (stopped) return;
+      const element = findTarget(target);
+      if (element) {
+        stop();
+        onFound(element);
+      }
+    };
+    if (typeof MutationObserver === "undefined" || !document.documentElement) {
+      timer = window.setTimeout(() => {
+        stop();
+        onUnavailable();
+      }, timeoutMs);
+      return stop;
+    }
+    observer = new MutationObserver(check);
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    timer = window.setTimeout(() => {
+      if (!stopped) {
+        stop();
+        onUnavailable();
+      }
+    }, timeoutMs);
+    return stop;
+  }
   function buildCard(root, content, design, behavior, callbacks) {
     var _a, _b, _c;
     const card = document.createElement("section");
@@ -2475,6 +2532,7 @@
     constructor() {
       this.host = null;
       this.renderer = null;
+      this.cancelPendingTarget = null;
       this.step = 0;
     }
     render(experience, callbacks) {
@@ -2496,12 +2554,23 @@
     }
     renderWidget(experience, definition, callbacks) {
       if (experience.widgetType === "anchored_card") {
+        const mount = (target2) => {
+          const root = this.root();
+          const renderer = new AnchoredCardRenderer();
+          this.renderer = renderer;
+          renderer.render(root, target2, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks));
+          requestAnimationFrame(callbacks.onVisible);
+        };
         const target = findTarget(definition.target);
-        if (!target) return false;
-        const root = this.root();
-        const renderer = new AnchoredCardRenderer();
-        this.renderer = renderer;
-        renderer.render(root, target, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks));
+        if (target) mount(target);
+        else this.cancelPendingTarget = waitForTarget(definition.target, (element) => {
+          this.cancelPendingTarget = null;
+          mount(element);
+        }, () => {
+          var _a;
+          this.cancelPendingTarget = null;
+          (_a = callbacks.onUnavailable) == null ? void 0 : _a.call(callbacks);
+        });
       } else if (experience.widgetType === "toast") {
         const root = this.root();
         const renderer = new ToastRenderer();
@@ -2513,52 +2582,63 @@
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks));
       } else return false;
-      requestAnimationFrame(callbacks.onVisible);
+      if (experience.widgetType !== "anchored_card") requestAnimationFrame(callbacks.onVisible);
       return true;
     }
     renderGuide(experience, definition, callbacks) {
-      var _a;
       const step = definition.steps[this.step];
-      const target = findTarget(step == null ? void 0 : step.target);
-      if (!step || !target) return false;
-      const root = this.root();
-      const renderer = new AnchoredCardRenderer();
-      this.renderer = renderer;
-      const behavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset };
-      const card = renderer.render(root, target, step.content, definition.design, behavior, {
-        onDismiss: () => {
-          callbacks.onDismiss();
-          this.destroy();
-        },
-        onSecondary: () => {
-          callbacks.onDismiss();
-          this.destroy();
-        },
-        onPrimary: () => {
-          const action = step.content.primaryAction;
-          if (action) callbacks.onAction(action);
-          if (this.step < definition.steps.length - 1) {
-            this.clearSurface();
-            this.step++;
-            this.renderGuide(experience, definition, callbacks);
-          } else {
-            callbacks.onComplete();
+      if (!step) return false;
+      const mount = (target2) => {
+        var _a;
+        const root = this.root();
+        const renderer = new AnchoredCardRenderer();
+        this.renderer = renderer;
+        const behavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset };
+        const card = renderer.render(root, target2, step.content, definition.design, behavior, {
+          onDismiss: () => {
+            callbacks.onDismiss();
             this.destroy();
+          },
+          onSecondary: () => {
+            callbacks.onDismiss();
+            this.destroy();
+          },
+          onPrimary: () => {
+            const action = step.content.primaryAction;
+            if (action) callbacks.onAction(action);
+            if (this.step < definition.steps.length - 1) {
+              this.clearSurface();
+              this.step++;
+              this.renderGuide(experience, definition, callbacks);
+            } else {
+              callbacks.onComplete();
+              this.destroy();
+            }
           }
-        }
-      });
-      if (this.step > 0) {
-        const back = document.createElement("button");
-        back.className = "secondary";
-        back.textContent = "Back";
-        back.addEventListener("click", () => {
-          this.clearSurface();
-          this.step--;
-          this.renderGuide(experience, definition, callbacks);
         });
-        (_a = card.querySelector("footer")) == null ? void 0 : _a.prepend(back);
-      }
-      requestAnimationFrame(callbacks.onVisible);
+        if (this.step > 0) {
+          const back = document.createElement("button");
+          back.className = "secondary";
+          back.textContent = "Back";
+          back.addEventListener("click", () => {
+            this.clearSurface();
+            this.step--;
+            this.renderGuide(experience, definition, callbacks);
+          });
+          (_a = card.querySelector("footer")) == null ? void 0 : _a.prepend(back);
+        }
+        requestAnimationFrame(callbacks.onVisible);
+      };
+      const target = findTarget(step.target);
+      if (target) mount(target);
+      else this.cancelPendingTarget = waitForTarget(step.target, (element) => {
+        this.cancelPendingTarget = null;
+        mount(element);
+      }, () => {
+        var _a;
+        this.cancelPendingTarget = null;
+        (_a = callbacks.onUnavailable) == null ? void 0 : _a.call(callbacks);
+      });
       return true;
     }
     callbacks(content, callbacks) {
@@ -2582,10 +2662,12 @@
       };
     }
     clearSurface() {
-      var _a, _b;
-      (_a = this.renderer) == null ? void 0 : _a.destroy();
+      var _a, _b, _c;
+      (_a = this.cancelPendingTarget) == null ? void 0 : _a.call(this);
+      this.cancelPendingTarget = null;
+      (_b = this.renderer) == null ? void 0 : _b.destroy();
       this.renderer = null;
-      (_b = this.host) == null ? void 0 : _b.remove();
+      (_c = this.host) == null ? void 0 : _c.remove();
       this.host = null;
     }
     destroy() {
@@ -2614,11 +2696,12 @@
         if (!response.ok) return false;
         const session = await response.json();
         const clean2 = new URL(location.href);
+        const requestedStep = Number(clean2.searchParams.get("loopz_editor_step") ?? "0");
         clean2.searchParams.delete("loopz_editor_token");
+        clean2.searchParams.delete("loopz_editor_step");
         history.replaceState(history.state, "", clean2.toString());
         const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
-        const draft = await bridge.load();
-        this.mount(draft, bridge);
+        this.mount(await bridge.load(), bridge, requestedStep);
         this.expiryTimer = window.setTimeout(() => this.destroy(), Math.max(0, new Date(session.expiresAt).getTime() - Date.now()));
         return true;
       } catch {
@@ -2626,28 +2709,41 @@
         return false;
       }
     }
-    mount(draft, bridge) {
+    mount(draft, bridge, requestedStep = 0) {
       var _a, _b;
       this.host = document.createElement("div");
       this.host.dataset.loopzEditor = "";
       const root = this.host.attachShadow({ mode: "open" });
-      root.innerHTML = `<style>${STYLE}</style><aside><header><b>Loopz visual editor</b><small>${escapeText(draft.experience.name)}</small></header><nav>${["Content", "Design", "Behavior", "Targeting", "Publish"].map((x, i) => `<button data-tab="${i}" class="${i === 0 ? "active" : ""}">${x}</button>`).join("")}</nav><main>
-      <section data-panel="0"><label>Heading<input data-heading></label><label>Body<textarea data-body></textarea></label></section>
-      <section data-panel="1" hidden><label>Width<select data-width><option value="sm">Small</option><option value="md">Medium</option><option value="lg">Large</option></select></label><label>Background<input data-background type="color"></label><label>Text color<input data-foreground type="color"></label><label>Primary color<input data-primary type="color"></label></section>
-      <section data-panel="2" hidden><label>Placement<select data-placement><option value="auto">Auto</option><option value="top">Top</option><option value="right">Right</option><option value="bottom">Bottom</option><option value="left">Left</option></select></label><label>Offset<input data-offset type="number" min="0" max="100"></label><label class="row"><input data-dismissible type="checkbox"> Dismissible</label><button data-pick>Reselect target</button><p data-reliability></p></section>
-      <section data-panel="3" hidden><label>Frequency<select data-frequency><option value="once">Once ever</option><option value="once_per_session">Once per session</option><option value="every_time">Every qualifying time</option></select></label><label>Priority<input data-priority type="number" min="-1000" max="1000"></label><p>Saved Page, Segment, and event targeting are configured securely in the Loopz dashboard.</p></section>
-      <section data-panel="4" hidden><p>Preview is live on this page. Save the draft here, then return to Loopz to publish or pause it.</p><button data-save>Save draft</button></section>
-      <p data-status>Draft autosaves as you edit.</p></main></aside>`;
-      document.documentElement.appendChild(this.host);
       const definition = draft.version.definition;
-      const content = isGuideDefinition(definition) ? definition.steps[0].content : definition.content;
+      const guide = isGuideDefinition(definition) ? definition : null;
+      let stepIndex = guide ? Math.max(0, Math.min(requestedStep, guide.steps.length - 1)) : 0;
+      const stepTabs = guide ? `<div class="steps"><b data-step-label>Editing step 1 of ${guide.steps.length}</b><div>${guide.steps.map((_, index) => `<button data-step="${index}" class="${index === 0 ? "active" : ""}">Step ${index + 1}</button>`).join("")}</div></div>` : "";
+      root.innerHTML = `<style>${STYLE}</style><aside><header><b>Loopz visual editor</b><small>${escapeText(draft.experience.name)}</small></header><nav>${["Content", "Design", "Behavior", "Targeting", "Publish"].map((x, i) => `<button data-tab="${i}" class="${i === 0 ? "active" : ""}">${x}</button>`).join("")}</nav><main>${stepTabs}<section data-panel="0"><label>Heading<input data-heading></label><label>Body<textarea data-body></textarea></label></section><section data-panel="1" hidden><label>Width<select data-width><option value="sm">Small</option><option value="md">Medium</option><option value="lg">Large</option></select></label><label>Background<input data-background type="color"></label><label>Text color<input data-foreground type="color"></label><label>Primary color<input data-primary type="color"></label></section><section data-panel="2" hidden><label>Placement<select data-placement><option value="auto">Auto</option><option value="top">Top</option><option value="right">Right</option><option value="bottom">Bottom</option><option value="left">Left</option></select></label><label>Offset<input data-offset type="number" min="0" max="100"></label><label class="row"><input data-dismissible type="checkbox"> Dismissible</label><button data-pick>Reselect target</button><p data-reliability></p></section><section data-panel="3" hidden><label>Frequency<select data-frequency><option value="once">Once ever</option><option value="once_per_session">Once per session</option><option value="every_time">Every qualifying time</option></select></label><label>Priority<input data-priority type="number" min="-1000" max="1000"></label><p>Saved Page, Segment, and event targeting are configured securely in the Loopz dashboard.</p></section><section data-panel="4" hidden><p>Preview is live on this page. Save the draft here, then return to Loopz to publish or pause it.</p><button data-save>Save draft</button></section><p data-status>Draft autosaves as you edit.</p></main></aside>`;
+      document.documentElement.appendChild(this.host);
+      const currentContent = () => guide ? guide.steps[stepIndex].content : definition.content;
+      const currentBehavior = () => guide ? guide.steps[stepIndex].behavior : definition.behavior;
       const heading = root.querySelector("[data-heading]");
       const body = root.querySelector("[data-body]");
-      heading.value = content.heading;
-      body.value = content.body;
-      let saveTimer = 0;
+      const placement = root.querySelector("[data-placement]");
+      const offset = root.querySelector("[data-offset]");
+      const dismissible = root.querySelector("[data-dismissible]");
       const status = root.querySelector("[data-status]");
-      const renderPreview = () => this.preview.render({ id: draft.experience.id, versionId: draft.version.id, kind: draft.experience.kind, widgetType: draft.experience.widgetType, priority: 0, definition }, { onVisible: () => void 0, onDismiss: () => window.setTimeout(renderPreview, 0), onAction: () => void 0, onComplete: () => window.setTimeout(renderPreview, 0) });
+      const syncStep = () => {
+        var _a2;
+        const content = currentContent(), behavior = currentBehavior();
+        heading.value = content.heading;
+        body.value = content.body;
+        placement.value = behavior.placement ?? "auto";
+        offset.value = String(behavior.offset ?? 8);
+        dismissible.checked = behavior.dismissible ?? true;
+        (_a2 = root.querySelector("[data-step-label]")) == null ? void 0 : _a2.replaceChildren(`Editing step ${stepIndex + 1} of ${(guide == null ? void 0 : guide.steps.length) ?? 1}`);
+        root.querySelectorAll("[data-step]").forEach((button) => button.classList.toggle("active", Number(button.dataset.step) === stepIndex));
+      };
+      let saveTimer = 0;
+      const renderPreview = () => {
+        const previewDefinition = guide ? { ...definition, steps: [guide.steps[stepIndex]] } : definition;
+        return this.preview.render({ id: draft.experience.id, versionId: draft.version.id, kind: draft.experience.kind, widgetType: draft.experience.widgetType, priority: 0, definition: previewDefinition }, { onVisible: () => void 0, onDismiss: () => window.setTimeout(renderPreview, 0), onAction: () => void 0, onComplete: () => window.setTimeout(renderPreview, 0) });
+      };
       const persist = async () => {
         status.textContent = "Saving…";
         try {
@@ -2663,12 +2759,25 @@
         clearTimeout(saveTimer);
         saveTimer = window.setTimeout(persist, 350);
       };
+      syncStep();
       heading.addEventListener("input", () => {
-        content.heading = heading.value;
+        currentContent().heading = heading.value;
         save();
       });
       body.addEventListener("input", () => {
-        content.body = body.value;
+        currentContent().body = body.value;
+        save();
+      });
+      placement.addEventListener("change", () => {
+        currentBehavior().placement = placement.value;
+        save();
+      });
+      offset.addEventListener("input", () => {
+        currentBehavior().offset = Number(offset.value);
+        save();
+      });
+      dismissible.addEventListener("change", () => {
+        currentBehavior().dismissible = dismissible.checked;
         save();
       });
       const width = root.querySelector("[data-width]");
@@ -2685,25 +2794,6 @@
           save();
         });
       }
-      const activeBehavior = isGuideDefinition(definition) ? definition.steps[0].behavior : definition.behavior;
-      const placement = root.querySelector("[data-placement]");
-      placement.value = activeBehavior.placement ?? "auto";
-      placement.addEventListener("change", () => {
-        activeBehavior.placement = placement.value;
-        save();
-      });
-      const offset = root.querySelector("[data-offset]");
-      offset.value = String(activeBehavior.offset ?? 8);
-      offset.addEventListener("input", () => {
-        activeBehavior.offset = Number(offset.value);
-        save();
-      });
-      const dismissible = root.querySelector("[data-dismissible]");
-      dismissible.checked = activeBehavior.dismissible ?? true;
-      dismissible.addEventListener("change", () => {
-        activeBehavior.dismissible = dismissible.checked;
-        save();
-      });
       const targeting = definition.targeting;
       const frequency = root.querySelector("[data-frequency]");
       frequency.value = targeting.frequency.mode;
@@ -2717,14 +2807,19 @@
         targeting.priority = Number(priority.value);
         save();
       });
+      root.querySelectorAll("[data-step]").forEach((button) => button.addEventListener("click", () => {
+        stepIndex = Number(button.dataset.step);
+        syncStep();
+        renderPreview();
+      }));
       (_a = root.querySelector("[data-pick]")) == null ? void 0 : _a.addEventListener("click", async () => {
-        status.textContent = "Click the element this step should attach to.";
+        status.textContent = `Click the element step ${stepIndex + 1} should attach to.`;
         const target = await this.picker.pick();
         if (!target) {
           status.textContent = "Selection cancelled.";
           return;
         }
-        this.setTarget(definition, target);
+        this.setTarget(definition, target, stepIndex);
         root.querySelector("[data-reliability]").textContent = target.reliability === "fragile" ? "Warning: this selector is fragile and may change with the page layout." : `${target.reliability} selector`;
         save();
       });
@@ -2732,16 +2827,15 @@
       root.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => {
         root.querySelectorAll("[data-tab]").forEach((item) => item.classList.remove("active"));
         button.classList.add("active");
-        const index = button.dataset.tab;
-        root.querySelectorAll("[data-panel]").forEach((panel) => panel.hidden = panel.dataset.panel !== index);
+        root.querySelectorAll("[data-panel]").forEach((panel) => panel.hidden = panel.dataset.panel !== button.dataset.tab);
       }));
       renderPreview();
       this.validationTimer = window.setInterval(() => {
         void bridge.load().catch(() => this.destroy());
       }, 15e3);
     }
-    setTarget(definition, target) {
-      if (isGuideDefinition(definition)) definition.steps[0].target = target;
+    setTarget(definition, target, stepIndex = 0) {
+      if (isGuideDefinition(definition)) definition.steps[stepIndex].target = target;
       else definition.target = target;
     }
     destroy() {
@@ -2759,7 +2853,7 @@
     span.textContent = value;
     return span.innerHTML;
   }
-  const STYLE = `:host{all:initial}aside{position:fixed;right:16px;top:16px;width:340px;z-index:2147483647;background:#fff;color:#111827;border:1px solid #d1d5db;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.28);font:14px ui-sans-serif,system-ui,sans-serif}header{display:flex;flex-direction:column;padding:16px;border-bottom:1px solid #e5e7eb}small{color:#6b7280;margin-top:3px}nav{display:flex;overflow:auto;border-bottom:1px solid #e5e7eb}nav button{border:0;background:transparent;padding:10px 8px;font-size:11px;cursor:pointer}nav button.active{color:#2563eb;border-bottom:2px solid #2563eb}main{display:grid;gap:12px;padding:16px}section{display:grid;gap:12px}label{display:grid;gap:5px;font-size:12px;font-weight:600}label.row{display:flex;align-items:center}label.row input{width:auto}input,textarea,select{box-sizing:border-box;width:100%;border:1px solid #d1d5db;border-radius:7px;padding:8px;font:14px inherit;background:#fff}textarea{min-height:88px;resize:vertical}main button{border:0;border-radius:7px;padding:9px;background:#111827;color:#fff;cursor:pointer}p{margin:0;color:#6b7280;font-size:12px}`;
+  const STYLE = `:host{all:initial}aside{position:fixed;right:16px;top:16px;width:340px;z-index:2147483647;background:#fff;color:#111827;border:1px solid #d1d5db;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.28);font:14px ui-sans-serif,system-ui,sans-serif}header{display:flex;flex-direction:column;padding:16px;border-bottom:1px solid #e5e7eb}small,p{color:#6b7280;margin:0;font-size:12px}nav,.steps>div{display:flex;overflow:auto;border-bottom:1px solid #e5e7eb}nav button,.steps button{border:0;background:transparent;padding:10px 8px;font-size:11px;cursor:pointer}nav button.active,.steps button.active{color:#2563eb;border-bottom:2px solid #2563eb}.steps{display:grid;gap:6px}.steps b{font-size:12px}main{display:grid;gap:12px;padding:16px}section{display:grid;gap:12px}label{display:grid;gap:5px;font-size:12px;font-weight:600}label.row{display:flex;align-items:center}label.row input{width:auto}input,textarea,select{box-sizing:border-box;width:100%;border:1px solid #d1d5db;border-radius:7px;padding:8px;font:14px inherit;background:#fff}textarea{min-height:88px;resize:vertical}main button{border:0;border-radius:7px;padding:9px;background:#111827;color:#fff;cursor:pointer}`;
   const EditorModeController$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
     EditorModeController
@@ -2825,7 +2919,10 @@
           onVisible: () => void this.shown(chosen),
           onDismiss: () => void this.record(chosen, "dismissed"),
           onAction: (action) => this.handleAction(chosen, action),
-          onComplete: () => void this.record(chosen, "completed")
+          onComplete: () => void this.record(chosen, "completed"),
+          onUnavailable: () => {
+            if (this.activeId === chosen.id) this.activeId = null;
+          }
         });
         if (mounted) this.activeId = chosen.id;
       } catch {

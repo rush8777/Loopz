@@ -1,6 +1,6 @@
 import type { DeliveredExperience, ExperienceAction, ExperienceBehavior, ExperienceContent, RuntimeGuideDefinition, RuntimeWidgetDefinition } from "../types";
 import { isGuideDefinition } from "../types";
-import { AnchoredCardRenderer, findTarget, type RenderCallbacks } from "./AnchoredCardRenderer";
+import { AnchoredCardRenderer, findTarget, waitForTarget, type RenderCallbacks } from "./AnchoredCardRenderer";
 import { ToastRenderer } from "./ToastRenderer";
 import { CursorFollowRenderer } from "./CursorFollowRenderer";
 
@@ -9,11 +9,13 @@ export interface ExperienceRendererCallbacks {
   onDismiss: () => void;
   onAction: (action: ExperienceAction) => void;
   onComplete: () => void;
+  onUnavailable?: () => void;
 }
 
 export class ExperienceRenderer {
   private host: HTMLElement | null = null;
   private renderer: { destroy(): void } | null = null;
+  private cancelPendingTarget: (() => void) | null = null;
   private step = 0;
 
   render(experience: DeliveredExperience, callbacks: ExperienceRendererCallbacks): boolean {
@@ -29,9 +31,9 @@ export class ExperienceRenderer {
 
   private renderWidget(experience: DeliveredExperience, definition: RuntimeWidgetDefinition, callbacks: ExperienceRendererCallbacks): boolean {
     if (experience.widgetType === "anchored_card") {
-      const target = findTarget(definition.target); if (!target) return false;
-      const root = this.root(); const renderer = new AnchoredCardRenderer(); this.renderer = renderer;
-      renderer.render(root, target, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks));
+      const mount = (target: Element) => { const root = this.root(); const renderer = new AnchoredCardRenderer(); this.renderer = renderer; renderer.render(root, target, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks)); requestAnimationFrame(callbacks.onVisible); };
+      const target = findTarget(definition.target);
+      if (target) mount(target); else this.cancelPendingTarget = waitForTarget(definition.target, (element) => { this.cancelPendingTarget = null; mount(element); }, () => { this.cancelPendingTarget = null; callbacks.onUnavailable?.(); });
     } else if (experience.widgetType === "toast") {
       const root = this.root(); const renderer = new ToastRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks));
@@ -39,11 +41,12 @@ export class ExperienceRenderer {
       const root = this.root(); const renderer = new CursorFollowRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks));
     } else return false;
-    requestAnimationFrame(callbacks.onVisible); return true;
+    if (experience.widgetType !== "anchored_card") requestAnimationFrame(callbacks.onVisible); return true;
   }
 
   private renderGuide(experience: DeliveredExperience, definition: RuntimeGuideDefinition, callbacks: ExperienceRendererCallbacks): boolean {
-    const step = definition.steps[this.step]; const target = findTarget(step?.target); if (!step || !target) return false;
+    const step = definition.steps[this.step]; if (!step) return false;
+    const mount = (target: Element) => {
     const root = this.root(); const renderer = new AnchoredCardRenderer(); this.renderer = renderer;
     const behavior: ExperienceBehavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset };
     const card = renderer.render(root, target, step.content, definition.design, behavior, {
@@ -60,7 +63,11 @@ export class ExperienceRenderer {
       back.addEventListener("click", () => { this.clearSurface(); this.step--; this.renderGuide(experience, definition, callbacks); });
       card.querySelector("footer")?.prepend(back);
     }
-    requestAnimationFrame(callbacks.onVisible); return true;
+    requestAnimationFrame(callbacks.onVisible);
+    };
+    const target = findTarget(step.target);
+    if (target) mount(target); else this.cancelPendingTarget = waitForTarget(step.target, (element) => { this.cancelPendingTarget = null; mount(element); }, () => { this.cancelPendingTarget = null; callbacks.onUnavailable?.(); });
+    return true;
   }
 
   private callbacks(content: ExperienceContent, callbacks: ExperienceRendererCallbacks): RenderCallbacks {
@@ -71,7 +78,7 @@ export class ExperienceRenderer {
     };
   }
 
-  private clearSurface(): void { this.renderer?.destroy(); this.renderer = null; this.host?.remove(); this.host = null; }
+  private clearSurface(): void { this.cancelPendingTarget?.(); this.cancelPendingTarget = null; this.renderer?.destroy(); this.renderer = null; this.host?.remove(); this.host = null; }
   destroy(): void { this.clearSurface(); this.step = 0; }
 }
 

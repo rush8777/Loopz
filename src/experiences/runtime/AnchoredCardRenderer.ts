@@ -10,6 +10,17 @@ export function findTarget(target?: ExperienceTarget): Element | null {
   return null;
 }
 
+/** Resolves a selector that may be rendered after the experience manifest arrives. */
+export function waitForTarget(target: ExperienceTarget | undefined, onFound: (element: Element) => void, onUnavailable: () => void, timeoutMs = 5000): () => void {
+  const immediate = findTarget(target); if (immediate) { onFound(immediate); return () => void 0; }
+  let stopped = false; let observer: MutationObserver | null = null; let timer = 0;
+  const stop = () => { if (stopped) return; stopped = true; observer?.disconnect(); clearTimeout(timer); };
+  const check = () => { if (stopped) return; const element = findTarget(target); if (element) { stop(); onFound(element); } };
+  if (typeof MutationObserver === "undefined" || !document.documentElement) { timer = window.setTimeout(() => { stop(); onUnavailable(); }, timeoutMs); return stop; }
+  observer = new MutationObserver(check); observer.observe(document.documentElement, { childList: true, subtree: true }); timer = window.setTimeout(() => { if (!stopped) { stop(); onUnavailable(); } }, timeoutMs);
+  return stop;
+}
+
 export function buildCard(root: ShadowRoot, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks): HTMLElement {
   const card = document.createElement("section");
   card.className = "card";
@@ -59,4 +70,3 @@ function position(card: HTMLElement, rect: DOMRect, behavior: ExperienceBehavior
 }
 
 function escapeText(value: string): string { const span = document.createElement("span"); span.textContent = value; return span.innerHTML; }
-
