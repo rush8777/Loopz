@@ -97,8 +97,12 @@ export interface AnalyticsConfig {
     feedback?: Partial<FeedbackConfig>;
     sessionInactivityMs?: number;
     respectDoNotTrack?: boolean;
+    /** Published visual experiences are enabled by default and fail independently from analytics capture. */
+    experiences?: {
+        enabled?: boolean;
+    };
 }
-export interface ResolvedAnalyticsConfig extends Required<Omit<AnalyticsConfig, "autocapture" | "rageClick" | "move" | "scroll" | "hover" | "cursor" | "queue" | "sessionReplay" | "feedback">> {
+export interface ResolvedAnalyticsConfig extends Required<Omit<AnalyticsConfig, "autocapture" | "rageClick" | "move" | "scroll" | "hover" | "cursor" | "queue" | "sessionReplay" | "feedback" | "experiences">> {
     autocapture: Required<NonNullable<AnalyticsConfig["autocapture"]>>;
     rageClick: RageClickConfig;
     move: MoveCollectorConfig;
@@ -108,4 +112,7 @@ export interface ResolvedAnalyticsConfig extends Required<Omit<AnalyticsConfig, 
     queue: QueueConfig;
     sessionReplay: SessionReplayConfig;
     feedback: FeedbackConfig;
+    experiences: {
+        enabled: boolean;
+    };
 }

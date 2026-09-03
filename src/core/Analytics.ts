@@ -28,6 +28,8 @@ import type {
 import type { FunnelStep } from "../types/funnel";
 import { RouteObserver } from "../dom/RouteObserver";
 import { HeatmapManager } from "../heatmaps/HeatmapManager";
+import type { ExperienceLoader } from "../experiences/runtime/ExperienceLoader";
+import type { EditorModeController } from "../experiences/editor/EditorModeController";
 
 /**
  * The core SDK instance. Owns configuration, session identity, the
@@ -44,6 +46,8 @@ export class Analytics {
   private batcher!: Batcher;
   private routeObserver = new RouteObserver();
   private heatmaps!: HeatmapManager;
+  private experiences: ExperienceLoader | null = null;
+  private editor: EditorModeController | null = null;
 
   private debugEnabled = false;
   private initialized = false;
@@ -92,6 +96,21 @@ export class Analytics {
 
     // Fire the initial page view + funnel evaluation.
     this.trackPageView();
+
+    const editorToken = new URL(location.href).searchParams.get("loopz_editor_token");
+    if (editorToken) {
+      void import("../experiences/editor/EditorModeController").then(({ EditorModeController }) => {
+        if (!this.initialized) return;
+        this.editor = new EditorModeController(this.config.endpoint);
+        void this.editor.start(editorToken);
+      }).catch(() => void 0);
+    } else if (this.config.experiences.enabled) {
+      void import("../experiences/runtime/ExperienceLoader").then(({ ExperienceLoader }) => {
+        if (!this.initialized) return;
+        this.experiences = new ExperienceLoader(this.config.endpoint, this.config.siteId, this.session, (name) => this.event(name));
+        void this.experiences.evaluate();
+      }).catch(() => void 0);
+    }
   }
 
   start(): void {
@@ -117,6 +136,10 @@ export class Analytics {
     for (const unsub of this.unsubscribers) unsub();
     this.unsubscribers = [];
     this.queue?.clear();
+    this.experiences?.destroy();
+    this.experiences = null;
+    this.editor?.destroy();
+    this.editor = null;
     this.initialized = false;
     this.log("destroyed");
   }
@@ -126,6 +149,7 @@ export class Analytics {
     const payload: CustomEventPayload = { name, properties };
     this.enqueueEvent("custom", payload);
     this.engine.funnel.onCustomEvent(name);
+    this.experiences?.onCustomEvent(name);
     this.log(`event: ${name}`, properties);
   }
 
@@ -254,6 +278,7 @@ export class Analytics {
       this.session.newPageView();
       this.engine.onRouteChange(location.pathname, true);
       this.trackPageView();
+      this.experiences?.onRouteChange();
     } else {
       this.engine.onRouteChange(location.pathname, false);
     }

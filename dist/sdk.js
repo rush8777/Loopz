@@ -1137,6 +1137,9 @@
       localStore.set(ANON_ID_KEY, this.anonymousId);
       sessionStore.set("__aa_identified_user__", userId);
     }
+    getIdentifiedUserId() {
+      return sessionStore.get("__aa_identified_user__");
+    }
   }
   const _EventQueue = class _EventQueue {
     constructor(options) {
@@ -1672,7 +1675,7 @@
     }
   }
   function resolveConfig(input) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G, _H, _I, _J, _K;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G, _H, _I, _J, _K, _L;
     if (!input || !input.siteId) {
       throw new Error("[Analytics] init() requires a `siteId`");
     }
@@ -1738,7 +1741,8 @@
         apiBase: ((_I = input.feedback) == null ? void 0 : _I.apiBase) ?? "https://platform.example.com",
         flushIntervalMs: ((_J = input.feedback) == null ? void 0 : _J.flushIntervalMs) ?? 3e3,
         autoDismissMs: ((_K = input.feedback) == null ? void 0 : _K.autoDismissMs) ?? 12e3
-      }
+      },
+      experiences: { enabled: ((_L = input.experiences) == null ? void 0 : _L.enabled) ?? true }
     };
   }
   class RouteObserver {
@@ -1937,6 +1941,8 @@
   class Analytics {
     constructor() {
       this.routeObserver = new RouteObserver();
+      this.experiences = null;
+      this.editor = null;
       this.debugEnabled = false;
       this.initialized = false;
       this.running = false;
@@ -1974,6 +1980,20 @@
       this.routeObserver.start();
       this.start();
       this.trackPageView();
+      const editorToken = new URL(location.href).searchParams.get("loopz_editor_token");
+      if (editorToken) {
+        void Promise.resolve().then(() => EditorModeController$1).then(({ EditorModeController: EditorModeController2 }) => {
+          if (!this.initialized) return;
+          this.editor = new EditorModeController2(this.config.endpoint);
+          void this.editor.start(editorToken);
+        }).catch(() => void 0);
+      } else if (this.config.experiences.enabled) {
+        void Promise.resolve().then(() => ExperienceLoader$1).then(({ ExperienceLoader: ExperienceLoader2 }) => {
+          if (!this.initialized) return;
+          this.experiences = new ExperienceLoader2(this.config.endpoint, this.config.siteId, this.session, (name) => this.event(name));
+          void this.experiences.evaluate();
+        }).catch(() => void 0);
+      }
     }
     start() {
       if (!this.initialized || this.running) return;
@@ -1990,21 +2010,27 @@
       this.log("autocapture stopped");
     }
     destroy() {
-      var _a, _b;
+      var _a, _b, _c, _d;
       this.stop();
       this.routeObserver.stop();
       (_a = this.engine) == null ? void 0 : _a.destroyElementDiscovery();
       for (const unsub of this.unsubscribers) unsub();
       this.unsubscribers = [];
       (_b = this.queue) == null ? void 0 : _b.clear();
+      (_c = this.experiences) == null ? void 0 : _c.destroy();
+      this.experiences = null;
+      (_d = this.editor) == null ? void 0 : _d.destroy();
+      this.editor = null;
       this.initialized = false;
       this.log("destroyed");
     }
     event(name, properties) {
+      var _a;
       if (!this.requireInit()) return;
       const payload = { name, properties };
       this.enqueueEvent("custom", payload);
       this.engine.funnel.onCustomEvent(name);
+      (_a = this.experiences) == null ? void 0 : _a.onCustomEvent(name);
       this.log(`event: ${name}`, properties);
     }
     identify(userId, attributes) {
@@ -2104,10 +2130,12 @@
       this.engine.funnel.onPageView(location.pathname);
     }
     onRouteChange() {
+      var _a;
       if (this.running) {
         this.session.newPageView();
         this.engine.onRouteChange(location.pathname, true);
         this.trackPageView();
+        (_a = this.experiences) == null ? void 0 : _a.onRouteChange();
       } else {
         this.engine.onRouteChange(location.pathname, false);
       }
@@ -2208,5 +2236,646 @@
     return analytics;
   }
   installPublicAPI(["__myAnalytics__", "analytics"]);
+  function isGuideDefinition(value) {
+    return "steps" in value;
+  }
+  class EditorBridge {
+    constructor(apiBase, sessionId, accessToken) {
+      this.apiBase = apiBase;
+      this.sessionId = sessionId;
+      this.accessToken = accessToken;
+    }
+    headers() {
+      return { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}` };
+    }
+    async load() {
+      const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { headers: this.headers(), credentials: "omit" });
+      if (!response.ok) throw new Error("Editor session expired");
+      return response.json();
+    }
+    async save(definition) {
+      const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { method: "PATCH", headers: this.headers(), credentials: "omit", body: JSON.stringify({ definition }) });
+      if (!response.ok) throw new Error("Draft could not be saved");
+    }
+  }
+  class HighlightOverlay {
+    constructor() {
+      this.element = document.createElement("div");
+      this.element.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #2563eb;background:rgba(37,99,235,.12);display:none;box-sizing:border-box";
+      document.documentElement.appendChild(this.element);
+    }
+    show(target) {
+      const rect = target.getBoundingClientRect();
+      Object.assign(this.element.style, { display: "block", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+    }
+    hide() {
+      this.element.style.display = "none";
+    }
+    destroy() {
+      this.element.remove();
+    }
+  }
+  function reliability(selector) {
+    if (/#[a-z][\w:-]*|\[data-(?:testid|test|qa|cy|analytics-id)=/i.test(selector)) return "reliable";
+    if (/\[(?:role|aria-label|name|type|href)=|\.[a-z][\w-]*/i.test(selector) && !selector.includes(":nth-of-type")) return "moderate";
+    return "fragile";
+  }
+  class ElementPicker {
+    constructor() {
+      this.overlay = null;
+      this.generator = new SelectorGenerator();
+      this.resolve = null;
+      this.move = (event) => {
+        var _a, _b;
+        const target = document.elementFromPoint(event.clientX, event.clientY);
+        if (target && !target.closest("[data-loopz-editor]")) (_a = this.overlay) == null ? void 0 : _a.show(target);
+        else (_b = this.overlay) == null ? void 0 : _b.hide();
+      };
+      this.click = (event) => {
+        const target = document.elementFromPoint(event.clientX, event.clientY);
+        if (!target || target.closest("[data-loopz-editor]")) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const descriptor = this.generator.describe(target);
+        const selector = descriptor.selector;
+        this.finish({ primarySelector: selector, fallbackSelectors: [], label: descriptor.label, role: descriptor.role, tagName: descriptor.tagName, reliability: reliability(selector) });
+      };
+      this.key = (event) => {
+        if (event.key === "Escape") this.finish(null);
+      };
+    }
+    pick() {
+      this.cancel();
+      this.overlay = new HighlightOverlay();
+      document.addEventListener("pointermove", this.move, true);
+      document.addEventListener("click", this.click, true);
+      document.addEventListener("keydown", this.key, true);
+      return new Promise((resolve) => {
+        this.resolve = resolve;
+      });
+    }
+    cancel() {
+      if (this.resolve) this.finish(null);
+      else this.cleanup();
+    }
+    finish(value) {
+      const resolve = this.resolve;
+      this.resolve = null;
+      this.cleanup();
+      resolve == null ? void 0 : resolve(value);
+    }
+    cleanup() {
+      var _a;
+      document.removeEventListener("pointermove", this.move, true);
+      document.removeEventListener("click", this.click, true);
+      document.removeEventListener("keydown", this.key, true);
+      (_a = this.overlay) == null ? void 0 : _a.destroy();
+      this.overlay = null;
+    }
+  }
+  function findTarget(target) {
+    if (!target) return null;
+    for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
+      try {
+        const element = document.querySelector(selector);
+        if (element) return element;
+      } catch {
+      }
+    }
+    return null;
+  }
+  function buildCard(root, content, design, behavior, callbacks) {
+    var _a, _b, _c;
+    const card = document.createElement("section");
+    card.className = "card";
+    card.style.setProperty("--loopz-bg", design.theme.background);
+    card.style.setProperty("--loopz-fg", design.theme.foreground);
+    card.style.setProperty("--loopz-primary", design.theme.primary);
+    card.dataset.width = design.width;
+    card.dataset.radius = design.theme.borderRadius;
+    const close = behavior.dismissible ? `<button class="close" data-dismiss aria-label="Dismiss">×</button>` : "";
+    const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText$1(content.primaryAction.label)}</button>` : "";
+    const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText$1(content.secondaryAction.label)}</button>` : "";
+    card.innerHTML = `${close}<h2>${escapeText$1(content.heading)}</h2><p>${escapeText$1(content.body)}</p><footer>${secondary}${primary}</footer>`;
+    (_a = card.querySelector("[data-dismiss]")) == null ? void 0 : _a.addEventListener("click", callbacks.onDismiss);
+    (_b = card.querySelector("[data-primary]")) == null ? void 0 : _b.addEventListener("click", callbacks.onPrimary);
+    (_c = card.querySelector("[data-secondary]")) == null ? void 0 : _c.addEventListener("click", callbacks.onSecondary);
+    root.appendChild(card);
+    return card;
+  }
+  class AnchoredCardRenderer {
+    constructor() {
+      this.cleanup = [];
+    }
+    render(root, target, content, design, behavior, callbacks) {
+      const card = buildCard(root, content, design, behavior, callbacks);
+      const update = () => position(card, target.getBoundingClientRect(), behavior);
+      const onWindow = () => requestAnimationFrame(update);
+      window.addEventListener("scroll", onWindow, true);
+      window.addEventListener("resize", onWindow);
+      this.cleanup.push(() => window.removeEventListener("scroll", onWindow, true), () => window.removeEventListener("resize", onWindow));
+      if (typeof ResizeObserver !== "undefined") {
+        const observer = new ResizeObserver(update);
+        observer.observe(target);
+        observer.observe(card);
+        this.cleanup.push(() => observer.disconnect());
+      }
+      if (typeof MutationObserver !== "undefined") {
+        const observer = new MutationObserver(onWindow);
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+        this.cleanup.push(() => observer.disconnect());
+      }
+      update();
+      return card;
+    }
+    destroy() {
+      this.cleanup.splice(0).forEach((fn) => fn());
+    }
+  }
+  function position(card, rect, behavior) {
+    const gap = behavior.offset ?? 8;
+    const bounds = card.getBoundingClientRect();
+    const margin = 8;
+    let placement = behavior.placement === "auto" || !behavior.placement ? "bottom" : behavior.placement;
+    if (placement === "bottom" && rect.bottom + gap + bounds.height > innerHeight) placement = "top";
+    if (placement === "top" && rect.top - gap - bounds.height < 0) placement = "bottom";
+    let left = rect.left + (rect.width - bounds.width) / 2;
+    let top = rect.bottom + gap;
+    if (placement === "top") top = rect.top - bounds.height - gap;
+    if (placement === "left") {
+      left = rect.left - bounds.width - gap;
+      top = rect.top + (rect.height - bounds.height) / 2;
+    }
+    if (placement === "right") {
+      left = rect.right + gap;
+      top = rect.top + (rect.height - bounds.height) / 2;
+    }
+    if (behavior.alignment === "start" && (placement === "top" || placement === "bottom")) left = rect.left;
+    if (behavior.alignment === "end" && (placement === "top" || placement === "bottom")) left = rect.right - bounds.width;
+    card.style.left = `${Math.max(margin, Math.min(left, innerWidth - bounds.width - margin))}px`;
+    card.style.top = `${Math.max(margin, Math.min(top, innerHeight - bounds.height - margin))}px`;
+  }
+  function escapeText$1(value) {
+    const span = document.createElement("span");
+    span.textContent = value;
+    return span.innerHTML;
+  }
+  class ToastRenderer {
+    constructor() {
+      this.timer = null;
+    }
+    render(root, content, design, behavior, callbacks) {
+      const card = buildCard(root, content, design, behavior, callbacks);
+      card.classList.add("toast");
+      card.dataset.position = behavior.toastPosition ?? "bottom-right";
+      if (behavior.autoDismissMs) this.timer = window.setTimeout(callbacks.onDismiss, behavior.autoDismissMs);
+      return card;
+    }
+    destroy() {
+      if (this.timer !== null) clearTimeout(this.timer);
+    }
+  }
+  class CursorFollowRenderer {
+    constructor() {
+      this.cleanup = null;
+    }
+    render(root, content, design, behavior, callbacks) {
+      const card = buildCard(root, content, design, behavior, callbacks);
+      card.classList.add("cursor");
+      let frame = 0;
+      let x = innerWidth / 2;
+      let y = innerHeight / 2;
+      const offset = behavior.cursorOffset ?? { x: 16, y: 16 };
+      const update = () => {
+        frame = 0;
+        const rect = card.getBoundingClientRect();
+        card.style.left = `${Math.max(8, Math.min(x + offset.x, innerWidth - rect.width - 8))}px`;
+        card.style.top = `${Math.max(8, Math.min(y + offset.y, innerHeight - rect.height - 8))}px`;
+      };
+      const move = (event) => {
+        x = event.clientX;
+        y = event.clientY;
+        if (!frame) frame = requestAnimationFrame(update);
+      };
+      window.addEventListener("pointermove", move, { passive: true });
+      this.cleanup = () => {
+        window.removeEventListener("pointermove", move);
+        if (frame) cancelAnimationFrame(frame);
+      };
+      update();
+      return card;
+    }
+    destroy() {
+      var _a;
+      (_a = this.cleanup) == null ? void 0 : _a.call(this);
+      this.cleanup = null;
+    }
+  }
+  class ExperienceRenderer {
+    constructor() {
+      this.host = null;
+      this.renderer = null;
+      this.step = 0;
+    }
+    render(experience, callbacks) {
+      this.destroy();
+      this.step = 0;
+      if (isGuideDefinition(experience.definition)) return this.renderGuide(experience, experience.definition, callbacks);
+      return this.renderWidget(experience, experience.definition, callbacks);
+    }
+    root() {
+      this.host = document.createElement("div");
+      this.host.dataset.loopzExperience = "";
+      this.host.style.cssText = "position:fixed;inset:0;z-index:2147483000;pointer-events:none";
+      const root = this.host.attachShadow({ mode: "open" });
+      const style = document.createElement("style");
+      style.textContent = STYLES;
+      root.appendChild(style);
+      document.documentElement.appendChild(this.host);
+      return root;
+    }
+    renderWidget(experience, definition, callbacks) {
+      if (experience.widgetType === "anchored_card") {
+        const target = findTarget(definition.target);
+        if (!target) return false;
+        const root = this.root();
+        const renderer = new AnchoredCardRenderer();
+        this.renderer = renderer;
+        renderer.render(root, target, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks));
+      } else if (experience.widgetType === "toast") {
+        const root = this.root();
+        const renderer = new ToastRenderer();
+        this.renderer = renderer;
+        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks));
+      } else if (experience.widgetType === "cursor_follow") {
+        const root = this.root();
+        const renderer = new CursorFollowRenderer();
+        this.renderer = renderer;
+        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks));
+      } else return false;
+      requestAnimationFrame(callbacks.onVisible);
+      return true;
+    }
+    renderGuide(experience, definition, callbacks) {
+      var _a;
+      const step = definition.steps[this.step];
+      const target = findTarget(step == null ? void 0 : step.target);
+      if (!step || !target) return false;
+      const root = this.root();
+      const renderer = new AnchoredCardRenderer();
+      this.renderer = renderer;
+      const behavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset };
+      const card = renderer.render(root, target, step.content, definition.design, behavior, {
+        onDismiss: () => {
+          callbacks.onDismiss();
+          this.destroy();
+        },
+        onSecondary: () => {
+          callbacks.onDismiss();
+          this.destroy();
+        },
+        onPrimary: () => {
+          const action = step.content.primaryAction;
+          if (action) callbacks.onAction(action);
+          if (this.step < definition.steps.length - 1) {
+            this.clearSurface();
+            this.step++;
+            this.renderGuide(experience, definition, callbacks);
+          } else {
+            callbacks.onComplete();
+            this.destroy();
+          }
+        }
+      });
+      if (this.step > 0) {
+        const back = document.createElement("button");
+        back.className = "secondary";
+        back.textContent = "Back";
+        back.addEventListener("click", () => {
+          this.clearSurface();
+          this.step--;
+          this.renderGuide(experience, definition, callbacks);
+        });
+        (_a = card.querySelector("footer")) == null ? void 0 : _a.prepend(back);
+      }
+      requestAnimationFrame(callbacks.onVisible);
+      return true;
+    }
+    callbacks(content, callbacks) {
+      return {
+        onDismiss: () => {
+          callbacks.onDismiss();
+          this.destroy();
+        },
+        onSecondary: () => {
+          callbacks.onDismiss();
+          this.destroy();
+        },
+        onPrimary: () => {
+          var _a;
+          if (content.primaryAction) callbacks.onAction(content.primaryAction);
+          if (((_a = content.primaryAction) == null ? void 0 : _a.type) === "dismiss") {
+            callbacks.onDismiss();
+            this.destroy();
+          }
+        }
+      };
+    }
+    clearSurface() {
+      var _a, _b;
+      (_a = this.renderer) == null ? void 0 : _a.destroy();
+      this.renderer = null;
+      (_b = this.host) == null ? void 0 : _b.remove();
+      this.host = null;
+    }
+    destroy() {
+      this.clearSurface();
+      this.step = 0;
+    }
+  }
+  const STYLES = `
+  :host{all:initial}.card{pointer-events:auto;position:fixed;box-sizing:border-box;width:320px;max-width:calc(100vw - 16px);padding:18px;background:var(--loopz-bg);color:var(--loopz-fg);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-shadow:0 12px 38px rgba(0,0,0,.22);border:1px solid rgba(0,0,0,.12)}
+  .card[data-width=sm]{width:260px}.card[data-width=lg]{width:400px}.card[data-radius=sm]{border-radius:6px}.card[data-radius=md]{border-radius:12px}.card[data-radius=lg]{border-radius:20px}
+  h2{font:600 17px/1.3 ui-sans-serif,system-ui,sans-serif;margin:0 24px 7px 0}p{margin:0;white-space:pre-wrap}footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}button{border:0;border-radius:7px;padding:8px 12px;font:600 13px ui-sans-serif,system-ui,sans-serif;cursor:pointer}.primary{background:var(--loopz-primary);color:#fff}.secondary{background:transparent;color:inherit}.close{position:absolute;right:8px;top:7px;padding:3px 7px;background:transparent;color:inherit;font-size:20px}
+  .toast{position:fixed!important}.toast[data-position=top-left]{top:16px;left:16px}.toast[data-position=top-right]{top:16px;right:16px}.toast[data-position=bottom-left]{bottom:16px;left:16px}.toast[data-position=bottom-right]{bottom:16px;right:16px}.cursor{will-change:left,top}@media(prefers-reduced-motion:reduce){.card{transition:none!important}}
+`;
+  class EditorModeController {
+    constructor(apiBase) {
+      this.apiBase = apiBase;
+      this.host = null;
+      this.picker = new ElementPicker();
+      this.expiryTimer = 0;
+      this.validationTimer = 0;
+      this.preview = new ExperienceRenderer();
+    }
+    async start(rawToken) {
+      try {
+        const response = await fetch(`${this.apiBase}/public/experience-editor/exchange`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", body: JSON.stringify({ token: rawToken }) });
+        if (!response.ok) return false;
+        const session = await response.json();
+        const clean2 = new URL(location.href);
+        clean2.searchParams.delete("loopz_editor_token");
+        history.replaceState(history.state, "", clean2.toString());
+        const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
+        const draft = await bridge.load();
+        this.mount(draft, bridge);
+        this.expiryTimer = window.setTimeout(() => this.destroy(), Math.max(0, new Date(session.expiresAt).getTime() - Date.now()));
+        return true;
+      } catch {
+        this.destroy();
+        return false;
+      }
+    }
+    mount(draft, bridge) {
+      var _a, _b;
+      this.host = document.createElement("div");
+      this.host.dataset.loopzEditor = "";
+      const root = this.host.attachShadow({ mode: "open" });
+      root.innerHTML = `<style>${STYLE}</style><aside><header><b>Loopz visual editor</b><small>${escapeText(draft.experience.name)}</small></header><nav>${["Content", "Design", "Behavior", "Targeting", "Publish"].map((x, i) => `<button data-tab="${i}" class="${i === 0 ? "active" : ""}">${x}</button>`).join("")}</nav><main>
+      <section data-panel="0"><label>Heading<input data-heading></label><label>Body<textarea data-body></textarea></label></section>
+      <section data-panel="1" hidden><label>Width<select data-width><option value="sm">Small</option><option value="md">Medium</option><option value="lg">Large</option></select></label><label>Background<input data-background type="color"></label><label>Text color<input data-foreground type="color"></label><label>Primary color<input data-primary type="color"></label></section>
+      <section data-panel="2" hidden><label>Placement<select data-placement><option value="auto">Auto</option><option value="top">Top</option><option value="right">Right</option><option value="bottom">Bottom</option><option value="left">Left</option></select></label><label>Offset<input data-offset type="number" min="0" max="100"></label><label class="row"><input data-dismissible type="checkbox"> Dismissible</label><button data-pick>Reselect target</button><p data-reliability></p></section>
+      <section data-panel="3" hidden><label>Frequency<select data-frequency><option value="once">Once ever</option><option value="once_per_session">Once per session</option><option value="every_time">Every qualifying time</option></select></label><label>Priority<input data-priority type="number" min="-1000" max="1000"></label><p>Saved Page, Segment, and event targeting are configured securely in the Loopz dashboard.</p></section>
+      <section data-panel="4" hidden><p>Preview is live on this page. Save the draft here, then return to Loopz to publish or pause it.</p><button data-save>Save draft</button></section>
+      <p data-status>Draft autosaves as you edit.</p></main></aside>`;
+      document.documentElement.appendChild(this.host);
+      const definition = draft.version.definition;
+      const content = isGuideDefinition(definition) ? definition.steps[0].content : definition.content;
+      const heading = root.querySelector("[data-heading]");
+      const body = root.querySelector("[data-body]");
+      heading.value = content.heading;
+      body.value = content.body;
+      let saveTimer = 0;
+      const status = root.querySelector("[data-status]");
+      const renderPreview = () => this.preview.render({ id: draft.experience.id, versionId: draft.version.id, kind: draft.experience.kind, widgetType: draft.experience.widgetType, priority: 0, definition }, { onVisible: () => void 0, onDismiss: () => window.setTimeout(renderPreview, 0), onAction: () => void 0, onComplete: () => window.setTimeout(renderPreview, 0) });
+      const persist = async () => {
+        status.textContent = "Saving…";
+        try {
+          await bridge.save(definition);
+          status.textContent = "Draft saved.";
+        } catch {
+          status.textContent = "Editor session expired or was revoked.";
+          this.destroy();
+        }
+      };
+      const save = () => {
+        renderPreview();
+        clearTimeout(saveTimer);
+        saveTimer = window.setTimeout(persist, 350);
+      };
+      heading.addEventListener("input", () => {
+        content.heading = heading.value;
+        save();
+      });
+      body.addEventListener("input", () => {
+        content.body = body.value;
+        save();
+      });
+      const width = root.querySelector("[data-width]");
+      width.value = definition.design.width;
+      width.addEventListener("change", () => {
+        definition.design.width = width.value;
+        save();
+      });
+      for (const key of ["background", "foreground", "primary"]) {
+        const input = root.querySelector(`[data-${key}]`);
+        input.value = definition.design.theme[key];
+        input.addEventListener("input", () => {
+          definition.design.theme[key] = input.value;
+          save();
+        });
+      }
+      const activeBehavior = isGuideDefinition(definition) ? definition.steps[0].behavior : definition.behavior;
+      const placement = root.querySelector("[data-placement]");
+      placement.value = activeBehavior.placement ?? "auto";
+      placement.addEventListener("change", () => {
+        activeBehavior.placement = placement.value;
+        save();
+      });
+      const offset = root.querySelector("[data-offset]");
+      offset.value = String(activeBehavior.offset ?? 8);
+      offset.addEventListener("input", () => {
+        activeBehavior.offset = Number(offset.value);
+        save();
+      });
+      const dismissible = root.querySelector("[data-dismissible]");
+      dismissible.checked = activeBehavior.dismissible ?? true;
+      dismissible.addEventListener("change", () => {
+        activeBehavior.dismissible = dismissible.checked;
+        save();
+      });
+      const targeting = definition.targeting;
+      const frequency = root.querySelector("[data-frequency]");
+      frequency.value = targeting.frequency.mode;
+      frequency.addEventListener("change", () => {
+        targeting.frequency.mode = frequency.value;
+        save();
+      });
+      const priority = root.querySelector("[data-priority]");
+      priority.value = String(targeting.priority);
+      priority.addEventListener("input", () => {
+        targeting.priority = Number(priority.value);
+        save();
+      });
+      (_a = root.querySelector("[data-pick]")) == null ? void 0 : _a.addEventListener("click", async () => {
+        status.textContent = "Click the element this step should attach to.";
+        const target = await this.picker.pick();
+        if (!target) {
+          status.textContent = "Selection cancelled.";
+          return;
+        }
+        this.setTarget(definition, target);
+        root.querySelector("[data-reliability]").textContent = target.reliability === "fragile" ? "Warning: this selector is fragile and may change with the page layout." : `${target.reliability} selector`;
+        save();
+      });
+      (_b = root.querySelector("[data-save]")) == null ? void 0 : _b.addEventListener("click", () => void persist());
+      root.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => {
+        root.querySelectorAll("[data-tab]").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        const index = button.dataset.tab;
+        root.querySelectorAll("[data-panel]").forEach((panel) => panel.hidden = panel.dataset.panel !== index);
+      }));
+      renderPreview();
+      this.validationTimer = window.setInterval(() => {
+        void bridge.load().catch(() => this.destroy());
+      }, 15e3);
+    }
+    setTarget(definition, target) {
+      if (isGuideDefinition(definition)) definition.steps[0].target = target;
+      else definition.target = target;
+    }
+    destroy() {
+      var _a;
+      clearTimeout(this.expiryTimer);
+      clearInterval(this.validationTimer);
+      this.preview.destroy();
+      this.picker.cancel();
+      (_a = this.host) == null ? void 0 : _a.remove();
+      this.host = null;
+    }
+  }
+  function escapeText(value) {
+    const span = document.createElement("span");
+    span.textContent = value;
+    return span.innerHTML;
+  }
+  const STYLE = `:host{all:initial}aside{position:fixed;right:16px;top:16px;width:340px;z-index:2147483647;background:#fff;color:#111827;border:1px solid #d1d5db;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.28);font:14px ui-sans-serif,system-ui,sans-serif}header{display:flex;flex-direction:column;padding:16px;border-bottom:1px solid #e5e7eb}small{color:#6b7280;margin-top:3px}nav{display:flex;overflow:auto;border-bottom:1px solid #e5e7eb}nav button{border:0;background:transparent;padding:10px 8px;font-size:11px;cursor:pointer}nav button.active{color:#2563eb;border-bottom:2px solid #2563eb}main{display:grid;gap:12px;padding:16px}section{display:grid;gap:12px}label{display:grid;gap:5px;font-size:12px;font-weight:600}label.row{display:flex;align-items:center}label.row input{width:auto}input,textarea,select{box-sizing:border-box;width:100%;border:1px solid #d1d5db;border-radius:7px;padding:8px;font:14px inherit;background:#fff}textarea{min-height:88px;resize:vertical}main button{border:0;border-radius:7px;padding:9px;background:#111827;color:#fff;cursor:pointer}p{margin:0;color:#6b7280;font-size:12px}`;
+  const EditorModeController$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    EditorModeController
+  }, Symbol.toStringTag, { value: "Module" }));
+  class EligibilityEngine {
+    choose(experiences) {
+      return [...experiences].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))[0] ?? null;
+    }
+  }
+  const ONCE_KEY = "__loopz_experiences_seen__";
+  const SESSION_KEY = "__loopz_experiences_session_seen__";
+  function read(storage, key) {
+    try {
+      return new Set(JSON.parse(storage.getItem(key) ?? "[]"));
+    } catch {
+      return /* @__PURE__ */ new Set();
+    }
+  }
+  class ExperienceStateStore {
+    hasEver(id) {
+      return read(localStorage, ONCE_KEY).has(id);
+    }
+    hasInSession(id) {
+      return read(sessionStorage, SESSION_KEY).has(id);
+    }
+    markSeen(id) {
+      for (const [storage, key] of [[localStorage, ONCE_KEY], [sessionStorage, SESSION_KEY]]) {
+        const values = read(storage, key);
+        values.add(id);
+        try {
+          storage.setItem(key, JSON.stringify([...values]));
+        } catch {
+        }
+      }
+    }
+  }
+  class ExperienceLoader {
+    constructor(apiBase, siteId, session, trackEvent) {
+      this.apiBase = apiBase;
+      this.siteId = siteId;
+      this.session = session;
+      this.trackEvent = trackEvent;
+      this.renderer = new ExperienceRenderer();
+      this.eligibility = new EligibilityEngine();
+      this.state = new ExperienceStateStore();
+      this.activeId = null;
+      this.impressionId = null;
+      this.destroyed = false;
+    }
+    async evaluate(trigger) {
+      if (this.destroyed || this.activeId) return;
+      try {
+        const query = new URLSearchParams({ url: location.href, anonymousId: this.session.getAnonymousId(), sessionId: this.session.getSessionId() });
+        const userId = this.session.getIdentifiedUserId();
+        if (userId) query.set("trackedUserId", userId);
+        if (trigger) query.set("trigger", trigger);
+        const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experiences?${query}`, { credentials: "omit" });
+        if (!response.ok) return;
+        const manifest = await response.json();
+        const chosen = this.eligibility.choose(Array.isArray(manifest.experiences) ? manifest.experiences : []);
+        if (!chosen) return;
+        const mounted = this.renderer.render(chosen, {
+          onVisible: () => void this.shown(chosen),
+          onDismiss: () => void this.record(chosen, "dismissed"),
+          onAction: (action) => this.handleAction(chosen, action),
+          onComplete: () => void this.record(chosen, "completed")
+        });
+        if (mounted) this.activeId = chosen.id;
+      } catch {
+      }
+    }
+    onRouteChange() {
+      this.renderer.destroy();
+      this.activeId = null;
+      this.impressionId = null;
+      void this.evaluate();
+    }
+    onCustomEvent(name) {
+      void this.evaluate(name);
+    }
+    destroy() {
+      this.destroyed = true;
+      this.renderer.destroy();
+      this.activeId = null;
+    }
+    async shown(experience) {
+      if (this.activeId !== experience.id || this.impressionId) return;
+      this.state.markSeen(experience.id);
+      const result = await this.post(experience, "shown");
+      this.impressionId = (result == null ? void 0 : result.impressionId) ?? null;
+    }
+    handleAction(experience, action) {
+      var _a;
+      void this.record(experience, "action", action.type);
+      if (action.type === "open_url" && action.url) window.location.assign(action.url);
+      if (action.type === "track_event" && action.eventName) (_a = this.trackEvent) == null ? void 0 : _a.call(this, action.eventName);
+    }
+    async record(experience, event, action) {
+      await this.post(experience, event, action);
+      if (event !== "action") {
+        this.activeId = null;
+        this.impressionId = null;
+      }
+    }
+    async post(experience, event, action) {
+      try {
+        const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: this.impressionId ?? void 0, event, action }) });
+        return response.ok && response.status !== 204 ? await response.json() : null;
+      } catch {
+        return null;
+      }
+    }
+  }
+  const ExperienceLoader$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    ExperienceLoader
+  }, Symbol.toStringTag, { value: "Module" }));
 })();
 //# sourceMappingURL=sdk.js.map

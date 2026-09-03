@@ -29,4 +29,5 @@ export declare class SessionManager {
     getPageViewId(): string;
     /** Allow identify() to bind a known user id to the anonymous id (kept locally only). */
     identify(userId: string): void;
+    getIdentifiedUserId(): string | null;
 }

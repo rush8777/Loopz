@@ -92,6 +92,8 @@ export type {
   FeedbackConfig,
 } from "./types/config";
 
+export type { ExperienceKind, WidgetType, ExperienceTarget, RuntimeDefinition, DeliveredExperience } from "./experiences/types";
+
 export type { FunnelStep } from "./types/funnel";
 
 export type {

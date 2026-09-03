@@ -99,4 +99,8 @@ export class SessionManager {
     localStore.set(ANON_ID_KEY, this.anonymousId); // anonymousId persists regardless
     sessionStore.set("__aa_identified_user__", userId);
   }
+
+  getIdentifiedUserId(): string | null {
+    return sessionStore.get("__aa_identified_user__");
+  }
 }

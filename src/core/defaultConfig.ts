@@ -68,5 +68,6 @@ export function resolveConfig(input: AnalyticsConfig): ResolvedAnalyticsConfig {
       flushIntervalMs: input.feedback?.flushIntervalMs ?? 3000,
       autoDismissMs: input.feedback?.autoDismissMs ?? 12_000,
     },
+    experiences: { enabled: input.experiences?.enabled ?? true },
   };
 }

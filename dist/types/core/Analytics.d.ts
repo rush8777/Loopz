@@ -15,6 +15,8 @@ export declare class Analytics {
     private batcher;
     private routeObserver;
     private heatmaps;
+    private experiences;
+    private editor;
     private debugEnabled;
     private initialized;
     private running;
