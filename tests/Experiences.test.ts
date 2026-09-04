@@ -46,6 +46,18 @@ describe("experience editor and runtime", () => {
     for (const type of ["toast", "cursor_follow"] as const) { const renderer = new ExperienceRenderer(); expect(renderer.render(base(type), { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() })).toBe(true); if (type === "cursor_follow") window.dispatchEvent(new MouseEvent("pointermove", { clientX: 40, clientY: 50 })); renderer.destroy(); expect(document.querySelector("[data-loopz-experience]")).toBeNull(); }
   });
 
+  it("renders modal, slideout, banner, and hotspot widgets through the shared lifecycle", () => {
+    const callbacks = { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() };
+    const modal = base("modal"); if (!isGuide(modal)) modal.definition.behavior = { dismissible: true, modalLayout: "fullscreen", backdrop: true, closeOnBackdrop: true };
+    const modalRenderer = new ExperienceRenderer(); expect(modalRenderer.render(modal, callbacks)).toBe(true); let root = document.querySelector("[data-loopz-experience]")!.shadowRoot!; expect(root.querySelector(".modal")?.getAttribute("data-layout")).toBe("fullscreen"); expect(root.querySelector(".backdrop")).not.toBeNull(); modalRenderer.destroy();
+    const slideout = base("slideout"); if (!isGuide(slideout)) slideout.definition.behavior = { dismissible: true, slideoutPosition: "center-left" };
+    const slideoutRenderer = new ExperienceRenderer(); expect(slideoutRenderer.render(slideout, callbacks)).toBe(true); root = document.querySelector("[data-loopz-experience]")!.shadowRoot!; expect(root.querySelector(".slideout")?.getAttribute("data-position")).toBe("center-left"); slideoutRenderer.destroy();
+    const banner = base("banner"); if (!isGuide(banner)) banner.definition.behavior = { dismissible: true, bannerPosition: "bottom" };
+    const bannerRenderer = new ExperienceRenderer(); expect(bannerRenderer.render(banner, callbacks)).toBe(true); root = document.querySelector("[data-loopz-experience]")!.shadowRoot!; expect(root.querySelector(".banner")?.getAttribute("data-position")).toBe("bottom"); bannerRenderer.destroy();
+    const target = document.createElement("button"); target.id = "feature"; document.body.appendChild(target); const hotspot = base("hotspot"); if (!isGuide(hotspot)) { hotspot.definition.target = { primarySelector: "#feature", fallbackSelectors: [], reliability: "reliable" }; hotspot.definition.behavior = { dismissible: true, hotspotStyle: "question", hotspotColor: "#ef4444" }; }
+    const hotspotRenderer = new ExperienceRenderer(); expect(hotspotRenderer.render(hotspot, callbacks)).toBe(true); root = document.querySelector("[data-loopz-experience]")!.shadowRoot!; const beacon = root.querySelector<HTMLButtonElement>(".hotspot")!; expect(beacon.dataset.style).toBe("question"); expect(root.querySelector(".card")).toBeNull(); beacon.click(); expect(root.querySelector(".card")?.textContent).toContain("Hello"); hotspotRenderer.destroy(); expect(document.querySelector("[data-loopz-experience]")).toBeNull();
+  });
+
   it("does not record an impression when an eligible anchored target is missing", async () => {
     const experience = base("anchored_card"); const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ experiences: [experience] }) }); vi.stubGlobal("fetch", fetchMock);
     const loader = new ExperienceLoader("https://api.example.com", "site_1", new SessionManager()); await loader.evaluate();

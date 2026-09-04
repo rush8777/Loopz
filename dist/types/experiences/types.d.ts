@@ -1,5 +1,5 @@
 export type ExperienceKind = "guide" | "widget";
-export type WidgetType = "anchored_card" | "toast" | "cursor_follow";
+export type WidgetType = "anchored_card" | "toast" | "cursor_follow" | "modal" | "slideout" | "hotspot" | "banner";
 export interface ExperienceAction {
     label: string;
     type: "dismiss" | "next_step" | "open_url" | "track_event";
@@ -44,6 +44,14 @@ export interface ExperienceBehavior {
         x: number;
         y: number;
     };
+    modalLayout?: "center" | "fullscreen";
+    backdrop?: boolean;
+    backdropOpacity?: number;
+    closeOnBackdrop?: boolean;
+    slideoutPosition?: "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center-left" | "center-right";
+    bannerPosition?: "top" | "bottom";
+    hotspotStyle?: "pulse" | "dot" | "question";
+    hotspotColor?: string;
 }
 export interface GuideStep {
     id: string;
