@@ -1,6 +1,6 @@
-import type { ExperienceBehavior, ExperienceContent, ExperienceDesign } from "../types";
+import type { ExperienceBehavior, ExperienceContent, ExperienceDesign, WidgetBuilderState } from "../types";
 import { type RenderCallbacks } from "./AnchoredCardRenderer";
 export declare class ModalRenderer {
-    render(root: ShadowRoot, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks): HTMLElement;
+    render(root: ShadowRoot, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState): HTMLElement;
     destroy(): void;
 }

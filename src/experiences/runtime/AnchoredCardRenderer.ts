@@ -1,4 +1,5 @@
-import type { ExperienceBehavior, ExperienceContent, ExperienceDesign, ExperienceTarget } from "../types";
+import type { ExperienceBehavior, ExperienceContent, ExperienceDesign, ExperienceTarget, WidgetBuilderState } from "../types";
+import { mountBuilderContent } from "./BuilderContent";
 
 export interface RenderCallbacks { onDismiss: () => void; onPrimary: () => void; onSecondary: () => void; onBack?: () => void }
 
@@ -21,7 +22,7 @@ export function waitForTarget(target: ExperienceTarget | undefined, onFound: (el
   return stop;
 }
 
-export function buildCard(root: ShadowRoot, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks): HTMLElement {
+export function buildCard(root: ShadowRoot, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState): HTMLElement {
   const card = document.createElement("section");
   card.className = "card";
   card.style.setProperty("--loopz-bg", design.theme.background);
@@ -29,20 +30,23 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
   card.style.setProperty("--loopz-primary", design.theme.primary);
   card.dataset.width = design.width; card.dataset.radius = design.theme.borderRadius;
   const close = behavior.dismissible ? `<button class="close" data-dismiss aria-label="Dismiss">×</button>` : "";
-  const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText(content.primaryAction.label)}</button>` : "";
-  const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText(content.secondaryAction.label)}</button>` : "";
-  card.innerHTML = `${close}<h2>${escapeText(content.heading)}</h2><p>${escapeText(content.body)}</p><footer>${secondary}${primary}</footer>`;
+  card.innerHTML = close;
   card.querySelector("[data-dismiss]")?.addEventListener("click", callbacks.onDismiss);
-  card.querySelector("[data-primary]")?.addEventListener("click", callbacks.onPrimary);
-  card.querySelector("[data-secondary]")?.addEventListener("click", callbacks.onSecondary);
+  if (!builder || !mountBuilderContent(root, card, builder, callbacks)) {
+    const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText(content.primaryAction.label)}</button>` : "";
+    const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText(content.secondaryAction.label)}</button>` : "";
+    card.insertAdjacentHTML("beforeend", `<div class="legacy-content"><h2>${escapeText(content.heading)}</h2><p>${escapeText(content.body)}</p><footer>${secondary}${primary}</footer></div>`);
+    card.querySelector("[data-primary]")?.addEventListener("click", callbacks.onPrimary);
+    card.querySelector("[data-secondary]")?.addEventListener("click", callbacks.onSecondary);
+  }
   root.appendChild(card);
   return card;
 }
 
 export class AnchoredCardRenderer {
   private cleanup: Array<() => void> = [];
-  render(root: ShadowRoot, target: Element, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks): HTMLElement {
-    const card = buildCard(root, content, design, behavior, callbacks);
+  render(root: ShadowRoot, target: Element, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState): HTMLElement {
+    const card = buildCard(root, content, design, behavior, callbacks, builder);
     const update = () => position(card, target.getBoundingClientRect(), behavior);
     const onWindow = () => requestAnimationFrame(update);
     window.addEventListener("scroll", onWindow, true); window.addEventListener("resize", onWindow);

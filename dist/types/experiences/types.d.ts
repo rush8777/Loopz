@@ -32,6 +32,12 @@ export interface ExperienceDesign {
         borderRadius: "sm" | "md" | "lg";
     };
 }
+export interface WidgetBuilderState {
+    version: 1;
+    projectData: Record<string, unknown>;
+    html: string;
+    css: string;
+}
 export interface ExperienceBehavior {
     dismissible: boolean;
     zIndex?: number;
@@ -63,6 +69,7 @@ export interface RuntimeWidgetDefinition {
     content: ExperienceContent;
     design: ExperienceDesign;
     behavior: ExperienceBehavior;
+    builder?: WidgetBuilderState;
     target?: ExperienceTarget;
 }
 export interface RuntimeGuideDefinition {

@@ -2350,6 +2350,75 @@
       this.overlay = null;
     }
   }
+  const ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "H1", "H2", "H3", "H4", "P", "SPAN", "BUTTON", "IMG", "HR"]);
+  const ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "alt", "src", "width", "height", "data-loopz-action-id", "data-loopz-content", "data-loopz-widget-type"]);
+  function mountBuilderContent(root, card, builder, callbacks) {
+    const html = sanitizeBuilderHtml(builder.html);
+    const css = safeBuilderCss(builder.css);
+    if (!html || css === null) return false;
+    let style = root.querySelector("style[data-loopz-builder-style]");
+    if (!style) {
+      style = document.createElement("style");
+      style.dataset.loopzBuilderStyle = "";
+      root.appendChild(style);
+    }
+    style.textContent = `${css}
+${ISOLATION_CSS}`;
+    const content = document.createElement("div");
+    content.className = "builder-content";
+    content.dataset.loopzBuilderSurface = "";
+    content.append(...html);
+    card.appendChild(content);
+    card.classList.add("builder-card");
+    card.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target.closest("[data-loopz-action-id]") : null;
+      if (!target || !card.contains(target)) return;
+      if (target.dataset.loopzActionId === "primary") callbacks.onPrimary();
+      if (target.dataset.loopzActionId === "secondary") callbacks.onSecondary();
+    });
+    return true;
+  }
+  const ISOLATION_CSS = `[data-loopz-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-loopz-builder-surface]>.loopz-widget{position:relative!important;inset:auto!important;max-width:100%!important}`;
+  function sanitizeBuilderHtml(input) {
+    const template = document.createElement("template");
+    template.innerHTML = input;
+    for (const element of Array.from(template.content.querySelectorAll("*"))) {
+      if (!ALLOWED_TAGS.has(element.tagName)) {
+        if (/^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO)$/i.test(element.tagName)) element.remove();
+        else element.replaceWith(...Array.from(element.childNodes));
+        continue;
+      }
+      for (const attribute of Array.from(element.attributes)) {
+        const name = attribute.name.toLowerCase();
+        if (!ALLOWED_ATTRIBUTES.has(name) || name.startsWith("on") || /javascript\s*:/i.test(attribute.value)) element.removeAttribute(attribute.name);
+      }
+      const action = element.getAttribute("data-loopz-action-id");
+      if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-loopz-action-id");
+      if (element.tagName === "IMG") {
+        const source = element.getAttribute("src") ?? "";
+        if (source && !/^(https?:|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(source)) element.removeAttribute("src");
+      }
+    }
+    const root = template.content.querySelector(".loopz-widget");
+    if (!root) return null;
+    for (const slot of ["primary", "secondary"]) {
+      const actions = Array.from(template.content.querySelectorAll(`[data-loopz-action-id="${slot}"]`));
+      actions.slice(1).forEach((action) => action.remove());
+    }
+    return Array.from(template.content.childNodes);
+  }
+  function safeBuilderCss(input) {
+    const css = input.replace(/\/\*[\s\S]*?\*\//g, "").trim();
+    if (/@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i.test(css)) return null;
+    const rule = /([^{}]+)\{/g;
+    let match;
+    while ((match = rule.exec(css)) !== null) {
+      const prelude = match[1].trim();
+      if (!prelude || prelude.startsWith("@")) continue;
+      if (prelude.split(",").some((selector) => !selector.trim().includes(".loopz-widget"))) return null;
+    }
+    return css;
+  }
   function findTarget(target) {
     if (!target) return null;
     for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
@@ -2401,7 +2470,7 @@
     }, timeoutMs);
     return stop;
   }
-  function buildCard(root, content, design, behavior, callbacks) {
+  function buildCard(root, content, design, behavior, callbacks, builder) {
     var _a, _b, _c;
     const card = document.createElement("section");
     card.className = "card";
@@ -2411,12 +2480,15 @@
     card.dataset.width = design.width;
     card.dataset.radius = design.theme.borderRadius;
     const close = behavior.dismissible ? `<button class="close" data-dismiss aria-label="Dismiss">×</button>` : "";
-    const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText$1(content.primaryAction.label)}</button>` : "";
-    const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText$1(content.secondaryAction.label)}</button>` : "";
-    card.innerHTML = `${close}<h2>${escapeText$1(content.heading)}</h2><p>${escapeText$1(content.body)}</p><footer>${secondary}${primary}</footer>`;
+    card.innerHTML = close;
     (_a = card.querySelector("[data-dismiss]")) == null ? void 0 : _a.addEventListener("click", callbacks.onDismiss);
-    (_b = card.querySelector("[data-primary]")) == null ? void 0 : _b.addEventListener("click", callbacks.onPrimary);
-    (_c = card.querySelector("[data-secondary]")) == null ? void 0 : _c.addEventListener("click", callbacks.onSecondary);
+    if (!builder || !mountBuilderContent(root, card, builder, callbacks)) {
+      const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText$1(content.primaryAction.label)}</button>` : "";
+      const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText$1(content.secondaryAction.label)}</button>` : "";
+      card.insertAdjacentHTML("beforeend", `<div class="legacy-content"><h2>${escapeText$1(content.heading)}</h2><p>${escapeText$1(content.body)}</p><footer>${secondary}${primary}</footer></div>`);
+      (_b = card.querySelector("[data-primary]")) == null ? void 0 : _b.addEventListener("click", callbacks.onPrimary);
+      (_c = card.querySelector("[data-secondary]")) == null ? void 0 : _c.addEventListener("click", callbacks.onSecondary);
+    }
     root.appendChild(card);
     return card;
   }
@@ -2424,8 +2496,8 @@
     constructor() {
       this.cleanup = [];
     }
-    render(root, target, content, design, behavior, callbacks) {
-      const card = buildCard(root, content, design, behavior, callbacks);
+    render(root, target, content, design, behavior, callbacks, builder) {
+      const card = buildCard(root, content, design, behavior, callbacks, builder);
       const update = () => position(card, target.getBoundingClientRect(), behavior);
       const onWindow = () => requestAnimationFrame(update);
       window.addEventListener("scroll", onWindow, true);
@@ -2481,8 +2553,8 @@
     constructor() {
       this.timer = null;
     }
-    render(root, content, design, behavior, callbacks) {
-      const card = buildCard(root, content, design, behavior, callbacks);
+    render(root, content, design, behavior, callbacks, builder) {
+      const card = buildCard(root, content, design, behavior, callbacks, builder);
       card.classList.add("toast");
       card.dataset.position = behavior.toastPosition ?? "bottom-right";
       if (behavior.autoDismissMs) this.timer = window.setTimeout(callbacks.onDismiss, behavior.autoDismissMs);
@@ -2496,8 +2568,8 @@
     constructor() {
       this.cleanup = null;
     }
-    render(root, content, design, behavior, callbacks) {
-      const card = buildCard(root, content, design, behavior, callbacks);
+    render(root, content, design, behavior, callbacks, builder) {
+      const card = buildCard(root, content, design, behavior, callbacks, builder);
       card.classList.add("cursor");
       let frame = 0;
       let x = innerWidth / 2;
@@ -2529,7 +2601,7 @@
     }
   }
   class ModalRenderer {
-    render(root, content, design, behavior, callbacks) {
+    render(root, content, design, behavior, callbacks, builder) {
       if (behavior.backdrop !== false) {
         const backdrop = document.createElement("div");
         backdrop.className = "backdrop";
@@ -2537,7 +2609,7 @@
         if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
         root.appendChild(backdrop);
       }
-      const card = buildCard(root, content, design, behavior, callbacks);
+      const card = buildCard(root, content, design, behavior, callbacks, builder);
       card.classList.add("modal");
       card.dataset.layout = behavior.modalLayout ?? "center";
       return card;
@@ -2546,7 +2618,7 @@
     }
   }
   class SlideoutRenderer {
-    render(root, content, design, behavior, callbacks) {
+    render(root, content, design, behavior, callbacks, builder) {
       if (behavior.backdrop) {
         const backdrop = document.createElement("div");
         backdrop.className = "backdrop";
@@ -2554,7 +2626,7 @@
         if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
         root.appendChild(backdrop);
       }
-      const card = buildCard(root, content, design, behavior, callbacks);
+      const card = buildCard(root, content, design, behavior, callbacks, builder);
       card.classList.add("slideout");
       card.dataset.position = behavior.slideoutPosition ?? "bottom-right";
       return card;
@@ -2568,7 +2640,7 @@
       this.cardRenderer = null;
       this.card = null;
     }
-    render(root, target, content, design, behavior, callbacks) {
+    render(root, target, content, design, behavior, callbacks, builder) {
       const beacon = document.createElement("button");
       beacon.className = "hotspot";
       beacon.dataset.style = behavior.hotspotStyle ?? "pulse";
@@ -2593,7 +2665,7 @@
           return;
         }
         this.cardRenderer = new AnchoredCardRenderer();
-        this.card = this.cardRenderer.render(root, target, content, design, behavior, callbacks);
+        this.card = this.cardRenderer.render(root, target, content, design, behavior, callbacks, builder);
       };
       beacon.addEventListener("click", toggle);
       window.addEventListener("scroll", schedule, true);
@@ -2616,8 +2688,8 @@
     }
   }
   class BannerRenderer {
-    render(root, content, design, behavior, callbacks) {
-      const card = buildCard(root, content, design, behavior, callbacks);
+    render(root, content, design, behavior, callbacks, builder) {
+      const card = buildCard(root, content, design, behavior, callbacks, builder);
       card.classList.add("banner");
       card.dataset.position = behavior.bannerPosition ?? "top";
       return card;
@@ -2638,9 +2710,10 @@
       if (isGuideDefinition(experience.definition)) return this.renderGuide(experience, experience.definition, callbacks);
       return this.renderWidget(experience, experience.definition, callbacks);
     }
-    root() {
+    root(experienceId) {
       this.host = document.createElement("div");
-      this.host.dataset.loopzExperience = "";
+      this.host.dataset.loopzExperience = experienceId;
+      this.host.dataset.loopzExperienceRoot = experienceId;
       this.host.style.cssText = "position:fixed;inset:0;z-index:2147483000;pointer-events:none";
       const root = this.host.attachShadow({ mode: "open" });
       const style = document.createElement("style");
@@ -2652,10 +2725,10 @@
     renderWidget(experience, definition, callbacks) {
       if (experience.widgetType === "anchored_card" || experience.widgetType === "hotspot") {
         const mount = (target2) => {
-          const root = this.root();
+          const root = this.root(experience.id);
           const renderer = experience.widgetType === "hotspot" ? new HotspotRenderer() : new AnchoredCardRenderer();
           this.renderer = renderer;
-          renderer.render(root, target2, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks));
+          renderer.render(root, target2, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
           requestAnimationFrame(callbacks.onVisible);
         };
         const target = findTarget(definition.target);
@@ -2669,30 +2742,30 @@
           (_a = callbacks.onUnavailable) == null ? void 0 : _a.call(callbacks);
         });
       } else if (experience.widgetType === "toast") {
-        const root = this.root();
+        const root = this.root(experience.id);
         const renderer = new ToastRenderer();
         this.renderer = renderer;
-        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks));
+        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else if (experience.widgetType === "cursor_follow") {
-        const root = this.root();
+        const root = this.root(experience.id);
         const renderer = new CursorFollowRenderer();
         this.renderer = renderer;
-        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks));
+        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else if (experience.widgetType === "modal") {
-        const root = this.root();
+        const root = this.root(experience.id);
         const renderer = new ModalRenderer();
         this.renderer = renderer;
-        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks));
+        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else if (experience.widgetType === "slideout") {
-        const root = this.root();
+        const root = this.root(experience.id);
         const renderer = new SlideoutRenderer();
         this.renderer = renderer;
-        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks));
+        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else if (experience.widgetType === "banner") {
-        const root = this.root();
+        const root = this.root(experience.id);
         const renderer = new BannerRenderer();
         this.renderer = renderer;
-        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks));
+        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else return false;
       if (experience.widgetType !== "anchored_card" && experience.widgetType !== "hotspot") requestAnimationFrame(callbacks.onVisible);
       return true;
@@ -2702,7 +2775,7 @@
       if (!step) return false;
       const mount = (target2) => {
         var _a;
-        const root = this.root();
+        const root = this.root(experience.id);
         const renderer = new AnchoredCardRenderer();
         this.renderer = renderer;
         const behavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset };
@@ -2790,6 +2863,7 @@
   const STYLES = `
   :host{all:initial}.card{pointer-events:auto;position:fixed;box-sizing:border-box;width:320px;max-width:calc(100vw - 16px);padding:18px;background:var(--loopz-bg);color:var(--loopz-fg);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-shadow:0 12px 38px rgba(0,0,0,.22);border:1px solid rgba(0,0,0,.12)}
   .card[data-width=sm]{width:260px}.card[data-width=lg]{width:400px}.card[data-radius=sm]{border-radius:6px}.card[data-radius=md]{border-radius:12px}.card[data-radius=lg]{border-radius:20px}
+  .builder-card{padding:0;background:transparent;border:0;box-shadow:none}.builder-card:not(.banner){width:max-content}.builder-content{box-sizing:border-box;width:100%;max-width:100%}.builder-content>.loopz-widget{max-width:100%}.builder-card>.close{z-index:2}
   h2{font:600 17px/1.3 ui-sans-serif,system-ui,sans-serif;margin:0 24px 7px 0}p{margin:0;white-space:pre-wrap}footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}button{border:0;border-radius:7px;padding:8px 12px;font:600 13px ui-sans-serif,system-ui,sans-serif;cursor:pointer}.primary{background:var(--loopz-primary);color:#fff}.secondary{background:transparent;color:inherit}.close{position:absolute;right:8px;top:7px;padding:3px 7px;background:transparent;color:inherit;font-size:20px}
   .toast{position:fixed!important}.toast[data-position=top-left]{top:16px;left:16px}.toast[data-position=top-right]{top:16px;right:16px}.toast[data-position=bottom-left]{bottom:16px;left:16px}.toast[data-position=bottom-right]{bottom:16px;right:16px}.cursor{will-change:left,top}@media(prefers-reduced-motion:reduce){.card{transition:none!important}}
   .backdrop{pointer-events:auto;position:fixed;inset:0;background:rgba(0,0,0,var(--loopz-backdrop-opacity,.45))}

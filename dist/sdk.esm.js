@@ -1,4 +1,4 @@
-import { A, c } from "./module-DF701WYw.js";
+import { A, c } from "./module-Ddntzl8y.js";
 export {
   A as Analytics,
   c as createAnalytics

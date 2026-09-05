@@ -1,4 +1,4 @@
-import type { ExperienceBehavior, ExperienceContent, ExperienceDesign } from "../types";
+import type { ExperienceBehavior, ExperienceContent, ExperienceDesign, WidgetBuilderState } from "../types";
 import { AnchoredCardRenderer, type RenderCallbacks } from "./AnchoredCardRenderer";
 
 export class HotspotRenderer {
@@ -6,7 +6,7 @@ export class HotspotRenderer {
   private cardRenderer: AnchoredCardRenderer | null = null;
   private card: HTMLElement | null = null;
 
-  render(root: ShadowRoot, target: Element, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks): HTMLElement {
+  render(root: ShadowRoot, target: Element, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState): HTMLElement {
     const beacon = document.createElement("button");
     beacon.className = "hotspot";
     beacon.dataset.style = behavior.hotspotStyle ?? "pulse";
@@ -25,7 +25,7 @@ export class HotspotRenderer {
     const toggle = () => {
       if (this.card) { this.card.remove(); this.card = null; this.cardRenderer?.destroy(); this.cardRenderer = null; return; }
       this.cardRenderer = new AnchoredCardRenderer();
-      this.card = this.cardRenderer.render(root, target, content, design, behavior, callbacks);
+      this.card = this.cardRenderer.render(root, target, content, design, behavior, callbacks, builder);
     };
     beacon.addEventListener("click", toggle);
     window.addEventListener("scroll", schedule, true);

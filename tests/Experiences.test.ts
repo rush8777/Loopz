@@ -9,6 +9,7 @@ import type { DeliveredExperience, ExperienceDesign } from "../src/experiences/t
 
 const design: ExperienceDesign = { width: "md", theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } };
 const base = (widgetType: DeliveredExperience["widgetType"]): DeliveredExperience => ({ id: "exp_1", versionId: "v1", kind: "widget", widgetType, priority: 1, definition: { content: { heading: "Hello", body: "World" }, design, behavior: { dismissible: true, toastPosition: "bottom-right", cursorOffset: { x: 12, y: 12 } } } });
+function withBuilder(experience: DeliveredExperience, label = "Builder content"): DeliveredExperience { if (!isGuide(experience)) { experience.definition.content.primaryAction = { label: "Legacy action", type: "dismiss" }; experience.definition.builder = { version: 1, projectData: {}, html: `<section class="loopz-widget"><h2>${label}</h2><button data-loopz-action-id="primary"><span>Continue</span></button></section>`, css: `.loopz-widget{color:rgb(1,2,3)}` }; } return experience; }
 
 describe("experience editor and runtime", () => {
   beforeEach(() => { document.body.innerHTML = ""; localStorage.clear(); sessionStorage.clear(); vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => { fn(0); return 1; }); });
@@ -18,9 +19,9 @@ describe("experience editor and runtime", () => {
     history.replaceState({}, "", "/?loopz_editor_token=secret");
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ sessionId: "ees_1", accessToken: "access", expiresAt: new Date(Date.now() + 60000).toISOString() }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ experience: { id: "exp_1", name: "Draft", kind: "widget", widgetType: "toast" }, version: { id: "v1", versionNumber: 1, definition: { ...base("toast").definition, targeting: { pageRules: [], audience: { type: "all" }, trigger: { type: "page_load" }, frequency: { mode: "once" }, priority: 0 } } } }) });
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ experience: { id: "exp_1", name: "Draft", kind: "widget", widgetType: "toast" }, version: { id: "v1", versionNumber: 1, definition: { ...withBuilder(base("toast"), "Draft builder preview").definition, targeting: { pageRules: [], audience: { type: "all" }, trigger: { type: "page_load" }, frequency: { mode: "once" }, priority: 0 } } } }) });
     vi.stubGlobal("fetch", fetchMock); const controller = new EditorModeController("https://api.example.com");
-    expect(await controller.start("secret")).toBe(true); expect(location.search).not.toContain("loopz_editor_token"); expect(document.querySelector("[data-loopz-editor]")).not.toBeNull(); controller.destroy();
+    expect(await controller.start("secret")).toBe(true); expect(location.search).not.toContain("loopz_editor_token"); expect(document.querySelector("[data-loopz-editor]")).not.toBeNull(); expect(document.querySelector("[data-loopz-experience]")?.shadowRoot?.textContent).toContain("Draft builder preview"); controller.destroy();
   });
 
   it("leaves the token and host DOM untouched when validation fails", async () => {
@@ -44,6 +45,29 @@ describe("experience editor and runtime", () => {
 
   it("mounts and safely destroys toast and cursor-follow lifecycles", () => {
     for (const type of ["toast", "cursor_follow"] as const) { const renderer = new ExperienceRenderer(); expect(renderer.render(base(type), { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() })).toBe(true); if (type === "cursor_follow") window.dispatchEvent(new MouseEvent("pointermove", { clientX: 40, clientY: 50 })); renderer.destroy(); expect(document.querySelector("[data-loopz-experience]")).toBeNull(); }
+  });
+
+  it("renders builder markup through every widget shell while preserving runtime behavior", () => {
+    const target = document.createElement("button"); target.id = "builder-target"; document.body.appendChild(target);
+    for (const type of ["anchored_card", "toast", "cursor_follow", "modal", "slideout", "banner", "hotspot"] as const) {
+      const experience = withBuilder(base(type), `Builder ${type}`); if (!isGuide(experience) && (type === "anchored_card" || type === "hotspot")) experience.definition.target = { primarySelector: "#builder-target", fallbackSelectors: [], reliability: "reliable" };
+      const renderer = new ExperienceRenderer(); expect(renderer.render(experience, { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() })).toBe(true);
+      const root = document.querySelector(`[data-loopz-experience-root="${experience.id}"]`)!.shadowRoot!; if (type === "hotspot") root.querySelector<HTMLButtonElement>(".hotspot")!.click();
+      expect(root.querySelector(".loopz-widget")?.textContent).toContain(`Builder ${type}`); expect(root.querySelector("style[data-loopz-builder-style]")?.textContent).toContain("rgb(1,2,3)"); if (type === "hotspot") { const beacon = root.querySelector<HTMLButtonElement>(".hotspot")!; beacon.click(); beacon.click(); expect(root.querySelectorAll("style[data-loopz-builder-style]")).toHaveLength(1); } renderer.destroy();
+    }
+  });
+
+  it("sanitizes builder HTML, delegates Loopz actions, and falls back for unsafe builder data", () => {
+    const callbacks = { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() }; const built = withBuilder(base("toast")); if (!isGuide(built)) built.definition.builder!.html = '<section class="loopz-widget"><script>window.bad=1</script><button onclick="window.bad=2" data-loopz-action-id="primary"><span>Act</span></button></section>';
+    const renderer = new ExperienceRenderer(); renderer.render(built, callbacks); let root = document.querySelector("[data-loopz-experience]")!.shadowRoot!; expect(root.querySelector("script")).toBeNull(); expect(root.querySelector("[onclick]")).toBeNull(); root.querySelector<HTMLSpanElement>("[data-loopz-action-id=primary] span")!.click(); expect(callbacks.onAction).toHaveBeenCalledWith(expect.objectContaining({ type: "dismiss" })); renderer.destroy();
+    const unsafe = withBuilder(base("toast")); if (!isGuide(unsafe)) unsafe.definition.builder!.css = "body{display:none}"; renderer.render(unsafe, callbacks); root = document.querySelector("[data-loopz-experience]")!.shadowRoot!; expect(root.querySelector(".loopz-widget")).toBeNull(); expect(root.textContent).toContain("Hello"); renderer.destroy();
+    renderer.render(base("toast"), callbacks); root = document.querySelector("[data-loopz-experience]")!.shadowRoot!; expect(root.querySelector(".legacy-content")?.textContent).toContain("World"); renderer.destroy();
+  });
+
+  it("isolates and deduplicates builder CSS per experience ShadowRoot", () => {
+    const first = withBuilder(base("toast"), "First"); first.id = "exp_a"; const second = withBuilder(base("toast"), "Second"); second.id = "exp_b"; if (!isGuide(second)) second.definition.builder!.css = ".loopz-widget{color:blue}";
+    const firstRenderer = new ExperienceRenderer(), secondRenderer = new ExperienceRenderer(); const callbacks = { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() }; firstRenderer.render(first, callbacks); secondRenderer.render(second, callbacks);
+    const firstRoot = document.querySelector('[data-loopz-experience-root="exp_a"]')!.shadowRoot!, secondRoot = document.querySelector('[data-loopz-experience-root="exp_b"]')!.shadowRoot!; expect(firstRoot.querySelectorAll("style[data-loopz-builder-style]")).toHaveLength(1); expect(secondRoot.querySelectorAll("style[data-loopz-builder-style]")).toHaveLength(1); expect(firstRoot.querySelector("style[data-loopz-builder-style]")?.textContent).not.toBe(secondRoot.querySelector("style[data-loopz-builder-style]")?.textContent); expect(document.querySelector("style[data-loopz-builder-style]")).toBeNull(); firstRenderer.destroy(); expect(document.querySelector('[data-loopz-experience-root="exp_b"]')).not.toBeNull(); secondRenderer.destroy();
   });
 
   it("renders modal, slideout, banner, and hotspot widgets through the shared lifecycle", () => {
