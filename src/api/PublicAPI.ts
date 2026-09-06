@@ -95,3 +95,17 @@ export function installPublicAPI(globalNames: string[]): Analytics {
 
   return analytics;
 }
+
+/** Auto-initializes the CDN build when its own script carries data-site-id. */
+export function autoInitializeFromScript(
+  analytics: Analytics,
+  script: HTMLScriptElement | null
+): void {
+  const siteId = script?.dataset.siteId?.trim();
+  if (!siteId) return;
+
+  analytics.init({
+    siteId,
+    endpoint: script?.dataset.endpoint?.trim() || undefined,
+  });
+}

@@ -1,5 +1,6 @@
 import type { AnalyticsConfig } from "../types/config";
 import type { FunnelStep } from "../types/funnel";
+import type { AnalyticsRuntimeProviders } from "../experiences/runtimeInterfaces";
 /**
  * The core SDK instance. Owns configuration, session identity, the
  * autocapture engine, and the delivery pipeline. This is the only class
@@ -7,6 +8,7 @@ import type { FunnelStep } from "../types/funnel";
  * never talk to the network directly.
  */
 export declare class Analytics {
+    private runtimeProviders;
     private config;
     private session;
     private engine;
@@ -22,7 +24,9 @@ export declare class Analytics {
     private debugEnabled;
     private initialized;
     private running;
+    private generation;
     private unsubscribers;
+    constructor(runtimeProviders?: AnalyticsRuntimeProviders);
     init(userConfig: AnalyticsConfig): void;
     start(): void;
     stop(): void;
@@ -34,6 +38,9 @@ export declare class Analytics {
     enableDebug(): void;
     disableDebug(): void;
     private requireInit;
+    private initializeEditor;
+    private fallbackFromEditor;
+    private initializeExperiences;
     private wireCollectorsToPipeline;
     private trackPageView;
     private onRouteChange;

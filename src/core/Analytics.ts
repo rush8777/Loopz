@@ -28,8 +28,12 @@ import type {
 import type { FunnelStep } from "../types/funnel";
 import { RouteObserver } from "../dom/RouteObserver";
 import { HeatmapManager } from "../heatmaps/HeatmapManager";
-import type { ExperienceLoader } from "../experiences/runtime/ExperienceLoader";
-import type { EditorModeController } from "../experiences/editor/EditorModeController";
+import { loadEditorRuntime, loadExperienceRuntime } from "../experiences/loadRuntimes";
+import type {
+  AnalyticsRuntimeProviders,
+  EditorControllerRuntime,
+  ExperienceLoaderRuntime,
+} from "../experiences/runtimeInterfaces";
 
 /**
  * The core SDK instance. Owns configuration, session identity, the
@@ -46,15 +50,18 @@ export class Analytics {
   private batcher!: Batcher;
   private routeObserver = new RouteObserver();
   private heatmaps!: HeatmapManager;
-  private experiences: ExperienceLoader | null = null;
-  private editor: EditorModeController | null = null;
+  private experiences: ExperienceLoaderRuntime | null = null;
+  private editor: EditorControllerRuntime | null = null;
   private editorMode = false;
   private editorAttempted = false;
 
   private debugEnabled = false;
   private initialized = false;
   private running = false;
+  private generation = 0;
   private unsubscribers: Array<() => void> = [];
+
+  constructor(private runtimeProviders: AnalyticsRuntimeProviders = {}) {}
 
   init(userConfig: AnalyticsConfig): void {
     if (this.initialized) {
@@ -64,6 +71,7 @@ export class Analytics {
 
     this.config = resolveConfig(userConfig);
     this.debugEnabled = !!this.config.debug;
+    const generation = ++this.generation;
 
     const editorToken = new URL(location.href).searchParams.get("loopz_editor_token");
     if (editorToken && !this.editorAttempted) {
@@ -71,20 +79,7 @@ export class Analytics {
       // existing editor token exchange has decided whether this is an editor.
       this.initialized = true;
       this.editorAttempted = true;
-      void import("../experiences/editor/EditorModeController").then(async ({ EditorModeController }) => {
-        if (!this.initialized) return;
-        const editor = new EditorModeController(this.config.endpoint);
-        if (await editor.start(editorToken)) {
-          this.editor = editor;
-          this.editorMode = true;
-          this.log("experience editor mode initialized");
-          return;
-        }
-        // Invalid/expired tokens retain the established secure failure path:
-        // no editor is mounted, and the page continues as a normal visit.
-        this.initialized = false;
-        this.init(userConfig);
-      }).catch(() => { this.initialized = false; this.init(userConfig); });
+      void this.initializeEditor(editorToken, userConfig, generation);
       return;
     }
 
@@ -123,11 +118,7 @@ export class Analytics {
     this.trackPageView();
 
     if (this.config.experiences.enabled) {
-      void import("../experiences/runtime/ExperienceLoader").then(({ ExperienceLoader }) => {
-        if (!this.initialized) return;
-        this.experiences = new ExperienceLoader(this.config.endpoint, this.config.siteId, this.session, (name) => this.event(name));
-        void this.experiences.evaluate();
-      }).catch(() => void 0);
+      void this.initializeExperiences(generation);
     }
   }
 
@@ -148,6 +139,7 @@ export class Analytics {
   }
 
   destroy(): void {
+    this.generation++;
     this.stop();
     this.routeObserver.stop();
     this.engine?.destroyElementDiscovery();
@@ -214,6 +206,60 @@ export class Analytics {
       return false;
     }
     return true;
+  }
+
+  private async initializeEditor(editorToken: string, userConfig: AnalyticsConfig, generation: number): Promise<void> {
+    try {
+      const runtime = this.runtimeProviders.editor ?? await loadEditorRuntime(this.config.editorRuntimeBundleUrl);
+      if (!this.initialized || generation !== this.generation) return;
+      if (!runtime) {
+        this.fallbackFromEditor(userConfig, generation);
+        return;
+      }
+
+      const editor = runtime.createController(this.config.endpoint);
+      const started = await editor.start(editorToken);
+      if (!this.initialized || generation !== this.generation) {
+        editor.destroy();
+        return;
+      }
+
+      if (started) {
+        this.editor = editor;
+        this.editorMode = true;
+        this.log("experience editor mode initialized");
+        return;
+      }
+
+      editor.destroy();
+      this.fallbackFromEditor(userConfig, generation);
+    } catch {
+      this.fallbackFromEditor(userConfig, generation);
+    }
+  }
+
+  private fallbackFromEditor(userConfig: AnalyticsConfig, generation: number): void {
+    if (!this.initialized || generation !== this.generation) return;
+    // Invalid/expired tokens and editor bundle failures retain the established
+    // secure failure path: no editor mounts and the page becomes a normal visit.
+    this.initialized = false;
+    this.init(userConfig);
+  }
+
+  private async initializeExperiences(generation: number): Promise<void> {
+    try {
+      const runtime = this.runtimeProviders.experiences ?? await loadExperienceRuntime(this.config.experienceRuntimeBundleUrl);
+      if (!runtime || !this.initialized || this.editorMode || generation !== this.generation) return;
+      this.experiences = runtime.createLoader(
+        this.config.endpoint,
+        this.config.siteId,
+        this.session,
+        (name) => this.event(name)
+      );
+      await this.experiences.evaluate();
+    } catch {
+      // Experience delivery is isolated from analytics and host application code.
+    }
   }
 
   private wireCollectorsToPipeline(): void {

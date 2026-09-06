@@ -7,24 +7,19 @@ manual instrumentation.
 
 ```html
 <head>
-<script>
-(function (w, d, s, u) {
-  w.analytics = w.analytics || { q: [], init: function () { this.q.push(["init", ...arguments]); } };
-  ["start","stop","destroy","event","identify","page","defineFunnel","enableDebug","disableDebug"]
-    .forEach(function (m) { w.analytics[m] = w.analytics[m] || function () { w.analytics.q.push([m, ...arguments]); }; });
-  var script = d.createElement(s);
-  script.async = true;
-  script.src = u;
-  d.getElementsByTagName(s)[0].parentNode.insertBefore(script, d.getElementsByTagName(s)[0]);
-})(window, document, "script", "https://cdn.yourdomain.com/sdk.js");
-
-analytics.init({ siteId: "YOUR_SITE_ID" });
-</script>
+<script async src="https://cdn.movcues.com/v1.js" data-site-id="YOUR_SITE_ID"></script>
 </head>
 ```
 
 That's the entire installation. No other code, no imports, no tracking
-attributes on your buttons or links.
+attributes on your buttons or links. The core reads `data-site-id` and
+initializes itself. Experience delivery, visual editor, replay, and heatmap
+capture code remain separate CDN resources and are fetched only when needed.
+
+Existing manual and queued integrations remain supported. Loading `sdk.js`
+without `data-site-id` and calling `analytics.init({...})` still works, and a
+queued manual `init` wins before auto-initialization so collectors are never
+started twice.
 
 ```html
 <button>Add to cart</button>   <!-- automatically captured, no code needed -->
@@ -79,7 +74,7 @@ src/
   dom/          selector generation, SPA route observation, DOM helpers
   api/          public window.analytics API + command-queue draining
   types/        shared TypeScript types (events, config, funnels)
-  index.ts      CDN entry point (builds into dist/sdk.js)
+  index.ts      CDN entry point (builds into dist/sdk.js, sdk.min.js, and v1.js)
   module.ts     npm/ESM entry point (builds into dist/sdk.esm.js)
 bootstrap/
   install-snippet.html   copy-pasteable snippet
@@ -89,10 +84,14 @@ examples/
   nextjs/       both the CDN <Script> method and the ESM method
   esm/          minimal framework-agnostic ESM usage
 dist/
-  sdk.js            readable IIFE build (CDN <script> tag)
-  sdk.min.js        minified IIFE build (~7KB gzipped)
-  sdk.esm.js        ES module build (npm import)
-  types/            .d.ts declarations for the ESM build
+  sdk.js                    readable core IIFE build
+  sdk.min.js / v1.js        minified core IIFE builds
+  sdk-experiences(.min).js  lazy experience-delivery runtime
+  sdk-editor(.min).js       lazy visual-editor runtime
+  sdk-replay(.min).js       lazy rrweb runtime
+  sdk-heatmap(.min).js      lazy snapshot runtime
+  sdk.esm.js                single-file ES module build (npm import)
+  types/                    .d.ts declarations for the ESM build
 docs/
   ARCHITECTURE.md, EVENT_SCHEMA.md, PRIVACY.md, PERFORMANCE.md
 ```
@@ -104,13 +103,13 @@ npm install
 npm run build
 ```
 
-`npm run build` runs Vite for each target (core IIFE, minified IIFE,
-replay IIFE + minified, and the ES module build) and then `tsc` to emit
+`npm run build` cleans `dist` once, then runs Vite for each target (core,
+experiences, editor, replay, and heatmap IIFEs in readable/minified forms,
+the `v1.js` CDN alias, and the ES module build) and then `tsc` to emit
 `.d.ts` declarations. The IIFE bundles are dependency-free — no React, no
-runtime dependencies — safe to serve from any static CDN. The ES module
-build leaves `rrweb` external (it's a real npm dependency of this package;
-your own bundler resolves and dedupes it) and has no side effects on
-import.
+runtime dependencies — safe to serve from any static CDN. The ES module has
+no side effects on import and uses module-native experience/editor factories,
+so npm consumers do not depend on CDN globals.
 
 ## Running the demo
 
@@ -132,7 +131,7 @@ live on the page.
 ## Public API
 
 ```javascript
-analytics.init(config)          // required - siteId is mandatory
+analytics.init(config)          // manual install/configuration; siteId is mandatory
 analytics.start()                // resume autocapture if stopped
 analytics.stop()                 // pause autocapture, keep queued events
 analytics.destroy()              // full teardown, removes all listeners

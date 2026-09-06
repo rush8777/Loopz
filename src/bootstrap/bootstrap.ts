@@ -1,8 +1,8 @@
 /**
- * This file is NOT bundled into dist/sdk.js. It exists purely as the
- * source-of-truth, type-checkable reference for the tiny inline snippet
- * that customers paste into their <head> (see bootstrap/install-snippet.html
- * and the README for the copy-pasteable version).
+ * Legacy programmatic bootstrap helper. The recommended installation is now
+ * the single data-site-id script tag in bootstrap/install-snippet.html; the
+ * SDK itself owns auto-initialization. This helper remains for compatibility
+ * with integrations that create the script element programmatically.
  *
  * The snippet's only job is to:
  *   1. Create a global queue stub synchronously (so analytics.event(...)
@@ -55,7 +55,8 @@ export function bootstrap(
 
   const script = d.createElement(scriptTag);
   script.async = true;
-  script.src = `${sdkUrl}?siteId=${encodeURIComponent(siteId)}`;
+  script.src = sdkUrl;
+  script.dataset.siteId = siteId;
 
   const first = d.getElementsByTagName(scriptTag)[0];
   if (first && first.parentNode) {

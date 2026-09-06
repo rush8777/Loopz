@@ -1,70 +1,71 @@
 import { defineConfig } from "vite";
 import { resolve } from "path";
 
-// Builds seven artifacts:
-//   dist/sdk.js              - core SDK, readable IIFE build (CDN <script> tag)
-//   dist/sdk.min.js          - core SDK, minified IIFE build (terser)
-//   dist/sdk-replay.js       - rrweb, readable IIFE build
-//   dist/sdk-replay.min.js   - rrweb, minified IIFE build (terser)
-//   dist/sdk-heatmap.js      - modern-screenshot capture bundle, readable IIFE
-//   dist/sdk-heatmap.min.js  - modern-screenshot capture bundle, minified IIFE
-//   dist/sdk.esm.js          - core SDK, real ES module (npm/bundler import)
-//
-// The core SDK never imports rrweb or modern-screenshot directly. Session replay (RRWebRecorder)
-// lazily injects a <script src="sdk-replay(.min).js"> only when a site has
-// sessionReplay.enabled and actually starts recording. This keeps rrweb's
-// weight (which dwarfs the rest of this SDK) off every site that doesn't
-// use replay, in EVERY build target - the ESM build included, since that
-// lazy-load is a runtime DOM script injection, not a module-graph import,
-// so it behaves identically whether the surrounding code is a global IIFE
-// or bundled into a React/Next.js app. The heatmap capture bundle follows
-// the same runtime injection model and loads only for an explicit capture.
-//
-// The IIFE builds are self-executing global scripts with zero runtime
-// dependencies, safe to drop into any site via a plain <script> tag. The
-// ESM build is a side-effect-free module (see src/module.ts) meant to be
-// `import`ed by a bundler - "rrweb" is left external there since it's
-// already a real npm dependency of this package and consumers' own
-// bundlers resolve/dedupe it rather than it being inlined twice.
-//
-// mode values: "development" (core, unminified) | "minify" (core, minified)
-//            | "replay" (replay, unminified)     | "replay-minify" (replay, minified)
-//            | "module" (core, ES module, unminified - consumer's bundler minifies)
-export default defineConfig(({ mode }) => {
-  const minify = mode.endsWith("minify");
-  const isReplay = mode.startsWith("replay");
-  const isHeatmap = mode.startsWith("heatmap");
-  const isModule = mode === "module";
+type BundleKind = "core" | "experiences" | "editor" | "replay" | "heatmap" | "module" | "v1";
 
-  const entry = isModule
-    ? "src/module.ts"
-    : isReplay
-      ? "src/session/replayBundleEntry.ts"
-      : isHeatmap
-        ? "src/heatmaps/snapshotBundleEntry.ts"
-      : "src/index.ts";
-  const name = isReplay ? "AutocaptureAnalyticsSDKReplay" : isHeatmap ? "LoopzHeatmapSnapshot" : "AutocaptureAnalyticsSDK";
-  const baseName = isReplay ? "sdk-replay" : isHeatmap ? "sdk-heatmap" : "sdk";
-  const fileName = isModule ? "sdk.esm.js" : minify ? `${baseName}.min.js` : `${baseName}.js`;
+/**
+ * Every CDN target is built as its own single-entry IIFE. The first
+ * (production/core) invocation cleans dist; subsequent modes preserve only
+ * artifacts produced during that same npm run build sequence.
+ */
+export default defineConfig(({ mode }) => {
+  const kind: BundleKind =
+    mode === "module" ? "module" :
+    mode === "v1" ? "v1" :
+    mode.startsWith("experiences") ? "experiences" :
+    mode.startsWith("editor") ? "editor" :
+    mode.startsWith("replay") ? "replay" :
+    mode.startsWith("heatmap") ? "heatmap" :
+    "core";
+
+  const minify = mode.endsWith("minify") || kind === "v1";
+  const entry: Record<BundleKind, string> = {
+    core: "src/index.ts",
+    v1: "src/index.ts",
+    experiences: "src/experiences/runtimeBundleEntry.ts",
+    editor: "src/experiences/editorBundleEntry.ts",
+    replay: "src/session/replayBundleEntry.ts",
+    heatmap: "src/heatmaps/snapshotBundleEntry.ts",
+    module: "src/module.ts",
+  };
+  const globalName: Record<Exclude<BundleKind, "module">, string> = {
+    core: "AutocaptureAnalyticsSDK",
+    v1: "AutocaptureAnalyticsSDK",
+    experiences: "MovcuesExperienceRuntimeBundle",
+    editor: "MovcuesEditorRuntimeBundle",
+    replay: "AutocaptureAnalyticsSDKReplay",
+    heatmap: "LoopzHeatmapSnapshot",
+  };
+  const baseName: Record<Exclude<BundleKind, "module" | "v1">, string> = {
+    core: "sdk",
+    experiences: "sdk-experiences",
+    editor: "sdk-editor",
+    replay: "sdk-replay",
+    heatmap: "sdk-heatmap",
+  };
+
+  const fileName = kind === "module"
+    ? "sdk.esm.js"
+    : kind === "v1"
+      ? "v1.js"
+      : `${baseName[kind]}${minify ? ".min" : ""}.js`;
 
   return {
     build: {
-      emptyOutDir: false,
+      // `vite build` uses mode=production and is deliberately first in the
+      // package script. This removes stale hashed chunks exactly once.
+      emptyOutDir: mode === "production",
       minify: minify ? "terser" : false,
       sourcemap: !minify,
       lib: {
-        entry: resolve(__dirname, entry),
-        name,
-        formats: isModule ? ["es"] : ["iife"],
+        entry: resolve(__dirname, entry[kind]),
+        name: kind === "module" ? undefined : globalName[kind],
+        formats: kind === "module" ? ["es"] : ["iife"],
         fileName: () => fileName,
       },
       rollupOptions: {
-        // "rrweb" only matters for the ESM build (it's the only format where
-        // an external import is even expressible) - iife/replay ignore this
-        // since rrweb never appears in their module graphs to begin with.
-        external: isModule ? ["rrweb"] : [],
         output: {
-          extend: true,
+          extend: kind !== "module",
         },
       },
     },

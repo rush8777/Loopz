@@ -117,7 +117,7 @@ describe("experience editor and runtime", () => {
   it("enters validated editor mode before analytics collectors or page views exist", async () => {
     history.replaceState({}, "", "/?loopz_editor_token=editor-token");
     const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ sessionId: "ees_1", accessToken: "access", expiresAt: new Date(Date.now() + 60000).toISOString() }) }).mockResolvedValueOnce({ ok: true, json: async () => ({ experience: { id: "exp_1", name: "Draft", kind: "widget", widgetType: "toast" }, version: { id: "v1", versionNumber: 1, definition: { ...base("toast").definition, targeting: { pageRules: [], audience: { type: "all" }, trigger: { type: "page_load" }, frequency: { mode: "once" }, priority: 0 } } } }) });
-    vi.stubGlobal("fetch", fetchMock); const analytics = new Analytics(); analytics.init({ siteId: "site_1", endpoint: "https://api.example.com" }); await vi.runAllTimersAsync(); await vi.dynamicImportSettled();
+    vi.stubGlobal("fetch", fetchMock); const analytics = new Analytics({ editor: { createController: (apiBase) => new EditorModeController(apiBase) } }); analytics.init({ siteId: "site_1", endpoint: "https://api.example.com" }); await vi.runAllTimersAsync();
     const internals = analytics as unknown as { editor: unknown; engine: unknown; session: unknown }; expect(internals.editor).toBeTruthy(); expect(internals.engine).toBeUndefined(); expect(internals.session).toBeUndefined(); analytics.event("editor-click"); expect(fetchMock.mock.calls.every(([url]) => String(url).includes("experience-editor"))).toBe(true); analytics.destroy();
   });
 });

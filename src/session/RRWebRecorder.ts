@@ -1,7 +1,7 @@
 import type { record as RecordFnType, eventWithTime } from "rrweb";
 import { EventBus } from "../core/EventBus";
 import { generateId } from "../core/ids";
-import { currentScriptUrl } from "../core/scriptOrigin";
+import { loadSdkBundle, sdkBundleUrl } from "../core/sdkBundleLoader";
 import type { SessionReplayConfig } from "../types/config";
 
 type RecordFn = typeof RecordFnType;
@@ -117,7 +117,7 @@ export class RRWebRecorder {
     if (w.__aaRRWebRecord__) return Promise.resolve(w.__aaRRWebRecord__);
     if (this.loadPromise) return this.loadPromise;
 
-    const url = this.config.bundleUrl ?? deriveReplayBundleUrl(currentScriptUrl);
+    const url = sdkBundleUrl("replay", this.config.bundleUrl);
     if (!url) {
       // eslint-disable-next-line no-console
       console.warn(
@@ -126,18 +126,7 @@ export class RRWebRecorder {
       return Promise.resolve(null);
     }
 
-    this.loadPromise = new Promise((resolve) => {
-      const script = document.createElement("script");
-      script.src = url;
-      script.async = true;
-      script.onload = () => resolve(w.__aaRRWebRecord__ ?? null);
-      script.onerror = () => {
-        // eslint-disable-next-line no-console
-        console.warn(`[Analytics] failed to load session replay bundle from ${url}`);
-        resolve(null);
-      };
-      document.head.appendChild(script);
-    });
+    this.loadPromise = loadSdkBundle(url, () => w.__aaRRWebRecord__, "session replay");
     return this.loadPromise;
   }
 
@@ -180,12 +169,4 @@ export class RRWebRecorder {
     };
     this.bus.emit<SessionReplayEvent>("session_replay_event", payload);
   }
-}
-
-/** Same-directory convention: sdk.js -> sdk-replay.js, sdk.min.js -> sdk-replay.min.js. */
-function deriveReplayBundleUrl(scriptUrl: string | null): string | null {
-  if (!scriptUrl) return null;
-  if (scriptUrl.includes("sdk.min.js")) return scriptUrl.replace("sdk.min.js", "sdk-replay.min.js");
-  if (scriptUrl.includes("sdk.js")) return scriptUrl.replace("sdk.js", "sdk-replay.js");
-  return null;
 }

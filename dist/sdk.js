@@ -265,7 +265,7 @@
   function distance(x1, y1, x2, y2) {
     return Math.hypot(x2 - x1, y2 - y1);
   }
-  function clamp$1(value, min, max) {
+  function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
   }
   class ClickCollector {
@@ -353,7 +353,7 @@
       const viewportHeight = window.innerHeight;
       const scrollTop = window.scrollY;
       const scrollable = Math.max(documentHeight - viewportHeight, 1);
-      const scrollPercent = clamp$1(Math.round(scrollTop / scrollable * 100), 0, 100);
+      const scrollPercent = clamp(Math.round(scrollTop / scrollable * 100), 0, 100);
       const direction = scrollTop >= this.lastScrollTop ? "down" : "up";
       this.lastScrollTop = scrollTop;
       if (scrollPercent > this.maxScrollPercent) {
@@ -804,7 +804,64 @@
   function now() {
     return Date.now();
   }
-  const currentScriptUrl = typeof document !== "undefined" && document.currentScript instanceof HTMLScriptElement ? document.currentScript.src : null;
+  const currentScriptElement = typeof document !== "undefined" && document.currentScript instanceof HTMLScriptElement ? document.currentScript : null;
+  const currentScriptUrl = (currentScriptElement == null ? void 0 : currentScriptElement.src) ?? null;
+  const pendingLoads = /* @__PURE__ */ new Map();
+  function deriveSiblingBundleUrl(scriptUrl, bundle) {
+    if (!scriptUrl) return null;
+    try {
+      const url = new URL(scriptUrl, typeof location === "undefined" ? void 0 : location.href);
+      const parts = url.pathname.split("/");
+      const file = parts[parts.length - 1] ?? "";
+      const readable = file === "sdk.js";
+      if (file !== "sdk.js" && file !== "sdk.min.js" && file !== "v1.js" && file !== "v1.min.js") {
+        return null;
+      }
+      parts[parts.length - 1] = `sdk-${bundle}${readable ? "" : ".min"}.js`;
+      url.pathname = parts.join("/");
+      return url.href;
+    } catch {
+      return null;
+    }
+  }
+  function sdkBundleUrl(bundle, overrideUrl) {
+    return overrideUrl || deriveSiblingBundleUrl(currentScriptUrl, bundle);
+  }
+  function loadSdkBundle(url, globalCheck, label) {
+    const available = globalCheck();
+    if (available) return Promise.resolve(available);
+    if (!url || typeof document === "undefined") return Promise.resolve(null);
+    const existingPromise = pendingLoads.get(url);
+    if (existingPromise) return existingPromise;
+    const promise = new Promise((resolve) => {
+      const selector = `script[data-movcues-bundle-url="${escapeAttribute(url)}"]`;
+      const existing = document.querySelector(selector);
+      const script = existing ?? document.createElement("script");
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      script.addEventListener("load", () => finish(globalCheck() ?? null), { once: true });
+      script.addEventListener("error", () => {
+        console.warn(`[Analytics] failed to load ${label} bundle from ${url}`);
+        finish(null);
+      }, { once: true });
+      if (!existing) {
+        script.src = url;
+        script.async = true;
+        script.dataset.movcuesBundleUrl = url;
+        (document.head ?? document.documentElement).appendChild(script);
+      }
+    });
+    pendingLoads.set(url, promise);
+    return promise;
+  }
+  function escapeAttribute(value) {
+    if (typeof CSS !== "undefined" && typeof CSS.escape === "function") return CSS.escape(value);
+    return value.replace(/["\\]/g, "\\$&");
+  }
   class RRWebRecorder {
     constructor(bus, config) {
       this.bus = bus;
@@ -878,24 +935,14 @@
       const w = window;
       if (w.__aaRRWebRecord__) return Promise.resolve(w.__aaRRWebRecord__);
       if (this.loadPromise) return this.loadPromise;
-      const url = this.config.bundleUrl ?? deriveReplayBundleUrl(currentScriptUrl);
+      const url = sdkBundleUrl("replay", this.config.bundleUrl);
       if (!url) {
         console.warn(
           "[Analytics] sessionReplay.enabled is true but the replay bundle URL could not be determined automatically. Set sessionReplay.bundleUrl explicitly."
         );
         return Promise.resolve(null);
       }
-      this.loadPromise = new Promise((resolve) => {
-        const script = document.createElement("script");
-        script.src = url;
-        script.async = true;
-        script.onload = () => resolve(w.__aaRRWebRecord__ ?? null);
-        script.onerror = () => {
-          console.warn(`[Analytics] failed to load session replay bundle from ${url}`);
-          resolve(null);
-        };
-        document.head.appendChild(script);
-      });
+      this.loadPromise = loadSdkBundle(url, () => w.__aaRRWebRecord__, "session replay");
       return this.loadPromise;
     }
     buildRecordOptions() {
@@ -933,12 +980,6 @@
       };
       this.bus.emit("session_replay_event", payload);
     }
-  }
-  function deriveReplayBundleUrl(scriptUrl) {
-    if (!scriptUrl) return null;
-    if (scriptUrl.includes("sdk.min.js")) return scriptUrl.replace("sdk.min.js", "sdk-replay.min.js");
-    if (scriptUrl.includes("sdk.js")) return scriptUrl.replace("sdk.js", "sdk-replay.js");
-    return null;
   }
   class AutoCaptureEngine {
     constructor(config) {
@@ -1681,7 +1722,9 @@
     }
     return {
       siteId: input.siteId,
-      endpoint: input.endpoint || "https://api.example.com",
+      endpoint: input.endpoint || "https://api.movcues.com",
+      experienceRuntimeBundleUrl: input.experienceRuntimeBundleUrl ?? "",
+      editorRuntimeBundleUrl: input.editorRuntimeBundleUrl ?? "",
       heatmapSnapshotBundleUrl: input.heatmapSnapshotBundleUrl ?? "",
       debug: input.debug ?? false,
       sessionInactivityMs: input.sessionInactivityMs ?? 30 * 60 * 1e3,
@@ -1916,30 +1959,32 @@
     loadCaptureFunction() {
       if (window.__loopzHeatmapCapture__) return Promise.resolve(window.__loopzHeatmapCapture__);
       if (this.loadPromise) return this.loadPromise;
-      const url = this.bundleUrl || deriveHeatmapBundleUrl(currentScriptUrl);
+      const url = sdkBundleUrl("heatmap", this.bundleUrl);
       if (!url) return Promise.resolve(null);
-      this.loadPromise = new Promise((resolve) => {
-        const script = document.createElement("script");
-        script.src = url;
-        script.async = true;
-        script.onload = () => resolve(window.__loopzHeatmapCapture__ ?? null);
-        script.onerror = () => resolve(null);
-        document.head.appendChild(script);
-      });
+      this.loadPromise = loadSdkBundle(url, () => window.__loopzHeatmapCapture__, "heatmap snapshot");
       return this.loadPromise;
     }
   }
   function capitalize(value) {
     return value ? value[0].toUpperCase() + value.slice(1) : value;
   }
-  function deriveHeatmapBundleUrl(url) {
-    if (!url) return null;
-    if (url.includes("sdk.min.js")) return url.replace("sdk.min.js", "sdk-heatmap.min.js");
-    if (url.includes("sdk.js")) return url.replace("sdk.js", "sdk-heatmap.js");
-    return null;
+  function loadExperienceRuntime(overrideUrl) {
+    return loadSdkBundle(
+      sdkBundleUrl("experiences", overrideUrl),
+      () => window.__movcuesExperienceRuntime__,
+      "experience runtime"
+    );
+  }
+  function loadEditorRuntime(overrideUrl) {
+    return loadSdkBundle(
+      sdkBundleUrl("editor", overrideUrl),
+      () => window.__movcuesEditorRuntime__,
+      "experience editor"
+    );
   }
   class Analytics {
-    constructor() {
+    constructor(runtimeProviders = {}) {
+      this.runtimeProviders = runtimeProviders;
       this.routeObserver = new RouteObserver();
       this.experiences = null;
       this.editor = null;
@@ -1948,6 +1993,7 @@
       this.debugEnabled = false;
       this.initialized = false;
       this.running = false;
+      this.generation = 0;
       this.unsubscribers = [];
     }
     init(userConfig) {
@@ -1957,25 +2003,12 @@
       }
       this.config = resolveConfig(userConfig);
       this.debugEnabled = !!this.config.debug;
+      const generation = ++this.generation;
       const editorToken = new URL(location.href).searchParams.get("loopz_editor_token");
       if (editorToken && !this.editorAttempted) {
         this.initialized = true;
         this.editorAttempted = true;
-        void Promise.resolve().then(() => EditorModeController$1).then(async ({ EditorModeController: EditorModeController2 }) => {
-          if (!this.initialized) return;
-          const editor = new EditorModeController2(this.config.endpoint);
-          if (await editor.start(editorToken)) {
-            this.editor = editor;
-            this.editorMode = true;
-            this.log("experience editor mode initialized");
-            return;
-          }
-          this.initialized = false;
-          this.init(userConfig);
-        }).catch(() => {
-          this.initialized = false;
-          this.init(userConfig);
-        });
+        void this.initializeEditor(editorToken, userConfig, generation);
         return;
       }
       if (this.config.respectDoNotTrack && isDoNotTrackEnabled()) {
@@ -2004,11 +2037,7 @@
       this.start();
       this.trackPageView();
       if (this.config.experiences.enabled) {
-        void Promise.resolve().then(() => ExperienceLoader$1).then(({ ExperienceLoader: ExperienceLoader2 }) => {
-          if (!this.initialized) return;
-          this.experiences = new ExperienceLoader2(this.config.endpoint, this.config.siteId, this.session, (name) => this.event(name));
-          void this.experiences.evaluate();
-        }).catch(() => void 0);
+        void this.initializeExperiences(generation);
       }
     }
     start() {
@@ -2027,6 +2056,7 @@
     }
     destroy() {
       var _a, _b, _c, _d;
+      this.generation++;
       this.stop();
       this.routeObserver.stop();
       (_a = this.engine) == null ? void 0 : _a.destroyElementDiscovery();
@@ -2084,6 +2114,51 @@
         return false;
       }
       return true;
+    }
+    async initializeEditor(editorToken, userConfig, generation) {
+      try {
+        const runtime = this.runtimeProviders.editor ?? await loadEditorRuntime(this.config.editorRuntimeBundleUrl);
+        if (!this.initialized || generation !== this.generation) return;
+        if (!runtime) {
+          this.fallbackFromEditor(userConfig, generation);
+          return;
+        }
+        const editor = runtime.createController(this.config.endpoint);
+        const started = await editor.start(editorToken);
+        if (!this.initialized || generation !== this.generation) {
+          editor.destroy();
+          return;
+        }
+        if (started) {
+          this.editor = editor;
+          this.editorMode = true;
+          this.log("experience editor mode initialized");
+          return;
+        }
+        editor.destroy();
+        this.fallbackFromEditor(userConfig, generation);
+      } catch {
+        this.fallbackFromEditor(userConfig, generation);
+      }
+    }
+    fallbackFromEditor(userConfig, generation) {
+      if (!this.initialized || generation !== this.generation) return;
+      this.initialized = false;
+      this.init(userConfig);
+    }
+    async initializeExperiences(generation) {
+      try {
+        const runtime = this.runtimeProviders.experiences ?? await loadExperienceRuntime(this.config.experienceRuntimeBundleUrl);
+        if (!runtime || !this.initialized || this.editorMode || generation !== this.generation) return;
+        this.experiences = runtime.createLoader(
+          this.config.endpoint,
+          this.config.siteId,
+          this.session,
+          (name) => this.event(name)
+        );
+        await this.experiences.evaluate();
+      } catch {
+      }
     }
     wireCollectorsToPipeline() {
       const bus = this.engine.bus;
@@ -2193,8 +2268,8 @@
     const dnt = navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack;
     return dnt === "1" || dnt === "yes";
   }
-  function installUnloadHandlers(analytics) {
-    const flush = () => analytics.flushOnUnload();
+  function installUnloadHandlers(analytics2) {
+    const flush = () => analytics2.flushOnUnload();
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") flush();
     });
@@ -2218,24 +2293,24 @@
       const existing = w[name];
       if (existing && "__analyticsInstance" in existing) return existing.__analyticsInstance;
     }
-    const analytics = new Analytics();
+    const analytics2 = new Analytics();
     const realApi = {
-      init: (...args) => analytics.init(args[0]),
-      start: () => analytics.start(),
-      stop: () => analytics.stop(),
-      destroy: () => analytics.destroy(),
-      event: (...args) => analytics.event(args[0], args[1]),
-      identify: (...args) => analytics.identify(args[0], args[1]),
-      page: () => analytics.page(),
-      defineFunnel: (...args) => analytics.defineFunnel(args[0], args[1]),
-      enableDebug: () => analytics.enableDebug(),
-      disableDebug: () => analytics.disableDebug()
+      init: (...args) => analytics2.init(args[0]),
+      start: () => analytics2.start(),
+      stop: () => analytics2.stop(),
+      destroy: () => analytics2.destroy(),
+      event: (...args) => analytics2.event(args[0], args[1]),
+      identify: (...args) => analytics2.identify(args[0], args[1]),
+      page: () => analytics2.page(),
+      defineFunnel: (...args) => analytics2.defineFunnel(args[0], args[1]),
+      enableDebug: () => analytics2.enableDebug(),
+      disableDebug: () => analytics2.disableDebug()
     };
     for (const name of globalNames) {
       const existingStub = w[name];
       const queuedCommands = (existingStub == null ? void 0 : existingStub.q) ?? [];
       const finalApi = realApi;
-      finalApi.__analyticsInstance = analytics;
+      finalApi.__analyticsInstance = analytics2;
       w[name] = finalApi;
       for (const method of PUBLIC_METHODS) {
         if (!(method in finalApi)) {
@@ -2249,1036 +2324,19 @@
         }
       }
     }
-    installUnloadHandlers(analytics);
-    return analytics;
+    installUnloadHandlers(analytics2);
+    return analytics2;
   }
-  installPublicAPI(["__myAnalytics__", "analytics"]);
-  function isGuideDefinition(value) {
-    return "steps" in value;
-  }
-  class EditorBridge {
-    constructor(apiBase, sessionId, accessToken) {
-      this.apiBase = apiBase;
-      this.sessionId = sessionId;
-      this.accessToken = accessToken;
-    }
-    headers() {
-      return { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}` };
-    }
-    async load() {
-      const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { headers: this.headers(), credentials: "omit" });
-      if (!response.ok) throw new Error("Editor session expired");
-      return response.json();
-    }
-    async save(definition) {
-      const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { method: "PATCH", headers: this.headers(), credentials: "omit", body: JSON.stringify({ definition }) });
-      if (!response.ok) throw new Error("Draft could not be saved");
-    }
-  }
-  class HighlightOverlay {
-    constructor() {
-      this.element = document.createElement("div");
-      this.element.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #2563eb;background:rgba(37,99,235,.12);display:none;box-sizing:border-box";
-      document.documentElement.appendChild(this.element);
-    }
-    show(target) {
-      const rect = target.getBoundingClientRect();
-      Object.assign(this.element.style, { display: "block", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
-    }
-    hide() {
-      this.element.style.display = "none";
-    }
-    destroy() {
-      this.element.remove();
-    }
-  }
-  function reliability(selector) {
-    if (/#[a-z][\w:-]*|\[data-(?:testid|test|qa|cy|analytics-id)=/i.test(selector)) return "reliable";
-    if (/\[(?:role|aria-label|name|type|href)=|\.[a-z][\w-]*/i.test(selector) && !selector.includes(":nth-of-type")) return "moderate";
-    return "fragile";
-  }
-  class ElementPicker {
-    constructor() {
-      this.overlay = null;
-      this.generator = new SelectorGenerator();
-      this.resolve = null;
-      this.move = (event) => {
-        var _a, _b;
-        const target = document.elementFromPoint(event.clientX, event.clientY);
-        if (target && !target.closest("[data-loopz-editor]")) (_a = this.overlay) == null ? void 0 : _a.show(target);
-        else (_b = this.overlay) == null ? void 0 : _b.hide();
-      };
-      this.click = (event) => {
-        const target = document.elementFromPoint(event.clientX, event.clientY);
-        if (!target || target.closest("[data-loopz-editor]")) return;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        const descriptor = this.generator.describe(target);
-        const selector = descriptor.selector;
-        this.finish({ primarySelector: selector, fallbackSelectors: [], label: descriptor.label, role: descriptor.role, tagName: descriptor.tagName, reliability: reliability(selector) });
-      };
-      this.key = (event) => {
-        if (event.key === "Escape") this.finish(null);
-      };
-    }
-    pick() {
-      this.cancel();
-      this.overlay = new HighlightOverlay();
-      document.addEventListener("pointermove", this.move, true);
-      document.addEventListener("click", this.click, true);
-      document.addEventListener("keydown", this.key, true);
-      return new Promise((resolve) => {
-        this.resolve = resolve;
-      });
-    }
-    cancel() {
-      if (this.resolve) this.finish(null);
-      else this.cleanup();
-    }
-    finish(value) {
-      const resolve = this.resolve;
-      this.resolve = null;
-      this.cleanup();
-      resolve == null ? void 0 : resolve(value);
-    }
-    cleanup() {
-      var _a;
-      document.removeEventListener("pointermove", this.move, true);
-      document.removeEventListener("click", this.click, true);
-      document.removeEventListener("keydown", this.key, true);
-      (_a = this.overlay) == null ? void 0 : _a.destroy();
-      this.overlay = null;
-    }
-  }
-  const ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "H1", "H2", "H3", "H4", "P", "SPAN", "BUTTON", "IMG", "HR"]);
-  const ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "alt", "src", "width", "height", "data-loopz-action-id", "data-loopz-content", "data-loopz-widget-type"]);
-  function mountBuilderContent(root, card, builder, callbacks) {
-    const html = sanitizeBuilderHtml(builder.html);
-    const css = safeBuilderCss(builder.css);
-    if (!html || css === null) return false;
-    let style = root.querySelector("style[data-loopz-builder-style]");
-    if (!style) {
-      style = document.createElement("style");
-      style.dataset.loopzBuilderStyle = "";
-      root.appendChild(style);
-    }
-    style.textContent = `${css}
-${ISOLATION_CSS}`;
-    const content = document.createElement("div");
-    content.className = "builder-content";
-    content.dataset.loopzBuilderSurface = "";
-    content.append(...html);
-    card.appendChild(content);
-    card.classList.add("builder-card");
-    card.addEventListener("click", (event) => {
-      const target = event.target instanceof Element ? event.target.closest("[data-loopz-action-id]") : null;
-      if (!target || !card.contains(target)) return;
-      if (target.dataset.loopzActionId === "primary") callbacks.onPrimary();
-      if (target.dataset.loopzActionId === "secondary") callbacks.onSecondary();
-    });
-    return true;
-  }
-  const ISOLATION_CSS = `[data-loopz-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-loopz-builder-surface]>.loopz-widget{position:relative!important;inset:auto!important;width:100%!important;min-width:0!important;max-width:100%!important;max-height:100%!important}`;
-  function sanitizeBuilderHtml(input) {
-    const template = document.createElement("template");
-    template.innerHTML = input;
-    for (const element of Array.from(template.content.querySelectorAll("*"))) {
-      if (!ALLOWED_TAGS.has(element.tagName)) {
-        if (/^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO)$/i.test(element.tagName)) element.remove();
-        else element.replaceWith(...Array.from(element.childNodes));
-        continue;
-      }
-      for (const attribute of Array.from(element.attributes)) {
-        const name = attribute.name.toLowerCase();
-        if (!ALLOWED_ATTRIBUTES.has(name) || name.startsWith("on") || /javascript\s*:/i.test(attribute.value)) element.removeAttribute(attribute.name);
-      }
-      const action = element.getAttribute("data-loopz-action-id");
-      if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-loopz-action-id");
-      if (element.tagName === "IMG") {
-        const source = element.getAttribute("src") ?? "";
-        if (source && !/^(https?:|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(source)) element.removeAttribute("src");
-      }
-    }
-    const root = template.content.querySelector(".loopz-widget");
-    if (!root) return null;
-    for (const slot of ["primary", "secondary"]) {
-      const actions = Array.from(template.content.querySelectorAll(`[data-loopz-action-id="${slot}"]`));
-      actions.slice(1).forEach((action) => action.remove());
-    }
-    return Array.from(template.content.childNodes);
-  }
-  function safeBuilderCss(input) {
-    const css = input.replace(/\/\*[\s\S]*?\*\//g, "").trim();
-    if (/@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i.test(css)) return null;
-    const rule = /([^{}]+)\{/g;
-    let match;
-    while ((match = rule.exec(css)) !== null) {
-      const prelude = match[1].trim();
-      if (!prelude || prelude.startsWith("@")) continue;
-      if (prelude.split(",").some((selector) => !selector.trim().includes(".loopz-widget"))) return null;
-    }
-    return css;
-  }
-  const WIDGET_SIZE_CONSTRAINTS = {
-    anchored_card: { width: { default: 320, min: 240, max: 480 }, height: {}, viewportGutter: 24 },
-    toast: { width: { default: 380, min: 280, max: 520 }, height: {}, viewportGutter: 24 },
-    cursor_follow: { width: { default: 280, min: 200, max: 360 }, height: {}, viewportGutter: 24 },
-    modal: { width: { default: 600, min: 320, max: 960, allowFull: true }, height: { allowFixed: true, allowViewport: true, min: 200, max: 900 }, viewportGutter: 24 },
-    slideout: { width: { default: 400, min: 320, max: 640 }, height: { allowFixed: true, allowViewport: true, min: 240, max: 900 }, viewportGutter: 24 },
-    hotspot: { width: { default: 300, min: 220, max: 420 }, height: {}, viewportGutter: 24 },
-    banner: { width: { default: "full" }, height: {}, viewportGutter: 0 }
-  };
-  function normalizeWidgetSize(widgetType, design) {
+  function autoInitializeFromScript(analytics2, script) {
     var _a, _b;
-    const constraint = WIDGET_SIZE_CONSTRAINTS[widgetType];
-    if (widgetType === "banner") return { width: { mode: "full" }, height: { mode: "auto" } };
-    const legacyValue = design.width === "sm" ? constraint.width.min : design.width === "lg" ? constraint.width.max : constraint.width.default;
-    const requestedWidth = (_a = design.size) == null ? void 0 : _a.width;
-    const width = (requestedWidth == null ? void 0 : requestedWidth.mode) === "full" && constraint.width.allowFull ? { mode: "full" } : { mode: "fixed", value: clamp((requestedWidth == null ? void 0 : requestedWidth.value) ?? legacyValue, constraint.width.min, constraint.width.max) };
-    const requestedHeight = (_b = design.size) == null ? void 0 : _b.height;
-    const height = (requestedHeight == null ? void 0 : requestedHeight.mode) === "fixed" && constraint.height.allowFixed ? { mode: "fixed", value: clamp(requestedHeight.value ?? constraint.height.min, constraint.height.min, constraint.height.max) } : (requestedHeight == null ? void 0 : requestedHeight.mode) === "viewport" && constraint.height.allowViewport ? { mode: "viewport" } : { mode: "auto" };
-    return { width, height };
+    const siteId = (_a = script == null ? void 0 : script.dataset.siteId) == null ? void 0 : _a.trim();
+    if (!siteId) return;
+    analytics2.init({
+      siteId,
+      endpoint: ((_b = script == null ? void 0 : script.dataset.endpoint) == null ? void 0 : _b.trim()) || void 0
+    });
   }
-  function applyWidgetSizeEnvelope(card, widgetType, design) {
-    const constraint = WIDGET_SIZE_CONSTRAINTS[widgetType];
-    const size = normalizeWidgetSize(widgetType, design);
-    const gutter = Math.max(24, constraint.viewportGutter);
-    card.dataset.sizeWidth = size.width.mode;
-    card.dataset.sizeHeight = size.height.mode;
-    if (size.width.mode === "full") {
-      card.style.width = widgetType === "banner" ? "100%" : `calc(100vw - ${gutter}px)`;
-      card.style.minWidth = "0";
-      card.style.maxWidth = "none";
-    } else {
-      card.style.width = `${size.width.value}px`;
-      card.style.minWidth = `min(${constraint.width.min}px, calc(100vw - ${gutter}px))`;
-      card.style.maxWidth = `min(${constraint.width.max}px, calc(100vw - ${gutter}px))`;
-    }
-    card.style.height = size.height.mode === "fixed" ? `${size.height.value}px` : size.height.mode === "viewport" ? `calc(100vh - ${gutter}px)` : "auto";
-    card.style.maxHeight = `calc(100vh - ${gutter}px)`;
-    card.style.overflowX = "hidden";
-    card.style.overflowY = "auto";
-  }
-  function clamp(value, min, max) {
-    return Math.min(max, Math.max(min, Number.isFinite(value) ? Math.round(value) : min));
-  }
-  function findTarget(target) {
-    if (!target) return null;
-    for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
-      try {
-        const element = document.querySelector(selector);
-        if (element) return element;
-      } catch {
-      }
-    }
-    return null;
-  }
-  function waitForTarget(target, onFound, onUnavailable, timeoutMs = 5e3) {
-    const immediate = findTarget(target);
-    if (immediate) {
-      onFound(immediate);
-      return () => void 0;
-    }
-    let stopped = false;
-    let observer = null;
-    let timer = 0;
-    const stop = () => {
-      if (stopped) return;
-      stopped = true;
-      observer == null ? void 0 : observer.disconnect();
-      clearTimeout(timer);
-    };
-    const check = () => {
-      if (stopped) return;
-      const element = findTarget(target);
-      if (element) {
-        stop();
-        onFound(element);
-      }
-    };
-    if (typeof MutationObserver === "undefined" || !document.documentElement) {
-      timer = window.setTimeout(() => {
-        stop();
-        onUnavailable();
-      }, timeoutMs);
-      return stop;
-    }
-    observer = new MutationObserver(check);
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-    timer = window.setTimeout(() => {
-      if (!stopped) {
-        stop();
-        onUnavailable();
-      }
-    }, timeoutMs);
-    return stop;
-  }
-  function buildCard(root, content, design, behavior, callbacks, builder, widgetType) {
-    var _a, _b, _c;
-    const card = document.createElement("section");
-    card.className = "card";
-    card.style.setProperty("--loopz-bg", design.theme.background);
-    card.style.setProperty("--loopz-fg", design.theme.foreground);
-    card.style.setProperty("--loopz-primary", design.theme.primary);
-    card.dataset.width = design.width;
-    card.dataset.radius = design.theme.borderRadius;
-    if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
-    const close = behavior.dismissible ? `<button class="close" data-dismiss aria-label="Dismiss">×</button>` : "";
-    card.innerHTML = close;
-    (_a = card.querySelector("[data-dismiss]")) == null ? void 0 : _a.addEventListener("click", callbacks.onDismiss);
-    if (!builder || !mountBuilderContent(root, card, builder, callbacks)) {
-      const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText$1(content.primaryAction.label)}</button>` : "";
-      const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText$1(content.secondaryAction.label)}</button>` : "";
-      card.insertAdjacentHTML("beforeend", `<div class="legacy-content"><h2>${escapeText$1(content.heading)}</h2><p>${escapeText$1(content.body)}</p><footer>${secondary}${primary}</footer></div>`);
-      (_b = card.querySelector("[data-primary]")) == null ? void 0 : _b.addEventListener("click", callbacks.onPrimary);
-      (_c = card.querySelector("[data-secondary]")) == null ? void 0 : _c.addEventListener("click", callbacks.onSecondary);
-    }
-    root.appendChild(card);
-    return card;
-  }
-  class AnchoredCardRenderer {
-    constructor() {
-      this.cleanup = [];
-    }
-    render(root, target, content, design, behavior, callbacks, builder, widgetType) {
-      const card = buildCard(root, content, design, behavior, callbacks, builder, widgetType);
-      const update = () => position(card, target.getBoundingClientRect(), behavior);
-      const onWindow = () => requestAnimationFrame(update);
-      window.addEventListener("scroll", onWindow, true);
-      window.addEventListener("resize", onWindow);
-      this.cleanup.push(() => window.removeEventListener("scroll", onWindow, true), () => window.removeEventListener("resize", onWindow));
-      if (typeof ResizeObserver !== "undefined") {
-        const observer = new ResizeObserver(update);
-        observer.observe(target);
-        observer.observe(card);
-        this.cleanup.push(() => observer.disconnect());
-      }
-      if (typeof MutationObserver !== "undefined") {
-        const observer = new MutationObserver(onWindow);
-        observer.observe(document.body, { childList: true, subtree: true, attributes: true });
-        this.cleanup.push(() => observer.disconnect());
-      }
-      update();
-      return card;
-    }
-    destroy() {
-      this.cleanup.splice(0).forEach((fn) => fn());
-    }
-  }
-  function position(card, rect, behavior) {
-    const gap = behavior.offset ?? 8;
-    const bounds = card.getBoundingClientRect();
-    const margin = 8;
-    let placement = behavior.placement === "auto" || !behavior.placement ? "bottom" : behavior.placement;
-    if (placement === "bottom" && rect.bottom + gap + bounds.height > innerHeight) placement = "top";
-    if (placement === "top" && rect.top - gap - bounds.height < 0) placement = "bottom";
-    let left = rect.left + (rect.width - bounds.width) / 2;
-    let top = rect.bottom + gap;
-    if (placement === "top") top = rect.top - bounds.height - gap;
-    if (placement === "left") {
-      left = rect.left - bounds.width - gap;
-      top = rect.top + (rect.height - bounds.height) / 2;
-    }
-    if (placement === "right") {
-      left = rect.right + gap;
-      top = rect.top + (rect.height - bounds.height) / 2;
-    }
-    if (behavior.alignment === "start" && (placement === "top" || placement === "bottom")) left = rect.left;
-    if (behavior.alignment === "end" && (placement === "top" || placement === "bottom")) left = rect.right - bounds.width;
-    card.style.left = `${Math.max(margin, Math.min(left, innerWidth - bounds.width - margin))}px`;
-    card.style.top = `${Math.max(margin, Math.min(top, innerHeight - bounds.height - margin))}px`;
-  }
-  function escapeText$1(value) {
-    const span = document.createElement("span");
-    span.textContent = value;
-    return span.innerHTML;
-  }
-  class ToastRenderer {
-    constructor() {
-      this.timer = null;
-    }
-    render(root, content, design, behavior, callbacks, builder) {
-      const card = buildCard(root, content, design, behavior, callbacks, builder, "toast");
-      card.classList.add("toast");
-      card.dataset.position = behavior.toastPosition ?? "bottom-right";
-      if (behavior.autoDismissMs) this.timer = window.setTimeout(callbacks.onDismiss, behavior.autoDismissMs);
-      return card;
-    }
-    destroy() {
-      if (this.timer !== null) clearTimeout(this.timer);
-    }
-  }
-  class CursorFollowRenderer {
-    constructor() {
-      this.cleanup = null;
-    }
-    render(root, content, design, behavior, callbacks, builder) {
-      const card = buildCard(root, content, design, behavior, callbacks, builder, "cursor_follow");
-      card.classList.add("cursor");
-      let frame = 0;
-      let x = innerWidth / 2;
-      let y = innerHeight / 2;
-      const offset = behavior.cursorOffset ?? { x: 16, y: 16 };
-      const update = () => {
-        frame = 0;
-        const rect = card.getBoundingClientRect();
-        card.style.left = `${Math.max(8, Math.min(x + offset.x, innerWidth - rect.width - 8))}px`;
-        card.style.top = `${Math.max(8, Math.min(y + offset.y, innerHeight - rect.height - 8))}px`;
-      };
-      const move = (event) => {
-        x = event.clientX;
-        y = event.clientY;
-        if (!frame) frame = requestAnimationFrame(update);
-      };
-      window.addEventListener("pointermove", move, { passive: true });
-      this.cleanup = () => {
-        window.removeEventListener("pointermove", move);
-        if (frame) cancelAnimationFrame(frame);
-      };
-      update();
-      return card;
-    }
-    destroy() {
-      var _a;
-      (_a = this.cleanup) == null ? void 0 : _a.call(this);
-      this.cleanup = null;
-    }
-  }
-  class ModalRenderer {
-    render(root, content, design, behavior, callbacks, builder) {
-      if (behavior.backdrop !== false) {
-        const backdrop = document.createElement("div");
-        backdrop.className = "backdrop";
-        backdrop.style.setProperty("--loopz-backdrop-opacity", String(behavior.backdropOpacity ?? 0.45));
-        if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
-        root.appendChild(backdrop);
-      }
-      const card = buildCard(root, content, design, behavior, callbacks, builder, "modal");
-      card.classList.add("modal");
-      card.dataset.layout = behavior.modalLayout ?? "center";
-      return card;
-    }
-    destroy() {
-    }
-  }
-  class SlideoutRenderer {
-    render(root, content, design, behavior, callbacks, builder) {
-      if (behavior.backdrop) {
-        const backdrop = document.createElement("div");
-        backdrop.className = "backdrop";
-        backdrop.style.setProperty("--loopz-backdrop-opacity", String(behavior.backdropOpacity ?? 0.35));
-        if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
-        root.appendChild(backdrop);
-      }
-      const card = buildCard(root, content, design, behavior, callbacks, builder, "slideout");
-      card.classList.add("slideout");
-      card.dataset.position = behavior.slideoutPosition ?? "bottom-right";
-      return card;
-    }
-    destroy() {
-    }
-  }
-  class HotspotRenderer {
-    constructor() {
-      this.cleanup = [];
-      this.cardRenderer = null;
-      this.card = null;
-    }
-    render(root, target, content, design, behavior, callbacks, builder) {
-      const beacon = document.createElement("button");
-      beacon.className = "hotspot";
-      beacon.dataset.style = behavior.hotspotStyle ?? "pulse";
-      beacon.style.setProperty("--loopz-hotspot", behavior.hotspotColor ?? design.theme.primary);
-      beacon.type = "button";
-      beacon.setAttribute("aria-label", `Open ${content.heading}`);
-      if (beacon.dataset.style === "question") beacon.textContent = "?";
-      root.appendChild(beacon);
-      const update = () => {
-        const rect = target.getBoundingClientRect();
-        beacon.style.left = `${Math.max(4, Math.min(rect.right - 7, innerWidth - 18))}px`;
-        beacon.style.top = `${Math.max(4, Math.min(rect.top - 7, innerHeight - 18))}px`;
-      };
-      const schedule = () => requestAnimationFrame(update);
-      const toggle = () => {
-        var _a;
-        if (this.card) {
-          this.card.remove();
-          this.card = null;
-          (_a = this.cardRenderer) == null ? void 0 : _a.destroy();
-          this.cardRenderer = null;
-          return;
-        }
-        this.cardRenderer = new AnchoredCardRenderer();
-        this.card = this.cardRenderer.render(root, target, content, design, behavior, callbacks, builder, "hotspot");
-      };
-      beacon.addEventListener("click", toggle);
-      window.addEventListener("scroll", schedule, true);
-      window.addEventListener("resize", schedule);
-      this.cleanup.push(() => beacon.removeEventListener("click", toggle), () => window.removeEventListener("scroll", schedule, true), () => window.removeEventListener("resize", schedule));
-      if (typeof ResizeObserver !== "undefined") {
-        const observer = new ResizeObserver(schedule);
-        observer.observe(target);
-        this.cleanup.push(() => observer.disconnect());
-      }
-      update();
-      return beacon;
-    }
-    destroy() {
-      var _a;
-      (_a = this.cardRenderer) == null ? void 0 : _a.destroy();
-      this.cardRenderer = null;
-      this.card = null;
-      this.cleanup.splice(0).forEach((fn) => fn());
-    }
-  }
-  class BannerRenderer {
-    render(root, content, design, behavior, callbacks, builder) {
-      const card = buildCard(root, content, design, behavior, callbacks, builder, "banner");
-      card.classList.add("banner");
-      card.dataset.position = behavior.bannerPosition ?? "top";
-      return card;
-    }
-    destroy() {
-    }
-  }
-  class ExperienceRenderer {
-    constructor() {
-      this.host = null;
-      this.renderer = null;
-      this.cancelPendingTarget = null;
-      this.step = 0;
-    }
-    render(experience, callbacks) {
-      this.destroy();
-      this.step = 0;
-      if (isGuideDefinition(experience.definition)) return this.renderGuide(experience, experience.definition, callbacks);
-      return this.renderWidget(experience, experience.definition, callbacks);
-    }
-    root(experienceId) {
-      this.host = document.createElement("div");
-      this.host.dataset.loopzExperience = experienceId;
-      this.host.dataset.loopzExperienceRoot = experienceId;
-      this.host.style.cssText = "position:fixed;inset:0;z-index:2147483000;pointer-events:none";
-      const root = this.host.attachShadow({ mode: "open" });
-      const style = document.createElement("style");
-      style.textContent = STYLES;
-      root.appendChild(style);
-      document.documentElement.appendChild(this.host);
-      return root;
-    }
-    renderWidget(experience, definition, callbacks) {
-      if (experience.widgetType === "anchored_card" || experience.widgetType === "hotspot") {
-        const mount = (target2) => {
-          const root = this.root(experience.id);
-          const renderer = experience.widgetType === "hotspot" ? new HotspotRenderer() : new AnchoredCardRenderer();
-          this.renderer = renderer;
-          renderer.render(root, target2, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder, experience.widgetType ?? "anchored_card");
-          requestAnimationFrame(callbacks.onVisible);
-        };
-        const target = findTarget(definition.target);
-        if (target) mount(target);
-        else this.cancelPendingTarget = waitForTarget(definition.target, (element) => {
-          this.cancelPendingTarget = null;
-          mount(element);
-        }, () => {
-          var _a;
-          this.cancelPendingTarget = null;
-          (_a = callbacks.onUnavailable) == null ? void 0 : _a.call(callbacks);
-        });
-      } else if (experience.widgetType === "toast") {
-        const root = this.root(experience.id);
-        const renderer = new ToastRenderer();
-        this.renderer = renderer;
-        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
-      } else if (experience.widgetType === "cursor_follow") {
-        const root = this.root(experience.id);
-        const renderer = new CursorFollowRenderer();
-        this.renderer = renderer;
-        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
-      } else if (experience.widgetType === "modal") {
-        const root = this.root(experience.id);
-        const renderer = new ModalRenderer();
-        this.renderer = renderer;
-        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
-      } else if (experience.widgetType === "slideout") {
-        const root = this.root(experience.id);
-        const renderer = new SlideoutRenderer();
-        this.renderer = renderer;
-        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
-      } else if (experience.widgetType === "banner") {
-        const root = this.root(experience.id);
-        const renderer = new BannerRenderer();
-        this.renderer = renderer;
-        renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
-      } else return false;
-      if (experience.widgetType !== "anchored_card" && experience.widgetType !== "hotspot") requestAnimationFrame(callbacks.onVisible);
-      return true;
-    }
-    renderGuide(experience, definition, callbacks) {
-      const step = definition.steps[this.step];
-      if (!step) return false;
-      const mount = (target2) => {
-        var _a;
-        const root = this.root(experience.id);
-        const renderer = new AnchoredCardRenderer();
-        this.renderer = renderer;
-        const behavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset };
-        const card = renderer.render(root, target2, step.content, definition.design, behavior, {
-          onDismiss: () => {
-            callbacks.onDismiss();
-            this.destroy();
-          },
-          onSecondary: () => {
-            callbacks.onDismiss();
-            this.destroy();
-          },
-          onPrimary: () => {
-            const action = step.content.primaryAction;
-            if (action) callbacks.onAction(action);
-            if (this.step < definition.steps.length - 1) {
-              this.clearSurface();
-              this.step++;
-              this.renderGuide(experience, definition, callbacks);
-            } else {
-              callbacks.onComplete();
-              this.destroy();
-            }
-          }
-        });
-        if (this.step > 0) {
-          const back = document.createElement("button");
-          back.className = "secondary";
-          back.textContent = "Back";
-          back.addEventListener("click", () => {
-            this.clearSurface();
-            this.step--;
-            this.renderGuide(experience, definition, callbacks);
-          });
-          (_a = card.querySelector("footer")) == null ? void 0 : _a.prepend(back);
-        }
-        requestAnimationFrame(callbacks.onVisible);
-      };
-      const target = findTarget(step.target);
-      if (target) mount(target);
-      else this.cancelPendingTarget = waitForTarget(step.target, (element) => {
-        this.cancelPendingTarget = null;
-        mount(element);
-      }, () => {
-        var _a;
-        this.cancelPendingTarget = null;
-        (_a = callbacks.onUnavailable) == null ? void 0 : _a.call(callbacks);
-      });
-      return true;
-    }
-    callbacks(content, callbacks) {
-      return {
-        onDismiss: () => {
-          callbacks.onDismiss();
-          this.destroy();
-        },
-        onSecondary: () => {
-          callbacks.onDismiss();
-          this.destroy();
-        },
-        onPrimary: () => {
-          var _a;
-          if (content.primaryAction) callbacks.onAction(content.primaryAction);
-          if (((_a = content.primaryAction) == null ? void 0 : _a.type) === "dismiss") {
-            callbacks.onDismiss();
-            this.destroy();
-          }
-        }
-      };
-    }
-    clearSurface() {
-      var _a, _b, _c;
-      (_a = this.cancelPendingTarget) == null ? void 0 : _a.call(this);
-      this.cancelPendingTarget = null;
-      (_b = this.renderer) == null ? void 0 : _b.destroy();
-      this.renderer = null;
-      (_c = this.host) == null ? void 0 : _c.remove();
-      this.host = null;
-    }
-    destroy() {
-      this.clearSurface();
-      this.step = 0;
-    }
-  }
-  const STYLES = `
-  :host{all:initial}.card{pointer-events:auto;position:fixed;box-sizing:border-box;width:320px;max-width:calc(100vw - 16px);padding:18px;background:var(--loopz-bg);color:var(--loopz-fg);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-shadow:0 12px 38px rgba(0,0,0,.22);border:1px solid rgba(0,0,0,.12)}
-  .card[data-width=sm]{width:260px}.card[data-width=lg]{width:400px}.card[data-radius=sm]{border-radius:6px}.card[data-radius=md]{border-radius:12px}.card[data-radius=lg]{border-radius:20px}
-  .builder-card{padding:0;background:transparent;border:0;box-shadow:none}.builder-content{box-sizing:border-box;width:100%;height:100%;max-width:100%}.builder-content>.loopz-widget{box-sizing:border-box;width:100%!important;min-width:0!important;max-width:100%!important;max-height:100%!important}.builder-card>.close{z-index:2}
-  h2{font:600 17px/1.3 ui-sans-serif,system-ui,sans-serif;margin:0 24px 7px 0}p{margin:0;white-space:pre-wrap}footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}button{border:0;border-radius:7px;padding:8px 12px;font:600 13px ui-sans-serif,system-ui,sans-serif;cursor:pointer}.primary{background:var(--loopz-primary);color:#fff}.secondary{background:transparent;color:inherit}.close{position:absolute;right:8px;top:7px;padding:3px 7px;background:transparent;color:inherit;font-size:20px}
-  .toast{position:fixed!important}.toast[data-position=top-left]{top:16px;left:16px}.toast[data-position=top-right]{top:16px;right:16px}.toast[data-position=bottom-left]{bottom:16px;left:16px}.toast[data-position=bottom-right]{bottom:16px;right:16px}.cursor{will-change:left,top}@media(prefers-reduced-motion:reduce){.card{transition:none!important}}
-  .backdrop{pointer-events:auto;position:fixed;inset:0;background:rgba(0,0,0,var(--loopz-backdrop-opacity,.45))}
-  .modal{left:50%;top:50%;transform:translate(-50%,-50%)}.modal[data-layout=fullscreen],.modal[data-size-width=full]{inset:12px;width:auto!important;max-width:none!important;transform:none;display:flex;flex-direction:column;justify-content:center}.modal[data-layout=fullscreen] footer,.modal[data-size-width=full] footer{justify-content:center}
-  .slideout[data-position=top-left]{top:16px;left:16px}.slideout[data-position=top-right]{top:16px;right:16px}.slideout[data-position=bottom-left]{bottom:16px;left:16px}.slideout[data-position=bottom-right]{bottom:16px;right:16px}.slideout[data-position=center-left]{left:16px;top:50%;transform:translateY(-50%)}.slideout[data-position=center-right]{right:16px;top:50%;transform:translateY(-50%)}
-  .banner{left:0;right:0;width:auto!important;max-width:none;border-radius:0!important;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner[data-position=top]{top:0}.banner[data-position=bottom]{bottom:0}.banner h2,.banner p{grid-column:1}.banner footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
-  .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--loopz-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--loopz-hotspot);border-radius:50%;animation:loopz-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes loopz-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
-`;
-  class EditorModeController {
-    constructor(apiBase) {
-      this.apiBase = apiBase;
-      this.host = null;
-      this.picker = new ElementPicker();
-      this.expiryTimer = 0;
-      this.validationTimer = 0;
-      this.preview = new ExperienceRenderer();
-    }
-    async start(rawToken) {
-      try {
-        const response = await fetch(`${this.apiBase}/public/experience-editor/exchange`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", body: JSON.stringify({ token: rawToken }) });
-        if (!response.ok) return false;
-        const session = await response.json();
-        const clean2 = new URL(location.href);
-        const requestedStep = Number(clean2.searchParams.get("loopz_editor_step") ?? "0");
-        clean2.searchParams.delete("loopz_editor_token");
-        clean2.searchParams.delete("loopz_editor_step");
-        history.replaceState(history.state, "", clean2.toString());
-        const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
-        this.mount(await bridge.load(), bridge, requestedStep);
-        this.expiryTimer = window.setTimeout(() => this.destroy(), Math.max(0, new Date(session.expiresAt).getTime() - Date.now()));
-        return true;
-      } catch {
-        this.destroy();
-        return false;
-      }
-    }
-    mount(draft, bridge, requestedStep = 0) {
-      var _a, _b, _c;
-      this.host = document.createElement("div");
-      this.host.dataset.loopzEditor = "";
-      const root = this.host.attachShadow({ mode: "open" });
-      const definition = draft.version.definition;
-      const guide = isGuideDefinition(definition) ? definition : null;
-      let stepIndex = guide ? Math.max(0, Math.min(requestedStep, guide.steps.length - 1)) : 0;
-      const stepTabs = guide ? `<div class="steps"><b data-step-label>Editing step 1 of ${guide.steps.length}</b><div>${guide.steps.map((_, index) => `<button data-step="${index}" class="${index === 0 ? "active" : ""}">Step ${index + 1}</button>`).join("")}</div></div>` : "";
-      root.innerHTML = `<style>${STYLE}</style><aside><header><b>Loopz visual editor</b><small>${escapeText(draft.experience.name)}</small></header><nav>${["Content", "Design", "Behavior", "Targeting", "Publish"].map((x, i) => `<button data-tab="${i}" class="${i === 0 ? "active" : ""}">${x}</button>`).join("")}</nav><main>${stepTabs}<section data-panel="0"><label>Heading<input data-heading></label><label>Body<textarea data-body></textarea></label></section><section data-panel="1" hidden><label>Width<select data-width><option value="sm">Small</option><option value="md">Medium</option><option value="lg">Large</option></select></label><label>Background<input data-background type="color"></label><label>Text color<input data-foreground type="color"></label><label>Primary color<input data-primary type="color"></label></section><section data-panel="2" hidden><div data-for="anchored"><label>Placement<select data-placement><option value="auto">Auto</option><option value="top">Top</option><option value="right">Right</option><option value="bottom">Bottom</option><option value="left">Left</option></select></label><label>Offset<input data-offset type="number" min="0" max="100"></label></div><div data-for="toast"><label>Toast position<select data-toast-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label><label>Auto-dismiss ms<input data-auto-dismiss type="number" min="500" placeholder="Disabled"></label></div><div data-for="cursor"><label>Horizontal offset<input data-cursor-x type="number"></label><label>Vertical offset<input data-cursor-y type="number"></label></div><div data-for="modal"><label>Layout<select data-modal-layout><option value="center">Centered</option><option value="fullscreen">Fullscreen</option></select></label></div><div data-for="slideout"><label>Edge position<select data-slideout-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="center-left">Center left</option><option value="center-right">Center right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label></div><div data-for="overlay"><label class="row"><input data-backdrop type="checkbox"> Backdrop</label><label>Backdrop opacity<input data-backdrop-opacity type="number" min="0" max="0.9" step="0.05"></label><label class="row"><input data-close-backdrop type="checkbox"> Dismiss on backdrop click</label></div><div data-for="hotspot"><label>Beacon style<select data-hotspot-style><option value="pulse">Pulse</option><option value="dot">Dot</option><option value="question">Question mark</option></select></label><label>Beacon color<input data-hotspot-color type="color"></label></div><label class="row"><input data-dismissible type="checkbox"> Dismissible</label><div data-for="target"><button data-pick>Reselect target</button><p data-reliability></p></div></section><section data-panel="3" hidden><label>Frequency<select data-frequency><option value="once">Once ever</option><option value="once_per_session">Once per session</option><option value="every_time">Every qualifying time</option></select></label><label>Priority<input data-priority type="number" min="-1000" max="1000"></label><p>Saved Page, Segment, and event targeting are configured securely in the Loopz dashboard.</p></section><section data-panel="4" hidden><p>Preview is live on this page. Save the draft here, then return to Loopz to publish or pause it.</p><button data-save>Save draft</button></section><p data-status>Draft autosaves as you edit.</p></main></aside>`;
-      (_a = root.querySelector('[data-for="overlay"]')) == null ? void 0 : _a.insertAdjacentHTML("beforebegin", '<div data-for="banner"><label>Banner position<select data-banner-position><option value="top">Top</option><option value="bottom">Bottom</option></select></label></div>');
-      document.documentElement.appendChild(this.host);
-      const currentContent = () => guide ? guide.steps[stepIndex].content : definition.content;
-      const currentBehavior = () => guide ? guide.steps[stepIndex].behavior : definition.behavior;
-      const heading = root.querySelector("[data-heading]");
-      const body = root.querySelector("[data-body]");
-      const placement = root.querySelector("[data-placement]");
-      const offset = root.querySelector("[data-offset]");
-      const dismissible = root.querySelector("[data-dismissible]");
-      const status = root.querySelector("[data-status]");
-      const widgetType = draft.experience.widgetType;
-      const activeGroups = new Set(guide || widgetType === "anchored_card" ? ["anchored", "target"] : widgetType === "hotspot" ? ["anchored", "hotspot", "target"] : widgetType === "modal" ? ["modal", "overlay"] : widgetType === "slideout" ? ["slideout", "overlay"] : widgetType === "banner" ? ["banner"] : widgetType === "toast" ? ["toast"] : ["cursor"]);
-      root.querySelectorAll("[data-for]").forEach((group) => {
-        group.hidden = !activeGroups.has(group.dataset.for);
-      });
-      const field = (selector) => root.querySelector(selector);
-      const bannerPosition = field("[data-banner-position]");
-      bannerPosition.value = currentBehavior().bannerPosition ?? "top";
-      const syncStep = () => {
-        var _a2, _b2, _c2;
-        const content = currentContent(), behavior = currentBehavior();
-        heading.value = content.heading;
-        body.value = content.body;
-        placement.value = behavior.placement ?? "auto";
-        offset.value = String(behavior.offset ?? 8);
-        dismissible.checked = behavior.dismissible ?? true;
-        field("[data-toast-position]").value = behavior.toastPosition ?? "bottom-right";
-        field("[data-auto-dismiss]").value = behavior.autoDismissMs ? String(behavior.autoDismissMs) : "";
-        field("[data-cursor-x]").value = String(((_a2 = behavior.cursorOffset) == null ? void 0 : _a2.x) ?? 16);
-        field("[data-cursor-y]").value = String(((_b2 = behavior.cursorOffset) == null ? void 0 : _b2.y) ?? 16);
-        field("[data-modal-layout]").value = behavior.modalLayout ?? "center";
-        field("[data-slideout-position]").value = behavior.slideoutPosition ?? "bottom-right";
-        field("[data-backdrop]").checked = behavior.backdrop ?? widgetType === "modal";
-        field("[data-backdrop-opacity]").value = String(behavior.backdropOpacity ?? (widgetType === "modal" ? 0.45 : 0.35));
-        field("[data-close-backdrop]").checked = behavior.closeOnBackdrop ?? false;
-        field("[data-hotspot-style]").value = behavior.hotspotStyle ?? "pulse";
-        field("[data-hotspot-color]").value = behavior.hotspotColor ?? definition.design.theme.primary;
-        (_c2 = root.querySelector("[data-step-label]")) == null ? void 0 : _c2.replaceChildren(`Editing step ${stepIndex + 1} of ${(guide == null ? void 0 : guide.steps.length) ?? 1}`);
-        root.querySelectorAll("[data-step]").forEach((button) => button.classList.toggle("active", Number(button.dataset.step) === stepIndex));
-      };
-      let saveTimer = 0;
-      const renderPreview = () => {
-        const previewDefinition = guide ? { ...definition, steps: [guide.steps[stepIndex]] } : definition;
-        return this.preview.render({ id: draft.experience.id, versionId: draft.version.id, kind: draft.experience.kind, widgetType: draft.experience.widgetType, priority: 0, definition: previewDefinition }, { onVisible: () => void 0, onDismiss: () => window.setTimeout(renderPreview, 0), onAction: () => void 0, onComplete: () => window.setTimeout(renderPreview, 0) });
-      };
-      const persist = async () => {
-        status.textContent = "Saving…";
-        try {
-          await bridge.save(definition);
-          status.textContent = "Draft saved.";
-        } catch {
-          status.textContent = "Editor session expired or was revoked.";
-          this.destroy();
-        }
-      };
-      const save = () => {
-        renderPreview();
-        clearTimeout(saveTimer);
-        saveTimer = window.setTimeout(persist, 350);
-      };
-      syncStep();
-      heading.addEventListener("input", () => {
-        currentContent().heading = heading.value;
-        save();
-      });
-      body.addEventListener("input", () => {
-        currentContent().body = body.value;
-        save();
-      });
-      placement.addEventListener("change", () => {
-        currentBehavior().placement = placement.value;
-        save();
-      });
-      offset.addEventListener("input", () => {
-        currentBehavior().offset = Number(offset.value);
-        save();
-      });
-      dismissible.addEventListener("change", () => {
-        currentBehavior().dismissible = dismissible.checked;
-        save();
-      });
-      field("[data-toast-position]").addEventListener("change", (event) => {
-        currentBehavior().toastPosition = event.currentTarget.value;
-        save();
-      });
-      field("[data-auto-dismiss]").addEventListener("input", (event) => {
-        const value = event.currentTarget.value;
-        currentBehavior().autoDismissMs = value ? Number(value) : null;
-        save();
-      });
-      field("[data-cursor-x]").addEventListener("input", (event) => {
-        var _a2;
-        currentBehavior().cursorOffset = { x: Number(event.currentTarget.value), y: ((_a2 = currentBehavior().cursorOffset) == null ? void 0 : _a2.y) ?? 16 };
-        save();
-      });
-      field("[data-cursor-y]").addEventListener("input", (event) => {
-        var _a2;
-        currentBehavior().cursorOffset = { x: ((_a2 = currentBehavior().cursorOffset) == null ? void 0 : _a2.x) ?? 16, y: Number(event.currentTarget.value) };
-        save();
-      });
-      field("[data-modal-layout]").addEventListener("change", (event) => {
-        currentBehavior().modalLayout = event.currentTarget.value;
-        save();
-      });
-      field("[data-slideout-position]").addEventListener("change", (event) => {
-        currentBehavior().slideoutPosition = event.currentTarget.value;
-        save();
-      });
-      field("[data-backdrop]").addEventListener("change", (event) => {
-        currentBehavior().backdrop = event.currentTarget.checked;
-        save();
-      });
-      field("[data-backdrop-opacity]").addEventListener("input", (event) => {
-        currentBehavior().backdropOpacity = Number(event.currentTarget.value);
-        save();
-      });
-      field("[data-close-backdrop]").addEventListener("change", (event) => {
-        currentBehavior().closeOnBackdrop = event.currentTarget.checked;
-        save();
-      });
-      field("[data-hotspot-style]").addEventListener("change", (event) => {
-        currentBehavior().hotspotStyle = event.currentTarget.value;
-        save();
-      });
-      field("[data-hotspot-color]").addEventListener("input", (event) => {
-        currentBehavior().hotspotColor = event.currentTarget.value;
-        save();
-      });
-      bannerPosition.addEventListener("change", () => {
-        currentBehavior().bannerPosition = bannerPosition.value;
-        save();
-      });
-      const width = root.querySelector("[data-width]");
-      width.value = definition.design.width;
-      width.addEventListener("change", () => {
-        definition.design.width = width.value;
-        save();
-      });
-      for (const key of ["background", "foreground", "primary"]) {
-        const input = root.querySelector(`[data-${key}]`);
-        input.value = definition.design.theme[key];
-        input.addEventListener("input", () => {
-          definition.design.theme[key] = input.value;
-          save();
-        });
-      }
-      const targeting = definition.targeting;
-      const frequency = root.querySelector("[data-frequency]");
-      frequency.value = targeting.frequency.mode;
-      frequency.addEventListener("change", () => {
-        targeting.frequency.mode = frequency.value;
-        save();
-      });
-      const priority = root.querySelector("[data-priority]");
-      priority.value = String(targeting.priority);
-      priority.addEventListener("input", () => {
-        targeting.priority = Number(priority.value);
-        save();
-      });
-      root.querySelectorAll("[data-step]").forEach((button) => button.addEventListener("click", () => {
-        stepIndex = Number(button.dataset.step);
-        syncStep();
-        renderPreview();
-      }));
-      (_b = root.querySelector("[data-pick]")) == null ? void 0 : _b.addEventListener("click", async () => {
-        status.textContent = `Click the element step ${stepIndex + 1} should attach to.`;
-        const target = await this.picker.pick();
-        if (!target) {
-          status.textContent = "Selection cancelled.";
-          return;
-        }
-        this.setTarget(definition, target, stepIndex);
-        root.querySelector("[data-reliability]").textContent = target.reliability === "fragile" ? "Warning: this selector is fragile and may change with the page layout." : `${target.reliability} selector`;
-        save();
-      });
-      (_c = root.querySelector("[data-save]")) == null ? void 0 : _c.addEventListener("click", () => void persist());
-      root.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => {
-        root.querySelectorAll("[data-tab]").forEach((item) => item.classList.remove("active"));
-        button.classList.add("active");
-        root.querySelectorAll("[data-panel]").forEach((panel) => panel.hidden = panel.dataset.panel !== button.dataset.tab);
-      }));
-      renderPreview();
-      this.validationTimer = window.setInterval(() => {
-        void bridge.load().catch(() => this.destroy());
-      }, 15e3);
-    }
-    setTarget(definition, target, stepIndex = 0) {
-      if (isGuideDefinition(definition)) definition.steps[stepIndex].target = target;
-      else definition.target = target;
-    }
-    destroy() {
-      var _a;
-      clearTimeout(this.expiryTimer);
-      clearInterval(this.validationTimer);
-      this.preview.destroy();
-      this.picker.cancel();
-      (_a = this.host) == null ? void 0 : _a.remove();
-      this.host = null;
-    }
-  }
-  function escapeText(value) {
-    const span = document.createElement("span");
-    span.textContent = value;
-    return span.innerHTML;
-  }
-  const STYLE = `:host{all:initial}aside{position:fixed;right:16px;top:16px;width:340px;z-index:2147483647;background:#fff;color:#111827;border:1px solid #d1d5db;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.28);font:14px ui-sans-serif,system-ui,sans-serif}header{display:flex;flex-direction:column;padding:16px;border-bottom:1px solid #e5e7eb}small,p{color:#6b7280;margin:0;font-size:12px}nav,.steps>div{display:flex;overflow:auto;border-bottom:1px solid #e5e7eb}nav button,.steps button{border:0;background:transparent;padding:10px 8px;font-size:11px;cursor:pointer}nav button.active,.steps button.active{color:#2563eb;border-bottom:2px solid #2563eb}.steps{display:grid;gap:6px}.steps b{font-size:12px}main{display:grid;gap:12px;padding:16px}section{display:grid;gap:12px}label{display:grid;gap:5px;font-size:12px;font-weight:600}label.row{display:flex;align-items:center}label.row input{width:auto}input,textarea,select{box-sizing:border-box;width:100%;border:1px solid #d1d5db;border-radius:7px;padding:8px;font:14px inherit;background:#fff}textarea{min-height:88px;resize:vertical}main button{border:0;border-radius:7px;padding:9px;background:#111827;color:#fff;cursor:pointer}`;
-  const EditorModeController$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-    __proto__: null,
-    EditorModeController
-  }, Symbol.toStringTag, { value: "Module" }));
-  class EligibilityEngine {
-    choose(experiences) {
-      return [...experiences].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))[0] ?? null;
-    }
-  }
-  const ONCE_KEY = "__loopz_experiences_seen__";
-  const SESSION_KEY = "__loopz_experiences_session_seen__";
-  function read(storage, key) {
-    try {
-      return new Set(JSON.parse(storage.getItem(key) ?? "[]"));
-    } catch {
-      return /* @__PURE__ */ new Set();
-    }
-  }
-  class ExperienceStateStore {
-    hasEver(id) {
-      return read(localStorage, ONCE_KEY).has(id);
-    }
-    hasInSession(id) {
-      return read(sessionStorage, SESSION_KEY).has(id);
-    }
-    markSeen(id) {
-      for (const [storage, key] of [[localStorage, ONCE_KEY], [sessionStorage, SESSION_KEY]]) {
-        const values = read(storage, key);
-        values.add(id);
-        try {
-          storage.setItem(key, JSON.stringify([...values]));
-        } catch {
-        }
-      }
-    }
-  }
-  class ExperienceLoader {
-    constructor(apiBase, siteId, session, trackEvent) {
-      this.apiBase = apiBase;
-      this.siteId = siteId;
-      this.session = session;
-      this.trackEvent = trackEvent;
-      this.renderer = new ExperienceRenderer();
-      this.eligibility = new EligibilityEngine();
-      this.state = new ExperienceStateStore();
-      this.activeId = null;
-      this.impressionId = null;
-      this.destroyed = false;
-    }
-    async evaluate(trigger) {
-      if (this.destroyed || this.activeId) return;
-      try {
-        const query = new URLSearchParams({ url: location.href, anonymousId: this.session.getAnonymousId(), sessionId: this.session.getSessionId() });
-        const userId = this.session.getIdentifiedUserId();
-        if (userId) query.set("trackedUserId", userId);
-        if (trigger) query.set("trigger", trigger);
-        const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experiences?${query}`, { credentials: "omit" });
-        if (!response.ok) return;
-        const manifest = await response.json();
-        const chosen = this.eligibility.choose(Array.isArray(manifest.experiences) ? manifest.experiences : []);
-        if (!chosen) return;
-        const mounted = this.renderer.render(chosen, {
-          onVisible: () => void this.shown(chosen),
-          onDismiss: () => void this.record(chosen, "dismissed"),
-          onAction: (action) => this.handleAction(chosen, action),
-          onComplete: () => void this.record(chosen, "completed"),
-          onUnavailable: () => {
-            if (this.activeId === chosen.id) this.activeId = null;
-          }
-        });
-        if (mounted) this.activeId = chosen.id;
-      } catch {
-      }
-    }
-    onRouteChange() {
-      this.renderer.destroy();
-      this.activeId = null;
-      this.impressionId = null;
-      void this.evaluate();
-    }
-    onCustomEvent(name) {
-      void this.evaluate(name);
-    }
-    destroy() {
-      this.destroyed = true;
-      this.renderer.destroy();
-      this.activeId = null;
-    }
-    async shown(experience) {
-      if (this.activeId !== experience.id || this.impressionId) return;
-      this.state.markSeen(experience.id);
-      const result = await this.post(experience, "shown");
-      this.impressionId = (result == null ? void 0 : result.impressionId) ?? null;
-    }
-    handleAction(experience, action) {
-      var _a;
-      void this.record(experience, "action", action.type);
-      if (action.type === "open_url" && action.url) window.location.assign(action.url);
-      if (action.type === "track_event" && action.eventName) (_a = this.trackEvent) == null ? void 0 : _a.call(this, action.eventName);
-    }
-    async record(experience, event, action) {
-      await this.post(experience, event, action);
-      if (event !== "action") {
-        this.activeId = null;
-        this.impressionId = null;
-      }
-    }
-    async post(experience, event, action) {
-      try {
-        const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: this.impressionId ?? void 0, event, action }) });
-        return response.ok && response.status !== 204 ? await response.json() : null;
-      } catch {
-        return null;
-      }
-    }
-  }
-  const ExperienceLoader$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-    __proto__: null,
-    ExperienceLoader
-  }, Symbol.toStringTag, { value: "Module" }));
+  const analytics = installPublicAPI(["__myAnalytics__", "analytics"]);
+  autoInitializeFromScript(analytics, currentScriptElement);
 })();
 //# sourceMappingURL=sdk.js.map

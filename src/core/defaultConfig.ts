@@ -7,7 +7,9 @@ export function resolveConfig(input: AnalyticsConfig): ResolvedAnalyticsConfig {
 
   return {
     siteId: input.siteId,
-    endpoint: input.endpoint || "https://api.example.com",
+    endpoint: input.endpoint || "https://api.movcues.com",
+    experienceRuntimeBundleUrl: input.experienceRuntimeBundleUrl ?? "",
+    editorRuntimeBundleUrl: input.editorRuntimeBundleUrl ?? "",
     heatmapSnapshotBundleUrl: input.heatmapSnapshotBundleUrl ?? "",
     debug: input.debug ?? false,
     sessionInactivityMs: input.sessionInactivityMs ?? 30 * 60 * 1000,

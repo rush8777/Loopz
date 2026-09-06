@@ -7,7 +7,9 @@
  * captures it at exactly the right time, regardless of how the bootstrap
  * snippet loaded the script.
  */
-export const currentScriptUrl: string | null =
+export const currentScriptElement: HTMLScriptElement | null =
   typeof document !== "undefined" && document.currentScript instanceof HTMLScriptElement
-    ? document.currentScript.src
+    ? document.currentScript
     : null;
+
+export const currentScriptUrl: string | null = currentScriptElement?.src ?? null;

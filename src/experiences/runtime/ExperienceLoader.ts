@@ -1,5 +1,5 @@
-import type { SessionManager } from "../../core/SessionManager";
 import type { DeliveredExperience, ExperienceAction } from "../types";
+import type { ExperienceSession } from "../runtimeInterfaces";
 import { EligibilityEngine } from "./EligibilityEngine";
 import { ExperienceRenderer } from "./ExperienceRenderer";
 import { ExperienceStateStore } from "./ExperienceStateStore";
@@ -12,7 +12,7 @@ export class ExperienceLoader {
   private impressionId: string | null = null;
   private destroyed = false;
 
-  constructor(private apiBase: string, private siteId: string, private session: SessionManager, private trackEvent?: (name: string) => void) {}
+  constructor(private apiBase: string, private siteId: string, private session: ExperienceSession, private trackEvent?: (name: string) => void) {}
 
   async evaluate(trigger?: string): Promise<void> {
     if (this.destroyed || this.activeId) return;

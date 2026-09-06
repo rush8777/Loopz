@@ -7,4 +7,5 @@
  * captures it at exactly the right time, regardless of how the bootstrap
  * snippet loaded the script.
  */
+export declare const currentScriptElement: HTMLScriptElement | null;
 export declare const currentScriptUrl: string | null;

@@ -82,6 +82,10 @@ export interface AnalyticsConfig {
    *   {endpoint}/public/sites/{siteId}/replay   - rrweb session replay
    */
   endpoint?: string;
+  /** Optional URL for the separately lazy-loaded experience runtime bundle. */
+  experienceRuntimeBundleUrl?: string;
+  /** Optional URL for the separately lazy-loaded visual editor bundle. */
+  editorRuntimeBundleUrl?: string;
   /** Optional URL for the separately lazy-loaded sdk-heatmap bundle (useful for ESM/bundled integrations). */
   heatmapSnapshotBundleUrl?: string;
   debug?: boolean;

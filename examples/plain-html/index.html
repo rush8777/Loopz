@@ -367,72 +367,13 @@
         }
     </style>
 
-    <!-- Analytics SDK -->
-    <script>
-        (function (w, d, s, u) {
-            w.analytics = w.analytics || {
-                q: [],
-                init: function () {
-                    this.q.push(["init", ...arguments]);
-                }
-            };
-
-            [
-                "start",
-                "stop",
-                "destroy",
-                "event",
-                "identify",
-                "page",
-                "defineFunnel",
-                "enableDebug",
-                "disableDebug"
-            ].forEach(function (method) {
-                w.analytics[method] =
-                    w.analytics[method] ||
-                    function () {
-                        w.analytics.q.push([
-                            method,
-                            ...arguments
-                        ]);
-                    };
-            });
-
-            var script = d.createElement(s);
-
-            script.async = true;
-            script.src = u + "?siteId=demo_site";
-
-            var first = d.getElementsByTagName(s)[0];
-
-            first.parentNode.insertBefore(script, first);
-        })(
-            window,
-            document,
-            "script",
-            "../../dist/sdk.js"
-        );
-
-        /*
-         * Initialize Analytics
-         */
-        analytics.init({
-            siteId: "site_tlh00zlo4buy61twqjccpmik",
-            debug: true,
-            endpoint: "http://localhost:3000",
-
-            sessionReplay: {
-                enabled: false
-            },
-
-            autocapture: {
-                cursor: true
-            }
-        });
-
-        
-    
-    </script>
+    <!--
+        Current SDK install: the core reads these attributes and initializes
+        itself. Experience, editor, replay, and heatmap bundles stay lazy.
+        This relative URL uses the local dist build; localhost is appropriate
+        only while this demo and backend run on the same machine.
+    -->
+    <script async src="../../dist/sdk.js" data-site-id="site_tlh00zlo4buy61twqjccpmik" data-endpoint="http://localhost:3000"></script>
 </head>
 
 <body>
@@ -690,7 +631,7 @@
         });
 
         const getStarted = document.getElementById("btm_started").addEventListener("click" , () => {
-            analytics.event("Activated");
+            window.analytics?.event("Activated");
         })
 
 
@@ -765,7 +706,7 @@
              * Send identity to your SDK
              */
 
-            analytics.identify(userId, {
+            window.analytics?.identify(userId, {
 
                 email: email,
 
@@ -786,7 +727,7 @@
              * identity transition in your analytics data.
              */
 
-            analytics.event("user_signed_in", {
+            window.analytics?.event("user_signed_in", {
 
                 user_id: userId
 

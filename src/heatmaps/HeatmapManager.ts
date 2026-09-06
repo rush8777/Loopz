@@ -1,4 +1,4 @@
-import { currentScriptUrl } from "../core/scriptOrigin";
+import { loadSdkBundle, sdkBundleUrl } from "../core/sdkBundleLoader";
 import { classifyHeatmapDevice, type HeatmapDeviceClass } from "./deviceClass";
 interface PublicHeatmapState { id: string; selector: string }
 export class HeatmapManager {
@@ -87,17 +87,11 @@ export class HeatmapManager {
   private loadCaptureFunction(): Promise<(() => Promise<string>) | null> {
     if (window.__loopzHeatmapCapture__) return Promise.resolve(window.__loopzHeatmapCapture__);
     if (this.loadPromise) return this.loadPromise;
-    const url = this.bundleUrl || deriveHeatmapBundleUrl(currentScriptUrl);
+    const url = sdkBundleUrl("heatmap", this.bundleUrl);
     if (!url) return Promise.resolve(null);
-    this.loadPromise = new Promise((resolve) => { const script = document.createElement("script"); script.src = url; script.async = true; script.onload = () => resolve(window.__loopzHeatmapCapture__ ?? null); script.onerror = () => resolve(null); document.head.appendChild(script); });
+    this.loadPromise = loadSdkBundle(url, () => window.__loopzHeatmapCapture__, "heatmap snapshot");
     return this.loadPromise;
   }
 }
 function capitalize(value: string) { return value ? value[0].toUpperCase() + value.slice(1) : value; }
 declare global { interface Window { __loopzHeatmapCapture__?: () => Promise<string> } }
-function deriveHeatmapBundleUrl(url: string | null): string | null {
-  if (!url) return null;
-  if (url.includes("sdk.min.js")) return url.replace("sdk.min.js", "sdk-heatmap.min.js");
-  if (url.includes("sdk.js")) return url.replace("sdk.js", "sdk-heatmap.js");
-  return null;
-}

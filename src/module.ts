@@ -1,5 +1,8 @@
-import { Analytics } from "./core/Analytics";
+import { Analytics as CoreAnalytics } from "./core/Analytics";
 import { installUnloadHandlers } from "./core/unloadHandlers";
+import { EditorModeController } from "./experiences/editor/EditorModeController";
+import { ExperienceLoader } from "./experiences/runtime/ExperienceLoader";
+import type { AnalyticsRuntimeProviders } from "./experiences/runtimeInterfaces";
 import type { AnalyticsConfig } from "./types/config";
 
 /**
@@ -30,7 +33,22 @@ import type { AnalyticsConfig } from "./types/config";
  *   const analytics = new Analytics();
  *   analytics.init({ siteId: "YOUR_SITE_ID" });
  */
-export { Analytics };
+const bundledRuntimeProviders: AnalyticsRuntimeProviders = {
+  experiences: {
+    createLoader: (apiBase, siteId, session, trackEvent) =>
+      new ExperienceLoader(apiBase, siteId, session, trackEvent),
+  },
+  editor: {
+    createController: (apiBase) => new EditorModeController(apiBase),
+  },
+};
+
+/** npm/ESM users receive module-native runtimes without CDN globals. */
+export class Analytics extends CoreAnalytics {
+  constructor() {
+    super(bundledRuntimeProviders);
+  }
+}
 
 /**
  * Convenience factory: creates an Analytics instance, calls init(config)

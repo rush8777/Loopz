@@ -1,4 +1,5 @@
-import { installPublicAPI } from "./api/PublicAPI";
+import { autoInitializeFromScript, installPublicAPI } from "./api/PublicAPI";
+import { currentScriptElement } from "./core/scriptOrigin";
 
 /**
  * This is the file that gets built into dist/sdk.js and dist/sdk.min.js -
@@ -9,4 +10,5 @@ import { installPublicAPI } from "./api/PublicAPI";
  * Both `window.__myAnalytics__` and the short alias `window.analytics`
  * are supported so a site can use whichever name its bootstrap snippet set up.
  */
-installPublicAPI(["__myAnalytics__", "analytics"]);
+const analytics = installPublicAPI(["__myAnalytics__", "analytics"]);
+autoInitializeFromScript(analytics, currentScriptElement);

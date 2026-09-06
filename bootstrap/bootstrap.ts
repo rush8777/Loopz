@@ -1,17 +1,15 @@
 /**
- * This file is NOT bundled into dist/sdk.js. It exists purely as the
- * source-of-truth, type-checkable reference for the tiny inline snippet
- * that customers paste into their <head> (see bootstrap/install-snippet.html
- * and the README for the copy-pasteable version).
+ * Legacy programmatic queue bootstrap retained for existing integrations.
+ * New installations use the one-line data-site-id script tag documented in
+ * bootstrap/install-snippet.html and README.md; the SDK auto-initializes it.
  *
  * The snippet's only job is to:
  *   1. Create a global queue stub synchronously (so analytics.event(...)
  *      never throws even before the real SDK has loaded).
  *   2. Asynchronously load the real SDK from the CDN.
  *
- * Configuration (siteId, endpoint, sessionReplay, etc.) is NOT this
- * function's job - it happens entirely through the analytics.init({...})
- * call the snippet makes immediately afterward. That call is safe to
+ * Configuration still happens through analytics.init({...}) for consumers of
+ * this legacy helper. That call is safe to
  * make before the real SDK has finished loading because it just pushes
  * onto the queue stub's `q` array above; once the real script executes,
  * it drains that queue and processes the queued init() for real.

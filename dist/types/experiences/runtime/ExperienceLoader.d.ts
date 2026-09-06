@@ -1,4 +1,4 @@
-import type { SessionManager } from "../../core/SessionManager";
+import type { ExperienceSession } from "../runtimeInterfaces";
 export declare class ExperienceLoader {
     private apiBase;
     private siteId;
@@ -10,7 +10,7 @@ export declare class ExperienceLoader {
     private activeId;
     private impressionId;
     private destroyed;
-    constructor(apiBase: string, siteId: string, session: SessionManager, trackEvent?: ((name: string) => void) | undefined);
+    constructor(apiBase: string, siteId: string, session: ExperienceSession, trackEvent?: ((name: string) => void) | undefined);
     evaluate(trigger?: string): Promise<void>;
     onRouteChange(): void;
     onCustomEvent(name: string): void;

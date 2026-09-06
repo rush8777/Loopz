@@ -16,3 +16,5 @@ import { Analytics } from "../core/Analytics";
  * for the equivalent guard on the ESM entry point.
  */
 export declare function installPublicAPI(globalNames: string[]): Analytics;
+/** Auto-initializes the CDN build when its own script carries data-site-id. */
+export declare function autoInitializeFromScript(analytics: Analytics, script: HTMLScriptElement | null): void;
