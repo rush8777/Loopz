@@ -1,5 +1,6 @@
-import type { ExperienceBehavior, ExperienceContent, ExperienceDesign, ExperienceTarget, WidgetBuilderState } from "../types";
+import type { ExperienceBehavior, ExperienceContent, ExperienceDesign, ExperienceTarget, WidgetBuilderState, WidgetType } from "../types";
 import { mountBuilderContent } from "./BuilderContent";
+import { applyWidgetSizeEnvelope } from "./WidgetSizing";
 
 export interface RenderCallbacks { onDismiss: () => void; onPrimary: () => void; onSecondary: () => void; onBack?: () => void }
 
@@ -22,13 +23,14 @@ export function waitForTarget(target: ExperienceTarget | undefined, onFound: (el
   return stop;
 }
 
-export function buildCard(root: ShadowRoot, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState): HTMLElement {
+export function buildCard(root: ShadowRoot, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState, widgetType?: WidgetType): HTMLElement {
   const card = document.createElement("section");
   card.className = "card";
   card.style.setProperty("--loopz-bg", design.theme.background);
   card.style.setProperty("--loopz-fg", design.theme.foreground);
   card.style.setProperty("--loopz-primary", design.theme.primary);
   card.dataset.width = design.width; card.dataset.radius = design.theme.borderRadius;
+  if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
   const close = behavior.dismissible ? `<button class="close" data-dismiss aria-label="Dismiss">×</button>` : "";
   card.innerHTML = close;
   card.querySelector("[data-dismiss]")?.addEventListener("click", callbacks.onDismiss);
@@ -45,8 +47,8 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
 
 export class AnchoredCardRenderer {
   private cleanup: Array<() => void> = [];
-  render(root: ShadowRoot, target: Element, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState): HTMLElement {
-    const card = buildCard(root, content, design, behavior, callbacks, builder);
+  render(root: ShadowRoot, target: Element, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState, widgetType?: WidgetType): HTMLElement {
+    const card = buildCard(root, content, design, behavior, callbacks, builder, widgetType);
     const update = () => position(card, target.getBoundingClientRect(), behavior);
     const onWindow = () => requestAnimationFrame(update);
     window.addEventListener("scroll", onWindow, true); window.addEventListener("resize", onWindow);

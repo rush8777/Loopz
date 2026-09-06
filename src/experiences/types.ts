@@ -3,7 +3,9 @@ export type WidgetType = "anchored_card" | "toast" | "cursor_follow" | "modal" |
 export interface ExperienceAction { label: string; type: "dismiss" | "next_step" | "open_url" | "track_event"; url?: string; eventName?: string }
 export interface ExperienceContent { heading: string; body: string; primaryAction?: ExperienceAction; secondaryAction?: { label: string; type: "dismiss" } }
 export interface ExperienceTarget { primarySelector: string; fallbackSelectors: string[]; label?: string; role?: string; tagName?: string; reliability: "reliable" | "moderate" | "fragile" }
-export interface ExperienceDesign { width: "sm" | "md" | "lg"; theme: { background: string; foreground: string; primary: string; borderRadius: "sm" | "md" | "lg" } }
+export type LegacyExperienceWidth = "sm" | "md" | "lg";
+export interface ExperienceSize { width: { mode: "auto" | "fixed" | "full"; value?: number }; height: { mode: "auto" | "fixed" | "viewport"; value?: number } }
+export interface ExperienceDesign { width: LegacyExperienceWidth; size?: ExperienceSize; theme: { background: string; foreground: string; primary: string; borderRadius: "sm" | "md" | "lg" } }
 export interface WidgetBuilderState { version: 1; projectData: Record<string, unknown>; html: string; css: string }
 export interface ExperienceBehavior { dismissible: boolean; zIndex?: number; placement?: "auto" | "top" | "right" | "bottom" | "left"; alignment?: "start" | "center" | "end"; offset?: number; toastPosition?: "top-left" | "top-right" | "bottom-left" | "bottom-right"; autoDismissMs?: number | null; cursorOffset?: { x: number; y: number }; modalLayout?: "center" | "fullscreen"; backdrop?: boolean; backdropOpacity?: number; closeOnBackdrop?: boolean; slideoutPosition?: "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center-left" | "center-right"; bannerPosition?: "top" | "bottom"; hotspotStyle?: "pulse" | "dot" | "question"; hotspotColor?: string }
 export interface GuideStep { id: string; content: ExperienceContent; target?: ExperienceTarget; behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "dismissible"> }

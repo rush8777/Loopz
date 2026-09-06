@@ -265,7 +265,7 @@
   function distance(x1, y1, x2, y2) {
     return Math.hypot(x2 - x1, y2 - y1);
   }
-  function clamp(value, min, max) {
+  function clamp$1(value, min, max) {
     return Math.min(max, Math.max(min, value));
   }
   class ClickCollector {
@@ -353,7 +353,7 @@
       const viewportHeight = window.innerHeight;
       const scrollTop = window.scrollY;
       const scrollable = Math.max(documentHeight - viewportHeight, 1);
-      const scrollPercent = clamp(Math.round(scrollTop / scrollable * 100), 0, 100);
+      const scrollPercent = clamp$1(Math.round(scrollTop / scrollable * 100), 0, 100);
       const direction = scrollTop >= this.lastScrollTop ? "down" : "up";
       this.lastScrollTop = scrollTop;
       if (scrollPercent > this.maxScrollPercent) {
@@ -2378,7 +2378,7 @@ ${ISOLATION_CSS}`;
     });
     return true;
   }
-  const ISOLATION_CSS = `[data-loopz-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-loopz-builder-surface]>.loopz-widget{position:relative!important;inset:auto!important;max-width:100%!important}`;
+  const ISOLATION_CSS = `[data-loopz-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-loopz-builder-surface]>.loopz-widget{position:relative!important;inset:auto!important;width:100%!important;min-width:0!important;max-width:100%!important;max-height:100%!important}`;
   function sanitizeBuilderHtml(input) {
     const template = document.createElement("template");
     template.innerHTML = input;
@@ -2418,6 +2418,49 @@ ${ISOLATION_CSS}`;
       if (prelude.split(",").some((selector) => !selector.trim().includes(".loopz-widget"))) return null;
     }
     return css;
+  }
+  const WIDGET_SIZE_CONSTRAINTS = {
+    anchored_card: { width: { default: 320, min: 240, max: 480 }, height: {}, viewportGutter: 24 },
+    toast: { width: { default: 380, min: 280, max: 520 }, height: {}, viewportGutter: 24 },
+    cursor_follow: { width: { default: 280, min: 200, max: 360 }, height: {}, viewportGutter: 24 },
+    modal: { width: { default: 600, min: 320, max: 960, allowFull: true }, height: { allowFixed: true, allowViewport: true, min: 200, max: 900 }, viewportGutter: 24 },
+    slideout: { width: { default: 400, min: 320, max: 640 }, height: { allowFixed: true, allowViewport: true, min: 240, max: 900 }, viewportGutter: 24 },
+    hotspot: { width: { default: 300, min: 220, max: 420 }, height: {}, viewportGutter: 24 },
+    banner: { width: { default: "full" }, height: {}, viewportGutter: 0 }
+  };
+  function normalizeWidgetSize(widgetType, design) {
+    var _a, _b;
+    const constraint = WIDGET_SIZE_CONSTRAINTS[widgetType];
+    if (widgetType === "banner") return { width: { mode: "full" }, height: { mode: "auto" } };
+    const legacyValue = design.width === "sm" ? constraint.width.min : design.width === "lg" ? constraint.width.max : constraint.width.default;
+    const requestedWidth = (_a = design.size) == null ? void 0 : _a.width;
+    const width = (requestedWidth == null ? void 0 : requestedWidth.mode) === "full" && constraint.width.allowFull ? { mode: "full" } : { mode: "fixed", value: clamp((requestedWidth == null ? void 0 : requestedWidth.value) ?? legacyValue, constraint.width.min, constraint.width.max) };
+    const requestedHeight = (_b = design.size) == null ? void 0 : _b.height;
+    const height = (requestedHeight == null ? void 0 : requestedHeight.mode) === "fixed" && constraint.height.allowFixed ? { mode: "fixed", value: clamp(requestedHeight.value ?? constraint.height.min, constraint.height.min, constraint.height.max) } : (requestedHeight == null ? void 0 : requestedHeight.mode) === "viewport" && constraint.height.allowViewport ? { mode: "viewport" } : { mode: "auto" };
+    return { width, height };
+  }
+  function applyWidgetSizeEnvelope(card, widgetType, design) {
+    const constraint = WIDGET_SIZE_CONSTRAINTS[widgetType];
+    const size = normalizeWidgetSize(widgetType, design);
+    const gutter = Math.max(24, constraint.viewportGutter);
+    card.dataset.sizeWidth = size.width.mode;
+    card.dataset.sizeHeight = size.height.mode;
+    if (size.width.mode === "full") {
+      card.style.width = widgetType === "banner" ? "100%" : `calc(100vw - ${gutter}px)`;
+      card.style.minWidth = "0";
+      card.style.maxWidth = "none";
+    } else {
+      card.style.width = `${size.width.value}px`;
+      card.style.minWidth = `min(${constraint.width.min}px, calc(100vw - ${gutter}px))`;
+      card.style.maxWidth = `min(${constraint.width.max}px, calc(100vw - ${gutter}px))`;
+    }
+    card.style.height = size.height.mode === "fixed" ? `${size.height.value}px` : size.height.mode === "viewport" ? `calc(100vh - ${gutter}px)` : "auto";
+    card.style.maxHeight = `calc(100vh - ${gutter}px)`;
+    card.style.overflowX = "hidden";
+    card.style.overflowY = "auto";
+  }
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, Number.isFinite(value) ? Math.round(value) : min));
   }
   function findTarget(target) {
     if (!target) return null;
@@ -2470,7 +2513,7 @@ ${ISOLATION_CSS}`;
     }, timeoutMs);
     return stop;
   }
-  function buildCard(root, content, design, behavior, callbacks, builder) {
+  function buildCard(root, content, design, behavior, callbacks, builder, widgetType) {
     var _a, _b, _c;
     const card = document.createElement("section");
     card.className = "card";
@@ -2479,6 +2522,7 @@ ${ISOLATION_CSS}`;
     card.style.setProperty("--loopz-primary", design.theme.primary);
     card.dataset.width = design.width;
     card.dataset.radius = design.theme.borderRadius;
+    if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
     const close = behavior.dismissible ? `<button class="close" data-dismiss aria-label="Dismiss">×</button>` : "";
     card.innerHTML = close;
     (_a = card.querySelector("[data-dismiss]")) == null ? void 0 : _a.addEventListener("click", callbacks.onDismiss);
@@ -2496,8 +2540,8 @@ ${ISOLATION_CSS}`;
     constructor() {
       this.cleanup = [];
     }
-    render(root, target, content, design, behavior, callbacks, builder) {
-      const card = buildCard(root, content, design, behavior, callbacks, builder);
+    render(root, target, content, design, behavior, callbacks, builder, widgetType) {
+      const card = buildCard(root, content, design, behavior, callbacks, builder, widgetType);
       const update = () => position(card, target.getBoundingClientRect(), behavior);
       const onWindow = () => requestAnimationFrame(update);
       window.addEventListener("scroll", onWindow, true);
@@ -2554,7 +2598,7 @@ ${ISOLATION_CSS}`;
       this.timer = null;
     }
     render(root, content, design, behavior, callbacks, builder) {
-      const card = buildCard(root, content, design, behavior, callbacks, builder);
+      const card = buildCard(root, content, design, behavior, callbacks, builder, "toast");
       card.classList.add("toast");
       card.dataset.position = behavior.toastPosition ?? "bottom-right";
       if (behavior.autoDismissMs) this.timer = window.setTimeout(callbacks.onDismiss, behavior.autoDismissMs);
@@ -2569,7 +2613,7 @@ ${ISOLATION_CSS}`;
       this.cleanup = null;
     }
     render(root, content, design, behavior, callbacks, builder) {
-      const card = buildCard(root, content, design, behavior, callbacks, builder);
+      const card = buildCard(root, content, design, behavior, callbacks, builder, "cursor_follow");
       card.classList.add("cursor");
       let frame = 0;
       let x = innerWidth / 2;
@@ -2609,7 +2653,7 @@ ${ISOLATION_CSS}`;
         if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
         root.appendChild(backdrop);
       }
-      const card = buildCard(root, content, design, behavior, callbacks, builder);
+      const card = buildCard(root, content, design, behavior, callbacks, builder, "modal");
       card.classList.add("modal");
       card.dataset.layout = behavior.modalLayout ?? "center";
       return card;
@@ -2626,7 +2670,7 @@ ${ISOLATION_CSS}`;
         if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
         root.appendChild(backdrop);
       }
-      const card = buildCard(root, content, design, behavior, callbacks, builder);
+      const card = buildCard(root, content, design, behavior, callbacks, builder, "slideout");
       card.classList.add("slideout");
       card.dataset.position = behavior.slideoutPosition ?? "bottom-right";
       return card;
@@ -2665,7 +2709,7 @@ ${ISOLATION_CSS}`;
           return;
         }
         this.cardRenderer = new AnchoredCardRenderer();
-        this.card = this.cardRenderer.render(root, target, content, design, behavior, callbacks, builder);
+        this.card = this.cardRenderer.render(root, target, content, design, behavior, callbacks, builder, "hotspot");
       };
       beacon.addEventListener("click", toggle);
       window.addEventListener("scroll", schedule, true);
@@ -2689,7 +2733,7 @@ ${ISOLATION_CSS}`;
   }
   class BannerRenderer {
     render(root, content, design, behavior, callbacks, builder) {
-      const card = buildCard(root, content, design, behavior, callbacks, builder);
+      const card = buildCard(root, content, design, behavior, callbacks, builder, "banner");
       card.classList.add("banner");
       card.dataset.position = behavior.bannerPosition ?? "top";
       return card;
@@ -2728,7 +2772,7 @@ ${ISOLATION_CSS}`;
           const root = this.root(experience.id);
           const renderer = experience.widgetType === "hotspot" ? new HotspotRenderer() : new AnchoredCardRenderer();
           this.renderer = renderer;
-          renderer.render(root, target2, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
+          renderer.render(root, target2, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder, experience.widgetType ?? "anchored_card");
           requestAnimationFrame(callbacks.onVisible);
         };
         const target = findTarget(definition.target);
@@ -2863,11 +2907,11 @@ ${ISOLATION_CSS}`;
   const STYLES = `
   :host{all:initial}.card{pointer-events:auto;position:fixed;box-sizing:border-box;width:320px;max-width:calc(100vw - 16px);padding:18px;background:var(--loopz-bg);color:var(--loopz-fg);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-shadow:0 12px 38px rgba(0,0,0,.22);border:1px solid rgba(0,0,0,.12)}
   .card[data-width=sm]{width:260px}.card[data-width=lg]{width:400px}.card[data-radius=sm]{border-radius:6px}.card[data-radius=md]{border-radius:12px}.card[data-radius=lg]{border-radius:20px}
-  .builder-card{padding:0;background:transparent;border:0;box-shadow:none}.builder-card:not(.banner){width:max-content}.builder-content{box-sizing:border-box;width:100%;max-width:100%}.builder-content>.loopz-widget{max-width:100%}.builder-card>.close{z-index:2}
+  .builder-card{padding:0;background:transparent;border:0;box-shadow:none}.builder-content{box-sizing:border-box;width:100%;height:100%;max-width:100%}.builder-content>.loopz-widget{box-sizing:border-box;width:100%!important;min-width:0!important;max-width:100%!important;max-height:100%!important}.builder-card>.close{z-index:2}
   h2{font:600 17px/1.3 ui-sans-serif,system-ui,sans-serif;margin:0 24px 7px 0}p{margin:0;white-space:pre-wrap}footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}button{border:0;border-radius:7px;padding:8px 12px;font:600 13px ui-sans-serif,system-ui,sans-serif;cursor:pointer}.primary{background:var(--loopz-primary);color:#fff}.secondary{background:transparent;color:inherit}.close{position:absolute;right:8px;top:7px;padding:3px 7px;background:transparent;color:inherit;font-size:20px}
   .toast{position:fixed!important}.toast[data-position=top-left]{top:16px;left:16px}.toast[data-position=top-right]{top:16px;right:16px}.toast[data-position=bottom-left]{bottom:16px;left:16px}.toast[data-position=bottom-right]{bottom:16px;right:16px}.cursor{will-change:left,top}@media(prefers-reduced-motion:reduce){.card{transition:none!important}}
   .backdrop{pointer-events:auto;position:fixed;inset:0;background:rgba(0,0,0,var(--loopz-backdrop-opacity,.45))}
-  .modal{left:50%;top:50%;transform:translate(-50%,-50%)}.modal[data-layout=fullscreen]{inset:16px;width:auto!important;max-width:none;transform:none;display:flex;flex-direction:column;justify-content:center}.modal[data-layout=fullscreen] footer{justify-content:center}
+  .modal{left:50%;top:50%;transform:translate(-50%,-50%)}.modal[data-layout=fullscreen],.modal[data-size-width=full]{inset:12px;width:auto!important;max-width:none!important;transform:none;display:flex;flex-direction:column;justify-content:center}.modal[data-layout=fullscreen] footer,.modal[data-size-width=full] footer{justify-content:center}
   .slideout[data-position=top-left]{top:16px;left:16px}.slideout[data-position=top-right]{top:16px;right:16px}.slideout[data-position=bottom-left]{bottom:16px;left:16px}.slideout[data-position=bottom-right]{bottom:16px;right:16px}.slideout[data-position=center-left]{left:16px;top:50%;transform:translateY(-50%)}.slideout[data-position=center-right]{right:16px;top:50%;transform:translateY(-50%)}
   .banner{left:0;right:0;width:auto!important;max-width:none;border-radius:0!important;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner[data-position=top]{top:0}.banner[data-position=bottom]{bottom:0}.banner h2,.banner p{grid-column:1}.banner footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
   .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--loopz-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--loopz-hotspot);border-radius:50%;animation:loopz-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes loopz-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}

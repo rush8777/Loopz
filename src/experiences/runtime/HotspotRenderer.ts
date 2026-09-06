@@ -25,7 +25,7 @@ export class HotspotRenderer {
     const toggle = () => {
       if (this.card) { this.card.remove(); this.card = null; this.cardRenderer?.destroy(); this.cardRenderer = null; return; }
       this.cardRenderer = new AnchoredCardRenderer();
-      this.card = this.cardRenderer.render(root, target, content, design, behavior, callbacks, builder);
+      this.card = this.cardRenderer.render(root, target, content, design, behavior, callbacks, builder, "hotspot");
     };
     beacon.addEventListener("click", toggle);
     window.addEventListener("scroll", schedule, true);

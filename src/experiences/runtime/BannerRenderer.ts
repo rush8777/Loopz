@@ -3,7 +3,7 @@ import { buildCard, type RenderCallbacks } from "./AnchoredCardRenderer";
 
 export class BannerRenderer {
   render(root: ShadowRoot, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState): HTMLElement {
-    const card = buildCard(root, content, design, behavior, callbacks, builder);
+    const card = buildCard(root, content, design, behavior, callbacks, builder, "banner");
     card.classList.add("banner");
     card.dataset.position = behavior.bannerPosition ?? "top";
     return card;

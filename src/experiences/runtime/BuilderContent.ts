@@ -26,7 +26,7 @@ export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder
   return true;
 }
 
-const ISOLATION_CSS = `[data-loopz-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-loopz-builder-surface]>.loopz-widget{position:relative!important;inset:auto!important;max-width:100%!important}`;
+const ISOLATION_CSS = `[data-loopz-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-loopz-builder-surface]>.loopz-widget{position:relative!important;inset:auto!important;width:100%!important;min-width:0!important;max-width:100%!important;max-height:100%!important}`;
 
 export function sanitizeBuilderHtml(input: string): ChildNode[] | null {
   const template = document.createElement("template");

@@ -10,7 +10,7 @@ export class SlideoutRenderer {
       if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
       root.appendChild(backdrop);
     }
-    const card = buildCard(root, content, design, behavior, callbacks, builder);
+    const card = buildCard(root, content, design, behavior, callbacks, builder, "slideout");
     card.classList.add("slideout");
     card.dataset.position = behavior.slideoutPosition ?? "bottom-right";
     return card;

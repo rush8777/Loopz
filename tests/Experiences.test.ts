@@ -57,6 +57,16 @@ describe("experience editor and runtime", () => {
     }
   });
 
+  it("enforces widget-specific sizing outside untrusted builder CSS", () => {
+    const callbacks = { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() };
+    const toast = withBuilder(base("toast")); if (!isGuide(toast)) { toast.definition.design.size = { width: { mode: "fixed", value: 3000 }, height: { mode: "auto" } }; toast.definition.builder!.css = ".loopz-widget{width:3000px!important}"; }
+    const toastRenderer = new ExperienceRenderer(); toastRenderer.render(toast, callbacks); let root = document.querySelector("[data-loopz-experience]")!.shadowRoot!; const toastCard = root.querySelector<HTMLElement>(".card")!;
+    expect(toastCard.style.width).toBe("520px"); expect(toastCard.style.maxWidth).toContain("100vw - 24px"); expect(root.querySelector("style[data-loopz-builder-style]")?.textContent).toContain("width:100%!important"); toastRenderer.destroy();
+    const modal = base("modal"); if (!isGuide(modal)) modal.definition.design.size = { width: { mode: "full" }, height: { mode: "viewport" } };
+    const modalRenderer = new ExperienceRenderer(); modalRenderer.render(modal, callbacks); root = document.querySelector("[data-loopz-experience]")!.shadowRoot!; expect(root.querySelector<HTMLElement>(".modal")?.dataset.sizeWidth).toBe("full"); expect(root.querySelector<HTMLElement>(".modal")?.style.height).toBe("calc(100vh - 24px)"); modalRenderer.destroy();
+    const bannerRenderer = new ExperienceRenderer(); bannerRenderer.render(base("banner"), callbacks); root = document.querySelector("[data-loopz-experience]")!.shadowRoot!; expect(root.querySelector<HTMLElement>(".banner")?.dataset.sizeWidth).toBe("full"); bannerRenderer.destroy();
+  });
+
   it("sanitizes builder HTML, delegates Loopz actions, and falls back for unsafe builder data", () => {
     const callbacks = { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() }; const built = withBuilder(base("toast")); if (!isGuide(built)) built.definition.builder!.html = '<section class="loopz-widget"><script>window.bad=1</script><button onclick="window.bad=2" data-loopz-action-id="primary"><span>Act</span></button></section>';
     const renderer = new ExperienceRenderer(); renderer.render(built, callbacks); let root = document.querySelector("[data-loopz-experience]")!.shadowRoot!; expect(root.querySelector("script")).toBeNull(); expect(root.querySelector("[onclick]")).toBeNull(); root.querySelector<HTMLSpanElement>("[data-loopz-action-id=primary] span")!.click(); expect(callbacks.onAction).toHaveBeenCalledWith(expect.objectContaining({ type: "dismiss" })); renderer.destroy();

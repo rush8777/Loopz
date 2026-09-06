@@ -23,8 +23,20 @@ export interface ExperienceTarget {
     tagName?: string;
     reliability: "reliable" | "moderate" | "fragile";
 }
+export type LegacyExperienceWidth = "sm" | "md" | "lg";
+export interface ExperienceSize {
+    width: {
+        mode: "auto" | "fixed" | "full";
+        value?: number;
+    };
+    height: {
+        mode: "auto" | "fixed" | "viewport";
+        value?: number;
+    };
+}
 export interface ExperienceDesign {
-    width: "sm" | "md" | "lg";
+    width: LegacyExperienceWidth;
+    size?: ExperienceSize;
     theme: {
         background: string;
         foreground: string;

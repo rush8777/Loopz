@@ -10,7 +10,7 @@ export class ModalRenderer {
       if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
       root.appendChild(backdrop);
     }
-    const card = buildCard(root, content, design, behavior, callbacks, builder);
+    const card = buildCard(root, content, design, behavior, callbacks, builder, "modal");
     card.classList.add("modal");
     card.dataset.layout = behavior.modalLayout ?? "center";
     return card;
