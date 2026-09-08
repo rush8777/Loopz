@@ -32,11 +32,11 @@ If your app already goes through a bundler, `npm install` the package and
 `window` globals:
 
 ```bash
-npm install loopz
+npm install movecues
 ```
 
 ```javascript
-import { createAnalytics } from "loopz";
+import { createAnalytics } from "movecues";
 
 const analytics = createAnalytics({ siteId: "YOUR_SITE_ID" });
 analytics.event("app_started");

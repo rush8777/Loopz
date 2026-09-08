@@ -12,10 +12,10 @@ export class ElementPicker {
   private overlay: HighlightOverlay | null = null;
   private generator = new SelectorGenerator();
   private resolve: ((target: ExperienceTarget | null) => void) | null = null;
-  private move = (event: PointerEvent) => { const target = document.elementFromPoint(event.clientX, event.clientY); if (target && !target.closest("[data-loopz-editor]")) this.overlay?.show(target); else this.overlay?.hide(); };
+  private move = (event: PointerEvent) => { const target = document.elementFromPoint(event.clientX, event.clientY); if (target && !target.closest("[data-movecues-editor]")) this.overlay?.show(target); else this.overlay?.hide(); };
   private click = (event: MouseEvent) => {
     const target = document.elementFromPoint(event.clientX, event.clientY);
-    if (!target || target.closest("[data-loopz-editor]")) return;
+    if (!target || target.closest("[data-movecues-editor]")) return;
     event.preventDefault(); event.stopImmediatePropagation();
     const descriptor = this.generator.describe(target); const selector = descriptor.selector;
     this.finish({ primarySelector: selector, fallbackSelectors: [], label: descriptor.label, role: descriptor.role, tagName: descriptor.tagName, reliability: reliability(selector) });

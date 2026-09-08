@@ -9,7 +9,7 @@
  * autocaptured elements (explicit override > accessibility metadata >
  * visible text > semantic fallback):
  *
- *   1. data-loopz-name        - explicit developer override, always wins
+ *   1. data-movecues-name        - explicit developer override, always wins
  *   2. aria-label / aria-labelledby
  *   3. visible text content   - skipped entirely for elements within a
  *                                privacy-marked subtree (data-private

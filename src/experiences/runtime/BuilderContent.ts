@@ -2,31 +2,31 @@ import type { WidgetBuilderState } from "../types";
 import type { RenderCallbacks } from "./AnchoredCardRenderer";
 
 const ALLOWED_TAGS = new Set(["DIV", "SECTION", "H1", "H2", "H3", "H4", "P", "SPAN", "BUTTON", "IMG", "HR"]);
-const ALLOWED_ATTRIBUTES = new Set(["class", "id", "title", "role", "aria-label", "alt", "src", "width", "height", "data-loopz-action-id", "data-loopz-content", "data-loopz-widget-type"]);
+const ALLOWED_ATTRIBUTES = new Set(["class", "id", "title", "role", "aria-label", "alt", "src", "width", "height", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type"]);
 
 export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder: WidgetBuilderState, callbacks: RenderCallbacks): boolean {
   const html = sanitizeBuilderHtml(builder.html);
   const css = safeBuilderCss(builder.css);
   if (!html || css === null) return false;
-  let style = root.querySelector<HTMLStyleElement>("style[data-loopz-builder-style]");
-  if (!style) { style = document.createElement("style"); style.dataset.loopzBuilderStyle = ""; root.appendChild(style); }
+  let style = root.querySelector<HTMLStyleElement>("style[data-movecues-builder-style]");
+  if (!style) { style = document.createElement("style"); style.dataset.movecuesBuilderStyle = ""; root.appendChild(style); }
   style.textContent = `${css}\n${ISOLATION_CSS}`;
   const content = document.createElement("div");
   content.className = "builder-content";
-  content.dataset.loopzBuilderSurface = "";
+  content.dataset.movecuesBuilderSurface = "";
   content.append(...html);
   card.appendChild(content);
   card.classList.add("builder-card");
   card.addEventListener("click", event => {
-    const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-loopz-action-id]") : null;
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movecues-action-id]") : null;
     if (!target || !card.contains(target)) return;
-    if (target.dataset.loopzActionId === "primary") callbacks.onPrimary();
-    if (target.dataset.loopzActionId === "secondary") callbacks.onSecondary();
+    if (target.dataset.movecuesActionId === "primary") callbacks.onPrimary();
+    if (target.dataset.movecuesActionId === "secondary") callbacks.onSecondary();
   });
   return true;
 }
 
-const ISOLATION_CSS = `[data-loopz-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-loopz-builder-surface]>.loopz-widget{position:relative!important;inset:auto!important;width:100%!important;min-width:0!important;max-width:100%!important;max-height:100%!important}`;
+const ISOLATION_CSS = `[data-movecues-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-movecues-builder-surface]>.movecues-widget{position:relative!important;inset:auto!important;width:100%!important;min-width:0!important;max-width:100%!important;max-height:100%!important}`;
 
 export function sanitizeBuilderHtml(input: string): ChildNode[] | null {
   const template = document.createElement("template");
@@ -41,17 +41,17 @@ export function sanitizeBuilderHtml(input: string): ChildNode[] | null {
       const name = attribute.name.toLowerCase();
       if (!ALLOWED_ATTRIBUTES.has(name) || name.startsWith("on") || /javascript\s*:/i.test(attribute.value)) element.removeAttribute(attribute.name);
     }
-    const action = element.getAttribute("data-loopz-action-id");
-    if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-loopz-action-id");
+    const action = element.getAttribute("data-movecues-action-id");
+    if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-movecues-action-id");
     if (element.tagName === "IMG") {
       const source = element.getAttribute("src") ?? "";
       if (source && !/^(https?:|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(source)) element.removeAttribute("src");
     }
   }
-  const root = template.content.querySelector(".loopz-widget");
+  const root = template.content.querySelector(".movecues-widget");
   if (!root) return null;
   for (const slot of ["primary", "secondary"]) {
-    const actions = Array.from(template.content.querySelectorAll(`[data-loopz-action-id="${slot}"]`));
+    const actions = Array.from(template.content.querySelectorAll(`[data-movecues-action-id="${slot}"]`));
     actions.slice(1).forEach(action => action.remove());
   }
   return Array.from(template.content.childNodes);
@@ -65,7 +65,7 @@ export function safeBuilderCss(input: string): string | null {
   while ((match = rule.exec(css)) !== null) {
     const prelude = match[1].trim();
     if (!prelude || prelude.startsWith("@")) continue;
-    if (prelude.split(",").some((selector: string) => !selector.trim().includes(".loopz-widget"))) return null;
+    if (prelude.split(",").some((selector: string) => !selector.trim().includes(".movecues-widget"))) return null;
   }
   return css;
 }

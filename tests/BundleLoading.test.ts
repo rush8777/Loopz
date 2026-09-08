@@ -112,7 +112,7 @@ describe("SDK bundle loading boundaries", () => {
   });
 
   it("loads editor first and a valid editor never creates a normal analytics session", async () => {
-    history.replaceState({}, "", "/?loopz_editor_token=valid-token");
+    history.replaceState({}, "", "/?movecues_editor_token=valid-token");
     const start = vi.fn().mockResolvedValue(true);
     const destroy = vi.fn();
     const analytics = new Analytics();
@@ -141,7 +141,7 @@ describe("SDK bundle loading boundaries", () => {
   });
 
   it("an invalid editor token falls back to normal initialization", async () => {
-    history.replaceState({}, "", "/?loopz_editor_token=expired-token");
+    history.replaceState({}, "", "/?movecues_editor_token=expired-token");
     installSuccessfulFetch();
     const analytics = new Analytics();
     analytics.init({

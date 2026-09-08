@@ -1,5 +1,5 @@
 {
-  "name": "loopz",
+  "name": "movecues",
   "version": "0.1.0",
   "description": "Hotjar-style autocapture behavioral analytics SDK (Click Maps, Scroll Maps, Move Maps, Rage Clicks, Funnels)",
   "type": "module",

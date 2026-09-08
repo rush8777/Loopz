@@ -19,7 +19,7 @@ import type { AnalyticsConfig } from "./types/config";
  *
  * Basic usage:
  *
- *   import { createAnalytics } from "loopz";
+ *   import { createAnalytics } from "movecues";
  *
  *   const analytics = createAnalytics({ siteId: "YOUR_SITE_ID" });
  *   analytics.event("signed_up");
@@ -28,7 +28,7 @@ import type { AnalyticsConfig } from "./types/config";
  *
  * Or, for manual lifecycle control:
  *
- *   import { Analytics } from "loopz";
+ *   import { Analytics } from "movecues";
  *
  *   const analytics = new Analytics();
  *   analytics.init({ siteId: "YOUR_SITE_ID" });

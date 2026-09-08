@@ -1539,6 +1539,6 @@
       await orCreateContext(node, { ...options, type: "image/webp" })
     );
   }
-  window.__loopzHeatmapCapture__ = () => domToWebp(document.documentElement, { scale: 1, backgroundColor: getComputedStyle(document.body).backgroundColor || "#ffffff" });
+  window.__movecuesHeatmapCapture__ = () => domToWebp(document.documentElement, { scale: 1, backgroundColor: getComputedStyle(document.body).backgroundColor || "#ffffff" });
 })();
 //# sourceMappingURL=sdk-heatmap.js.map

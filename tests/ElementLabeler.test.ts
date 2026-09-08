@@ -14,8 +14,8 @@ afterEach(() => {
 });
 
 describe("computeElementLabel priority order", () => {
-  it("prefers an explicit data-loopz-name override above everything else", () => {
-    const button = el(`<button data-loopz-name="Checkout button" aria-label="ignored">Ignored text</button>`);
+  it("prefers an explicit data-movecues-name override above everything else", () => {
+    const button = el(`<button data-movecues-name="Checkout button" aria-label="ignored">Ignored text</button>`);
     expect(computeElementLabel(button)).toBe("Checkout button");
   });
 

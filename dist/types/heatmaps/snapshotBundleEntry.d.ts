@@ -1,6 +1,6 @@
 declare global {
     interface Window {
-        __loopzHeatmapCapture__?: () => Promise<string>;
+        __movecuesHeatmapCapture__?: () => Promise<string>;
     }
 }
 export {};

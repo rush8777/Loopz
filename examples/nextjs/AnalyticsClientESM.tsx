@@ -4,7 +4,7 @@
  * whichever fits your setup:
  *   - app-layout-example.tsx: zero npm dependency, loads from a CDN URL,
  *     works even if this package isn't in your package.json.
- *   - this file: `npm install loopz`, tree-shakeable,
+ *   - this file: `npm install movecues`, tree-shakeable,
  *     typed, no CDN round trip.
  *
  * Must be a Client Component ("use client") since it touches window/
@@ -15,7 +15,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { createAnalytics, type Analytics } from "loopz";
+import { createAnalytics, type Analytics } from "movecues";
 
 export function AnalyticsClientESM({ siteId }: { siteId: string }) {
   const analyticsRef = useRef<Analytics | null>(null);

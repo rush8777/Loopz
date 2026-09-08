@@ -72,7 +72,7 @@
     }
   }
   const MAX_LABEL_LENGTH = 60;
-  const OVERRIDE_ATTR = "data-loopz-name";
+  const OVERRIDE_ATTR = "data-movecues-name";
   const detector = new SensitiveElementDetector();
   function clean(text) {
     if (!text) return void 0;
@@ -1858,7 +1858,7 @@
     }
     initialize() {
       if (!this.apiBase || typeof fetch === "undefined") return;
-      const liveToken = new URL(location.href).searchParams.get("__loopz_heatmap_capture");
+      const liveToken = new URL(location.href).searchParams.get("__movecues_heatmap_capture");
       if (liveToken) {
         void this.enterLiveCapture(liveToken);
         return;
@@ -1905,7 +1905,7 @@
         if (!response.ok) return;
         const capture = await response.json();
         const cleanUrl = new URL(location.href);
-        cleanUrl.searchParams.delete("__loopz_heatmap_capture");
+        cleanUrl.searchParams.delete("__movecues_heatmap_capture");
         history.replaceState(history.state, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
         this.mountToolbar(token, capture);
       } catch {
@@ -1913,10 +1913,10 @@
     }
     mountToolbar(token, capture) {
       const host = document.createElement("div");
-      host.setAttribute("data-loopz-heatmap-toolbar", "");
+      host.setAttribute("data-movecues-heatmap-toolbar", "");
       const root = host.attachShadow({ mode: "closed" });
       const wrap = document.createElement("div");
-      wrap.innerHTML = `<style>:host{all:initial}.bar{position:fixed;z-index:2147483647;left:50%;bottom:24px;transform:translateX(-50%);display:flex;align-items:center;gap:18px;min-width:560px;padding:14px 16px;border-radius:12px;background:#111827;color:#fff;box-shadow:0 16px 50px #0007;font:13px/1.4 system-ui,sans-serif}.copy{flex:1}.title{font-weight:700}.sub{color:#cbd5e1;margin-top:2px}.actions{display:flex;gap:8px}button{border:0;border-radius:7px;padding:9px 14px;font:600 13px system-ui;cursor:pointer}.cancel{background:#374151;color:#fff}.capture{background:#7c3aed;color:#fff}.status{color:#d1fae5;font-weight:600}</style><div class="bar"><div class="copy"><div class="title">Loopz · Heatmap capture</div><div class="sub"></div></div><div class="actions"><button class="cancel">Cancel</button><button class="capture">Capture</button></div></div>`;
+      wrap.innerHTML = `<style>:host{all:initial}.bar{position:fixed;z-index:2147483647;left:50%;bottom:24px;transform:translateX(-50%);display:flex;align-items:center;gap:18px;min-width:560px;padding:14px 16px;border-radius:12px;background:#111827;color:#fff;box-shadow:0 16px 50px #0007;font:13px/1.4 system-ui,sans-serif}.copy{flex:1}.title{font-weight:700}.sub{color:#cbd5e1;margin-top:2px}.actions{display:flex;gap:8px}button{border:0;border-radius:7px;padding:9px 14px;font:600 13px system-ui;cursor:pointer}.cancel{background:#374151;color:#fff}.capture{background:#7c3aed;color:#fff}.status{color:#d1fae5;font-weight:600}</style><div class="bar"><div class="copy"><div class="title">movecues · Heatmap capture</div><div class="sub"></div></div><div class="actions"><button class="cancel">Cancel</button><button class="capture">Capture</button></div></div>`;
       const sub = wrap.querySelector(".sub");
       sub.textContent = `${capture.pageName ?? "Page"} · ${capture.stateName ?? "Default"} · ${capitalize(capture.device ?? "desktop")} — Arrange this page exactly as you want it shown.`;
       wrap.querySelector(".cancel").addEventListener("click", () => host.remove());
@@ -1957,11 +1957,11 @@
       return this.cachedStateId;
     }
     loadCaptureFunction() {
-      if (window.__loopzHeatmapCapture__) return Promise.resolve(window.__loopzHeatmapCapture__);
+      if (window.__movecuesHeatmapCapture__) return Promise.resolve(window.__movecuesHeatmapCapture__);
       if (this.loadPromise) return this.loadPromise;
       const url = sdkBundleUrl("heatmap", this.bundleUrl);
       if (!url) return Promise.resolve(null);
-      this.loadPromise = loadSdkBundle(url, () => window.__loopzHeatmapCapture__, "heatmap snapshot");
+      this.loadPromise = loadSdkBundle(url, () => window.__movecuesHeatmapCapture__, "heatmap snapshot");
       return this.loadPromise;
     }
   }
@@ -2004,7 +2004,7 @@
       this.config = resolveConfig(userConfig);
       this.debugEnabled = !!this.config.debug;
       const generation = ++this.generation;
-      const editorToken = new URL(location.href).searchParams.get("loopz_editor_token");
+      const editorToken = new URL(location.href).searchParams.get("movecues_editor_token");
       if (editorToken && !this.editorAttempted) {
         this.initialized = true;
         this.editorAttempted = true;

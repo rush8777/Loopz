@@ -34,7 +34,7 @@ export default defineConfig(({ mode }) => {
     experiences: "MovcuesExperienceRuntimeBundle",
     editor: "MovcuesEditorRuntimeBundle",
     replay: "AutocaptureAnalyticsSDKReplay",
-    heatmap: "LoopzHeatmapSnapshot",
+    heatmap: "movecuesHeatmapSnapshot",
   };
   const baseName: Record<Exclude<BundleKind, "module" | "v1">, string> = {
     core: "sdk",

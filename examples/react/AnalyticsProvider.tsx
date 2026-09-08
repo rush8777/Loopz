@@ -10,7 +10,7 @@
  * plain HTML.
  */
 import { createContext, useContext, useEffect, useRef } from "react";
-import { createAnalytics, type Analytics, type AnalyticsConfig } from "loopz";
+import { createAnalytics, type Analytics, type AnalyticsConfig } from "movecues";
 
 const AnalyticsContext = createContext<Analytics | null>(null);
 

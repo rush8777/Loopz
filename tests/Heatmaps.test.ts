@@ -9,7 +9,7 @@ import type { ClickEventPayload } from "../src/types/events";
 describe("heatmap collection", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
-    delete window.__loopzHeatmapCapture__;
+    delete window.__movecuesHeatmapCapture__;
     Object.defineProperty(window, "scrollX", { configurable: true, value: 0 });
     Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
   });
@@ -57,19 +57,19 @@ describe("heatmap collection", () => {
   it("captures the currently rendered state only on an explicit request and contains failures", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ heatmapStates: [] }) });
     vi.stubGlobal("fetch", fetchMock);
-    window.__loopzHeatmapCapture__ = vi.fn().mockResolvedValue("data:image/webp;base64,AAAA");
+    window.__movecuesHeatmapCapture__ = vi.fn().mockResolvedValue("data:image/webp;base64,AAAA");
     const manager = new HeatmapManager("https://api.example", "site_public");
     const result = await manager.captureReference("one-time-token");
     expect(result).toEqual({ ok: true });
-    expect(window.__loopzHeatmapCapture__).toHaveBeenCalledOnce();
+    expect(window.__movecuesHeatmapCapture__).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/heatmap-snapshots/one-time-token"), expect.objectContaining({ method: "POST" }));
 
-    window.__loopzHeatmapCapture__ = vi.fn().mockRejectedValue(new Error("capture failed"));
+    window.__movecuesHeatmapCapture__ = vi.fn().mockRejectedValue(new Error("capture failed"));
     await expect(manager.captureReference("bad-token")).resolves.toEqual({ ok: false, error: "snapshot_capture_failed" });
   });
 
   it("automatically captures a missing reference while keeping the snapshot bundle lazy", async () => {
-    window.__loopzHeatmapCapture__ = vi.fn().mockResolvedValue("data:image/webp;base64,AAAA");
+    window.__movecuesHeatmapCapture__ = vi.fn().mockResolvedValue("data:image/webp;base64,AAAA");
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ heatmapStates: [] }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ capture: { token: "automatic-token" } }) })
@@ -84,13 +84,13 @@ describe("heatmap collection", () => {
   });
 
   it("validates and removes a live-capture token before mounting an isolated toolbar", async () => {
-    history.replaceState({}, "", "/dashboard?tab=reports&__loopz_heatmap_capture=live-token");
+    history.replaceState({}, "", "/dashboard?tab=reports&__movecues_heatmap_capture=live-token");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ valid: true, pageName: "Dashboard", stateName: "Default", device: "desktop" }) }));
     const manager = new HeatmapManager("https://api.example", "site_public");
     manager.initialize();
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(location.search).toBe("?tab=reports");
-    const toolbar = document.querySelector("[data-loopz-heatmap-toolbar]") as HTMLElement;
+    const toolbar = document.querySelector("[data-movecues-heatmap-toolbar]") as HTMLElement;
     expect(toolbar).not.toBeNull();
     expect(toolbar.shadowRoot).toBeNull();
     toolbar.remove();

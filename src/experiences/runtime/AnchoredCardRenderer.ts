@@ -26,9 +26,9 @@ export function waitForTarget(target: ExperienceTarget | undefined, onFound: (el
 export function buildCard(root: ShadowRoot, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState, widgetType?: WidgetType): HTMLElement {
   const card = document.createElement("section");
   card.className = "card";
-  card.style.setProperty("--loopz-bg", design.theme.background);
-  card.style.setProperty("--loopz-fg", design.theme.foreground);
-  card.style.setProperty("--loopz-primary", design.theme.primary);
+  card.style.setProperty("--movecues-bg", design.theme.background);
+  card.style.setProperty("--movecues-fg", design.theme.foreground);
+  card.style.setProperty("--movecues-primary", design.theme.primary);
   card.dataset.width = design.width; card.dataset.radius = design.theme.borderRadius;
   if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
   const close = behavior.dismissible ? `<button class="close" data-dismiss aria-label="Dismiss">×</button>` : "";

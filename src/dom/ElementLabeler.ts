@@ -1,7 +1,7 @@
 import { SensitiveElementDetector } from "../privacy/SensitiveElementDetector";
 
 const MAX_LABEL_LENGTH = 60;
-const OVERRIDE_ATTR = "data-loopz-name";
+const OVERRIDE_ATTR = "data-movecues-name";
 const detector = new SensitiveElementDetector();
 
 function clean(text: string | null | undefined): string | undefined {
@@ -22,7 +22,7 @@ function clean(text: string | null | undefined): string | undefined {
  * autocaptured elements (explicit override > accessibility metadata >
  * visible text > semantic fallback):
  *
- *   1. data-loopz-name        - explicit developer override, always wins
+ *   1. data-movecues-name        - explicit developer override, always wins
  *   2. aria-label / aria-labelledby
  *   3. visible text content   - skipped entirely for elements within a
  *                                privacy-marked subtree (data-private

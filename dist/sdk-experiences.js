@@ -9,34 +9,34 @@
     return "steps" in value;
   }
   const ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "H1", "H2", "H3", "H4", "P", "SPAN", "BUTTON", "IMG", "HR"]);
-  const ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "alt", "src", "width", "height", "data-loopz-action-id", "data-loopz-content", "data-loopz-widget-type"]);
+  const ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "alt", "src", "width", "height", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type"]);
   function mountBuilderContent(root, card, builder, callbacks) {
     const html = sanitizeBuilderHtml(builder.html);
     const css = safeBuilderCss(builder.css);
     if (!html || css === null) return false;
-    let style = root.querySelector("style[data-loopz-builder-style]");
+    let style = root.querySelector("style[data-movecues-builder-style]");
     if (!style) {
       style = document.createElement("style");
-      style.dataset.loopzBuilderStyle = "";
+      style.dataset.movecuesBuilderStyle = "";
       root.appendChild(style);
     }
     style.textContent = `${css}
 ${ISOLATION_CSS}`;
     const content = document.createElement("div");
     content.className = "builder-content";
-    content.dataset.loopzBuilderSurface = "";
+    content.dataset.movecuesBuilderSurface = "";
     content.append(...html);
     card.appendChild(content);
     card.classList.add("builder-card");
     card.addEventListener("click", (event) => {
-      const target = event.target instanceof Element ? event.target.closest("[data-loopz-action-id]") : null;
+      const target = event.target instanceof Element ? event.target.closest("[data-movecues-action-id]") : null;
       if (!target || !card.contains(target)) return;
-      if (target.dataset.loopzActionId === "primary") callbacks.onPrimary();
-      if (target.dataset.loopzActionId === "secondary") callbacks.onSecondary();
+      if (target.dataset.movecuesActionId === "primary") callbacks.onPrimary();
+      if (target.dataset.movecuesActionId === "secondary") callbacks.onSecondary();
     });
     return true;
   }
-  const ISOLATION_CSS = `[data-loopz-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-loopz-builder-surface]>.loopz-widget{position:relative!important;inset:auto!important;width:100%!important;min-width:0!important;max-width:100%!important;max-height:100%!important}`;
+  const ISOLATION_CSS = `[data-movecues-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-movecues-builder-surface]>.movecues-widget{position:relative!important;inset:auto!important;width:100%!important;min-width:0!important;max-width:100%!important;max-height:100%!important}`;
   function sanitizeBuilderHtml(input) {
     const template = document.createElement("template");
     template.innerHTML = input;
@@ -50,17 +50,17 @@ ${ISOLATION_CSS}`;
         const name = attribute.name.toLowerCase();
         if (!ALLOWED_ATTRIBUTES.has(name) || name.startsWith("on") || /javascript\s*:/i.test(attribute.value)) element.removeAttribute(attribute.name);
       }
-      const action = element.getAttribute("data-loopz-action-id");
-      if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-loopz-action-id");
+      const action = element.getAttribute("data-movecues-action-id");
+      if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-movecues-action-id");
       if (element.tagName === "IMG") {
         const source = element.getAttribute("src") ?? "";
         if (source && !/^(https?:|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(source)) element.removeAttribute("src");
       }
     }
-    const root = template.content.querySelector(".loopz-widget");
+    const root = template.content.querySelector(".movecues-widget");
     if (!root) return null;
     for (const slot of ["primary", "secondary"]) {
-      const actions = Array.from(template.content.querySelectorAll(`[data-loopz-action-id="${slot}"]`));
+      const actions = Array.from(template.content.querySelectorAll(`[data-movecues-action-id="${slot}"]`));
       actions.slice(1).forEach((action) => action.remove());
     }
     return Array.from(template.content.childNodes);
@@ -73,7 +73,7 @@ ${ISOLATION_CSS}`;
     while ((match = rule.exec(css)) !== null) {
       const prelude = match[1].trim();
       if (!prelude || prelude.startsWith("@")) continue;
-      if (prelude.split(",").some((selector) => !selector.trim().includes(".loopz-widget"))) return null;
+      if (prelude.split(",").some((selector) => !selector.trim().includes(".movecues-widget"))) return null;
     }
     return css;
   }
@@ -175,9 +175,9 @@ ${ISOLATION_CSS}`;
     var _a, _b, _c;
     const card = document.createElement("section");
     card.className = "card";
-    card.style.setProperty("--loopz-bg", design.theme.background);
-    card.style.setProperty("--loopz-fg", design.theme.foreground);
-    card.style.setProperty("--loopz-primary", design.theme.primary);
+    card.style.setProperty("--movecues-bg", design.theme.background);
+    card.style.setProperty("--movecues-fg", design.theme.foreground);
+    card.style.setProperty("--movecues-primary", design.theme.primary);
     card.dataset.width = design.width;
     card.dataset.radius = design.theme.borderRadius;
     if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
@@ -307,7 +307,7 @@ ${ISOLATION_CSS}`;
       if (behavior.backdrop !== false) {
         const backdrop = document.createElement("div");
         backdrop.className = "backdrop";
-        backdrop.style.setProperty("--loopz-backdrop-opacity", String(behavior.backdropOpacity ?? 0.45));
+        backdrop.style.setProperty("--movecues-backdrop-opacity", String(behavior.backdropOpacity ?? 0.45));
         if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
         root.appendChild(backdrop);
       }
@@ -324,7 +324,7 @@ ${ISOLATION_CSS}`;
       if (behavior.backdrop) {
         const backdrop = document.createElement("div");
         backdrop.className = "backdrop";
-        backdrop.style.setProperty("--loopz-backdrop-opacity", String(behavior.backdropOpacity ?? 0.35));
+        backdrop.style.setProperty("--movecues-backdrop-opacity", String(behavior.backdropOpacity ?? 0.35));
         if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
         root.appendChild(backdrop);
       }
@@ -346,7 +346,7 @@ ${ISOLATION_CSS}`;
       const beacon = document.createElement("button");
       beacon.className = "hotspot";
       beacon.dataset.style = behavior.hotspotStyle ?? "pulse";
-      beacon.style.setProperty("--loopz-hotspot", behavior.hotspotColor ?? design.theme.primary);
+      beacon.style.setProperty("--movecues-hotspot", behavior.hotspotColor ?? design.theme.primary);
       beacon.type = "button";
       beacon.setAttribute("aria-label", `Open ${content.heading}`);
       if (beacon.dataset.style === "question") beacon.textContent = "?";
@@ -414,8 +414,8 @@ ${ISOLATION_CSS}`;
     }
     root(experienceId) {
       this.host = document.createElement("div");
-      this.host.dataset.loopzExperience = experienceId;
-      this.host.dataset.loopzExperienceRoot = experienceId;
+      this.host.dataset.movecuesExperience = experienceId;
+      this.host.dataset.movecuesExperienceRoot = experienceId;
       this.host.style.cssText = "position:fixed;inset:0;z-index:2147483000;pointer-events:none";
       const root = this.host.attachShadow({ mode: "open" });
       const style = document.createElement("style");
@@ -563,19 +563,19 @@ ${ISOLATION_CSS}`;
     }
   }
   const STYLES = `
-  :host{all:initial}.card{pointer-events:auto;position:fixed;box-sizing:border-box;width:320px;max-width:calc(100vw - 16px);padding:18px;background:var(--loopz-bg);color:var(--loopz-fg);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-shadow:0 12px 38px rgba(0,0,0,.22);border:1px solid rgba(0,0,0,.12)}
+  :host{all:initial}.card{pointer-events:auto;position:fixed;box-sizing:border-box;width:320px;max-width:calc(100vw - 16px);padding:18px;background:var(--movecues-bg);color:var(--movecues-fg);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-shadow:0 12px 38px rgba(0,0,0,.22);border:1px solid rgba(0,0,0,.12)}
   .card[data-width=sm]{width:260px}.card[data-width=lg]{width:400px}.card[data-radius=sm]{border-radius:6px}.card[data-radius=md]{border-radius:12px}.card[data-radius=lg]{border-radius:20px}
-  .builder-card{padding:0;background:transparent;border:0;box-shadow:none}.builder-content{box-sizing:border-box;width:100%;height:100%;max-width:100%}.builder-content>.loopz-widget{box-sizing:border-box;width:100%!important;min-width:0!important;max-width:100%!important;max-height:100%!important}.builder-card>.close{z-index:2}
-  h2{font:600 17px/1.3 ui-sans-serif,system-ui,sans-serif;margin:0 24px 7px 0}p{margin:0;white-space:pre-wrap}footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}button{border:0;border-radius:7px;padding:8px 12px;font:600 13px ui-sans-serif,system-ui,sans-serif;cursor:pointer}.primary{background:var(--loopz-primary);color:#fff}.secondary{background:transparent;color:inherit}.close{position:absolute;right:8px;top:7px;padding:3px 7px;background:transparent;color:inherit;font-size:20px}
+  .builder-card{padding:0;background:transparent;border:0;box-shadow:none}.builder-content{box-sizing:border-box;width:100%;height:100%;max-width:100%}.builder-content>.movecues-widget{box-sizing:border-box;width:100%!important;min-width:0!important;max-width:100%!important;max-height:100%!important}.builder-card>.close{z-index:2}
+  h2{font:600 17px/1.3 ui-sans-serif,system-ui,sans-serif;margin:0 24px 7px 0}p{margin:0;white-space:pre-wrap}footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}button{border:0;border-radius:7px;padding:8px 12px;font:600 13px ui-sans-serif,system-ui,sans-serif;cursor:pointer}.primary{background:var(--movecues-primary);color:#fff}.secondary{background:transparent;color:inherit}.close{position:absolute;right:8px;top:7px;padding:3px 7px;background:transparent;color:inherit;font-size:20px}
   .toast{position:fixed!important}.toast[data-position=top-left]{top:16px;left:16px}.toast[data-position=top-right]{top:16px;right:16px}.toast[data-position=bottom-left]{bottom:16px;left:16px}.toast[data-position=bottom-right]{bottom:16px;right:16px}.cursor{will-change:left,top}@media(prefers-reduced-motion:reduce){.card{transition:none!important}}
-  .backdrop{pointer-events:auto;position:fixed;inset:0;background:rgba(0,0,0,var(--loopz-backdrop-opacity,.45))}
+  .backdrop{pointer-events:auto;position:fixed;inset:0;background:rgba(0,0,0,var(--movecues-backdrop-opacity,.45))}
   .modal{left:50%;top:50%;transform:translate(-50%,-50%)}.modal[data-layout=fullscreen],.modal[data-size-width=full]{inset:12px;width:auto!important;max-width:none!important;transform:none;display:flex;flex-direction:column;justify-content:center}.modal[data-layout=fullscreen] footer,.modal[data-size-width=full] footer{justify-content:center}
   .slideout[data-position=top-left]{top:16px;left:16px}.slideout[data-position=top-right]{top:16px;right:16px}.slideout[data-position=bottom-left]{bottom:16px;left:16px}.slideout[data-position=bottom-right]{bottom:16px;right:16px}.slideout[data-position=center-left]{left:16px;top:50%;transform:translateY(-50%)}.slideout[data-position=center-right]{right:16px;top:50%;transform:translateY(-50%)}
   .banner{left:0;right:0;width:auto!important;max-width:none;border-radius:0!important;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner[data-position=top]{top:0}.banner[data-position=bottom]{bottom:0}.banner h2,.banner p{grid-column:1}.banner footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
-  .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--loopz-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--loopz-hotspot);border-radius:50%;animation:loopz-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes loopz-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
+  .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--movecues-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--movecues-hotspot);border-radius:50%;animation:movecues-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes movecues-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
 `;
-  const ONCE_KEY = "__loopz_experiences_seen__";
-  const SESSION_KEY = "__loopz_experiences_session_seen__";
+  const ONCE_KEY = "__movecues_experiences_seen__";
+  const SESSION_KEY = "__movecues_experiences_session_seen__";
   function read(storage, key) {
     try {
       return new Set(JSON.parse(storage.getItem(key) ?? "[]"));

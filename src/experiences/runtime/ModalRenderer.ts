@@ -6,7 +6,7 @@ export class ModalRenderer {
     if (behavior.backdrop !== false) {
       const backdrop = document.createElement("div");
       backdrop.className = "backdrop";
-      backdrop.style.setProperty("--loopz-backdrop-opacity", String(behavior.backdropOpacity ?? 0.45));
+      backdrop.style.setProperty("--movecues-backdrop-opacity", String(behavior.backdropOpacity ?? 0.45));
       if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
       root.appendChild(backdrop);
     }

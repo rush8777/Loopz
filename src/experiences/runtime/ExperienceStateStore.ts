@@ -1,5 +1,5 @@
-const ONCE_KEY = "__loopz_experiences_seen__";
-const SESSION_KEY = "__loopz_experiences_session_seen__";
+const ONCE_KEY = "__movecues_experiences_seen__";
+const SESSION_KEY = "__movecues_experiences_session_seen__";
 
 function read(storage: Storage, key: string): Set<string> {
   try { return new Set(JSON.parse(storage.getItem(key) ?? "[]") as string[]); } catch { return new Set(); }

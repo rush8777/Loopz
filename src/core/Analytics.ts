@@ -73,7 +73,7 @@ export class Analytics {
     this.debugEnabled = !!this.config.debug;
     const generation = ++this.generation;
 
-    const editorToken = new URL(location.href).searchParams.get("loopz_editor_token");
+    const editorToken = new URL(location.href).searchParams.get("movecues_editor_token");
     if (editorToken && !this.editorAttempted) {
       // Do not create a SessionManager, collectors, or a page view until the
       // existing editor token exchange has decided whether this is an editor.
