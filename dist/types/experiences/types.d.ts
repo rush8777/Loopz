@@ -74,6 +74,7 @@ export interface ExperienceBehavior {
 export interface GuideStep {
     id: string;
     content: ExperienceContent;
+    builder?: WidgetBuilderState;
     target?: ExperienceTarget;
     behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "dismissible">;
 }

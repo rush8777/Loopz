@@ -2864,7 +2864,7 @@ class ExperienceRenderer {
             this.destroy();
           }
         }
-      });
+      }, step.builder, "anchored_card");
       if (this.step > 0) {
         const back = document.createElement("button");
         back.className = "secondary";

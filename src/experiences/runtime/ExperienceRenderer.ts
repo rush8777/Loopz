@@ -70,7 +70,7 @@ export class ExperienceRenderer {
         if (this.step < definition.steps.length - 1) { this.clearSurface(); this.step++; this.renderGuide(experience, definition, callbacks); }
         else { callbacks.onComplete(); this.destroy(); }
       },
-    });
+    }, step.builder, "anchored_card");
     if (this.step > 0) {
       const back = document.createElement("button"); back.className = "secondary"; back.textContent = "Back";
       back.addEventListener("click", () => { this.clearSurface(); this.step--; this.renderGuide(experience, definition, callbacks); });

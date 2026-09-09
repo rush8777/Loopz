@@ -104,14 +104,14 @@ describe("experience editor and runtime", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1); expect(String(fetchMock.mock.calls[0][0])).toContain("/experiences?"); loader.destroy();
   });
 
-  it("renders guide steps against their own targets and supports Back/Next", () => {
+  it("renders per-step Guide builders while preserving legacy steps and Back/Next", () => {
     const first = document.createElement("button"); first.id = "first"; const second = document.createElement("button"); second.id = "second"; document.body.append(first, second);
     const guide: DeliveredExperience = { id: "guide_1", versionId: "v1", kind: "guide", widgetType: null, priority: 1, definition: { design, targeting: { pageRules: [], audience: { type: "all" }, trigger: { type: "page_load" }, frequency: { mode: "once" }, priority: 0 }, steps: [
-      { id: "one", content: { heading: "First", body: "One", primaryAction: { label: "Next", type: "next_step" } }, target: { primarySelector: "#first", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
+      { id: "one", content: { heading: "First", body: "One", primaryAction: { label: "Next", type: "next_step" } }, builder: { version: 1, projectData: {}, html: '<section class="movecues-widget"><h2>Builder First</h2><button data-movecues-action-id="primary">Next</button></section>', css: ".movecues-widget{color:rgb(12,34,56)}" }, target: { primarySelector: "#first", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
       { id: "two", content: { heading: "Second", body: "Two", primaryAction: { label: "Finish", type: "next_step" } }, target: { primarySelector: "#second", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
     ] } };
     const renderer = new ExperienceRenderer(); renderer.render(guide, { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() });
-    const root = document.querySelector("[data-movecues-experience]")!.shadowRoot!; expect(root.textContent).toContain("First"); root.querySelector<HTMLButtonElement>("[data-primary]")!.click(); expect(document.querySelector("[data-movecues-experience]")!.shadowRoot!.textContent).toContain("Second"); expect(document.querySelector("[data-movecues-experience]")!.shadowRoot!.querySelector("footer")!.textContent).toContain("Back"); renderer.destroy();
+    const root = document.querySelector("[data-movecues-experience]")!.shadowRoot!; expect(root.querySelector(".movecues-widget")?.textContent).toContain("Builder First"); expect(root.querySelector("style[data-movecues-builder-style]")?.textContent).toContain("rgb(12,34,56)"); root.querySelector<HTMLButtonElement>('[data-movecues-action-id="primary"]')!.click(); const secondRoot = document.querySelector("[data-movecues-experience]")!.shadowRoot!; expect(secondRoot.textContent).toContain("Second"); expect(secondRoot.querySelector(".movecues-widget")).toBeNull(); expect(secondRoot.querySelector("footer")!.textContent).toContain("Back"); renderer.destroy();
   });
 
   it("waits for a delayed SPA target and cleans up on timeout or destroy", async () => {
