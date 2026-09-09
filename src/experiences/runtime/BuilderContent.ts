@@ -26,7 +26,7 @@ export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder
   return true;
 }
 
-const ISOLATION_CSS = `[data-movecues-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-movecues-builder-surface]>.movecues-widget{position:relative!important;inset:auto!important;width:100%!important;min-width:0!important;max-width:100%!important;max-height:100%!important}`;
+const ISOLATION_CSS = `[data-movecues-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-movecues-builder-surface]>.movecues-widget{position:relative!important;inset:auto!important}`;
 
 export function sanitizeBuilderHtml(input: string): ChildNode[] | null {
   const template = document.createElement("template");
