@@ -3,6 +3,7 @@ export interface GuideProgress {
     versionId: string;
     currentStepId: string;
     status: "active" | "paused";
+    impressionId?: string;
 }
 export declare class ExperienceStateStore {
     hasEver(id: string): boolean;

@@ -30,7 +30,7 @@ describe("experience editor and runtime", () => {
     expect(await new EditorModeController("https://api.example.com").start("bad")).toBe(false); expect(location.search).toContain("movecues_editor_token=bad"); expect(document.querySelector("[data-movecues-editor]")).toBeNull();
   });
 
-  it("prevents the host click while selecting and reuses SelectorGenerator metadata", async () => {
+  it("prevents the host click while selecting and stores exact target metadata", async () => {
     const button = document.createElement("button"); button.dataset.testid = "checkout"; document.body.appendChild(button); Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => button });
     let hostClicks = 0; button.addEventListener("click", () => hostClicks++); const picker = new ElementPicker(); const selected = picker.pick();
     button.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 4, clientY: 4 })); const target = await selected;
@@ -124,6 +124,35 @@ describe("experience editor and runtime", () => {
     const fetchMock = experienceFetch(() => [guide]); vi.stubGlobal("fetch", fetchMock); const loader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await loader.evaluate(); first.click(); await Promise.resolve(); expect(hostClicks).toBe(1); expect(activeExperienceText()).toContain("Event step"); loader.onCustomEvent("other"); await Promise.resolve(); expect(activeExperienceText()).toContain("Event step"); loader.onCustomEvent("saved"); expect(activeExperienceText()).toContain("Done step"); loader.destroy();
   });
 
+  it("waits for the next Guide step's page before rendering it", async () => {
+    history.replaceState({}, "", "/first");
+    const first = document.createElement("button"); first.id = "cross-page-first"; const nextPageTarget = document.createElement("button"); nextPageTarget.id = "cross-page-next"; document.body.append(first, nextPageTarget);
+    const guide: DeliveredExperience = { id: "guide_cross_page", versionId: "v1", kind: "guide", widgetType: null, priority: 40, definition: { design, steps: [
+      { id: "one", content: { heading: "First page", body: "One" }, advance: { type: "element_click" }, target: { primarySelector: "#cross-page-first", fallbackSelectors: [], reliability: "reliable", targetContext: { pagePath: "/first" } }, behavior: { dismissible: true } },
+      { id: "two", content: { heading: "Second page", body: "Two" }, target: { primarySelector: "#cross-page-next", fallbackSelectors: [], reliability: "reliable", targetContext: { pagePath: "/second" } }, behavior: { dismissible: true } },
+    ] } };
+    const fetchMock = experienceFetch(() => [guide]); vi.stubGlobal("fetch", fetchMock); const loader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await loader.evaluate(); expect(activeExperienceText()).toContain("First page");
+    first.click(); await Promise.resolve(); expect(document.querySelector("[data-movecues-experience]")).toBeNull(); expect(JSON.parse(sessionStorage.getItem("__movecues_active_guide__")!)).toMatchObject({ currentStepId: "two", status: "active" });
+    history.pushState({}, "", "/second"); loader.onRouteChange(); expect(activeExperienceText()).toContain("Second page"); loader.destroy();
+  });
+
+  it("resumes a multi-page Guide through every full-page load as one impression", async () => {
+    history.replaceState({}, "", "/one");
+    const first = document.createElement("button"); first.id = "reload-first"; const second = document.createElement("button"); second.id = "reload-second"; const third = document.createElement("button"); third.id = "reload-third"; document.body.append(first, second, third);
+    const guide: DeliveredExperience = { id: "guide_reload", versionId: "v1", kind: "guide", widgetType: null, priority: 40, definition: { design, steps: [
+      { id: "one", content: { heading: "Reload one", body: "One" }, advance: { type: "element_click" }, target: { primarySelector: "#reload-first", fallbackSelectors: [], reliability: "reliable", targetContext: { pagePath: "/one" } }, behavior: { dismissible: true } },
+      { id: "two", content: { heading: "Reload two", body: "Two" }, advance: { type: "route", pageRules: [{ id: "three", kind: "include", operator: "equals", value: "/three" }] }, target: { primarySelector: "#reload-second", fallbackSelectors: [], reliability: "reliable", targetContext: { pagePath: "/two" } }, behavior: { dismissible: true } },
+      { id: "three", content: { heading: "Reload three", body: "Three", primaryAction: { label: "Finish", type: "next_step" } }, target: { primarySelector: "#reload-third", fallbackSelectors: [], reliability: "reliable", targetContext: { pagePath: "/three" } }, behavior: { dismissible: true } },
+    ] } };
+    const fetchMock = experienceFetch((_trigger, url) => location.pathname === "/one" || (url.searchParams.get("activeGuideId") === guide.id && url.searchParams.get("activeGuideVersionId") === guide.versionId) ? [guide] : []); vi.stubGlobal("fetch", fetchMock);
+
+    const firstLoader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await firstLoader.evaluate(); await vi.waitFor(() => expect(JSON.parse(sessionStorage.getItem("__movecues_active_guide__")!).impressionId).toBe(`imp_${guide.id}`)); first.click(); await Promise.resolve(); firstLoader.destroy();
+    history.pushState({}, "", "/two"); const secondLoader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await secondLoader.evaluate(); expect(activeExperienceText()).toContain("Reload two"); secondLoader.destroy();
+    history.pushState({}, "", "/three"); const thirdLoader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await thirdLoader.evaluate(); expect(activeExperienceText()).toContain("Reload three"); document.querySelector("[data-movecues-experience]")!.shadowRoot!.querySelector<HTMLButtonElement>(".primary")!.click(); await vi.waitFor(() => expect(postedEvents(fetchMock).some(event => event.experienceId === guide.id && event.event === "completed")).toBe(true));
+
+    const guideRequests = fetchMock.mock.calls.filter(([input, init]) => !init?.method && String(input).includes("/experiences?")); expect(guideRequests.slice(1, 3).every(([input]) => { const url = new URL(String(input)); return url.searchParams.get("activeGuideId") === guide.id && url.searchParams.get("activeGuideVersionId") === guide.versionId; })).toBe(true); expect(postedEvents(fetchMock).filter(event => event.experienceId === guide.id && event.event === "shown")).toHaveLength(1); expect(sessionStorage.getItem("__movecues_active_guide__")).toBeNull(); thirdLoader.destroy();
+  });
+
   it("keeps the current Guide step across an SPA route change and records one impression", async () => {
     const first = document.createElement("button"); first.id = "route-first"; const second = document.createElement("button"); second.id = "route-second"; document.body.append(first, second);
     const guide: DeliveredExperience = { id: "guide_route", versionId: "v1", kind: "guide", widgetType: null, priority: 40, definition: { design, steps: [
@@ -159,11 +188,11 @@ describe("experience editor and runtime", () => {
 
 function isGuide(value: DeliveredExperience): value is DeliveredExperience & { definition: { steps: unknown[] } } { return "steps" in value.definition; }
 const runtimeSession = { getAnonymousId: () => "anon_1", getSessionId: () => "session_1", getPageViewId: () => "pageview_1", getIdentifiedUserId: () => null };
-function experienceFetch(manifest: (trigger: string | null) => DeliveredExperience[]) {
+function experienceFetch(manifest: (trigger: string | null, url: URL) => DeliveredExperience[]) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes("/experience-events")) { const event = JSON.parse(String(init?.body)); return { ok: true, status: event.event === "shown" ? 201 : 204, json: async () => ({ impressionId: `imp_${event.experienceId}` }) }; }
-    return { ok: true, status: 200, json: async () => ({ experiences: manifest(new URL(url).searchParams.get("trigger")) }) };
+    const parsed = new URL(url); return { ok: true, status: 200, json: async () => ({ experiences: manifest(parsed.searchParams.get("trigger"), parsed) }) };
   });
 }
 function postedEvents(fetchMock: ReturnType<typeof vi.fn>): Array<{ experienceId: string; event: string }> { return fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(String(init?.body))); }

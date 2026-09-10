@@ -7,7 +7,7 @@ export interface RenderCallbacks { onDismiss: () => void; onPrimary: () => void;
 export function findTarget(target?: ExperienceTarget): Element | null {
   if (!target) return null;
   for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
-    try { const element = document.querySelector(selector); if (element) return element; } catch { /* invalid selector cannot break host */ }
+    try { const matches = document.querySelectorAll(selector); if (matches.length === 1) return matches[0]; } catch { /* invalid selector cannot break host */ }
   }
   return null;
 }
@@ -49,7 +49,17 @@ export class AnchoredCardRenderer {
   private cleanup: Array<() => void> = [];
   render(root: ShadowRoot, target: Element, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState, widgetType?: WidgetType): HTMLElement {
     const card = buildCard(root, content, design, behavior, callbacks, builder, widgetType);
-    const update = () => position(card, target.getBoundingClientRect(), behavior);
+    const update = () => {
+      const rect = target.getBoundingClientRect();
+      if (!isVisibleTarget(target, card, rect)) {
+        card.style.visibility = "hidden";
+        card.style.pointerEvents = "none";
+        return;
+      }
+      card.style.visibility = "";
+      card.style.pointerEvents = "";
+      position(card, rect, behavior);
+    };
     const onWindow = () => requestAnimationFrame(update);
     window.addEventListener("scroll", onWindow, true); window.addEventListener("resize", onWindow);
     this.cleanup.push(() => window.removeEventListener("scroll", onWindow, true), () => window.removeEventListener("resize", onWindow));
@@ -58,6 +68,20 @@ export class AnchoredCardRenderer {
     update(); return card;
   }
   destroy(): void { this.cleanup.splice(0).forEach((fn) => fn()); }
+}
+
+function isVisibleTarget(target: Element, card: HTMLElement, rect: DOMRect): boolean {
+  if (!target.isConnected || rect.width <= 0 || rect.height <= 0 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) return false;
+  if (typeof document.elementFromPoint !== "function") return true;
+
+  const left = Math.max(0, rect.left); const right = Math.min(window.innerWidth, rect.right);
+  const top = Math.max(0, rect.top); const bottom = Math.min(window.innerHeight, rect.bottom);
+  const root = card.getRootNode(); const cardHost = root instanceof ShadowRoot ? root.host : null;
+  for (const horizontal of [0.2, 0.5, 0.8]) for (const vertical of [0.2, 0.5, 0.8]) {
+    const hit = document.elementFromPoint(left + (right - left) * horizontal, top + (bottom - top) * vertical);
+    if (!hit || hit === target || target.contains(hit) || hit === cardHost) return true;
+  }
+  return false;
 }
 
 function position(card: HTMLElement, rect: DOMRect, behavior: ExperienceBehavior): void {

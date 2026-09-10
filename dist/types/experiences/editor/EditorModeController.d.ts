@@ -1,4 +1,4 @@
-import type { EditorSession } from "../runtimeInterfaces";
+import type { EditorContinuation } from "../runtimeInterfaces";
 export declare class EditorModeController {
     private apiBase;
     private host;
@@ -16,6 +16,7 @@ export declare class EditorModeController {
     private targetRefreshTimer;
     private selectionGeneration;
     private bridge;
+    private session;
     private draft;
     private definition;
     private guide;
@@ -24,9 +25,10 @@ export declare class EditorModeController {
     private dirty;
     private previewRendered;
     private currentPath;
+    private persistBeforePageLeave;
     constructor(apiBase: string);
     start(rawToken: string): Promise<boolean>;
-    resume(session: EditorSession): Promise<boolean>;
+    resume(continuation: EditorContinuation): Promise<boolean>;
     private activate;
     private mount;
     private panelMarkup;
@@ -49,8 +51,10 @@ export declare class EditorModeController {
     private scheduleTargetRefresh;
     private onRouteChange;
     private currentTarget;
+    private targetStatus;
     private currentBehavior;
     private setTarget;
+    private updateContinuation;
     private isTargetedType;
     private setText;
     private setValue;

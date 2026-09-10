@@ -52,7 +52,7 @@ export class ExperienceLoader {
       if (!chosen) return;
       const stored = this.state.getGuideProgress();
       const stepId = isGuideDefinition(chosen.definition) && stored?.experienceId === chosen.id && stored.versionId === chosen.versionId ? stored.currentStepId : undefined;
-      this.show(chosen, stepId);
+      this.show(chosen, stepId, stepId ? stored ?? undefined : undefined);
     } catch { /* experience delivery must never affect analytics or host code */ }
   }
 
@@ -83,20 +83,25 @@ export class ExperienceLoader {
   private async fetchExperiences(trigger?: string): Promise<DeliveredExperience[]> {
     const query = new URLSearchParams({ url: location.href, anonymousId: this.session.getAnonymousId(), sessionId: this.session.getSessionId() });
     const userId = this.session.getIdentifiedUserId(); if (userId) query.set("trackedUserId", userId); if (trigger) query.set("trigger", trigger);
+    const stored = this.state.getGuideProgress();
+    if (stored) { query.set("activeGuideId", stored.experienceId); query.set("activeGuideVersionId", stored.versionId); }
     const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experiences?${query}`, { credentials: "omit" });
     if (!response.ok) return [];
     const manifest = await response.json() as { experiences?: DeliveredExperience[] };
     return Array.isArray(manifest.experiences) ? manifest.experiences : [];
   }
 
-  private show(experience: DeliveredExperience, requestedStepId?: string): void {
+  private show(experience: DeliveredExperience, requestedStepId?: string, progress?: GuideProgress): void {
     if (this.queued?.id === experience.id) this.queued = null;
     const definition = isGuideDefinition(experience.definition) ? experience.definition : null;
     const currentStepId = definition?.steps.some(step => step.id === requestedStepId) ? requestedStepId : definition?.steps[0]?.id;
-    const runtime: ActiveExperience = { experience, currentStepId, impressionId: null, shownRequested: false, shownPromise: null };
+    const impressionId = progress?.impressionId ?? experience.impressionId ?? null;
+    const runtime: ActiveExperience = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId), shownPromise: null };
     this.active = runtime;
     if (currentStepId) this.persistGuide(runtime, "active");
-    const mounted = this.renderer.render(experience, this.callbacks(runtime), currentStepId);
+    const mounted = currentStepId
+      ? (progress && this.advanceForRoute(runtime) ? true : (this.renderActiveGuide(), true))
+      : this.renderer.render(experience, this.callbacks(runtime), currentStepId);
     if (!mounted && this.active === runtime) { this.active = null; if (currentStepId) this.state.clearGuideProgress(experience.id); }
   }
 
@@ -120,7 +125,11 @@ export class ExperienceLoader {
     if (runtime.shownRequested) return;
     runtime.shownRequested = true;
     this.state.markSeen(runtime.experience.id);
-    runtime.shownPromise = this.post(runtime, "shown").then(result => { runtime.impressionId = result?.impressionId ?? null; });
+    runtime.shownPromise = this.post(runtime, "shown").then(result => {
+      runtime.impressionId = result?.impressionId ?? null;
+      if (this.active === runtime) this.persistGuide(runtime, "active");
+      else if (this.pausedGuide === runtime) this.persistGuide(runtime, "paused");
+    });
   }
 
   private handleAction(runtime: ActiveExperience, action: ExperienceAction): void {
@@ -164,7 +173,14 @@ export class ExperienceLoader {
 
   private renderActiveGuide(): void {
     const runtime = this.activeGuide(); if (!runtime) return;
+    this.renderer.destroy();
+    if (!this.currentGuideStepMatchesPage(runtime)) return;
     this.renderer.render(runtime.experience, this.callbacks(runtime), runtime.currentStepId);
+  }
+
+  private currentGuideStepMatchesPage(runtime: ActiveExperience): boolean {
+    const pagePath = this.currentGuideStep(runtime)?.target?.targetContext?.pagePath;
+    return !pagePath || pagePath === currentPagePath();
   }
 
   private pauseGuide(): void {
@@ -200,13 +216,13 @@ export class ExperienceLoader {
   }
 
   private persistGuide(runtime: ActiveExperience, status: GuideProgress["status"]): void {
-    if (runtime.currentStepId) this.state.setGuideProgress({ experienceId: runtime.experience.id, versionId: runtime.experience.versionId, currentStepId: runtime.currentStepId, status });
+    if (runtime.currentStepId) this.state.setGuideProgress({ experienceId: runtime.experience.id, versionId: runtime.experience.versionId, currentStepId: runtime.currentStepId, status, ...(runtime.impressionId ? { impressionId: runtime.impressionId } : {}) });
   }
 
   private async post(runtime: ActiveExperience, event: "shown" | "dismissed" | "completed" | "action", action?: string): Promise<{ impressionId?: string } | null> {
     const experience = runtime.experience;
     try {
-      const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? undefined, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: runtime.impressionId ?? undefined, event, action }) });
+      const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? undefined, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: runtime.impressionId ?? undefined, event, action }) });
       return response.ok && response.status !== 204 ? await response.json() as { impressionId?: string } : null;
     } catch { return null; }
   }

@@ -10,7 +10,7 @@ import type {
   RuntimeWidgetDefinition,
 } from "../types";
 import { isGuideDefinition } from "../types";
-import type { EditorSession } from "../runtimeInterfaces";
+import type { EditorAuthoringState, EditorContinuation, EditorSession } from "../runtimeInterfaces";
 import { clearEditorContinuation, storeEditorContinuation } from "../editorContinuation";
 import { RouteObserver } from "../../dom/RouteObserver";
 import { ExperienceRenderer } from "../runtime/ExperienceRenderer";
@@ -19,6 +19,7 @@ import { EditorBridge } from "./EditorBridge";
 import { ElementPicker } from "./ElementPicker";
 
 type EditorMode = "select" | "navigate";
+type TargetStatus = "found" | "off-page" | "missing" | "unconfigured";
 
 export class EditorModeController {
   private host: HTMLElement | null = null;
@@ -36,6 +37,7 @@ export class EditorModeController {
   private targetRefreshTimer = 0;
   private selectionGeneration = 0;
   private bridge: EditorBridge | null = null;
+  private session: EditorSession | null = null;
   private draft: EditorDraft | null = null;
   private definition: EditorDefinition | null = null;
   private guide: RuntimeGuideDefinition | null = null;
@@ -44,6 +46,7 @@ export class EditorModeController {
   private dirty = false;
   private previewRendered = false;
   private currentPath = "";
+  private persistBeforePageLeave = () => this.updateContinuation();
 
   constructor(private apiBase: string) {}
 
@@ -64,27 +67,27 @@ export class EditorModeController {
       clean.searchParams.delete("movecues_editor_token");
       clean.searchParams.delete("movecues_editor_step");
       history.replaceState(history.state, "", clean.toString());
-      return await this.activate(session, requestedStep);
+      return await this.activate(session, { requestedStep });
     } catch {
       this.destroy();
       return false;
     }
   }
 
-  async resume(session: EditorSession): Promise<boolean> {
-    if (!validSession(session)) {
+  async resume(continuation: EditorContinuation): Promise<boolean> {
+    if (!validSession(continuation.session)) {
       clearEditorContinuation();
       return false;
     }
     try {
-      return await this.activate(session, 0);
+      return await this.activate(continuation.session, { restoredState: continuation.editorState });
     } catch {
       this.destroy();
       return false;
     }
   }
 
-  private async activate(session: EditorSession, requestedStep: number): Promise<boolean> {
+  private async activate(session: EditorSession, options: { requestedStep?: number; restoredState?: EditorAuthoringState }): Promise<boolean> {
     this.teardown(false);
     const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
     let draft: EditorDraft;
@@ -92,13 +95,16 @@ export class EditorModeController {
     catch { clearEditorContinuation(); return false; }
 
     this.bridge = bridge;
+    this.session = session;
     this.draft = draft;
     this.definition = draft.version.definition;
     this.guide = isGuideDefinition(this.definition) ? this.definition : null;
-    this.stepIndex = this.guide ? clampStep(requestedStep, this.guide.steps.length) : 0;
+    const restored = options.restoredState?.experienceId === draft.experience.id ? options.restoredState : undefined;
+    const restoredIndex = this.guide && restored?.selectedStepId ? this.guide.steps.findIndex(step => step.id === restored.selectedStepId) : -1;
+    this.stepIndex = this.guide ? restoredIndex >= 0 ? restoredIndex : clampStep(options.requestedStep ?? 0, this.guide.steps.length) : 0;
     this.currentPath = currentPagePath();
-    this.mode = "select";
-    storeEditorContinuation(session);
+    this.mode = restored?.mode ?? "select";
+    this.updateContinuation();
     this.mount();
     this.expiryTimer = window.setTimeout(() => this.destroy(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
     this.validationTimer = window.setInterval(() => { void bridge.load().catch(() => this.destroy()); }, 15_000);
@@ -115,11 +121,11 @@ export class EditorModeController {
 
     this.bindPanel();
     this.syncPanel();
-    this.renderPreview();
-    this.startPicker();
+    if (this.mode === "select") { this.renderPreview(); this.startPicker(); }
 
     this.routeUnsubscribe = this.routeObserver.onChange(() => this.onRouteChange());
     this.routeObserver.start();
+    window.addEventListener("pagehide", this.persistBeforePageLeave);
     if (typeof MutationObserver !== "undefined") {
       this.mutationObserver = new MutationObserver(() => this.scheduleTargetRefresh());
       this.mutationObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["id", "class", "data-testid", "data-test", "data-qa", "data-cy", "aria-label", "role", "name", "href", "hidden"] });
@@ -224,6 +230,7 @@ export class EditorModeController {
     this.selectionGeneration++;
     this.picker.cancel();
     this.stepIndex = index;
+    this.updateContinuation();
     this.syncPanel();
     if (this.mode === "select") { this.renderPreview(); this.startPicker(); }
   }
@@ -233,6 +240,7 @@ export class EditorModeController {
     this.selectionGeneration++;
     this.picker.cancel();
     this.mode = mode;
+    this.updateContinuation();
     if (mode === "navigate") {
       this.preview.destroy();
       this.previewRendered = false;
@@ -252,6 +260,7 @@ export class EditorModeController {
     void this.picker.pick().then(target => {
       if (generation !== this.selectionGeneration || !this.definition || !target) return;
       this.setTarget(target);
+      this.updateContinuation();
       this.changed();
     });
   }
@@ -262,6 +271,7 @@ export class EditorModeController {
 
   private changed(): void {
     this.dirty = true;
+    this.updateContinuation();
     this.syncPanel();
     if (this.mode === "select") this.renderPreview();
     this.setText("[data-save-state]", "Saving…");
@@ -372,7 +382,8 @@ export class EditorModeController {
     if (!this.root) return;
     const target = this.currentTarget();
     const targeted = this.isTargetedType();
-    const found = targeted && !!findTarget(target);
+    const targetStatus = targeted ? this.targetStatus(target) : "unconfigured";
+    const found = targetStatus === "found";
     this.setText("[data-current-path]", this.currentPath || currentPagePath());
     this.setText("[data-preview-status]", `${this.previewRendered ? "✓" : "○"} Preview ${this.previewRendered ? "rendered" : this.mode === "navigate" ? "paused for navigation" : "waiting"}`);
     const previewStatus = this.root.querySelector<HTMLElement>("[data-preview-status]");
@@ -380,8 +391,8 @@ export class EditorModeController {
     const liveTarget = this.root.querySelector<HTMLElement>("[data-live-target]");
     if (liveTarget) {
       liveTarget.hidden = !targeted;
-      liveTarget.textContent = found ? "✓ Target found" : target ? "✕ Target not found" : "○ Target not configured";
-      liveTarget.className = found ? "status-ok" : target ? "status-error" : "muted";
+      liveTarget.textContent = targetStatus === "found" ? "✓ Found on current page" : targetStatus === "off-page" ? "○ Configured on another page" : targetStatus === "missing" ? "⚠ Expected on current page but not found" : "○ Not configured";
+      liveTarget.className = found ? "status-ok" : targetStatus === "missing" ? "status-error" : "muted";
     }
     this.setText("[data-target-label]", target?.label || target?.primarySelector || "Not selected");
     this.setText("[data-reliability]", target ? `${reliabilityIcon(target.reliability)} ${capitalize(target.reliability)} selector` : "○ No selector configured");
@@ -389,12 +400,12 @@ export class EditorModeController {
     if (reliability) reliability.dataset.level = target?.reliability ?? "none";
     const missing = this.root.querySelector<HTMLElement>("[data-missing-selector]");
     if (missing) {
-      missing.hidden = !target || found;
+      missing.hidden = targetStatus !== "missing";
       const code = missing.querySelector("code"); if (code) code.textContent = target?.primarySelector ?? "";
     }
     if (this.guide) this.root.querySelectorAll<HTMLButtonElement>("[data-step]").forEach((button, index) => {
       const stepTarget = this.guide!.steps[index].target;
-      const state = index === this.stepIndex ? "current" : !stepTarget ? "unconfigured" : findTarget(stepTarget) ? "found" : "missing";
+      const state = index === this.stepIndex ? "current" : this.targetStatus(stepTarget);
       button.dataset.stepStatus = state;
       const icon = button.querySelector("[data-step-icon]"); if (icon) icon.textContent = state === "current" ? "●" : state === "found" ? "✓" : state === "missing" ? "⚠" : "○";
       button.classList.toggle("active", index === this.stepIndex);
@@ -411,6 +422,7 @@ export class EditorModeController {
     const next = currentPagePath();
     if (next === previous) return;
     this.currentPath = next;
+    this.updateContinuation();
     const notice = this.root?.querySelector<HTMLElement>("[data-route-notice]");
     if (notice) notice.hidden = false;
     this.setText("[data-route-change]", `${previous} → ${next}`);
@@ -423,6 +435,12 @@ export class EditorModeController {
     return this.guide ? this.guide.steps[this.stepIndex]?.target : (this.definition as RuntimeWidgetDefinition).target;
   }
 
+  private targetStatus(target?: ExperienceTarget): TargetStatus {
+    if (!target) return "unconfigured";
+    if (target.targetContext?.pagePath && target.targetContext.pagePath !== (this.currentPath || currentPagePath())) return "off-page";
+    return findTarget(target) ? "found" : "missing";
+  }
+
   private currentBehavior(): ExperienceBehavior {
     if (!this.definition) return { dismissible: true };
     return (this.guide ? this.guide.steps[this.stepIndex].behavior : (this.definition as RuntimeWidgetDefinition).behavior) as ExperienceBehavior;
@@ -430,8 +448,21 @@ export class EditorModeController {
 
   private setTarget(target: ExperienceTarget): void {
     if (!this.definition) return;
-    if (this.guide) this.guide.steps[this.stepIndex].target = target;
-    else (this.definition as RuntimeWidgetDefinition).target = target;
+    const contextualTarget: ExperienceTarget = { ...target, targetContext: { pagePath: currentPagePath() } };
+    if (this.guide) this.guide.steps[this.stepIndex].target = contextualTarget;
+    else (this.definition as RuntimeWidgetDefinition).target = contextualTarget;
+  }
+
+  private updateContinuation(): void {
+    if (!this.session || !this.draft) return;
+    storeEditorContinuation({
+      session: this.session,
+      editorState: {
+        experienceId: this.draft.experience.id,
+        selectedStepId: this.guide?.steps[this.stepIndex]?.id,
+        mode: this.mode,
+      },
+    });
   }
 
   private isTargetedType(): boolean {
@@ -453,12 +484,13 @@ export class EditorModeController {
     this.selectionGeneration++;
     this.routeUnsubscribe?.(); this.routeUnsubscribe = null;
     this.routeObserver.stop();
+    window.removeEventListener("pagehide", this.persistBeforePageLeave);
     this.mutationObserver?.disconnect(); this.mutationObserver = null;
     this.dragCleanup?.(); this.dragCleanup = null;
     this.preview.destroy();
     this.picker.cancel();
     this.host?.remove();
-    this.host = null; this.root = null; this.bridge = null; this.draft = null; this.definition = null; this.guide = null;
+    this.host = null; this.root = null; this.bridge = null; this.session = null; this.draft = null; this.definition = null; this.guide = null;
     this.dirty = false; this.previewRendered = false; this.saveInFlight = null;
     if (clearContinuation) clearEditorContinuation();
   }

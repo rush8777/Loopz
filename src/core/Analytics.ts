@@ -32,8 +32,8 @@ import { loadEditorRuntime, loadExperienceRuntime } from "../experiences/loadRun
 import { clearEditorContinuation, readEditorContinuation } from "../experiences/editorContinuation";
 import type {
   AnalyticsRuntimeProviders,
+  EditorContinuation,
   EditorControllerRuntime,
-  EditorSession,
   ExperienceLoaderRuntime,
 } from "../experiences/runtimeInterfaces";
 
@@ -212,7 +212,7 @@ export class Analytics {
     return true;
   }
 
-  private async initializeEditor(editorToken: string | null, continuation: EditorSession | null, userConfig: AnalyticsConfig, generation: number): Promise<void> {
+  private async initializeEditor(editorToken: string | null, continuation: EditorContinuation | null, userConfig: AnalyticsConfig, generation: number): Promise<void> {
     try {
       const runtime = this.runtimeProviders.editor ?? await loadEditorRuntime(this.config.editorRuntimeBundleUrl);
       if (!this.initialized || generation !== this.generation) return;

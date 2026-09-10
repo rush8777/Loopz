@@ -7,6 +7,7 @@ export interface GuideProgress {
   versionId: string;
   currentStepId: string;
   status: "active" | "paused";
+  impressionId?: string;
 }
 
 function read(storage: Storage, key: string): Set<string> {
@@ -25,7 +26,7 @@ export class ExperienceStateStore {
   getGuideProgress(): GuideProgress | null {
     try {
       const value = JSON.parse(sessionStorage.getItem(GUIDE_KEY) ?? "null") as Partial<GuideProgress> | null;
-      return value && typeof value.experienceId === "string" && typeof value.versionId === "string" && typeof value.currentStepId === "string" && (value.status === "active" || value.status === "paused") ? value as GuideProgress : null;
+      return value && typeof value.experienceId === "string" && typeof value.versionId === "string" && typeof value.currentStepId === "string" && (value.status === "active" || value.status === "paused") && (value.impressionId === undefined || typeof value.impressionId === "string") ? value as GuideProgress : null;
     } catch { return null; }
   }
   setGuideProgress(progress: GuideProgress): void { try { sessionStorage.setItem(GUIDE_KEY, JSON.stringify(progress)); } catch { /* storage is best effort */ } }

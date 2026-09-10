@@ -130,18 +130,18 @@ function computeElementRole(el) {
   if (tag === "textarea") return "textarea";
   return void 0;
 }
-const STABLE_DATA_ATTRS = ["data-testid", "data-test", "data-qa", "data-cy", "data-analytics-id"];
-const SEMANTIC_ATTRS = ["role", "aria-label", "name", "type", "href"];
-const DYNAMIC_CLASS_PATTERN = /^(css-|sc-|jsx-|_|[a-z0-9]{6,}$)/i;
+const STABLE_DATA_ATTRS$1 = ["data-testid", "data-test", "data-qa", "data-cy", "data-analytics-id"];
+const SEMANTIC_ATTRS$1 = ["role", "aria-label", "name", "type", "href"];
+const DYNAMIC_CLASS_PATTERN$1 = /^(css-|sc-|jsx-|_|[a-z0-9]{6,}$)/i;
 const TAILWIND_UTILITY_PATTERN = /^(-?(m|p)[trblxy]?-|w-|h-|min-|max-|inset-|top-|right-|bottom-|left-|z-|order-|col-|row-|gap-|space-|grid-|flex-\d|flex$|inline-flex$|inline-block$|inline$|block$|hidden$|table|items-|justify-|content-|self-|place-|text-|font-|leading-|tracking-|whitespace-|break-|truncate$|bg-|from-|via-|to-|border|divide-|rounded|shadow|opacity-|blur-|brightness-|contrast-|grayscale|invert|saturate|sepia|backdrop-|transition|duration-|ease-|delay-|animate-|cursor-|select-|resize-|scroll-|snap-|touch-|pointer-events-|will-change-|appearance-|outline-|ring-|overflow-|overscroll-|absolute$|relative$|fixed$|sticky$|static$|visible$|invisible$|float-|clear-|isolate$|object-|aspect-|columns-|underline$|line-through$|no-underline$|uppercase$|lowercase$|capitalize$|normal-case$|italic$|not-italic$|antialiased$)/;
 const TAILWIND_VARIANT_PREFIX_PATTERN = /^(sm|md|lg|xl|2xl|hover|focus|active|disabled|dark|group-hover|focus-visible|first|last|odd|even):/;
 function isTailwindUtilityClass(cls) {
   const unescaped = cls.replace(/\\/g, "");
   return TAILWIND_UTILITY_PATTERN.test(unescaped) || TAILWIND_VARIANT_PREFIX_PATTERN.test(unescaped);
 }
-function isStableClass(cls) {
+function isStableClass$1(cls) {
   if (!cls) return false;
-  if (DYNAMIC_CLASS_PATTERN.test(cls)) return false;
+  if (DYNAMIC_CLASS_PATTERN$1.test(cls)) return false;
   if (/^\d/.test(cls)) return false;
   if (isTailwindUtilityClass(cls)) return false;
   return true;
@@ -179,13 +179,13 @@ class SelectorGenerator {
     if (id && this.isUniqueId(id)) {
       return `${el.tagName.toLowerCase()}#${cssEscape(id)}`;
     }
-    for (const attr of STABLE_DATA_ATTRS) {
+    for (const attr of STABLE_DATA_ATTRS$1) {
       const value = el.getAttribute(attr);
       if (value) {
         return `${el.tagName.toLowerCase()}[${attr}="${cssEscape(value)}"]`;
       }
     }
-    for (const attr of SEMANTIC_ATTRS) {
+    for (const attr of SEMANTIC_ATTRS$1) {
       const rawValue = el.getAttribute(attr);
       if (!rawValue) continue;
       const value = attr === "href" ? canonicalizeHref(rawValue) : rawValue;
@@ -194,7 +194,7 @@ class SelectorGenerator {
         return `${el.tagName.toLowerCase()}[${attr}="${cssEscape(value)}"]`;
       }
     }
-    const classes = this.getClassList(el).filter(isStableClass);
+    const classes = this.getClassList(el).filter(isStableClass$1);
     if (classes.length > 0) {
       return `${el.tagName.toLowerCase()}.${classes.map(cssEscape).join(".")}`;
     }
@@ -1984,19 +1984,20 @@ const EDITOR_CONTINUATION_KEY = "__movecues_experience_editor_session__";
 function readEditorContinuation() {
   try {
     const value = JSON.parse(sessionStorage.getItem(EDITOR_CONTINUATION_KEY) ?? "null");
-    if (!value || typeof value.sessionId !== "string" || !value.sessionId || typeof value.accessToken !== "string" || !value.accessToken || typeof value.expiresAt !== "string" || !Number.isFinite(Date.parse(value.expiresAt)) || Date.parse(value.expiresAt) <= Date.now()) {
+    const session = value && isSession(value.session) ? value.session : isSession(value) ? value : null;
+    if (!session || Date.parse(session.expiresAt) <= Date.now()) {
       clearEditorContinuation();
       return null;
     }
-    return value;
+    return { session, editorState: isEditorState(value == null ? void 0 : value.editorState) ? value.editorState : void 0 };
   } catch {
     clearEditorContinuation();
     return null;
   }
 }
-function storeEditorContinuation(session) {
+function storeEditorContinuation(continuation) {
   try {
-    sessionStorage.setItem(EDITOR_CONTINUATION_KEY, JSON.stringify(session));
+    sessionStorage.setItem(EDITOR_CONTINUATION_KEY, JSON.stringify(continuation));
   } catch {
   }
 }
@@ -2005,6 +2006,16 @@ function clearEditorContinuation() {
     sessionStorage.removeItem(EDITOR_CONTINUATION_KEY);
   } catch {
   }
+}
+function isSession(value) {
+  if (!value || typeof value !== "object") return false;
+  const session = value;
+  return typeof session.sessionId === "string" && !!session.sessionId && typeof session.accessToken === "string" && !!session.accessToken && typeof session.expiresAt === "string" && Number.isFinite(Date.parse(session.expiresAt));
+}
+function isEditorState(value) {
+  if (!value || typeof value !== "object") return false;
+  const state = value;
+  return typeof state.experienceId === "string" && !!state.experienceId && (state.selectedStepId === void 0 || typeof state.selectedStepId === "string") && (state.mode === "select" || state.mode === "navigate");
 }
 let Analytics$1 = class Analytics {
   constructor(runtimeProviders = {}) {
@@ -2421,8 +2432,8 @@ function findTarget(target) {
   if (!target) return null;
   for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
     try {
-      const element = document.querySelector(selector);
-      if (element) return element;
+      const matches = document.querySelectorAll(selector);
+      if (matches.length === 1) return matches[0];
     } catch {
     }
   }
@@ -2934,15 +2945,134 @@ class HighlightOverlay {
     this.element.remove();
   }
 }
-function reliability(selector) {
-  if (/#[a-z][\w:-]*|\[data-(?:testid|test|qa|cy|analytics-id)=/i.test(selector)) return "reliable";
-  if (/\[(?:role|aria-label|name|type|href)=|\.[a-z][\w-]*/i.test(selector) && !selector.includes(":nth-of-type")) return "moderate";
-  return "fragile";
+const STABLE_DATA_ATTRS = ["data-testid", "data-test", "data-qa", "data-cy", "data-analytics-id"];
+const SEMANTIC_ATTRS = ["role", "aria-label", "name", "type", "href"];
+const DYNAMIC_CLASS_PATTERN = /^(css-|sc-|jsx-|_|[a-z0-9]{6,}$)/i;
+const UTILITY_CLASS_PATTERN = /^(sm:|md:|lg:|xl:|2xl:|hover:|focus:|active:|disabled:|dark:|-?(m|p)[trblxy]?-|w-|h-|min-|max-|inset-|top-|right-|bottom-|left-|z-|gap-|space-|grid|flex|items-|justify-|text-|font-|leading-|tracking-|bg-|border|rounded|shadow|opacity-|transition|duration-|absolute$|relative$|fixed$|sticky$|hidden$|block$|inline)/;
+class TargetSelectorGenerator {
+  generate(element) {
+    const verified = [];
+    const seen = /* @__PURE__ */ new Set();
+    const add = (selector, reliability) => {
+      if (!selector || seen.has(selector)) return;
+      seen.add(selector);
+      if (uniquelyMatches(selector, element)) verified.push({ selector, reliability });
+    };
+    const tag = element.tagName.toLowerCase();
+    const id = shortValue(element.getAttribute("id"));
+    if (id) add(`${tag}#${cssIdentifier(id)}`, "reliable");
+    for (const selector of attributeSelectors(element, STABLE_DATA_ATTRS)) add(selector, "reliable");
+    const semantics = attributeSelectors(element, SEMANTIC_ATTRS);
+    for (const selector of semantics) add(selector, "moderate");
+    for (const selector of attributeCombinations(element, SEMANTIC_ATTRS)) add(selector, "moderate");
+    for (const selector of classSelectors(element)) add(selector, "moderate");
+    const childSelectors = [...semantics, ...attributeCombinations(element, SEMANTIC_ATTRS), ...classSelectors(element), tag];
+    let ancestor = element.parentElement;
+    let depth = 1;
+    while (ancestor && ancestor !== document.documentElement && depth <= 4) {
+      const relation = depth === 1 ? " > " : " ";
+      for (const parentSelector of identitySelectors(ancestor)) {
+        for (const childSelector of childSelectors) add(`${parentSelector}${relation}${childSelector}`, "moderate");
+      }
+      ancestor = ancestor.parentElement;
+      depth++;
+    }
+    for (const selector of structuralSelectors(element)) add(selector, "fragile");
+    const primary = verified[0];
+    if (!primary) throw new Error("Could not generate a unique selector for the selected element");
+    return { primarySelector: primary.selector, fallbackSelectors: verified.slice(1, 6).map((item) => item.selector), reliability: primary.reliability };
+  }
+  describe(element) {
+    return {
+      ...this.generate(element),
+      label: computeElementLabel(element),
+      role: computeElementRole(element),
+      tagName: element.tagName.toLowerCase()
+    };
+  }
+}
+function attributeSelectors(element, attributes) {
+  const tag = element.tagName.toLowerCase();
+  return attributes.flatMap((attribute) => {
+    const value = shortValue(element.getAttribute(attribute));
+    return value ? [`${tag}[${attribute}="${cssString(value)}"]`] : [];
+  });
+}
+function attributeCombinations(element, attributes) {
+  const tag = element.tagName.toLowerCase();
+  const present = attributes.flatMap((attribute) => {
+    const value = shortValue(element.getAttribute(attribute));
+    return value ? [{ attribute, value }] : [];
+  });
+  const selectors = [];
+  for (let first = 0; first < present.length; first++) {
+    for (let second = first + 1; second < present.length; second++) {
+      selectors.push(`${tag}[${present[first].attribute}="${cssString(present[first].value)}"][${present[second].attribute}="${cssString(present[second].value)}"]`);
+    }
+  }
+  return selectors;
+}
+function classSelectors(element) {
+  const tag = element.tagName.toLowerCase();
+  const classes = (element.getAttribute("class") ?? "").split(/\s+/).filter(isStableClass).slice(0, 4);
+  if (!classes.length) return [];
+  const selectors = [`${tag}.${classes.map(cssIdentifier).join(".")}`];
+  if (classes.length > 1) {
+    for (let first = 0; first < classes.length; first++) for (let second = first + 1; second < classes.length; second++) selectors.push(`${tag}.${cssIdentifier(classes[first])}.${cssIdentifier(classes[second])}`);
+  }
+  selectors.push(...classes.map((value) => `${tag}.${cssIdentifier(value)}`));
+  return [...new Set(selectors)];
+}
+function identitySelectors(element) {
+  const tag = element.tagName.toLowerCase();
+  const selectors = [];
+  const id = shortValue(element.getAttribute("id"));
+  if (id) selectors.push(`${tag}#${cssIdentifier(id)}`);
+  selectors.push(...attributeSelectors(element, STABLE_DATA_ATTRS), ...attributeSelectors(element, SEMANTIC_ATTRS), ...attributeCombinations(element, SEMANTIC_ATTRS), ...classSelectors(element));
+  return [...new Set(selectors)];
+}
+function structuralSelectors(element) {
+  const selectors = [];
+  const parts = [];
+  let node = element;
+  while (node && node !== document.documentElement) {
+    const parent = node.parentElement;
+    let part = node.tagName.toLowerCase();
+    if (parent) {
+      const siblings = Array.from(parent.children).filter((sibling) => sibling.tagName === node.tagName);
+      if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(node) + 1})`;
+    }
+    parts.unshift(part);
+    selectors.push(parts.join(" > "));
+    node = parent;
+  }
+  return selectors;
+}
+function uniquelyMatches(selector, selected) {
+  try {
+    const matches = document.querySelectorAll(selector);
+    return matches.length === 1 && matches[0] === selected;
+  } catch {
+    return false;
+  }
+}
+function shortValue(value) {
+  return value && value.length <= 160 ? value : null;
+}
+function isStableClass(value) {
+  const unescaped = value.replace(/\\/g, "");
+  return !!unescaped && !/^\d/.test(unescaped) && !DYNAMIC_CLASS_PATTERN.test(unescaped) && !UTILITY_CLASS_PATTERN.test(unescaped);
+}
+function cssIdentifier(value) {
+  return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(value) : value.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+}
+function cssString(value) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\r\n\f]/g, " ");
 }
 class ElementPicker {
   constructor() {
     this.overlay = null;
-    this.generator = new SelectorGenerator();
+    this.generator = new TargetSelectorGenerator();
     this.resolve = null;
     this.shiftPassthrough = false;
     this.move = (event) => {
@@ -2956,14 +3086,17 @@ class ElementPicker {
       else (_c = this.overlay) == null ? void 0 : _c.hide();
     };
     this.click = (event) => {
+      var _a;
       if (this.shiftPassthrough || event.shiftKey || event.composedPath().some((item) => item instanceof Element && isMovcuesSurface(item))) return;
       const target = document.elementFromPoint(event.clientX, event.clientY);
       if (!target || isMovcuesSurface(target)) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      const descriptor = this.generator.describe(target);
-      const selector = descriptor.selector;
-      this.finish({ primarySelector: selector, fallbackSelectors: [], label: descriptor.label, role: descriptor.role, tagName: descriptor.tagName, reliability: reliability(selector) });
+      try {
+        this.finish(this.generator.describe(target));
+      } catch {
+        (_a = this.overlay) == null ? void 0 : _a.hide();
+      }
     };
     this.keyDown = (event) => {
       var _a;
@@ -3039,6 +3172,7 @@ class EditorModeController {
     this.targetRefreshTimer = 0;
     this.selectionGeneration = 0;
     this.bridge = null;
+    this.session = null;
     this.draft = null;
     this.definition = null;
     this.guide = null;
@@ -3047,6 +3181,7 @@ class EditorModeController {
     this.dirty = false;
     this.previewRendered = false;
     this.currentPath = "";
+    this.persistBeforePageLeave = () => this.updateContinuation();
   }
   async start(rawToken) {
     try {
@@ -3064,25 +3199,26 @@ class EditorModeController {
       clean2.searchParams.delete("movecues_editor_token");
       clean2.searchParams.delete("movecues_editor_step");
       history.replaceState(history.state, "", clean2.toString());
-      return await this.activate(session, requestedStep);
+      return await this.activate(session, { requestedStep });
     } catch {
       this.destroy();
       return false;
     }
   }
-  async resume(session) {
-    if (!validSession(session)) {
+  async resume(continuation) {
+    if (!validSession(continuation.session)) {
       clearEditorContinuation();
       return false;
     }
     try {
-      return await this.activate(session, 0);
+      return await this.activate(continuation.session, { restoredState: continuation.editorState });
     } catch {
       this.destroy();
       return false;
     }
   }
-  async activate(session, requestedStep) {
+  async activate(session, options) {
+    var _a;
     this.teardown(false);
     const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
     let draft;
@@ -3093,13 +3229,16 @@ class EditorModeController {
       return false;
     }
     this.bridge = bridge;
+    this.session = session;
     this.draft = draft;
     this.definition = draft.version.definition;
     this.guide = isGuideDefinition(this.definition) ? this.definition : null;
-    this.stepIndex = this.guide ? clampStep(requestedStep, this.guide.steps.length) : 0;
+    const restored = ((_a = options.restoredState) == null ? void 0 : _a.experienceId) === draft.experience.id ? options.restoredState : void 0;
+    const restoredIndex = this.guide && (restored == null ? void 0 : restored.selectedStepId) ? this.guide.steps.findIndex((step) => step.id === restored.selectedStepId) : -1;
+    this.stepIndex = this.guide ? restoredIndex >= 0 ? restoredIndex : clampStep(options.requestedStep ?? 0, this.guide.steps.length) : 0;
     this.currentPath = currentPagePath$1();
-    this.mode = "select";
-    storeEditorContinuation(session);
+    this.mode = (restored == null ? void 0 : restored.mode) ?? "select";
+    this.updateContinuation();
     this.mount();
     this.expiryTimer = window.setTimeout(() => this.destroy(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
     this.validationTimer = window.setInterval(() => {
@@ -3116,10 +3255,13 @@ class EditorModeController {
     document.documentElement.appendChild(this.host);
     this.bindPanel();
     this.syncPanel();
-    this.renderPreview();
-    this.startPicker();
+    if (this.mode === "select") {
+      this.renderPreview();
+      this.startPicker();
+    }
     this.routeUnsubscribe = this.routeObserver.onChange(() => this.onRouteChange());
     this.routeObserver.start();
+    window.addEventListener("pagehide", this.persistBeforePageLeave);
     if (typeof MutationObserver !== "undefined") {
       this.mutationObserver = new MutationObserver(() => this.scheduleTargetRefresh());
       this.mutationObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["id", "class", "data-testid", "data-test", "data-qa", "data-cy", "aria-label", "role", "name", "href", "hidden"] });
@@ -3276,6 +3418,7 @@ class EditorModeController {
     this.selectionGeneration++;
     this.picker.cancel();
     this.stepIndex = index;
+    this.updateContinuation();
     this.syncPanel();
     if (this.mode === "select") {
       this.renderPreview();
@@ -3287,6 +3430,7 @@ class EditorModeController {
     this.selectionGeneration++;
     this.picker.cancel();
     this.mode = mode;
+    this.updateContinuation();
     if (mode === "navigate") {
       this.preview.destroy();
       this.previewRendered = false;
@@ -3305,6 +3449,7 @@ class EditorModeController {
     void this.picker.pick().then((target) => {
       if (generation !== this.selectionGeneration || !this.definition || !target) return;
       this.setTarget(target);
+      this.updateContinuation();
       this.changed();
     });
   }
@@ -3313,6 +3458,7 @@ class EditorModeController {
   }
   changed() {
     this.dirty = true;
+    this.updateContinuation();
     this.syncPanel();
     if (this.mode === "select") this.renderPreview();
     this.setText("[data-save-state]", "Saving…");
@@ -3426,7 +3572,8 @@ class EditorModeController {
     if (!this.root) return;
     const target = this.currentTarget();
     const targeted = this.isTargetedType();
-    const found = targeted && !!findTarget(target);
+    const targetStatus = targeted ? this.targetStatus(target) : "unconfigured";
+    const found = targetStatus === "found";
     this.setText("[data-current-path]", this.currentPath || currentPagePath$1());
     this.setText("[data-preview-status]", `${this.previewRendered ? "✓" : "○"} Preview ${this.previewRendered ? "rendered" : this.mode === "navigate" ? "paused for navigation" : "waiting"}`);
     const previewStatus = this.root.querySelector("[data-preview-status]");
@@ -3434,22 +3581,22 @@ class EditorModeController {
     const liveTarget = this.root.querySelector("[data-live-target]");
     if (liveTarget) {
       liveTarget.hidden = !targeted;
-      liveTarget.textContent = found ? "✓ Target found" : target ? "✕ Target not found" : "○ Target not configured";
-      liveTarget.className = found ? "status-ok" : target ? "status-error" : "muted";
+      liveTarget.textContent = targetStatus === "found" ? "✓ Found on current page" : targetStatus === "off-page" ? "○ Configured on another page" : targetStatus === "missing" ? "⚠ Expected on current page but not found" : "○ Not configured";
+      liveTarget.className = found ? "status-ok" : targetStatus === "missing" ? "status-error" : "muted";
     }
     this.setText("[data-target-label]", (target == null ? void 0 : target.label) || (target == null ? void 0 : target.primarySelector) || "Not selected");
     this.setText("[data-reliability]", target ? `${reliabilityIcon(target.reliability)} ${capitalize(target.reliability)} selector` : "○ No selector configured");
-    const reliability2 = this.root.querySelector("[data-reliability]");
-    if (reliability2) reliability2.dataset.level = (target == null ? void 0 : target.reliability) ?? "none";
+    const reliability = this.root.querySelector("[data-reliability]");
+    if (reliability) reliability.dataset.level = (target == null ? void 0 : target.reliability) ?? "none";
     const missing = this.root.querySelector("[data-missing-selector]");
     if (missing) {
-      missing.hidden = !target || found;
+      missing.hidden = targetStatus !== "missing";
       const code = missing.querySelector("code");
       if (code) code.textContent = (target == null ? void 0 : target.primarySelector) ?? "";
     }
     if (this.guide) this.root.querySelectorAll("[data-step]").forEach((button, index) => {
       const stepTarget = this.guide.steps[index].target;
-      const state = index === this.stepIndex ? "current" : !stepTarget ? "unconfigured" : findTarget(stepTarget) ? "found" : "missing";
+      const state = index === this.stepIndex ? "current" : this.targetStatus(stepTarget);
       button.dataset.stepStatus = state;
       const icon = button.querySelector("[data-step-icon]");
       if (icon) icon.textContent = state === "current" ? "●" : state === "found" ? "✓" : state === "missing" ? "⚠" : "○";
@@ -3466,6 +3613,7 @@ class EditorModeController {
     const next = currentPagePath$1();
     if (next === previous) return;
     this.currentPath = next;
+    this.updateContinuation();
     const notice = (_a = this.root) == null ? void 0 : _a.querySelector("[data-route-notice]");
     if (notice) notice.hidden = false;
     this.setText("[data-route-change]", `${previous} → ${next}`);
@@ -3477,14 +3625,33 @@ class EditorModeController {
     if (!this.definition) return void 0;
     return this.guide ? (_a = this.guide.steps[this.stepIndex]) == null ? void 0 : _a.target : this.definition.target;
   }
+  targetStatus(target) {
+    var _a;
+    if (!target) return "unconfigured";
+    if (((_a = target.targetContext) == null ? void 0 : _a.pagePath) && target.targetContext.pagePath !== (this.currentPath || currentPagePath$1())) return "off-page";
+    return findTarget(target) ? "found" : "missing";
+  }
   currentBehavior() {
     if (!this.definition) return { dismissible: true };
     return this.guide ? this.guide.steps[this.stepIndex].behavior : this.definition.behavior;
   }
   setTarget(target) {
     if (!this.definition) return;
-    if (this.guide) this.guide.steps[this.stepIndex].target = target;
-    else this.definition.target = target;
+    const contextualTarget = { ...target, targetContext: { pagePath: currentPagePath$1() } };
+    if (this.guide) this.guide.steps[this.stepIndex].target = contextualTarget;
+    else this.definition.target = contextualTarget;
+  }
+  updateContinuation() {
+    var _a, _b;
+    if (!this.session || !this.draft) return;
+    storeEditorContinuation({
+      session: this.session,
+      editorState: {
+        experienceId: this.draft.experience.id,
+        selectedStepId: (_b = (_a = this.guide) == null ? void 0 : _a.steps[this.stepIndex]) == null ? void 0 : _b.id,
+        mode: this.mode
+      }
+    });
   }
   isTargetedType() {
     var _a;
@@ -3519,6 +3686,7 @@ class EditorModeController {
     (_a = this.routeUnsubscribe) == null ? void 0 : _a.call(this);
     this.routeUnsubscribe = null;
     this.routeObserver.stop();
+    window.removeEventListener("pagehide", this.persistBeforePageLeave);
     (_b = this.mutationObserver) == null ? void 0 : _b.disconnect();
     this.mutationObserver = null;
     (_c = this.dragCleanup) == null ? void 0 : _c.call(this);
@@ -3529,6 +3697,7 @@ class EditorModeController {
     this.host = null;
     this.root = null;
     this.bridge = null;
+    this.session = null;
     this.draft = null;
     this.definition = null;
     this.guide = null;
@@ -3619,7 +3788,7 @@ class ExperienceStateStore {
   getGuideProgress() {
     try {
       const value = JSON.parse(sessionStorage.getItem(GUIDE_KEY) ?? "null");
-      return value && typeof value.experienceId === "string" && typeof value.versionId === "string" && typeof value.currentStepId === "string" && (value.status === "active" || value.status === "paused") ? value : null;
+      return value && typeof value.experienceId === "string" && typeof value.versionId === "string" && typeof value.currentStepId === "string" && (value.status === "active" || value.status === "paused") && (value.impressionId === void 0 || typeof value.impressionId === "string") ? value : null;
     } catch {
       return null;
     }
@@ -3680,7 +3849,7 @@ class ExperienceLoader {
       if (!chosen) return;
       const stored = this.state.getGuideProgress();
       const stepId = isGuideDefinition(chosen.definition) && (stored == null ? void 0 : stored.experienceId) === chosen.id && stored.versionId === chosen.versionId ? stored.currentStepId : void 0;
-      this.show(chosen, stepId);
+      this.show(chosen, stepId, stepId ? stored ?? void 0 : void 0);
     } catch {
     }
   }
@@ -3721,20 +3890,26 @@ class ExperienceLoader {
     const userId = this.session.getIdentifiedUserId();
     if (userId) query.set("trackedUserId", userId);
     if (trigger) query.set("trigger", trigger);
+    const stored = this.state.getGuideProgress();
+    if (stored) {
+      query.set("activeGuideId", stored.experienceId);
+      query.set("activeGuideVersionId", stored.versionId);
+    }
     const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experiences?${query}`, { credentials: "omit" });
     if (!response.ok) return [];
     const manifest = await response.json();
     return Array.isArray(manifest.experiences) ? manifest.experiences : [];
   }
-  show(experience, requestedStepId) {
+  show(experience, requestedStepId, progress) {
     var _a, _b;
     if (((_a = this.queued) == null ? void 0 : _a.id) === experience.id) this.queued = null;
     const definition = isGuideDefinition(experience.definition) ? experience.definition : null;
     const currentStepId = (definition == null ? void 0 : definition.steps.some((step) => step.id === requestedStepId)) ? requestedStepId : (_b = definition == null ? void 0 : definition.steps[0]) == null ? void 0 : _b.id;
-    const runtime = { experience, currentStepId, impressionId: null, shownRequested: false, shownPromise: null };
+    const impressionId = (progress == null ? void 0 : progress.impressionId) ?? experience.impressionId ?? null;
+    const runtime = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId), shownPromise: null };
     this.active = runtime;
     if (currentStepId) this.persistGuide(runtime, "active");
-    const mounted = this.renderer.render(experience, this.callbacks(runtime), currentStepId);
+    const mounted = currentStepId ? progress && this.advanceForRoute(runtime) ? true : (this.renderActiveGuide(), true) : this.renderer.render(experience, this.callbacks(runtime), currentStepId);
     if (!mounted && this.active === runtime) {
       this.active = null;
       if (currentStepId) this.state.clearGuideProgress(experience.id);
@@ -3764,6 +3939,8 @@ class ExperienceLoader {
     this.state.markSeen(runtime.experience.id);
     runtime.shownPromise = this.post(runtime, "shown").then((result) => {
       runtime.impressionId = (result == null ? void 0 : result.impressionId) ?? null;
+      if (this.active === runtime) this.persistGuide(runtime, "active");
+      else if (this.pausedGuide === runtime) this.persistGuide(runtime, "paused");
     });
   }
   handleAction(runtime, action) {
@@ -3814,7 +3991,14 @@ class ExperienceLoader {
   renderActiveGuide() {
     const runtime = this.activeGuide();
     if (!runtime) return;
+    this.renderer.destroy();
+    if (!this.currentGuideStepMatchesPage(runtime)) return;
     this.renderer.render(runtime.experience, this.callbacks(runtime), runtime.currentStepId);
+  }
+  currentGuideStepMatchesPage(runtime) {
+    var _a, _b, _c;
+    const pagePath = (_c = (_b = (_a = this.currentGuideStep(runtime)) == null ? void 0 : _a.target) == null ? void 0 : _b.targetContext) == null ? void 0 : _c.pagePath;
+    return !pagePath || pagePath === currentPagePath();
   }
   pauseGuide() {
     const runtime = this.activeGuide();
@@ -3856,12 +4040,12 @@ class ExperienceLoader {
     return (runtime == null ? void 0 : runtime.currentStepId) && isGuideDefinition(runtime.experience.definition) ? runtime : null;
   }
   persistGuide(runtime, status) {
-    if (runtime.currentStepId) this.state.setGuideProgress({ experienceId: runtime.experience.id, versionId: runtime.experience.versionId, currentStepId: runtime.currentStepId, status });
+    if (runtime.currentStepId) this.state.setGuideProgress({ experienceId: runtime.experience.id, versionId: runtime.experience.versionId, currentStepId: runtime.currentStepId, status, ...runtime.impressionId ? { impressionId: runtime.impressionId } : {} });
   }
   async post(runtime, event, action) {
     const experience = runtime.experience;
     try {
-      const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: runtime.impressionId ?? void 0, event, action }) });
+      const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: runtime.impressionId ?? void 0, event, action }) });
       return response.ok && response.status !== 204 ? await response.json() : null;
     } catch {
       return null;

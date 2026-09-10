@@ -15,9 +15,18 @@ export interface EditorSession {
     accessToken: string;
     expiresAt: string;
 }
+export interface EditorAuthoringState {
+    experienceId: string;
+    selectedStepId?: string;
+    mode: "select" | "navigate";
+}
+export interface EditorContinuation {
+    session: EditorSession;
+    editorState?: EditorAuthoringState;
+}
 export interface EditorControllerRuntime {
     start(rawToken: string): Promise<boolean>;
-    resume(session: EditorSession): Promise<boolean>;
+    resume(continuation: EditorContinuation): Promise<boolean>;
     destroy(): void;
 }
 export interface ExperienceRuntime {

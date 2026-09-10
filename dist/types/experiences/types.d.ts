@@ -22,6 +22,9 @@ export interface ExperienceTarget {
     role?: string;
     tagName?: string;
     reliability: "reliable" | "moderate" | "fragile";
+    targetContext?: {
+        pagePath: string;
+    };
 }
 export type LegacyExperienceWidth = "sm" | "md" | "lg";
 export interface ExperienceSize {
@@ -153,6 +156,7 @@ export interface DeliveredExperience {
     widgetType: WidgetType | null;
     priority: number;
     interruptPolicy?: "queue" | "interrupt";
+    impressionId?: string;
     definition: RuntimeDefinition;
 }
 export type EditorDefinition = RuntimeDefinition & {

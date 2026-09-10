@@ -1,16 +1,10 @@
-import { SelectorGenerator } from "../../dom/SelectorGenerator";
 import type { ExperienceTarget } from "../types";
 import { HighlightOverlay } from "./HighlightOverlay";
-
-function reliability(selector: string): ExperienceTarget["reliability"] {
-  if (/#[a-z][\w:-]*|\[data-(?:testid|test|qa|cy|analytics-id)=/i.test(selector)) return "reliable";
-  if (/\[(?:role|aria-label|name|type|href)=|\.[a-z][\w-]*/i.test(selector) && !selector.includes(":nth-of-type")) return "moderate";
-  return "fragile";
-}
+import { TargetSelectorGenerator } from "./TargetSelectorGenerator";
 
 export class ElementPicker {
   private overlay: HighlightOverlay | null = null;
-  private generator = new SelectorGenerator();
+  private generator = new TargetSelectorGenerator();
   private resolve: ((target: ExperienceTarget | null) => void) | null = null;
   private shiftPassthrough = false;
   private move = (event: PointerEvent) => {
@@ -23,8 +17,8 @@ export class ElementPicker {
     const target = document.elementFromPoint(event.clientX, event.clientY);
     if (!target || isMovcuesSurface(target)) return;
     event.preventDefault(); event.stopImmediatePropagation();
-    const descriptor = this.generator.describe(target); const selector = descriptor.selector;
-    this.finish({ primarySelector: selector, fallbackSelectors: [], label: descriptor.label, role: descriptor.role, tagName: descriptor.tagName, reliability: reliability(selector) });
+    try { this.finish(this.generator.describe(target)); }
+    catch { this.overlay?.hide(); }
   };
   private keyDown = (event: KeyboardEvent) => {
     if (event.key === "Escape") this.finish(null);

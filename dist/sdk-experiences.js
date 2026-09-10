@@ -124,8 +124,8 @@ ${ISOLATION_CSS}`;
     if (!target) return null;
     for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
       try {
-        const element = document.querySelector(selector);
-        if (element) return element;
+        const matches = document.querySelectorAll(selector);
+        if (matches.length === 1) return matches[0];
       } catch {
       }
     }
@@ -200,7 +200,17 @@ ${ISOLATION_CSS}`;
     }
     render(root, target, content, design, behavior, callbacks, builder, widgetType) {
       const card = buildCard(root, content, design, behavior, callbacks, builder, widgetType);
-      const update = () => position(card, target.getBoundingClientRect(), behavior);
+      const update = () => {
+        const rect = target.getBoundingClientRect();
+        if (!isVisibleTarget(target, card, rect)) {
+          card.style.visibility = "hidden";
+          card.style.pointerEvents = "none";
+          return;
+        }
+        card.style.visibility = "";
+        card.style.pointerEvents = "";
+        position(card, rect, behavior);
+      };
       const onWindow = () => requestAnimationFrame(update);
       window.addEventListener("scroll", onWindow, true);
       window.addEventListener("resize", onWindow);
@@ -222,6 +232,21 @@ ${ISOLATION_CSS}`;
     destroy() {
       this.cleanup.splice(0).forEach((fn) => fn());
     }
+  }
+  function isVisibleTarget(target, card, rect) {
+    if (!target.isConnected || rect.width <= 0 || rect.height <= 0 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) return false;
+    if (typeof document.elementFromPoint !== "function") return true;
+    const left = Math.max(0, rect.left);
+    const right = Math.min(window.innerWidth, rect.right);
+    const top = Math.max(0, rect.top);
+    const bottom = Math.min(window.innerHeight, rect.bottom);
+    const root = card.getRootNode();
+    const cardHost = root instanceof ShadowRoot ? root.host : null;
+    for (const horizontal of [0.2, 0.5, 0.8]) for (const vertical of [0.2, 0.5, 0.8]) {
+      const hit = document.elementFromPoint(left + (right - left) * horizontal, top + (bottom - top) * vertical);
+      if (!hit || hit === target || target.contains(hit) || hit === cardHost) return true;
+    }
+    return false;
   }
   function position(card, rect, behavior) {
     const gap = behavior.offset ?? 8;
@@ -630,7 +655,7 @@ ${ISOLATION_CSS}`;
     getGuideProgress() {
       try {
         const value = JSON.parse(sessionStorage.getItem(GUIDE_KEY) ?? "null");
-        return value && typeof value.experienceId === "string" && typeof value.versionId === "string" && typeof value.currentStepId === "string" && (value.status === "active" || value.status === "paused") ? value : null;
+        return value && typeof value.experienceId === "string" && typeof value.versionId === "string" && typeof value.currentStepId === "string" && (value.status === "active" || value.status === "paused") && (value.impressionId === void 0 || typeof value.impressionId === "string") ? value : null;
       } catch {
         return null;
       }
@@ -691,7 +716,7 @@ ${ISOLATION_CSS}`;
         if (!chosen) return;
         const stored = this.state.getGuideProgress();
         const stepId = isGuideDefinition(chosen.definition) && (stored == null ? void 0 : stored.experienceId) === chosen.id && stored.versionId === chosen.versionId ? stored.currentStepId : void 0;
-        this.show(chosen, stepId);
+        this.show(chosen, stepId, stepId ? stored ?? void 0 : void 0);
       } catch {
       }
     }
@@ -732,20 +757,26 @@ ${ISOLATION_CSS}`;
       const userId = this.session.getIdentifiedUserId();
       if (userId) query.set("trackedUserId", userId);
       if (trigger) query.set("trigger", trigger);
+      const stored = this.state.getGuideProgress();
+      if (stored) {
+        query.set("activeGuideId", stored.experienceId);
+        query.set("activeGuideVersionId", stored.versionId);
+      }
       const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experiences?${query}`, { credentials: "omit" });
       if (!response.ok) return [];
       const manifest = await response.json();
       return Array.isArray(manifest.experiences) ? manifest.experiences : [];
     }
-    show(experience, requestedStepId) {
+    show(experience, requestedStepId, progress) {
       var _a, _b;
       if (((_a = this.queued) == null ? void 0 : _a.id) === experience.id) this.queued = null;
       const definition = isGuideDefinition(experience.definition) ? experience.definition : null;
       const currentStepId = (definition == null ? void 0 : definition.steps.some((step) => step.id === requestedStepId)) ? requestedStepId : (_b = definition == null ? void 0 : definition.steps[0]) == null ? void 0 : _b.id;
-      const runtime2 = { experience, currentStepId, impressionId: null, shownRequested: false, shownPromise: null };
+      const impressionId = (progress == null ? void 0 : progress.impressionId) ?? experience.impressionId ?? null;
+      const runtime2 = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId), shownPromise: null };
       this.active = runtime2;
       if (currentStepId) this.persistGuide(runtime2, "active");
-      const mounted = this.renderer.render(experience, this.callbacks(runtime2), currentStepId);
+      const mounted = currentStepId ? progress && this.advanceForRoute(runtime2) ? true : (this.renderActiveGuide(), true) : this.renderer.render(experience, this.callbacks(runtime2), currentStepId);
       if (!mounted && this.active === runtime2) {
         this.active = null;
         if (currentStepId) this.state.clearGuideProgress(experience.id);
@@ -775,6 +806,8 @@ ${ISOLATION_CSS}`;
       this.state.markSeen(runtime2.experience.id);
       runtime2.shownPromise = this.post(runtime2, "shown").then((result) => {
         runtime2.impressionId = (result == null ? void 0 : result.impressionId) ?? null;
+        if (this.active === runtime2) this.persistGuide(runtime2, "active");
+        else if (this.pausedGuide === runtime2) this.persistGuide(runtime2, "paused");
       });
     }
     handleAction(runtime2, action) {
@@ -825,7 +858,14 @@ ${ISOLATION_CSS}`;
     renderActiveGuide() {
       const runtime2 = this.activeGuide();
       if (!runtime2) return;
+      this.renderer.destroy();
+      if (!this.currentGuideStepMatchesPage(runtime2)) return;
       this.renderer.render(runtime2.experience, this.callbacks(runtime2), runtime2.currentStepId);
+    }
+    currentGuideStepMatchesPage(runtime2) {
+      var _a, _b, _c;
+      const pagePath = (_c = (_b = (_a = this.currentGuideStep(runtime2)) == null ? void 0 : _a.target) == null ? void 0 : _b.targetContext) == null ? void 0 : _c.pagePath;
+      return !pagePath || pagePath === currentPagePath();
     }
     pauseGuide() {
       const runtime2 = this.activeGuide();
@@ -867,12 +907,12 @@ ${ISOLATION_CSS}`;
       return (runtime2 == null ? void 0 : runtime2.currentStepId) && isGuideDefinition(runtime2.experience.definition) ? runtime2 : null;
     }
     persistGuide(runtime2, status) {
-      if (runtime2.currentStepId) this.state.setGuideProgress({ experienceId: runtime2.experience.id, versionId: runtime2.experience.versionId, currentStepId: runtime2.currentStepId, status });
+      if (runtime2.currentStepId) this.state.setGuideProgress({ experienceId: runtime2.experience.id, versionId: runtime2.experience.versionId, currentStepId: runtime2.currentStepId, status, ...runtime2.impressionId ? { impressionId: runtime2.impressionId } : {} });
     }
     async post(runtime2, event, action) {
       const experience = runtime2.experience;
       try {
-        const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: runtime2.impressionId ?? void 0, event, action }) });
+        const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: runtime2.impressionId ?? void 0, event, action }) });
         return response.ok && response.status !== 204 ? await response.json() : null;
       } catch {
         return null;

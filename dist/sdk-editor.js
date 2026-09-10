@@ -4,9 +4,9 @@
     return "steps" in value;
   }
   const EDITOR_CONTINUATION_KEY = "__movecues_experience_editor_session__";
-  function storeEditorContinuation(session) {
+  function storeEditorContinuation(continuation) {
     try {
-      sessionStorage.setItem(EDITOR_CONTINUATION_KEY, JSON.stringify(session));
+      sessionStorage.setItem(EDITOR_CONTINUATION_KEY, JSON.stringify(continuation));
     } catch {
     }
   }
@@ -186,8 +186,8 @@ ${ISOLATION_CSS}`;
     if (!target) return null;
     for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
       try {
-        const element = document.querySelector(selector);
-        if (element) return element;
+        const matches = document.querySelectorAll(selector);
+        if (matches.length === 1) return matches[0];
       } catch {
       }
     }
@@ -681,6 +681,24 @@ ${ISOLATION_CSS}`;
       if (!response.ok) throw new Error("Draft could not be saved");
     }
   }
+  class HighlightOverlay {
+    constructor() {
+      this.element = document.createElement("div");
+      this.element.dataset.movecuesPickerOverlay = "";
+      this.element.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #2563eb;background:rgba(37,99,235,.12);display:none;box-sizing:border-box";
+      document.documentElement.appendChild(this.element);
+    }
+    show(target) {
+      const rect = target.getBoundingClientRect();
+      Object.assign(this.element.style, { display: "block", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+    }
+    hide() {
+      this.element.style.display = "none";
+    }
+    destroy() {
+      this.element.remove();
+    }
+  }
   const SENSITIVE_INPUT_TYPES = /* @__PURE__ */ new Set(["password", "email", "tel", "credit-card", "cc-number"]);
   const SENSITIVE_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA", "SELECT"]);
   const PRIVATE_ATTRIBUTES = ["data-private", "data-ignore", "data-analytics-ignore"];
@@ -772,147 +790,131 @@ ${ISOLATION_CSS}`;
   const STABLE_DATA_ATTRS = ["data-testid", "data-test", "data-qa", "data-cy", "data-analytics-id"];
   const SEMANTIC_ATTRS = ["role", "aria-label", "name", "type", "href"];
   const DYNAMIC_CLASS_PATTERN = /^(css-|sc-|jsx-|_|[a-z0-9]{6,}$)/i;
-  const TAILWIND_UTILITY_PATTERN = /^(-?(m|p)[trblxy]?-|w-|h-|min-|max-|inset-|top-|right-|bottom-|left-|z-|order-|col-|row-|gap-|space-|grid-|flex-\d|flex$|inline-flex$|inline-block$|inline$|block$|hidden$|table|items-|justify-|content-|self-|place-|text-|font-|leading-|tracking-|whitespace-|break-|truncate$|bg-|from-|via-|to-|border|divide-|rounded|shadow|opacity-|blur-|brightness-|contrast-|grayscale|invert|saturate|sepia|backdrop-|transition|duration-|ease-|delay-|animate-|cursor-|select-|resize-|scroll-|snap-|touch-|pointer-events-|will-change-|appearance-|outline-|ring-|overflow-|overscroll-|absolute$|relative$|fixed$|sticky$|static$|visible$|invisible$|float-|clear-|isolate$|object-|aspect-|columns-|underline$|line-through$|no-underline$|uppercase$|lowercase$|capitalize$|normal-case$|italic$|not-italic$|antialiased$)/;
-  const TAILWIND_VARIANT_PREFIX_PATTERN = /^(sm|md|lg|xl|2xl|hover|focus|active|disabled|dark|group-hover|focus-visible|first|last|odd|even):/;
-  function isTailwindUtilityClass(cls) {
-    const unescaped = cls.replace(/\\/g, "");
-    return TAILWIND_UTILITY_PATTERN.test(unescaped) || TAILWIND_VARIANT_PREFIX_PATTERN.test(unescaped);
-  }
-  function isStableClass(cls) {
-    if (!cls) return false;
-    if (DYNAMIC_CLASS_PATTERN.test(cls)) return false;
-    if (/^\d/.test(cls)) return false;
-    if (isTailwindUtilityClass(cls)) return false;
-    return true;
-  }
-  const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const NUMERIC_SEGMENT = /^\d+$/;
-  const PREFIXED_HEX_ID_SEGMENT = /^[a-z]{1,12}_[0-9a-f]{6,}$/i;
-  const BARE_HEX_ID_SEGMENT = /^[0-9a-f]{12,}$/i;
-  function canonicalizePathSegment(segment) {
-    if (UUID_SEGMENT.test(segment) || NUMERIC_SEGMENT.test(segment) || PREFIXED_HEX_ID_SEGMENT.test(segment) || BARE_HEX_ID_SEGMENT.test(segment)) {
-      return ":id";
-    }
-    return segment;
-  }
-  const SAFE_FRAGMENT_ID = /^[a-z][a-z0-9_.:-]{0,99}$/i;
-  const SAFE_HASH_ROUTE = /^\/[a-z0-9_./:-]{0,199}$/i;
-  function canonicalizePath(path) {
-    return path.split("/").map((segment) => segment ? canonicalizePathSegment(segment) : segment).join("/");
-  }
-  function canonicalizeHref(href) {
-    if (href.startsWith("#/")) {
-      const hashPath = href.slice(1).split("?")[0].split("#")[0];
-      return SAFE_HASH_ROUTE.test(hashPath) ? `#${canonicalizePath(hashPath)}` : null;
-    }
-    if (href.startsWith("#")) {
-      const fragment = href.slice(1);
-      return SAFE_FRAGMENT_ID.test(fragment) ? `#${fragment}` : null;
-    }
-    const path = href.split("?")[0].split("#")[0];
-    return path ? canonicalizePath(path) : null;
-  }
-  class SelectorGenerator {
-    generate(el) {
-      const id = el.getAttribute("id");
-      if (id && this.isUniqueId(id)) {
-        return `${el.tagName.toLowerCase()}#${cssEscape(id)}`;
-      }
-      for (const attr of STABLE_DATA_ATTRS) {
-        const value = el.getAttribute(attr);
-        if (value) {
-          return `${el.tagName.toLowerCase()}[${attr}="${cssEscape(value)}"]`;
-        }
-      }
-      for (const attr of SEMANTIC_ATTRS) {
-        const rawValue = el.getAttribute(attr);
-        if (!rawValue) continue;
-        const value = attr === "href" ? canonicalizeHref(rawValue) : rawValue;
-        if (!value) continue;
-        if (value.length < 100) {
-          return `${el.tagName.toLowerCase()}[${attr}="${cssEscape(value)}"]`;
-        }
-      }
-      const classes = this.getClassList(el).filter(isStableClass);
-      if (classes.length > 0) {
-        return `${el.tagName.toLowerCase()}.${classes.map(cssEscape).join(".")}`;
-      }
-      return this.limitedStructuralPath(el);
-    }
-    describe(el) {
-      const classes = this.getClassList(el);
-      return {
-        tagName: el.tagName.toLowerCase(),
-        id: el.getAttribute("id") || void 0,
-        classes: classes.length ? classes : void 0,
-        selector: this.generate(el),
-        label: computeElementLabel(el),
-        role: computeElementRole(el)
+  const UTILITY_CLASS_PATTERN = /^(sm:|md:|lg:|xl:|2xl:|hover:|focus:|active:|disabled:|dark:|-?(m|p)[trblxy]?-|w-|h-|min-|max-|inset-|top-|right-|bottom-|left-|z-|gap-|space-|grid|flex|items-|justify-|text-|font-|leading-|tracking-|bg-|border|rounded|shadow|opacity-|transition|duration-|absolute$|relative$|fixed$|sticky$|hidden$|block$|inline)/;
+  class TargetSelectorGenerator {
+    generate(element) {
+      const verified = [];
+      const seen = /* @__PURE__ */ new Set();
+      const add = (selector, reliability) => {
+        if (!selector || seen.has(selector)) return;
+        seen.add(selector);
+        if (uniquelyMatches(selector, element)) verified.push({ selector, reliability });
       };
-    }
-    getClassList(el) {
-      const raw = el.getAttribute("class");
-      if (!raw) return [];
-      return raw.split(/\s+/).filter(Boolean).slice(0, 5);
-    }
-    isUniqueId(id) {
-      try {
-        return document.querySelectorAll(`#${cssEscape(id)}`).length === 1;
-      } catch {
-        return false;
-      }
-    }
-    limitedStructuralPath(el, maxDepth = 3) {
-      const parts = [];
-      let node = el;
-      let depth = 0;
-      while (node && node !== document.body && depth < maxDepth) {
-        const tag = node.tagName.toLowerCase();
-        const parent = node.parentElement;
-        if (parent) {
-          const siblings = Array.from(parent.children).filter((c) => c.tagName === node.tagName);
-          const idx = siblings.indexOf(node) + 1;
-          parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${idx})` : tag);
-        } else {
-          parts.unshift(tag);
+      const tag = element.tagName.toLowerCase();
+      const id = shortValue(element.getAttribute("id"));
+      if (id) add(`${tag}#${cssIdentifier(id)}`, "reliable");
+      for (const selector of attributeSelectors(element, STABLE_DATA_ATTRS)) add(selector, "reliable");
+      const semantics = attributeSelectors(element, SEMANTIC_ATTRS);
+      for (const selector of semantics) add(selector, "moderate");
+      for (const selector of attributeCombinations(element, SEMANTIC_ATTRS)) add(selector, "moderate");
+      for (const selector of classSelectors(element)) add(selector, "moderate");
+      const childSelectors = [...semantics, ...attributeCombinations(element, SEMANTIC_ATTRS), ...classSelectors(element), tag];
+      let ancestor = element.parentElement;
+      let depth = 1;
+      while (ancestor && ancestor !== document.documentElement && depth <= 4) {
+        const relation = depth === 1 ? " > " : " ";
+        for (const parentSelector of identitySelectors(ancestor)) {
+          for (const childSelector of childSelectors) add(`${parentSelector}${relation}${childSelector}`, "moderate");
         }
-        node = parent;
+        ancestor = ancestor.parentElement;
         depth++;
       }
-      return parts.join(" > ") || el.tagName.toLowerCase();
+      for (const selector of structuralSelectors(element)) add(selector, "fragile");
+      const primary = verified[0];
+      if (!primary) throw new Error("Could not generate a unique selector for the selected element");
+      return { primarySelector: primary.selector, fallbackSelectors: verified.slice(1, 6).map((item) => item.selector), reliability: primary.reliability };
+    }
+    describe(element) {
+      return {
+        ...this.generate(element),
+        label: computeElementLabel(element),
+        role: computeElementRole(element),
+        tagName: element.tagName.toLowerCase()
+      };
     }
   }
-  function cssEscape(value) {
-    if (typeof CSS !== "undefined" && CSS.escape) return CSS.escape(value);
-    return value.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+  function attributeSelectors(element, attributes) {
+    const tag = element.tagName.toLowerCase();
+    return attributes.flatMap((attribute) => {
+      const value = shortValue(element.getAttribute(attribute));
+      return value ? [`${tag}[${attribute}="${cssString(value)}"]`] : [];
+    });
   }
-  class HighlightOverlay {
-    constructor() {
-      this.element = document.createElement("div");
-      this.element.dataset.movecuesPickerOverlay = "";
-      this.element.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #2563eb;background:rgba(37,99,235,.12);display:none;box-sizing:border-box";
-      document.documentElement.appendChild(this.element);
+  function attributeCombinations(element, attributes) {
+    const tag = element.tagName.toLowerCase();
+    const present = attributes.flatMap((attribute) => {
+      const value = shortValue(element.getAttribute(attribute));
+      return value ? [{ attribute, value }] : [];
+    });
+    const selectors = [];
+    for (let first = 0; first < present.length; first++) {
+      for (let second = first + 1; second < present.length; second++) {
+        selectors.push(`${tag}[${present[first].attribute}="${cssString(present[first].value)}"][${present[second].attribute}="${cssString(present[second].value)}"]`);
+      }
     }
-    show(target) {
-      const rect = target.getBoundingClientRect();
-      Object.assign(this.element.style, { display: "block", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+    return selectors;
+  }
+  function classSelectors(element) {
+    const tag = element.tagName.toLowerCase();
+    const classes = (element.getAttribute("class") ?? "").split(/\s+/).filter(isStableClass).slice(0, 4);
+    if (!classes.length) return [];
+    const selectors = [`${tag}.${classes.map(cssIdentifier).join(".")}`];
+    if (classes.length > 1) {
+      for (let first = 0; first < classes.length; first++) for (let second = first + 1; second < classes.length; second++) selectors.push(`${tag}.${cssIdentifier(classes[first])}.${cssIdentifier(classes[second])}`);
     }
-    hide() {
-      this.element.style.display = "none";
+    selectors.push(...classes.map((value) => `${tag}.${cssIdentifier(value)}`));
+    return [...new Set(selectors)];
+  }
+  function identitySelectors(element) {
+    const tag = element.tagName.toLowerCase();
+    const selectors = [];
+    const id = shortValue(element.getAttribute("id"));
+    if (id) selectors.push(`${tag}#${cssIdentifier(id)}`);
+    selectors.push(...attributeSelectors(element, STABLE_DATA_ATTRS), ...attributeSelectors(element, SEMANTIC_ATTRS), ...attributeCombinations(element, SEMANTIC_ATTRS), ...classSelectors(element));
+    return [...new Set(selectors)];
+  }
+  function structuralSelectors(element) {
+    const selectors = [];
+    const parts = [];
+    let node = element;
+    while (node && node !== document.documentElement) {
+      const parent = node.parentElement;
+      let part = node.tagName.toLowerCase();
+      if (parent) {
+        const siblings = Array.from(parent.children).filter((sibling) => sibling.tagName === node.tagName);
+        if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(node) + 1})`;
+      }
+      parts.unshift(part);
+      selectors.push(parts.join(" > "));
+      node = parent;
     }
-    destroy() {
-      this.element.remove();
+    return selectors;
+  }
+  function uniquelyMatches(selector, selected) {
+    try {
+      const matches = document.querySelectorAll(selector);
+      return matches.length === 1 && matches[0] === selected;
+    } catch {
+      return false;
     }
   }
-  function reliability(selector) {
-    if (/#[a-z][\w:-]*|\[data-(?:testid|test|qa|cy|analytics-id)=/i.test(selector)) return "reliable";
-    if (/\[(?:role|aria-label|name|type|href)=|\.[a-z][\w-]*/i.test(selector) && !selector.includes(":nth-of-type")) return "moderate";
-    return "fragile";
+  function shortValue(value) {
+    return value && value.length <= 160 ? value : null;
+  }
+  function isStableClass(value) {
+    const unescaped = value.replace(/\\/g, "");
+    return !!unescaped && !/^\d/.test(unescaped) && !DYNAMIC_CLASS_PATTERN.test(unescaped) && !UTILITY_CLASS_PATTERN.test(unescaped);
+  }
+  function cssIdentifier(value) {
+    return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(value) : value.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+  }
+  function cssString(value) {
+    return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\r\n\f]/g, " ");
   }
   class ElementPicker {
     constructor() {
       this.overlay = null;
-      this.generator = new SelectorGenerator();
+      this.generator = new TargetSelectorGenerator();
       this.resolve = null;
       this.shiftPassthrough = false;
       this.move = (event) => {
@@ -926,14 +928,17 @@ ${ISOLATION_CSS}`;
         else (_c = this.overlay) == null ? void 0 : _c.hide();
       };
       this.click = (event) => {
+        var _a;
         if (this.shiftPassthrough || event.shiftKey || event.composedPath().some((item) => item instanceof Element && isMovcuesSurface(item))) return;
         const target = document.elementFromPoint(event.clientX, event.clientY);
         if (!target || isMovcuesSurface(target)) return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        const descriptor = this.generator.describe(target);
-        const selector = descriptor.selector;
-        this.finish({ primarySelector: selector, fallbackSelectors: [], label: descriptor.label, role: descriptor.role, tagName: descriptor.tagName, reliability: reliability(selector) });
+        try {
+          this.finish(this.generator.describe(target));
+        } catch {
+          (_a = this.overlay) == null ? void 0 : _a.hide();
+        }
       };
       this.keyDown = (event) => {
         var _a;
@@ -1009,6 +1014,7 @@ ${ISOLATION_CSS}`;
       this.targetRefreshTimer = 0;
       this.selectionGeneration = 0;
       this.bridge = null;
+      this.session = null;
       this.draft = null;
       this.definition = null;
       this.guide = null;
@@ -1017,6 +1023,7 @@ ${ISOLATION_CSS}`;
       this.dirty = false;
       this.previewRendered = false;
       this.currentPath = "";
+      this.persistBeforePageLeave = () => this.updateContinuation();
     }
     async start(rawToken) {
       try {
@@ -1034,25 +1041,26 @@ ${ISOLATION_CSS}`;
         clean2.searchParams.delete("movecues_editor_token");
         clean2.searchParams.delete("movecues_editor_step");
         history.replaceState(history.state, "", clean2.toString());
-        return await this.activate(session, requestedStep);
+        return await this.activate(session, { requestedStep });
       } catch {
         this.destroy();
         return false;
       }
     }
-    async resume(session) {
-      if (!validSession(session)) {
+    async resume(continuation) {
+      if (!validSession(continuation.session)) {
         clearEditorContinuation();
         return false;
       }
       try {
-        return await this.activate(session, 0);
+        return await this.activate(continuation.session, { restoredState: continuation.editorState });
       } catch {
         this.destroy();
         return false;
       }
     }
-    async activate(session, requestedStep) {
+    async activate(session, options) {
+      var _a;
       this.teardown(false);
       const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
       let draft;
@@ -1063,13 +1071,16 @@ ${ISOLATION_CSS}`;
         return false;
       }
       this.bridge = bridge;
+      this.session = session;
       this.draft = draft;
       this.definition = draft.version.definition;
       this.guide = isGuideDefinition(this.definition) ? this.definition : null;
-      this.stepIndex = this.guide ? clampStep(requestedStep, this.guide.steps.length) : 0;
+      const restored = ((_a = options.restoredState) == null ? void 0 : _a.experienceId) === draft.experience.id ? options.restoredState : void 0;
+      const restoredIndex = this.guide && (restored == null ? void 0 : restored.selectedStepId) ? this.guide.steps.findIndex((step) => step.id === restored.selectedStepId) : -1;
+      this.stepIndex = this.guide ? restoredIndex >= 0 ? restoredIndex : clampStep(options.requestedStep ?? 0, this.guide.steps.length) : 0;
       this.currentPath = currentPagePath();
-      this.mode = "select";
-      storeEditorContinuation(session);
+      this.mode = (restored == null ? void 0 : restored.mode) ?? "select";
+      this.updateContinuation();
       this.mount();
       this.expiryTimer = window.setTimeout(() => this.destroy(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
       this.validationTimer = window.setInterval(() => {
@@ -1086,10 +1097,13 @@ ${ISOLATION_CSS}`;
       document.documentElement.appendChild(this.host);
       this.bindPanel();
       this.syncPanel();
-      this.renderPreview();
-      this.startPicker();
+      if (this.mode === "select") {
+        this.renderPreview();
+        this.startPicker();
+      }
       this.routeUnsubscribe = this.routeObserver.onChange(() => this.onRouteChange());
       this.routeObserver.start();
+      window.addEventListener("pagehide", this.persistBeforePageLeave);
       if (typeof MutationObserver !== "undefined") {
         this.mutationObserver = new MutationObserver(() => this.scheduleTargetRefresh());
         this.mutationObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["id", "class", "data-testid", "data-test", "data-qa", "data-cy", "aria-label", "role", "name", "href", "hidden"] });
@@ -1246,6 +1260,7 @@ ${ISOLATION_CSS}`;
       this.selectionGeneration++;
       this.picker.cancel();
       this.stepIndex = index;
+      this.updateContinuation();
       this.syncPanel();
       if (this.mode === "select") {
         this.renderPreview();
@@ -1257,6 +1272,7 @@ ${ISOLATION_CSS}`;
       this.selectionGeneration++;
       this.picker.cancel();
       this.mode = mode;
+      this.updateContinuation();
       if (mode === "navigate") {
         this.preview.destroy();
         this.previewRendered = false;
@@ -1275,6 +1291,7 @@ ${ISOLATION_CSS}`;
       void this.picker.pick().then((target) => {
         if (generation !== this.selectionGeneration || !this.definition || !target) return;
         this.setTarget(target);
+        this.updateContinuation();
         this.changed();
       });
     }
@@ -1283,6 +1300,7 @@ ${ISOLATION_CSS}`;
     }
     changed() {
       this.dirty = true;
+      this.updateContinuation();
       this.syncPanel();
       if (this.mode === "select") this.renderPreview();
       this.setText("[data-save-state]", "Saving…");
@@ -1396,7 +1414,8 @@ ${ISOLATION_CSS}`;
       if (!this.root) return;
       const target = this.currentTarget();
       const targeted = this.isTargetedType();
-      const found = targeted && !!findTarget(target);
+      const targetStatus = targeted ? this.targetStatus(target) : "unconfigured";
+      const found = targetStatus === "found";
       this.setText("[data-current-path]", this.currentPath || currentPagePath());
       this.setText("[data-preview-status]", `${this.previewRendered ? "✓" : "○"} Preview ${this.previewRendered ? "rendered" : this.mode === "navigate" ? "paused for navigation" : "waiting"}`);
       const previewStatus = this.root.querySelector("[data-preview-status]");
@@ -1404,22 +1423,22 @@ ${ISOLATION_CSS}`;
       const liveTarget = this.root.querySelector("[data-live-target]");
       if (liveTarget) {
         liveTarget.hidden = !targeted;
-        liveTarget.textContent = found ? "✓ Target found" : target ? "✕ Target not found" : "○ Target not configured";
-        liveTarget.className = found ? "status-ok" : target ? "status-error" : "muted";
+        liveTarget.textContent = targetStatus === "found" ? "✓ Found on current page" : targetStatus === "off-page" ? "○ Configured on another page" : targetStatus === "missing" ? "⚠ Expected on current page but not found" : "○ Not configured";
+        liveTarget.className = found ? "status-ok" : targetStatus === "missing" ? "status-error" : "muted";
       }
       this.setText("[data-target-label]", (target == null ? void 0 : target.label) || (target == null ? void 0 : target.primarySelector) || "Not selected");
       this.setText("[data-reliability]", target ? `${reliabilityIcon(target.reliability)} ${capitalize(target.reliability)} selector` : "○ No selector configured");
-      const reliability2 = this.root.querySelector("[data-reliability]");
-      if (reliability2) reliability2.dataset.level = (target == null ? void 0 : target.reliability) ?? "none";
+      const reliability = this.root.querySelector("[data-reliability]");
+      if (reliability) reliability.dataset.level = (target == null ? void 0 : target.reliability) ?? "none";
       const missing = this.root.querySelector("[data-missing-selector]");
       if (missing) {
-        missing.hidden = !target || found;
+        missing.hidden = targetStatus !== "missing";
         const code = missing.querySelector("code");
         if (code) code.textContent = (target == null ? void 0 : target.primarySelector) ?? "";
       }
       if (this.guide) this.root.querySelectorAll("[data-step]").forEach((button, index) => {
         const stepTarget = this.guide.steps[index].target;
-        const state = index === this.stepIndex ? "current" : !stepTarget ? "unconfigured" : findTarget(stepTarget) ? "found" : "missing";
+        const state = index === this.stepIndex ? "current" : this.targetStatus(stepTarget);
         button.dataset.stepStatus = state;
         const icon = button.querySelector("[data-step-icon]");
         if (icon) icon.textContent = state === "current" ? "●" : state === "found" ? "✓" : state === "missing" ? "⚠" : "○";
@@ -1436,6 +1455,7 @@ ${ISOLATION_CSS}`;
       const next = currentPagePath();
       if (next === previous) return;
       this.currentPath = next;
+      this.updateContinuation();
       const notice = (_a = this.root) == null ? void 0 : _a.querySelector("[data-route-notice]");
       if (notice) notice.hidden = false;
       this.setText("[data-route-change]", `${previous} → ${next}`);
@@ -1447,14 +1467,33 @@ ${ISOLATION_CSS}`;
       if (!this.definition) return void 0;
       return this.guide ? (_a = this.guide.steps[this.stepIndex]) == null ? void 0 : _a.target : this.definition.target;
     }
+    targetStatus(target) {
+      var _a;
+      if (!target) return "unconfigured";
+      if (((_a = target.targetContext) == null ? void 0 : _a.pagePath) && target.targetContext.pagePath !== (this.currentPath || currentPagePath())) return "off-page";
+      return findTarget(target) ? "found" : "missing";
+    }
     currentBehavior() {
       if (!this.definition) return { dismissible: true };
       return this.guide ? this.guide.steps[this.stepIndex].behavior : this.definition.behavior;
     }
     setTarget(target) {
       if (!this.definition) return;
-      if (this.guide) this.guide.steps[this.stepIndex].target = target;
-      else this.definition.target = target;
+      const contextualTarget = { ...target, targetContext: { pagePath: currentPagePath() } };
+      if (this.guide) this.guide.steps[this.stepIndex].target = contextualTarget;
+      else this.definition.target = contextualTarget;
+    }
+    updateContinuation() {
+      var _a, _b;
+      if (!this.session || !this.draft) return;
+      storeEditorContinuation({
+        session: this.session,
+        editorState: {
+          experienceId: this.draft.experience.id,
+          selectedStepId: (_b = (_a = this.guide) == null ? void 0 : _a.steps[this.stepIndex]) == null ? void 0 : _b.id,
+          mode: this.mode
+        }
+      });
     }
     isTargetedType() {
       var _a;
@@ -1489,6 +1528,7 @@ ${ISOLATION_CSS}`;
       (_a = this.routeUnsubscribe) == null ? void 0 : _a.call(this);
       this.routeUnsubscribe = null;
       this.routeObserver.stop();
+      window.removeEventListener("pagehide", this.persistBeforePageLeave);
       (_b = this.mutationObserver) == null ? void 0 : _b.disconnect();
       this.mutationObserver = null;
       (_c = this.dragCleanup) == null ? void 0 : _c.call(this);
@@ -1499,6 +1539,7 @@ ${ISOLATION_CSS}`;
       this.host = null;
       this.root = null;
       this.bridge = null;
+      this.session = null;
       this.draft = null;
       this.definition = null;
       this.guide = null;

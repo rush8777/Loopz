@@ -1986,11 +1986,12 @@
   function readEditorContinuation() {
     try {
       const value = JSON.parse(sessionStorage.getItem(EDITOR_CONTINUATION_KEY) ?? "null");
-      if (!value || typeof value.sessionId !== "string" || !value.sessionId || typeof value.accessToken !== "string" || !value.accessToken || typeof value.expiresAt !== "string" || !Number.isFinite(Date.parse(value.expiresAt)) || Date.parse(value.expiresAt) <= Date.now()) {
+      const session = value && isSession(value.session) ? value.session : isSession(value) ? value : null;
+      if (!session || Date.parse(session.expiresAt) <= Date.now()) {
         clearEditorContinuation();
         return null;
       }
-      return value;
+      return { session, editorState: isEditorState(value == null ? void 0 : value.editorState) ? value.editorState : void 0 };
     } catch {
       clearEditorContinuation();
       return null;
@@ -2001,6 +2002,16 @@
       sessionStorage.removeItem(EDITOR_CONTINUATION_KEY);
     } catch {
     }
+  }
+  function isSession(value) {
+    if (!value || typeof value !== "object") return false;
+    const session = value;
+    return typeof session.sessionId === "string" && !!session.sessionId && typeof session.accessToken === "string" && !!session.accessToken && typeof session.expiresAt === "string" && Number.isFinite(Date.parse(session.expiresAt));
+  }
+  function isEditorState(value) {
+    if (!value || typeof value !== "object") return false;
+    const state = value;
+    return typeof state.experienceId === "string" && !!state.experienceId && (state.selectedStepId === void 0 || typeof state.selectedStepId === "string") && (state.mode === "select" || state.mode === "navigate");
   }
   class Analytics {
     constructor(runtimeProviders = {}) {

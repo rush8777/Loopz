@@ -2,7 +2,7 @@ export type ExperienceKind = "guide" | "widget";
 export type WidgetType = "anchored_card" | "toast" | "cursor_follow" | "modal" | "slideout" | "hotspot" | "banner";
 export interface ExperienceAction { label: string; type: "dismiss" | "next_step" | "open_url" | "track_event"; url?: string; eventName?: string }
 export interface ExperienceContent { heading: string; body: string; primaryAction?: ExperienceAction; secondaryAction?: { label: string; type: "dismiss" } }
-export interface ExperienceTarget { primarySelector: string; fallbackSelectors: string[]; label?: string; role?: string; tagName?: string; reliability: "reliable" | "moderate" | "fragile" }
+export interface ExperienceTarget { primarySelector: string; fallbackSelectors: string[]; label?: string; role?: string; tagName?: string; reliability: "reliable" | "moderate" | "fragile"; targetContext?: { pagePath: string } }
 export type LegacyExperienceWidth = "sm" | "md" | "lg";
 export interface ExperienceSize { width: { mode: "auto" | "fixed" | "full"; value?: number }; height: { mode: "auto" | "fixed" | "viewport"; value?: number } }
 export interface ExperienceDesign { width: LegacyExperienceWidth; size?: ExperienceSize; theme: { background: string; foreground: string; primary: string; borderRadius: "sm" | "md" | "lg" } }
@@ -15,7 +15,7 @@ export interface GuideStep { id: string; content: ExperienceContent; builder?: W
 export interface RuntimeWidgetDefinition { content: ExperienceContent; design: ExperienceDesign; behavior: ExperienceBehavior; builder?: WidgetBuilderState; target?: ExperienceTarget }
 export interface RuntimeGuideDefinition { steps: GuideStep[]; design: ExperienceDesign }
 export type RuntimeDefinition = RuntimeWidgetDefinition | RuntimeGuideDefinition;
-export interface DeliveredExperience { id: string; versionId: string; kind: ExperienceKind; widgetType: WidgetType | null; priority: number; interruptPolicy?: "queue" | "interrupt"; definition: RuntimeDefinition }
+export interface DeliveredExperience { id: string; versionId: string; kind: ExperienceKind; widgetType: WidgetType | null; priority: number; interruptPolicy?: "queue" | "interrupt"; impressionId?: string; definition: RuntimeDefinition }
 export type EditorDefinition = RuntimeDefinition & { targeting: ExperienceTargeting };
 export interface EditorDraft { experience: { id: string; name: string; kind: ExperienceKind; widgetType: WidgetType | null }; version: { id: string; versionNumber: number; definition: EditorDefinition } }
 export function isGuideDefinition(value: RuntimeDefinition): value is RuntimeGuideDefinition { return "steps" in value; }
