@@ -29,9 +29,11 @@ import type { FunnelStep } from "../types/funnel";
 import { RouteObserver } from "../dom/RouteObserver";
 import { HeatmapManager } from "../heatmaps/HeatmapManager";
 import { loadEditorRuntime, loadExperienceRuntime } from "../experiences/loadRuntimes";
+import { clearEditorContinuation, readEditorContinuation } from "../experiences/editorContinuation";
 import type {
   AnalyticsRuntimeProviders,
   EditorControllerRuntime,
+  EditorSession,
   ExperienceLoaderRuntime,
 } from "../experiences/runtimeInterfaces";
 
@@ -74,12 +76,13 @@ export class Analytics {
     const generation = ++this.generation;
 
     const editorToken = new URL(location.href).searchParams.get("movecues_editor_token");
-    if (editorToken && !this.editorAttempted) {
+    const editorContinuation = editorToken ? null : readEditorContinuation();
+    if ((editorToken || editorContinuation) && !this.editorAttempted) {
       // Do not create a SessionManager, collectors, or a page view until the
-      // existing editor token exchange has decided whether this is an editor.
+      // editor token or continuation has been validated by the draft endpoint.
       this.initialized = true;
       this.editorAttempted = true;
-      void this.initializeEditor(editorToken, userConfig, generation);
+      void this.initializeEditor(editorToken, editorContinuation, userConfig, generation);
       return;
     }
 
@@ -151,6 +154,7 @@ export class Analytics {
     this.editor?.destroy();
     this.editor = null;
     this.editorMode = false;
+    this.editorAttempted = false;
     this.initialized = false;
     this.log("destroyed");
   }
@@ -208,7 +212,7 @@ export class Analytics {
     return true;
   }
 
-  private async initializeEditor(editorToken: string, userConfig: AnalyticsConfig, generation: number): Promise<void> {
+  private async initializeEditor(editorToken: string | null, continuation: EditorSession | null, userConfig: AnalyticsConfig, generation: number): Promise<void> {
     try {
       const runtime = this.runtimeProviders.editor ?? await loadEditorRuntime(this.config.editorRuntimeBundleUrl);
       if (!this.initialized || generation !== this.generation) return;
@@ -218,7 +222,7 @@ export class Analytics {
       }
 
       const editor = runtime.createController(this.config.endpoint);
-      const started = await editor.start(editorToken);
+      const started = editorToken ? await editor.start(editorToken) : continuation ? await editor.resume(continuation) : false;
       if (!this.initialized || generation !== this.generation) {
         editor.destroy();
         return;
@@ -242,6 +246,7 @@ export class Analytics {
     if (!this.initialized || generation !== this.generation) return;
     // Invalid/expired tokens and editor bundle failures retain the established
     // secure failure path: no editor mounts and the page becomes a normal visit.
+    clearEditorContinuation();
     this.initialized = false;
     this.init(userConfig);
   }

@@ -71,10 +71,66 @@ export interface ExperienceBehavior {
     hotspotStyle?: "pulse" | "dot" | "question";
     hotspotColor?: string;
 }
+export interface PageRule {
+    id: string;
+    kind: "include" | "exclude";
+    operator: "equals" | "starts_with" | "ends_with" | "contains" | "matches_pattern";
+    value: string;
+}
+export interface ExperienceTargeting {
+    pageRules: PageRule[];
+    audience: {
+        type: "all";
+    } | {
+        type: "segment";
+        segmentId: string;
+    } | {
+        type: "segment_rules";
+        logic: "all" | "any";
+        conditions: Array<{
+            id: string;
+            segmentId: string;
+            operator: "matches" | "not_matches";
+        }>;
+    };
+    trigger: {
+        type: "page_load";
+    } | {
+        type: "custom_event";
+        eventName: string;
+    };
+    frequency: {
+        mode: "once" | "once_per_session" | "every_time";
+        cooldownHours?: number;
+        maxImpressions?: number;
+    };
+    priority: number;
+    interruptPolicy?: "queue" | "interrupt";
+    schedule?: {
+        startsAt?: string;
+        endsAt?: string;
+    };
+    allowedOrigins?: string[];
+}
+export type GuideAdvance = {
+    type: "button";
+} | {
+    type: "element_click";
+} | {
+    type: "element_hover";
+    durationMs?: number;
+} | {
+    type: "custom_event";
+    eventName: string;
+} | {
+    type: "route";
+    pageRules: PageRule[];
+};
 export interface GuideStep {
     id: string;
     content: ExperienceContent;
     builder?: WidgetBuilderState;
+    advance?: GuideAdvance;
     target?: ExperienceTarget;
     behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "dismissible">;
 }
@@ -96,8 +152,12 @@ export interface DeliveredExperience {
     kind: ExperienceKind;
     widgetType: WidgetType | null;
     priority: number;
+    interruptPolicy?: "queue" | "interrupt";
     definition: RuntimeDefinition;
 }
+export type EditorDefinition = RuntimeDefinition & {
+    targeting: ExperienceTargeting;
+};
 export interface EditorDraft {
     experience: {
         id: string;
@@ -108,9 +168,7 @@ export interface EditorDraft {
     version: {
         id: string;
         versionNumber: number;
-        definition: RuntimeDefinition & {
-            targeting: unknown;
-        };
+        definition: EditorDefinition;
     };
 }
 export declare function isGuideDefinition(value: RuntimeDefinition): value is RuntimeGuideDefinition;

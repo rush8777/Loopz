@@ -3,9 +3,12 @@ export declare class ElementPicker {
     private overlay;
     private generator;
     private resolve;
+    private shiftPassthrough;
     private move;
     private click;
-    private key;
+    private keyDown;
+    private keyUp;
+    private resetPassthrough;
     pick(): Promise<ExperienceTarget | null>;
     cancel(): void;
     private finish;

@@ -1916,7 +1916,7 @@ class HeatmapManager {
     const wrap = document.createElement("div");
     wrap.innerHTML = `<style>:host{all:initial}.bar{position:fixed;z-index:2147483647;left:50%;bottom:24px;transform:translateX(-50%);display:flex;align-items:center;gap:18px;min-width:560px;padding:14px 16px;border-radius:12px;background:#111827;color:#fff;box-shadow:0 16px 50px #0007;font:13px/1.4 system-ui,sans-serif}.copy{flex:1}.title{font-weight:700}.sub{color:#cbd5e1;margin-top:2px}.actions{display:flex;gap:8px}button{border:0;border-radius:7px;padding:9px 14px;font:600 13px system-ui;cursor:pointer}.cancel{background:#374151;color:#fff}.capture{background:#7c3aed;color:#fff}.status{color:#d1fae5;font-weight:600}</style><div class="bar"><div class="copy"><div class="title">movecues · Heatmap capture</div><div class="sub"></div></div><div class="actions"><button class="cancel">Cancel</button><button class="capture">Capture</button></div></div>`;
     const sub = wrap.querySelector(".sub");
-    sub.textContent = `${capture.pageName ?? "Page"} · ${capture.stateName ?? "Default"} · ${capitalize(capture.device ?? "desktop")} — Arrange this page exactly as you want it shown.`;
+    sub.textContent = `${capture.pageName ?? "Page"} · ${capture.stateName ?? "Default"} · ${capitalize$1(capture.device ?? "desktop")} — Arrange this page exactly as you want it shown.`;
     wrap.querySelector(".cancel").addEventListener("click", () => host.remove());
     wrap.querySelector(".capture").addEventListener("click", async () => {
       const button = wrap.querySelector(".capture");
@@ -1963,7 +1963,7 @@ class HeatmapManager {
     return this.loadPromise;
   }
 }
-function capitalize(value) {
+function capitalize$1(value) {
   return value ? value[0].toUpperCase() + value.slice(1) : value;
 }
 function loadExperienceRuntime(overrideUrl) {
@@ -1979,6 +1979,32 @@ function loadEditorRuntime(overrideUrl) {
     () => window.__movcuesEditorRuntime__,
     "experience editor"
   );
+}
+const EDITOR_CONTINUATION_KEY = "__movecues_experience_editor_session__";
+function readEditorContinuation() {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(EDITOR_CONTINUATION_KEY) ?? "null");
+    if (!value || typeof value.sessionId !== "string" || !value.sessionId || typeof value.accessToken !== "string" || !value.accessToken || typeof value.expiresAt !== "string" || !Number.isFinite(Date.parse(value.expiresAt)) || Date.parse(value.expiresAt) <= Date.now()) {
+      clearEditorContinuation();
+      return null;
+    }
+    return value;
+  } catch {
+    clearEditorContinuation();
+    return null;
+  }
+}
+function storeEditorContinuation(session) {
+  try {
+    sessionStorage.setItem(EDITOR_CONTINUATION_KEY, JSON.stringify(session));
+  } catch {
+  }
+}
+function clearEditorContinuation() {
+  try {
+    sessionStorage.removeItem(EDITOR_CONTINUATION_KEY);
+  } catch {
+  }
 }
 let Analytics$1 = class Analytics {
   constructor(runtimeProviders = {}) {
@@ -2003,10 +2029,11 @@ let Analytics$1 = class Analytics {
     this.debugEnabled = !!this.config.debug;
     const generation = ++this.generation;
     const editorToken = new URL(location.href).searchParams.get("movecues_editor_token");
-    if (editorToken && !this.editorAttempted) {
+    const editorContinuation = editorToken ? null : readEditorContinuation();
+    if ((editorToken || editorContinuation) && !this.editorAttempted) {
       this.initialized = true;
       this.editorAttempted = true;
-      void this.initializeEditor(editorToken, userConfig, generation);
+      void this.initializeEditor(editorToken, editorContinuation, userConfig, generation);
       return;
     }
     if (this.config.respectDoNotTrack && isDoNotTrackEnabled()) {
@@ -2066,6 +2093,7 @@ let Analytics$1 = class Analytics {
     (_d = this.editor) == null ? void 0 : _d.destroy();
     this.editor = null;
     this.editorMode = false;
+    this.editorAttempted = false;
     this.initialized = false;
     this.log("destroyed");
   }
@@ -2113,7 +2141,7 @@ let Analytics$1 = class Analytics {
     }
     return true;
   }
-  async initializeEditor(editorToken, userConfig, generation) {
+  async initializeEditor(editorToken, continuation, userConfig, generation) {
     try {
       const runtime = this.runtimeProviders.editor ?? await loadEditorRuntime(this.config.editorRuntimeBundleUrl);
       if (!this.initialized || generation !== this.generation) return;
@@ -2122,7 +2150,7 @@ let Analytics$1 = class Analytics {
         return;
       }
       const editor = runtime.createController(this.config.endpoint);
-      const started = await editor.start(editorToken);
+      const started = editorToken ? await editor.start(editorToken) : continuation ? await editor.resume(continuation) : false;
       if (!this.initialized || generation !== this.generation) {
         editor.destroy();
         return;
@@ -2141,6 +2169,7 @@ let Analytics$1 = class Analytics {
   }
   fallbackFromEditor(userConfig, generation) {
     if (!this.initialized || generation !== this.generation) return;
+    clearEditorContinuation();
     this.initialized = false;
     this.init(userConfig);
   }
@@ -2275,100 +2304,6 @@ function installUnloadHandlers(analytics) {
 }
 function isGuideDefinition(value) {
   return "steps" in value;
-}
-class EditorBridge {
-  constructor(apiBase, sessionId, accessToken) {
-    this.apiBase = apiBase;
-    this.sessionId = sessionId;
-    this.accessToken = accessToken;
-  }
-  headers() {
-    return { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}` };
-  }
-  async load() {
-    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { headers: this.headers(), credentials: "omit" });
-    if (!response.ok) throw new Error("Editor session expired");
-    return response.json();
-  }
-  async save(definition) {
-    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { method: "PATCH", headers: this.headers(), credentials: "omit", body: JSON.stringify({ definition }) });
-    if (!response.ok) throw new Error("Draft could not be saved");
-  }
-}
-class HighlightOverlay {
-  constructor() {
-    this.element = document.createElement("div");
-    this.element.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #2563eb;background:rgba(37,99,235,.12);display:none;box-sizing:border-box";
-    document.documentElement.appendChild(this.element);
-  }
-  show(target) {
-    const rect = target.getBoundingClientRect();
-    Object.assign(this.element.style, { display: "block", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
-  }
-  hide() {
-    this.element.style.display = "none";
-  }
-  destroy() {
-    this.element.remove();
-  }
-}
-function reliability(selector) {
-  if (/#[a-z][\w:-]*|\[data-(?:testid|test|qa|cy|analytics-id)=/i.test(selector)) return "reliable";
-  if (/\[(?:role|aria-label|name|type|href)=|\.[a-z][\w-]*/i.test(selector) && !selector.includes(":nth-of-type")) return "moderate";
-  return "fragile";
-}
-class ElementPicker {
-  constructor() {
-    this.overlay = null;
-    this.generator = new SelectorGenerator();
-    this.resolve = null;
-    this.move = (event) => {
-      var _a, _b;
-      const target = document.elementFromPoint(event.clientX, event.clientY);
-      if (target && !target.closest("[data-movecues-editor]")) (_a = this.overlay) == null ? void 0 : _a.show(target);
-      else (_b = this.overlay) == null ? void 0 : _b.hide();
-    };
-    this.click = (event) => {
-      const target = document.elementFromPoint(event.clientX, event.clientY);
-      if (!target || target.closest("[data-movecues-editor]")) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      const descriptor = this.generator.describe(target);
-      const selector = descriptor.selector;
-      this.finish({ primarySelector: selector, fallbackSelectors: [], label: descriptor.label, role: descriptor.role, tagName: descriptor.tagName, reliability: reliability(selector) });
-    };
-    this.key = (event) => {
-      if (event.key === "Escape") this.finish(null);
-    };
-  }
-  pick() {
-    this.cancel();
-    this.overlay = new HighlightOverlay();
-    document.addEventListener("pointermove", this.move, true);
-    document.addEventListener("click", this.click, true);
-    document.addEventListener("keydown", this.key, true);
-    return new Promise((resolve) => {
-      this.resolve = resolve;
-    });
-  }
-  cancel() {
-    if (this.resolve) this.finish(null);
-    else this.cleanup();
-  }
-  finish(value) {
-    const resolve = this.resolve;
-    this.resolve = null;
-    this.cleanup();
-    resolve == null ? void 0 : resolve(value);
-  }
-  cleanup() {
-    var _a;
-    document.removeEventListener("pointermove", this.move, true);
-    document.removeEventListener("click", this.click, true);
-    document.removeEventListener("keydown", this.key, true);
-    (_a = this.overlay) == null ? void 0 : _a.destroy();
-    this.overlay = null;
-  }
 }
 const ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "H1", "H2", "H3", "H4", "P", "SPAN", "BUTTON", "IMG", "HR"]);
 const ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "alt", "src", "width", "height", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type"]);
@@ -2766,12 +2701,11 @@ class ExperienceRenderer {
     this.host = null;
     this.renderer = null;
     this.cancelPendingTarget = null;
-    this.step = 0;
+    this.cleanupAdvance = null;
   }
-  render(experience, callbacks) {
+  render(experience, callbacks, guideStepId) {
     this.destroy();
-    this.step = 0;
-    if (isGuideDefinition(experience.definition)) return this.renderGuide(experience, experience.definition, callbacks);
+    if (isGuideDefinition(experience.definition)) return this.renderGuide(experience, experience.definition, callbacks, guideStepId);
     return this.renderWidget(experience, experience.definition, callbacks);
   }
   root(experienceId) {
@@ -2834,11 +2768,12 @@ class ExperienceRenderer {
     if (experience.widgetType !== "anchored_card" && experience.widgetType !== "hotspot") requestAnimationFrame(callbacks.onVisible);
     return true;
   }
-  renderGuide(experience, definition, callbacks) {
-    const step = definition.steps[this.step];
+  renderGuide(experience, definition, callbacks, guideStepId) {
+    const stepIndex = guideStepId ? definition.steps.findIndex((item) => item.id === guideStepId) : 0;
+    const step = definition.steps[stepIndex];
     if (!step) return false;
     const mount = (target2) => {
-      var _a;
+      var _a, _b, _c;
       const root = this.root(experience.id);
       const renderer = new AnchoredCardRenderer();
       this.renderer = renderer;
@@ -2853,29 +2788,23 @@ class ExperienceRenderer {
           this.destroy();
         },
         onPrimary: () => {
+          var _a2, _b2;
           const action = step.content.primaryAction;
           if (action) callbacks.onAction(action);
-          if (this.step < definition.steps.length - 1) {
-            this.clearSurface();
-            this.step++;
-            this.renderGuide(experience, definition, callbacks);
-          } else {
-            callbacks.onComplete();
-            this.destroy();
-          }
+          if ((((_a2 = step.advance) == null ? void 0 : _a2.type) ?? "button") === "button") (_b2 = callbacks.onGuideAdvance) == null ? void 0 : _b2.call(callbacks);
         }
       }, step.builder, "anchored_card");
-      if (this.step > 0) {
+      if (stepIndex > 0) {
         const back = document.createElement("button");
         back.className = "secondary";
         back.textContent = "Back";
         back.addEventListener("click", () => {
-          this.clearSurface();
-          this.step--;
-          this.renderGuide(experience, definition, callbacks);
+          var _a2;
+          return (_a2 = callbacks.onGuideBack) == null ? void 0 : _a2.call(callbacks);
         });
         (_a = card.querySelector("footer")) == null ? void 0 : _a.prepend(back);
       }
+      this.listenForAdvance(target2, ((_b = step.advance) == null ? void 0 : _b.type) ?? "button", ((_c = step.advance) == null ? void 0 : _c.type) === "element_hover" ? step.advance.durationMs : void 0, callbacks.onGuideAdvance);
       requestAnimationFrame(callbacks.onVisible);
     };
     const target = findTarget(step.target);
@@ -2889,6 +2818,37 @@ class ExperienceRenderer {
       (_a = callbacks.onUnavailable) == null ? void 0 : _a.call(callbacks);
     });
     return true;
+  }
+  listenForAdvance(target, type, durationMs, advance) {
+    if (!advance) return;
+    if (type === "element_click") {
+      let active = true;
+      const click = () => queueMicrotask(() => {
+        if (active) advance();
+      });
+      target.addEventListener("click", click);
+      this.cleanupAdvance = () => {
+        active = false;
+        target.removeEventListener("click", click);
+      };
+    } else if (type === "element_hover") {
+      let timer = null;
+      const leave = () => {
+        if (timer !== null) window.clearTimeout(timer);
+        timer = null;
+      };
+      const enter = () => {
+        leave();
+        timer = window.setTimeout(advance, durationMs ?? 500);
+      };
+      target.addEventListener("mouseenter", enter);
+      target.addEventListener("mouseleave", leave);
+      this.cleanupAdvance = () => {
+        leave();
+        target.removeEventListener("mouseenter", enter);
+        target.removeEventListener("mouseleave", leave);
+      };
+    }
   }
   callbacks(content, callbacks) {
     return {
@@ -2911,17 +2871,18 @@ class ExperienceRenderer {
     };
   }
   clearSurface() {
-    var _a, _b, _c;
-    (_a = this.cancelPendingTarget) == null ? void 0 : _a.call(this);
+    var _a, _b, _c, _d;
+    (_a = this.cleanupAdvance) == null ? void 0 : _a.call(this);
+    this.cleanupAdvance = null;
+    (_b = this.cancelPendingTarget) == null ? void 0 : _b.call(this);
     this.cancelPendingTarget = null;
-    (_b = this.renderer) == null ? void 0 : _b.destroy();
+    (_c = this.renderer) == null ? void 0 : _c.destroy();
     this.renderer = null;
-    (_c = this.host) == null ? void 0 : _c.remove();
+    (_d = this.host) == null ? void 0 : _d.remove();
     this.host = null;
   }
   destroy() {
     this.clearSurface();
-    this.step = 0;
   }
 }
 const STYLES = `
@@ -2936,250 +2897,693 @@ const STYLES = `
   .banner{left:0;right:0;width:auto!important;max-width:none;border-radius:0!important;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner[data-position=top]{top:0}.banner[data-position=bottom]{bottom:0}.banner h2,.banner p{grid-column:1}.banner footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
   .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--movecues-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--movecues-hotspot);border-radius:50%;animation:movecues-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes movecues-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
 `;
+class EditorBridge {
+  constructor(apiBase, sessionId, accessToken) {
+    this.apiBase = apiBase;
+    this.sessionId = sessionId;
+    this.accessToken = accessToken;
+  }
+  headers() {
+    return { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}` };
+  }
+  async load() {
+    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { headers: this.headers(), credentials: "omit" });
+    if (!response.ok) throw new Error("Editor session expired");
+    return response.json();
+  }
+  async save(definition) {
+    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { method: "PATCH", headers: this.headers(), credentials: "omit", body: JSON.stringify({ definition }) });
+    if (!response.ok) throw new Error("Draft could not be saved");
+  }
+}
+class HighlightOverlay {
+  constructor() {
+    this.element = document.createElement("div");
+    this.element.dataset.movecuesPickerOverlay = "";
+    this.element.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #2563eb;background:rgba(37,99,235,.12);display:none;box-sizing:border-box";
+    document.documentElement.appendChild(this.element);
+  }
+  show(target) {
+    const rect = target.getBoundingClientRect();
+    Object.assign(this.element.style, { display: "block", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+  }
+  hide() {
+    this.element.style.display = "none";
+  }
+  destroy() {
+    this.element.remove();
+  }
+}
+function reliability(selector) {
+  if (/#[a-z][\w:-]*|\[data-(?:testid|test|qa|cy|analytics-id)=/i.test(selector)) return "reliable";
+  if (/\[(?:role|aria-label|name|type|href)=|\.[a-z][\w-]*/i.test(selector) && !selector.includes(":nth-of-type")) return "moderate";
+  return "fragile";
+}
+class ElementPicker {
+  constructor() {
+    this.overlay = null;
+    this.generator = new SelectorGenerator();
+    this.resolve = null;
+    this.shiftPassthrough = false;
+    this.move = (event) => {
+      var _a, _b, _c;
+      if (this.shiftPassthrough || event.shiftKey) {
+        (_a = this.overlay) == null ? void 0 : _a.hide();
+        return;
+      }
+      const target = document.elementFromPoint(event.clientX, event.clientY);
+      if (target && !isMovcuesSurface(target)) (_b = this.overlay) == null ? void 0 : _b.show(target);
+      else (_c = this.overlay) == null ? void 0 : _c.hide();
+    };
+    this.click = (event) => {
+      if (this.shiftPassthrough || event.shiftKey || event.composedPath().some((item) => item instanceof Element && isMovcuesSurface(item))) return;
+      const target = document.elementFromPoint(event.clientX, event.clientY);
+      if (!target || isMovcuesSurface(target)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const descriptor = this.generator.describe(target);
+      const selector = descriptor.selector;
+      this.finish({ primarySelector: selector, fallbackSelectors: [], label: descriptor.label, role: descriptor.role, tagName: descriptor.tagName, reliability: reliability(selector) });
+    };
+    this.keyDown = (event) => {
+      var _a;
+      if (event.key === "Escape") this.finish(null);
+      else if (event.key === "Shift") {
+        this.shiftPassthrough = true;
+        (_a = this.overlay) == null ? void 0 : _a.hide();
+      }
+    };
+    this.keyUp = (event) => {
+      if (event.key === "Shift") this.shiftPassthrough = false;
+    };
+    this.resetPassthrough = () => {
+      this.shiftPassthrough = false;
+    };
+  }
+  pick() {
+    this.cancel();
+    this.overlay = new HighlightOverlay();
+    document.addEventListener("pointermove", this.move, true);
+    document.addEventListener("click", this.click, true);
+    document.addEventListener("keydown", this.keyDown, true);
+    document.addEventListener("keyup", this.keyUp, true);
+    window.addEventListener("blur", this.resetPassthrough);
+    document.addEventListener("visibilitychange", this.resetPassthrough);
+    return new Promise((resolve) => {
+      this.resolve = resolve;
+    });
+  }
+  cancel() {
+    if (this.resolve) this.finish(null);
+    else this.cleanup();
+  }
+  finish(value) {
+    const resolve = this.resolve;
+    this.resolve = null;
+    this.cleanup();
+    resolve == null ? void 0 : resolve(value);
+  }
+  cleanup() {
+    var _a;
+    document.removeEventListener("pointermove", this.move, true);
+    document.removeEventListener("click", this.click, true);
+    document.removeEventListener("keydown", this.keyDown, true);
+    document.removeEventListener("keyup", this.keyUp, true);
+    window.removeEventListener("blur", this.resetPassthrough);
+    document.removeEventListener("visibilitychange", this.resetPassthrough);
+    this.shiftPassthrough = false;
+    (_a = this.overlay) == null ? void 0 : _a.destroy();
+    this.overlay = null;
+  }
+}
+function isMovcuesSurface(element) {
+  if (element.closest("[data-movecues-editor],[data-movecues-experience],[data-movecues-picker-overlay]")) return true;
+  const root = element.getRootNode();
+  return root instanceof ShadowRoot && isMovcuesSurface(root.host);
+}
 class EditorModeController {
   constructor(apiBase) {
     this.apiBase = apiBase;
     this.host = null;
+    this.root = null;
     this.picker = new ElementPicker();
+    this.preview = new ExperienceRenderer();
+    this.routeObserver = new RouteObserver();
+    this.routeUnsubscribe = null;
+    this.mutationObserver = null;
+    this.dragCleanup = null;
     this.expiryTimer = 0;
     this.validationTimer = 0;
-    this.preview = new ExperienceRenderer();
+    this.saveTimer = 0;
+    this.saveInFlight = null;
+    this.targetRefreshTimer = 0;
+    this.selectionGeneration = 0;
+    this.bridge = null;
+    this.draft = null;
+    this.definition = null;
+    this.guide = null;
+    this.stepIndex = 0;
+    this.mode = "select";
+    this.dirty = false;
+    this.previewRendered = false;
+    this.currentPath = "";
   }
   async start(rawToken) {
     try {
-      const response = await fetch(`${this.apiBase}/public/experience-editor/exchange`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", body: JSON.stringify({ token: rawToken }) });
+      const response = await fetch(`${this.apiBase}/public/experience-editor/exchange`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "omit",
+        body: JSON.stringify({ token: rawToken })
+      });
       if (!response.ok) return false;
       const session = await response.json();
+      if (!validSession(session)) return false;
       const clean2 = new URL(location.href);
       const requestedStep = Number(clean2.searchParams.get("movecues_editor_step") ?? "0");
       clean2.searchParams.delete("movecues_editor_token");
       clean2.searchParams.delete("movecues_editor_step");
       history.replaceState(history.state, "", clean2.toString());
-      const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
-      this.mount(await bridge.load(), bridge, requestedStep);
-      this.expiryTimer = window.setTimeout(() => this.destroy(), Math.max(0, new Date(session.expiresAt).getTime() - Date.now()));
-      return true;
+      return await this.activate(session, requestedStep);
     } catch {
       this.destroy();
       return false;
     }
   }
-  mount(draft, bridge, requestedStep = 0) {
-    var _a, _b, _c;
-    this.host = document.createElement("div");
-    this.host.dataset.movecuesEditor = "";
-    const root = this.host.attachShadow({ mode: "open" });
-    const definition = draft.version.definition;
-    const guide = isGuideDefinition(definition) ? definition : null;
-    let stepIndex = guide ? Math.max(0, Math.min(requestedStep, guide.steps.length - 1)) : 0;
-    const stepTabs = guide ? `<div class="steps"><b data-step-label>Editing step 1 of ${guide.steps.length}</b><div>${guide.steps.map((_, index) => `<button data-step="${index}" class="${index === 0 ? "active" : ""}">Step ${index + 1}</button>`).join("")}</div></div>` : "";
-    root.innerHTML = `<style>${STYLE}</style><aside><header><b>movecues visual editor</b><small>${escapeText(draft.experience.name)}</small></header><nav>${["Content", "Design", "Behavior", "Targeting", "Publish"].map((x, i) => `<button data-tab="${i}" class="${i === 0 ? "active" : ""}">${x}</button>`).join("")}</nav><main>${stepTabs}<section data-panel="0"><label>Heading<input data-heading></label><label>Body<textarea data-body></textarea></label></section><section data-panel="1" hidden><label>Width<select data-width><option value="sm">Small</option><option value="md">Medium</option><option value="lg">Large</option></select></label><label>Background<input data-background type="color"></label><label>Text color<input data-foreground type="color"></label><label>Primary color<input data-primary type="color"></label></section><section data-panel="2" hidden><div data-for="anchored"><label>Placement<select data-placement><option value="auto">Auto</option><option value="top">Top</option><option value="right">Right</option><option value="bottom">Bottom</option><option value="left">Left</option></select></label><label>Offset<input data-offset type="number" min="0" max="100"></label></div><div data-for="toast"><label>Toast position<select data-toast-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label><label>Auto-dismiss ms<input data-auto-dismiss type="number" min="500" placeholder="Disabled"></label></div><div data-for="cursor"><label>Horizontal offset<input data-cursor-x type="number"></label><label>Vertical offset<input data-cursor-y type="number"></label></div><div data-for="modal"><label>Layout<select data-modal-layout><option value="center">Centered</option><option value="fullscreen">Fullscreen</option></select></label></div><div data-for="slideout"><label>Edge position<select data-slideout-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="center-left">Center left</option><option value="center-right">Center right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label></div><div data-for="overlay"><label class="row"><input data-backdrop type="checkbox"> Backdrop</label><label>Backdrop opacity<input data-backdrop-opacity type="number" min="0" max="0.9" step="0.05"></label><label class="row"><input data-close-backdrop type="checkbox"> Dismiss on backdrop click</label></div><div data-for="hotspot"><label>Beacon style<select data-hotspot-style><option value="pulse">Pulse</option><option value="dot">Dot</option><option value="question">Question mark</option></select></label><label>Beacon color<input data-hotspot-color type="color"></label></div><label class="row"><input data-dismissible type="checkbox"> Dismissible</label><div data-for="target"><button data-pick>Reselect target</button><p data-reliability></p></div></section><section data-panel="3" hidden><label>Frequency<select data-frequency><option value="once">Once ever</option><option value="once_per_session">Once per session</option><option value="every_time">Every qualifying time</option></select></label><label>Priority<input data-priority type="number" min="-1000" max="1000"></label><p>Saved Page, Segment, and event targeting are configured securely in the movecues dashboard.</p></section><section data-panel="4" hidden><p>Preview is live on this page. Save the draft here, then return to movecues to publish or pause it.</p><button data-save>Save draft</button></section><p data-status>Draft autosaves as you edit.</p></main></aside>`;
-    (_a = root.querySelector('[data-for="overlay"]')) == null ? void 0 : _a.insertAdjacentHTML("beforebegin", '<div data-for="banner"><label>Banner position<select data-banner-position><option value="top">Top</option><option value="bottom">Bottom</option></select></label></div>');
-    document.documentElement.appendChild(this.host);
-    const currentContent = () => guide ? guide.steps[stepIndex].content : definition.content;
-    const currentBehavior = () => guide ? guide.steps[stepIndex].behavior : definition.behavior;
-    const heading = root.querySelector("[data-heading]");
-    const body = root.querySelector("[data-body]");
-    const placement = root.querySelector("[data-placement]");
-    const offset = root.querySelector("[data-offset]");
-    const dismissible = root.querySelector("[data-dismissible]");
-    const status = root.querySelector("[data-status]");
-    const widgetType = draft.experience.widgetType;
-    const activeGroups = new Set(guide || widgetType === "anchored_card" ? ["anchored", "target"] : widgetType === "hotspot" ? ["anchored", "hotspot", "target"] : widgetType === "modal" ? ["modal", "overlay"] : widgetType === "slideout" ? ["slideout", "overlay"] : widgetType === "banner" ? ["banner"] : widgetType === "toast" ? ["toast"] : ["cursor"]);
-    root.querySelectorAll("[data-for]").forEach((group) => {
-      group.hidden = !activeGroups.has(group.dataset.for);
-    });
-    const field = (selector) => root.querySelector(selector);
-    const bannerPosition = field("[data-banner-position]");
-    bannerPosition.value = currentBehavior().bannerPosition ?? "top";
-    const syncStep = () => {
-      var _a2, _b2, _c2;
-      const content = currentContent(), behavior = currentBehavior();
-      heading.value = content.heading;
-      body.value = content.body;
-      placement.value = behavior.placement ?? "auto";
-      offset.value = String(behavior.offset ?? 8);
-      dismissible.checked = behavior.dismissible ?? true;
-      field("[data-toast-position]").value = behavior.toastPosition ?? "bottom-right";
-      field("[data-auto-dismiss]").value = behavior.autoDismissMs ? String(behavior.autoDismissMs) : "";
-      field("[data-cursor-x]").value = String(((_a2 = behavior.cursorOffset) == null ? void 0 : _a2.x) ?? 16);
-      field("[data-cursor-y]").value = String(((_b2 = behavior.cursorOffset) == null ? void 0 : _b2.y) ?? 16);
-      field("[data-modal-layout]").value = behavior.modalLayout ?? "center";
-      field("[data-slideout-position]").value = behavior.slideoutPosition ?? "bottom-right";
-      field("[data-backdrop]").checked = behavior.backdrop ?? widgetType === "modal";
-      field("[data-backdrop-opacity]").value = String(behavior.backdropOpacity ?? (widgetType === "modal" ? 0.45 : 0.35));
-      field("[data-close-backdrop]").checked = behavior.closeOnBackdrop ?? false;
-      field("[data-hotspot-style]").value = behavior.hotspotStyle ?? "pulse";
-      field("[data-hotspot-color]").value = behavior.hotspotColor ?? definition.design.theme.primary;
-      (_c2 = root.querySelector("[data-step-label]")) == null ? void 0 : _c2.replaceChildren(`Editing step ${stepIndex + 1} of ${(guide == null ? void 0 : guide.steps.length) ?? 1}`);
-      root.querySelectorAll("[data-step]").forEach((button) => button.classList.toggle("active", Number(button.dataset.step) === stepIndex));
-    };
-    let saveTimer = 0;
-    const renderPreview = () => {
-      const previewDefinition = guide ? { ...definition, steps: [guide.steps[stepIndex]] } : definition;
-      return this.preview.render({ id: draft.experience.id, versionId: draft.version.id, kind: draft.experience.kind, widgetType: draft.experience.widgetType, priority: 0, definition: previewDefinition }, { onVisible: () => void 0, onDismiss: () => window.setTimeout(renderPreview, 0), onAction: () => void 0, onComplete: () => window.setTimeout(renderPreview, 0) });
-    };
-    const persist = async () => {
-      status.textContent = "Saving…";
-      try {
-        await bridge.save(definition);
-        status.textContent = "Draft saved.";
-      } catch {
-        status.textContent = "Editor session expired or was revoked.";
-        this.destroy();
-      }
-    };
-    const save = () => {
-      renderPreview();
-      clearTimeout(saveTimer);
-      saveTimer = window.setTimeout(persist, 350);
-    };
-    syncStep();
-    heading.addEventListener("input", () => {
-      currentContent().heading = heading.value;
-      save();
-    });
-    body.addEventListener("input", () => {
-      currentContent().body = body.value;
-      save();
-    });
-    placement.addEventListener("change", () => {
-      currentBehavior().placement = placement.value;
-      save();
-    });
-    offset.addEventListener("input", () => {
-      currentBehavior().offset = Number(offset.value);
-      save();
-    });
-    dismissible.addEventListener("change", () => {
-      currentBehavior().dismissible = dismissible.checked;
-      save();
-    });
-    field("[data-toast-position]").addEventListener("change", (event) => {
-      currentBehavior().toastPosition = event.currentTarget.value;
-      save();
-    });
-    field("[data-auto-dismiss]").addEventListener("input", (event) => {
-      const value = event.currentTarget.value;
-      currentBehavior().autoDismissMs = value ? Number(value) : null;
-      save();
-    });
-    field("[data-cursor-x]").addEventListener("input", (event) => {
-      var _a2;
-      currentBehavior().cursorOffset = { x: Number(event.currentTarget.value), y: ((_a2 = currentBehavior().cursorOffset) == null ? void 0 : _a2.y) ?? 16 };
-      save();
-    });
-    field("[data-cursor-y]").addEventListener("input", (event) => {
-      var _a2;
-      currentBehavior().cursorOffset = { x: ((_a2 = currentBehavior().cursorOffset) == null ? void 0 : _a2.x) ?? 16, y: Number(event.currentTarget.value) };
-      save();
-    });
-    field("[data-modal-layout]").addEventListener("change", (event) => {
-      currentBehavior().modalLayout = event.currentTarget.value;
-      save();
-    });
-    field("[data-slideout-position]").addEventListener("change", (event) => {
-      currentBehavior().slideoutPosition = event.currentTarget.value;
-      save();
-    });
-    field("[data-backdrop]").addEventListener("change", (event) => {
-      currentBehavior().backdrop = event.currentTarget.checked;
-      save();
-    });
-    field("[data-backdrop-opacity]").addEventListener("input", (event) => {
-      currentBehavior().backdropOpacity = Number(event.currentTarget.value);
-      save();
-    });
-    field("[data-close-backdrop]").addEventListener("change", (event) => {
-      currentBehavior().closeOnBackdrop = event.currentTarget.checked;
-      save();
-    });
-    field("[data-hotspot-style]").addEventListener("change", (event) => {
-      currentBehavior().hotspotStyle = event.currentTarget.value;
-      save();
-    });
-    field("[data-hotspot-color]").addEventListener("input", (event) => {
-      currentBehavior().hotspotColor = event.currentTarget.value;
-      save();
-    });
-    bannerPosition.addEventListener("change", () => {
-      currentBehavior().bannerPosition = bannerPosition.value;
-      save();
-    });
-    const width = root.querySelector("[data-width]");
-    width.value = definition.design.width;
-    width.addEventListener("change", () => {
-      definition.design.width = width.value;
-      save();
-    });
-    for (const key of ["background", "foreground", "primary"]) {
-      const input = root.querySelector(`[data-${key}]`);
-      input.value = definition.design.theme[key];
-      input.addEventListener("input", () => {
-        definition.design.theme[key] = input.value;
-        save();
-      });
+  async resume(session) {
+    if (!validSession(session)) {
+      clearEditorContinuation();
+      return false;
     }
-    const targeting = definition.targeting;
-    const frequency = root.querySelector("[data-frequency]");
-    frequency.value = targeting.frequency.mode;
-    frequency.addEventListener("change", () => {
-      targeting.frequency.mode = frequency.value;
-      save();
-    });
-    const priority = root.querySelector("[data-priority]");
-    priority.value = String(targeting.priority);
-    priority.addEventListener("input", () => {
-      targeting.priority = Number(priority.value);
-      save();
-    });
-    root.querySelectorAll("[data-step]").forEach((button) => button.addEventListener("click", () => {
-      stepIndex = Number(button.dataset.step);
-      syncStep();
-      renderPreview();
-    }));
-    (_b = root.querySelector("[data-pick]")) == null ? void 0 : _b.addEventListener("click", async () => {
-      status.textContent = `Click the element step ${stepIndex + 1} should attach to.`;
-      const target = await this.picker.pick();
-      if (!target) {
-        status.textContent = "Selection cancelled.";
-        return;
-      }
-      this.setTarget(definition, target, stepIndex);
-      root.querySelector("[data-reliability]").textContent = target.reliability === "fragile" ? "Warning: this selector is fragile and may change with the page layout." : `${target.reliability} selector`;
-      save();
-    });
-    (_c = root.querySelector("[data-save]")) == null ? void 0 : _c.addEventListener("click", () => void persist());
-    root.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => {
-      root.querySelectorAll("[data-tab]").forEach((item) => item.classList.remove("active"));
-      button.classList.add("active");
-      root.querySelectorAll("[data-panel]").forEach((panel) => panel.hidden = panel.dataset.panel !== button.dataset.tab);
-    }));
-    renderPreview();
+    try {
+      return await this.activate(session, 0);
+    } catch {
+      this.destroy();
+      return false;
+    }
+  }
+  async activate(session, requestedStep) {
+    this.teardown(false);
+    const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
+    let draft;
+    try {
+      draft = await bridge.load();
+    } catch {
+      clearEditorContinuation();
+      return false;
+    }
+    this.bridge = bridge;
+    this.draft = draft;
+    this.definition = draft.version.definition;
+    this.guide = isGuideDefinition(this.definition) ? this.definition : null;
+    this.stepIndex = this.guide ? clampStep(requestedStep, this.guide.steps.length) : 0;
+    this.currentPath = currentPagePath$1();
+    this.mode = "select";
+    storeEditorContinuation(session);
+    this.mount();
+    this.expiryTimer = window.setTimeout(() => this.destroy(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
     this.validationTimer = window.setInterval(() => {
       void bridge.load().catch(() => this.destroy());
     }, 15e3);
+    return true;
   }
-  setTarget(definition, target, stepIndex = 0) {
-    if (isGuideDefinition(definition)) definition.steps[stepIndex].target = target;
-    else definition.target = target;
+  mount() {
+    if (!this.draft || !this.definition) return;
+    this.host = document.createElement("div");
+    this.host.dataset.movecuesEditor = "";
+    this.root = this.host.attachShadow({ mode: "open" });
+    this.root.innerHTML = `<style>${STYLE}</style>${this.panelMarkup(this.draft)}`;
+    document.documentElement.appendChild(this.host);
+    this.bindPanel();
+    this.syncPanel();
+    this.renderPreview();
+    this.startPicker();
+    this.routeUnsubscribe = this.routeObserver.onChange(() => this.onRouteChange());
+    this.routeObserver.start();
+    if (typeof MutationObserver !== "undefined") {
+      this.mutationObserver = new MutationObserver(() => this.scheduleTargetRefresh());
+      this.mutationObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["id", "class", "data-testid", "data-test", "data-qa", "data-cy", "aria-label", "role", "name", "href", "hidden"] });
+    }
+  }
+  panelMarkup(draft) {
+    const guideMarkup = this.guide ? `<section class="section" data-guide><div class="eyebrow">Guide</div><div class="step-flow">${this.guide.steps.map((_, index) => `<button class="step" type="button" data-step="${index}" aria-label="Open step ${index + 1}">${index + 1} <span data-step-icon>○</span></button>`).join('<span class="arrow">→</span>')}</div><div class="muted" data-step-label></div></section>` : "";
+    return `<aside>
+      <header data-drag-handle>
+        <div class="header-copy"><strong>Movcues Live Editor</strong><span>${escapeText(draft.experience.name)}</span><small><i></i> Connected · <span data-save-state>Draft saved</span></small></div>
+        <div class="header-actions"><button type="button" data-minimize aria-label="Minimize editor">—</button><button type="button" data-close aria-label="Close editor">×</button></div>
+      </header>
+      <main>
+        <div class="modebar"><button type="button" data-mode="select">Select</button><button type="button" data-mode="navigate">Navigate</button></div>
+        <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
+        ${guideMarkup}
+        <section class="section" data-for="target">
+          <div class="eyebrow">Target</div><strong class="truncate" data-target-label>Not selected</strong><div class="reliability" data-reliability></div>
+          <button class="secondary-button" type="button" data-pick>Reselect target</button>
+        </section>
+        <section class="section" data-placement-section>
+          <div class="eyebrow">Placement</div>
+          <div data-for="anchored"><div class="placement-grid">${placementButton("top", "Top")}${placementButton("left", "Left")}${placementButton("auto", "Auto")}${placementButton("right", "Right")}${placementButton("bottom", "Bottom")}</div><label>Alignment<select data-alignment><option value="start">Start</option><option value="center">Center</option><option value="end">End</option></select></label><label>Offset<div class="number"><input data-offset type="number" min="0" max="100"><span>px</span></div></label></div>
+          <div data-for="toast"><label>Position<select data-toast-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label><label>Auto-dismiss<div class="number"><input data-auto-dismiss type="number" min="500" placeholder="Disabled"><span>ms</span></div></label></div>
+          <div data-for="modal"><label>Layout<select data-modal-layout><option value="center">Centered</option><option value="fullscreen">Fullscreen</option></select></label><label class="check"><input data-backdrop type="checkbox"> Backdrop</label><label>Backdrop opacity<input data-backdrop-opacity type="number" min="0" max="0.9" step="0.05"></label><label class="check"><input data-close-backdrop type="checkbox"> Dismiss on backdrop click</label></div>
+          <div data-for="slideout"><label>Position<select data-slideout-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="center-left">Center left</option><option value="center-right">Center right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label></div>
+          <div data-for="banner"><label>Position<select data-banner-position><option value="top">Top</option><option value="bottom">Bottom</option></select></label></div>
+          <div data-for="cursor"><label>X offset<div class="number"><input data-cursor-x type="number"><span>px</span></div></label><label>Y offset<div class="number"><input data-cursor-y type="number"><span>px</span></div></label></div>
+          <div data-for="hotspot"><label>Beacon style<select data-hotspot-style><option value="pulse">Pulse</option><option value="dot">Dot</option><option value="question">Question mark</option></select></label><label>Beacon color<input data-hotspot-color type="color"></label></div>
+        </section>
+        <section class="section" data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
+        <section class="section"><div class="eyebrow">Configured</div><dl data-configured></dl></section>
+        <section class="section live"><div class="eyebrow">Live status</div><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></section>
+        <p class="hint" data-mode-hint></p>
+      </main>
+    </aside>`;
+  }
+  bindPanel() {
+    var _a, _b;
+    const root = this.root;
+    root.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this.setMode(button.dataset.mode)));
+    root.querySelectorAll("[data-pick]").forEach((button) => button.addEventListener("click", () => {
+      if (this.mode === "navigate") this.setMode("select");
+      else this.startPicker();
+    }));
+    root.querySelectorAll("[data-step]").forEach((button) => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
+    (_a = root.querySelector("[data-minimize]")) == null ? void 0 : _a.addEventListener("click", () => {
+      const aside = root.querySelector("aside");
+      aside.classList.toggle("minimized");
+      const button = root.querySelector("[data-minimize]");
+      button.textContent = aside.classList.contains("minimized") ? "+" : "—";
+    });
+    (_b = root.querySelector("[data-close]")) == null ? void 0 : _b.addEventListener("click", () => void this.close());
+    this.bindDrag();
+    this.onSelect("[data-alignment]", (value) => {
+      this.currentBehavior().alignment = value;
+    });
+    this.onInput("[data-offset]", (value) => {
+      this.currentBehavior().offset = numberValue(value, 8);
+    });
+    root.querySelectorAll("[data-placement]").forEach((button) => button.addEventListener("click", () => {
+      this.currentBehavior().placement = button.dataset.placement;
+      this.changed();
+    }));
+    this.onSelect("[data-toast-position]", (value) => {
+      this.currentBehavior().toastPosition = value;
+    });
+    this.onInput("[data-auto-dismiss]", (value) => {
+      this.currentBehavior().autoDismissMs = value ? numberValue(value, 0) : null;
+    });
+    this.onSelect("[data-modal-layout]", (value) => {
+      this.currentBehavior().modalLayout = value;
+    });
+    this.onCheck("[data-backdrop]", (value) => {
+      this.currentBehavior().backdrop = value;
+    });
+    this.onInput("[data-backdrop-opacity]", (value) => {
+      this.currentBehavior().backdropOpacity = numberValue(value, 0.45);
+    });
+    this.onCheck("[data-close-backdrop]", (value) => {
+      this.currentBehavior().closeOnBackdrop = value;
+    });
+    this.onSelect("[data-slideout-position]", (value) => {
+      this.currentBehavior().slideoutPosition = value;
+    });
+    this.onSelect("[data-banner-position]", (value) => {
+      this.currentBehavior().bannerPosition = value;
+    });
+    this.onInput("[data-cursor-x]", (value) => {
+      var _a2;
+      this.currentBehavior().cursorOffset = { x: numberValue(value, 16), y: ((_a2 = this.currentBehavior().cursorOffset) == null ? void 0 : _a2.y) ?? 16 };
+    });
+    this.onInput("[data-cursor-y]", (value) => {
+      var _a2;
+      this.currentBehavior().cursorOffset = { x: ((_a2 = this.currentBehavior().cursorOffset) == null ? void 0 : _a2.x) ?? 16, y: numberValue(value, 16) };
+    });
+    this.onSelect("[data-hotspot-style]", (value) => {
+      this.currentBehavior().hotspotStyle = value;
+    });
+    this.onInput("[data-hotspot-color]", (value) => {
+      this.currentBehavior().hotspotColor = value;
+    });
+  }
+  bindDrag() {
+    var _a, _b;
+    const handle = (_a = this.root) == null ? void 0 : _a.querySelector("[data-drag-handle]");
+    const aside = (_b = this.root) == null ? void 0 : _b.querySelector("aside");
+    if (!handle || !aside) return;
+    handle.addEventListener("pointerdown", (event) => {
+      var _a2;
+      if (event.target.closest("button")) return;
+      const rect = aside.getBoundingClientRect();
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const move = (next) => {
+        aside.style.right = "auto";
+        aside.style.left = `${Math.max(4, Math.min(innerWidth - rect.width - 4, rect.left + next.clientX - startX))}px`;
+        aside.style.top = `${Math.max(4, Math.min(innerHeight - 48, rect.top + next.clientY - startY))}px`;
+      };
+      const stop = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", stop);
+        this.dragCleanup = null;
+      };
+      (_a2 = this.dragCleanup) == null ? void 0 : _a2.call(this);
+      this.dragCleanup = stop;
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", stop);
+    });
+  }
+  onSelect(selector, update) {
+    var _a, _b;
+    (_b = (_a = this.root) == null ? void 0 : _a.querySelector(selector)) == null ? void 0 : _b.addEventListener("change", (event) => {
+      update(event.currentTarget.value);
+      this.changed();
+    });
+  }
+  onInput(selector, update) {
+    var _a, _b;
+    (_b = (_a = this.root) == null ? void 0 : _a.querySelector(selector)) == null ? void 0 : _b.addEventListener("input", (event) => {
+      update(event.currentTarget.value);
+      this.changed();
+    });
+  }
+  onCheck(selector, update) {
+    var _a, _b;
+    (_b = (_a = this.root) == null ? void 0 : _a.querySelector(selector)) == null ? void 0 : _b.addEventListener("change", (event) => {
+      update(event.currentTarget.checked);
+      this.changed();
+    });
+  }
+  switchStep(index) {
+    if (!this.guide || index < 0 || index >= this.guide.steps.length || index === this.stepIndex) return;
+    this.selectionGeneration++;
+    this.picker.cancel();
+    this.stepIndex = index;
+    this.syncPanel();
+    if (this.mode === "select") {
+      this.renderPreview();
+      this.startPicker();
+    }
+  }
+  setMode(mode) {
+    if (this.mode === mode && (mode !== "select" || this.pickerIsSelecting())) return;
+    this.selectionGeneration++;
+    this.picker.cancel();
+    this.mode = mode;
+    if (mode === "navigate") {
+      this.preview.destroy();
+      this.previewRendered = false;
+      this.syncPanel();
+      if (!this.dirty) this.setText("[data-save-state]", "Draft saved");
+      return;
+    }
+    this.renderPreview();
+    this.syncPanel();
+    this.startPicker();
+  }
+  startPicker() {
+    if (!this.isTargetedType() || this.mode !== "select") return;
+    const generation = ++this.selectionGeneration;
+    this.setText("[data-mode-hint]", "Select an element · Hold Shift to interact temporarily");
+    void this.picker.pick().then((target) => {
+      if (generation !== this.selectionGeneration || !this.definition || !target) return;
+      this.setTarget(target);
+      this.changed();
+    });
+  }
+  pickerIsSelecting() {
+    return !!document.querySelector("[data-movecues-picker-overlay]");
+  }
+  changed() {
+    this.dirty = true;
+    this.syncPanel();
+    if (this.mode === "select") this.renderPreview();
+    this.setText("[data-save-state]", "Saving…");
+    clearTimeout(this.saveTimer);
+    this.saveTimer = window.setTimeout(() => void this.persist(), 350);
+  }
+  async persist() {
+    clearTimeout(this.saveTimer);
+    this.saveTimer = 0;
+    if (this.saveInFlight) {
+      const saved2 = await this.saveInFlight;
+      return saved2 && this.dirty ? this.persist() : saved2;
+    }
+    if (!this.dirty || !this.bridge || !this.definition) return true;
+    this.dirty = false;
+    const bridge = this.bridge;
+    const definition = this.definition;
+    const request = bridge.save(definition).then(() => {
+      this.setText("[data-save-state]", this.dirty ? "Saving…" : "Draft saved");
+      return true;
+    }).catch(() => {
+      this.setText("[data-save-state]", "Session expired");
+      this.destroy();
+      return false;
+    });
+    this.saveInFlight = request;
+    const saved = await request;
+    if (this.saveInFlight === request) this.saveInFlight = null;
+    if (saved && this.dirty && !this.saveTimer) this.saveTimer = window.setTimeout(() => void this.persist(), 350);
+    return saved;
+  }
+  async close() {
+    if (this.dirty && !await this.persist()) return;
+    this.destroy();
+  }
+  renderPreview() {
+    if (!this.definition || !this.draft || this.mode === "navigate") return;
+    this.previewRendered = false;
+    const definition = this.guide ? { ...this.definition, steps: [this.guide.steps[this.stepIndex]] } : this.definition;
+    this.preview.render({
+      id: this.draft.experience.id,
+      versionId: this.draft.version.id,
+      kind: this.draft.experience.kind,
+      widgetType: this.draft.experience.widgetType,
+      priority: 0,
+      definition
+    }, {
+      onVisible: () => {
+        this.previewRendered = true;
+        this.updateDiagnostics();
+      },
+      onDismiss: () => window.setTimeout(() => this.renderPreview(), 0),
+      onAction: () => void 0,
+      onComplete: () => window.setTimeout(() => this.renderPreview(), 0),
+      onUnavailable: () => {
+        this.previewRendered = false;
+        this.updateDiagnostics();
+      }
+    });
+    this.updateDiagnostics();
+  }
+  syncPanel() {
+    var _a, _b;
+    if (!this.root || !this.definition || !this.draft) return;
+    const behavior = this.currentBehavior();
+    const widgetType = this.draft.experience.widgetType;
+    const activeGroups = new Set(this.guide || widgetType === "anchored_card" ? ["target", "anchored"] : widgetType === "hotspot" ? ["target", "anchored", "hotspot"] : widgetType === "toast" ? ["toast"] : widgetType === "modal" ? ["modal"] : widgetType === "slideout" ? ["slideout"] : widgetType === "banner" ? ["banner"] : ["cursor"]);
+    this.root.querySelectorAll("[data-for]").forEach((group) => {
+      group.hidden = !activeGroups.has(group.dataset.for);
+    });
+    this.root.querySelector("[data-step-summary]").hidden = !this.guide;
+    this.root.querySelectorAll("[data-mode]").forEach((button) => button.classList.toggle("active", button.dataset.mode === this.mode));
+    this.root.querySelectorAll("[data-placement]").forEach((button) => button.classList.toggle("active", button.dataset.placement === (behavior.placement ?? "auto")));
+    this.setValue("[data-alignment]", behavior.alignment ?? "center");
+    this.setValue("[data-offset]", String(behavior.offset ?? 8));
+    this.setValue("[data-toast-position]", behavior.toastPosition ?? "bottom-right");
+    this.setValue("[data-auto-dismiss]", behavior.autoDismissMs ? String(behavior.autoDismissMs) : "");
+    this.setValue("[data-modal-layout]", behavior.modalLayout ?? "center");
+    this.setChecked("[data-backdrop]", behavior.backdrop ?? widgetType === "modal");
+    this.setValue("[data-backdrop-opacity]", String(behavior.backdropOpacity ?? 0.45));
+    this.setChecked("[data-close-backdrop]", behavior.closeOnBackdrop ?? false);
+    this.setValue("[data-slideout-position]", behavior.slideoutPosition ?? "bottom-right");
+    this.setValue("[data-banner-position]", behavior.bannerPosition ?? "top");
+    this.setValue("[data-cursor-x]", String(((_a = behavior.cursorOffset) == null ? void 0 : _a.x) ?? 16));
+    this.setValue("[data-cursor-y]", String(((_b = behavior.cursorOffset) == null ? void 0 : _b.y) ?? 16));
+    this.setValue("[data-hotspot-style]", behavior.hotspotStyle ?? "pulse");
+    this.setValue("[data-hotspot-color]", behavior.hotspotColor ?? this.definition.design.theme.primary);
+    if (this.guide) {
+      const step = this.guide.steps[this.stepIndex];
+      this.setText("[data-step-label]", `Step ${this.stepIndex + 1} of ${this.guide.steps.length}`);
+      this.setText("[data-advance]", formatAdvance(step.advance));
+      this.setText("[data-dismissible]", step.behavior.dismissible ?? true ? "Yes" : "No");
+    }
+    this.renderConfigured(this.definition.targeting);
+    this.updateDiagnostics();
+    this.setText("[data-mode-hint]", this.mode === "navigate" ? "Customer app interaction is enabled" : this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "Live placement preview");
+  }
+  renderConfigured(targeting) {
+    var _a;
+    const items = [];
+    items.push(["Trigger", targeting.trigger.type === "custom_event" ? `Custom event · ${targeting.trigger.eventName}` : "Page load"]);
+    items.push(["Page", formatPageRules(targeting.pageRules)]);
+    items.push(["Frequency", formatFrequency(targeting.frequency)]);
+    items.push(["Priority", String(targeting.priority)]);
+    items.push(["Interrupt", targeting.interruptPolicy === "interrupt" ? "Interrupt" : "Wait"]);
+    if (this.guide) items.push(["Advance", formatAdvance(this.guide.steps[this.stepIndex].advance)]);
+    const configured = (_a = this.root) == null ? void 0 : _a.querySelector("[data-configured]");
+    if (configured) configured.innerHTML = items.map(([label, value]) => `<dt>${escapeText(label)}</dt><dd>${escapeText(value)}</dd>`).join("");
+  }
+  updateDiagnostics() {
+    if (!this.root) return;
+    const target = this.currentTarget();
+    const targeted = this.isTargetedType();
+    const found = targeted && !!findTarget(target);
+    this.setText("[data-current-path]", this.currentPath || currentPagePath$1());
+    this.setText("[data-preview-status]", `${this.previewRendered ? "✓" : "○"} Preview ${this.previewRendered ? "rendered" : this.mode === "navigate" ? "paused for navigation" : "waiting"}`);
+    const previewStatus = this.root.querySelector("[data-preview-status]");
+    previewStatus == null ? void 0 : previewStatus.classList.toggle("status-ok", this.previewRendered);
+    const liveTarget = this.root.querySelector("[data-live-target]");
+    if (liveTarget) {
+      liveTarget.hidden = !targeted;
+      liveTarget.textContent = found ? "✓ Target found" : target ? "✕ Target not found" : "○ Target not configured";
+      liveTarget.className = found ? "status-ok" : target ? "status-error" : "muted";
+    }
+    this.setText("[data-target-label]", (target == null ? void 0 : target.label) || (target == null ? void 0 : target.primarySelector) || "Not selected");
+    this.setText("[data-reliability]", target ? `${reliabilityIcon(target.reliability)} ${capitalize(target.reliability)} selector` : "○ No selector configured");
+    const reliability2 = this.root.querySelector("[data-reliability]");
+    if (reliability2) reliability2.dataset.level = (target == null ? void 0 : target.reliability) ?? "none";
+    const missing = this.root.querySelector("[data-missing-selector]");
+    if (missing) {
+      missing.hidden = !target || found;
+      const code = missing.querySelector("code");
+      if (code) code.textContent = (target == null ? void 0 : target.primarySelector) ?? "";
+    }
+    if (this.guide) this.root.querySelectorAll("[data-step]").forEach((button, index) => {
+      const stepTarget = this.guide.steps[index].target;
+      const state = index === this.stepIndex ? "current" : !stepTarget ? "unconfigured" : findTarget(stepTarget) ? "found" : "missing";
+      button.dataset.stepStatus = state;
+      const icon = button.querySelector("[data-step-icon]");
+      if (icon) icon.textContent = state === "current" ? "●" : state === "found" ? "✓" : state === "missing" ? "⚠" : "○";
+      button.classList.toggle("active", index === this.stepIndex);
+    });
+  }
+  scheduleTargetRefresh() {
+    clearTimeout(this.targetRefreshTimer);
+    this.targetRefreshTimer = window.setTimeout(() => this.updateDiagnostics(), 80);
+  }
+  onRouteChange() {
+    var _a;
+    const previous = this.currentPath;
+    const next = currentPagePath$1();
+    if (next === previous) return;
+    this.currentPath = next;
+    const notice = (_a = this.root) == null ? void 0 : _a.querySelector("[data-route-notice]");
+    if (notice) notice.hidden = false;
+    this.setText("[data-route-change]", `${previous} → ${next}`);
+    this.updateDiagnostics();
+    if (this.mode === "select") this.renderPreview();
+  }
+  currentTarget() {
+    var _a;
+    if (!this.definition) return void 0;
+    return this.guide ? (_a = this.guide.steps[this.stepIndex]) == null ? void 0 : _a.target : this.definition.target;
+  }
+  currentBehavior() {
+    if (!this.definition) return { dismissible: true };
+    return this.guide ? this.guide.steps[this.stepIndex].behavior : this.definition.behavior;
+  }
+  setTarget(target) {
+    if (!this.definition) return;
+    if (this.guide) this.guide.steps[this.stepIndex].target = target;
+    else this.definition.target = target;
+  }
+  isTargetedType() {
+    var _a;
+    const type = (_a = this.draft) == null ? void 0 : _a.experience.widgetType;
+    return !!this.guide || type === "anchored_card" || type === "hotspot";
+  }
+  setText(selector, value) {
+    var _a;
+    const element = (_a = this.root) == null ? void 0 : _a.querySelector(selector);
+    if (element) element.textContent = value;
+  }
+  setValue(selector, value) {
+    var _a;
+    const element = (_a = this.root) == null ? void 0 : _a.querySelector(selector);
+    if (element) element.value = value;
+  }
+  setChecked(selector, value) {
+    var _a;
+    const element = (_a = this.root) == null ? void 0 : _a.querySelector(selector);
+    if (element) element.checked = value;
   }
   destroy() {
-    var _a;
+    this.teardown(true);
+  }
+  teardown(clearContinuation) {
+    var _a, _b, _c, _d;
     clearTimeout(this.expiryTimer);
     clearInterval(this.validationTimer);
+    clearTimeout(this.saveTimer);
+    clearTimeout(this.targetRefreshTimer);
+    this.selectionGeneration++;
+    (_a = this.routeUnsubscribe) == null ? void 0 : _a.call(this);
+    this.routeUnsubscribe = null;
+    this.routeObserver.stop();
+    (_b = this.mutationObserver) == null ? void 0 : _b.disconnect();
+    this.mutationObserver = null;
+    (_c = this.dragCleanup) == null ? void 0 : _c.call(this);
+    this.dragCleanup = null;
     this.preview.destroy();
     this.picker.cancel();
-    (_a = this.host) == null ? void 0 : _a.remove();
+    (_d = this.host) == null ? void 0 : _d.remove();
     this.host = null;
+    this.root = null;
+    this.bridge = null;
+    this.draft = null;
+    this.definition = null;
+    this.guide = null;
+    this.dirty = false;
+    this.previewRendered = false;
+    this.saveInFlight = null;
+    if (clearContinuation) clearEditorContinuation();
   }
+}
+function placementButton(value, label) {
+  return `<button type="button" data-placement="${value}">${label}</button>`;
+}
+function clampStep(value, length) {
+  return Number.isFinite(value) && length ? Math.max(0, Math.min(Math.trunc(value), length - 1)) : 0;
+}
+function validSession(value) {
+  return !!value && typeof value.sessionId === "string" && !!value.sessionId && typeof value.accessToken === "string" && !!value.accessToken && typeof value.expiresAt === "string" && Number.isFinite(Date.parse(value.expiresAt)) && Date.parse(value.expiresAt) > Date.now();
+}
+function numberValue(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+function currentPagePath$1() {
+  return `${location.pathname}${location.search}${location.hash}`;
+}
+function capitalize(value) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+function reliabilityIcon(value) {
+  return value === "reliable" ? "✓" : value === "moderate" ? "●" : "⚠";
+}
+function formatFrequency(value) {
+  const mode = value.mode === "once" ? "Once ever" : value.mode === "once_per_session" ? "Once per session" : "Every qualifying time";
+  const limits = [value.maxImpressions ? `max ${value.maxImpressions}` : "", value.cooldownHours ? `${value.cooldownHours}h cooldown` : ""].filter(Boolean);
+  return limits.length ? `${mode} · ${limits.join(" · ")}` : mode;
+}
+function formatPageRules(rules) {
+  if (!rules.length) return "All pages";
+  return rules.map((rule) => `${rule.kind === "exclude" ? "Exclude" : "Include"} ${rule.value}`).join(" · ");
+}
+function formatAdvance(advance) {
+  if (!advance || advance.type === "button") return "Button click";
+  if (advance.type === "element_click") return "Target element click";
+  if (advance.type === "element_hover") return `Target element hover${advance.durationMs ? ` · ${advance.durationMs}ms` : ""}`;
+  if (advance.type === "custom_event") return `Custom event · ${advance.eventName}`;
+  return `Route · ${formatPageRules(advance.pageRules)}`;
 }
 function escapeText(value) {
   const span = document.createElement("span");
   span.textContent = value;
   return span.innerHTML;
 }
-const STYLE = `:host{all:initial}aside{position:fixed;right:16px;top:16px;width:340px;z-index:2147483647;background:#fff;color:#111827;border:1px solid #d1d5db;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.28);font:14px ui-sans-serif,system-ui,sans-serif}header{display:flex;flex-direction:column;padding:16px;border-bottom:1px solid #e5e7eb}small,p{color:#6b7280;margin:0;font-size:12px}nav,.steps>div{display:flex;overflow:auto;border-bottom:1px solid #e5e7eb}nav button,.steps button{border:0;background:transparent;padding:10px 8px;font-size:11px;cursor:pointer}nav button.active,.steps button.active{color:#2563eb;border-bottom:2px solid #2563eb}.steps{display:grid;gap:6px}.steps b{font-size:12px}main{display:grid;gap:12px;padding:16px}section{display:grid;gap:12px}label{display:grid;gap:5px;font-size:12px;font-weight:600}label.row{display:flex;align-items:center}label.row input{width:auto}input,textarea,select{box-sizing:border-box;width:100%;border:1px solid #d1d5db;border-radius:7px;padding:8px;font:14px inherit;background:#fff}textarea{min-height:88px;resize:vertical}main button{border:0;border-radius:7px;padding:9px;background:#111827;color:#fff;cursor:pointer}`;
+const STYLE = `
+:host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:312px;max-height:calc(100vh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100vh - 82px);overflow:auto}.minimized{width:260px}.minimized main{display:none}.modebar{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{padding:7px}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-flow{display:flex;align-items:center;overflow:auto}.step{flex:none;padding:4px 6px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.arrow{color:#cbd5e1;font-size:10px}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}[hidden]{display:none!important}
+`;
 class EligibilityEngine {
   choose(experiences) {
     return [...experiences].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))[0] ?? null;
@@ -3187,6 +3591,7 @@ class EligibilityEngine {
 }
 const ONCE_KEY = "__movecues_experiences_seen__";
 const SESSION_KEY = "__movecues_experiences_session_seen__";
+const GUIDE_KEY = "__movecues_active_guide__";
 function read(storage, key) {
   try {
     return new Set(JSON.parse(storage.getItem(key) ?? "[]"));
@@ -3211,6 +3616,27 @@ class ExperienceStateStore {
       }
     }
   }
+  getGuideProgress() {
+    try {
+      const value = JSON.parse(sessionStorage.getItem(GUIDE_KEY) ?? "null");
+      return value && typeof value.experienceId === "string" && typeof value.versionId === "string" && typeof value.currentStepId === "string" && (value.status === "active" || value.status === "paused") ? value : null;
+    } catch {
+      return null;
+    }
+  }
+  setGuideProgress(progress) {
+    try {
+      sessionStorage.setItem(GUIDE_KEY, JSON.stringify(progress));
+    } catch {
+    }
+  }
+  clearGuideProgress(experienceId) {
+    var _a;
+    try {
+      if (!experienceId || ((_a = this.getGuideProgress()) == null ? void 0 : _a.experienceId) === experienceId) sessionStorage.removeItem(GUIDE_KEY);
+    } catch {
+    }
+  }
 }
 class ExperienceLoader {
   constructor(apiBase, siteId, session, trackEvent) {
@@ -3221,76 +3647,241 @@ class ExperienceLoader {
     this.renderer = new ExperienceRenderer();
     this.eligibility = new EligibilityEngine();
     this.state = new ExperienceStateStore();
-    this.activeId = null;
-    this.impressionId = null;
+    this.active = null;
+    this.pausedGuide = null;
+    this.queued = null;
+    this.justFinishedId = null;
     this.destroyed = false;
   }
   async evaluate(trigger) {
-    if (this.destroyed || this.activeId) return;
+    if (this.destroyed) return;
     try {
-      const query = new URLSearchParams({ url: location.href, anonymousId: this.session.getAnonymousId(), sessionId: this.session.getSessionId() });
-      const userId = this.session.getIdentifiedUserId();
-      if (userId) query.set("trackedUserId", userId);
-      if (trigger) query.set("trigger", trigger);
-      const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experiences?${query}`, { credentials: "omit" });
-      if (!response.ok) return;
-      const manifest = await response.json();
-      const chosen = this.eligibility.choose(Array.isArray(manifest.experiences) ? manifest.experiences : []);
-      if (!chosen) return;
-      const mounted = this.renderer.render(chosen, {
-        onVisible: () => void this.shown(chosen),
-        onDismiss: () => void this.record(chosen, "dismissed"),
-        onAction: (action) => this.handleAction(chosen, action),
-        onComplete: () => void this.record(chosen, "completed"),
-        onUnavailable: () => {
-          if (this.activeId === chosen.id) this.activeId = null;
-        }
+      const experiences = await this.fetchExperiences(trigger);
+      if (this.destroyed) return;
+      const candidates = [...experiences, ...this.queued ? [this.queued] : []].filter((item, index, all) => {
+        var _a;
+        return item.id !== ((_a = this.active) == null ? void 0 : _a.experience.id) && item.id !== this.justFinishedId && all.findIndex((candidate) => candidate.id === item.id) === index;
       });
-      if (mounted) this.activeId = chosen.id;
+      const chosen = this.eligibility.choose(candidates);
+      this.justFinishedId = null;
+      if (this.active) {
+        const activeGuide = this.activeGuide();
+        if (activeGuide && chosen && chosen.priority > activeGuide.experience.priority && chosen.interruptPolicy === "interrupt") {
+          this.pauseGuide();
+          this.show(chosen);
+        } else if (chosen) this.queued = chosen;
+        return;
+      }
+      if (this.pausedGuide) {
+        if (chosen && chosen.id !== this.pausedGuide.experience.id && chosen.priority > this.pausedGuide.experience.priority && chosen.interruptPolicy === "interrupt") this.show(chosen);
+        else this.resumeGuide();
+        return;
+      }
+      if (!chosen) return;
+      const stored = this.state.getGuideProgress();
+      const stepId = isGuideDefinition(chosen.definition) && (stored == null ? void 0 : stored.experienceId) === chosen.id && stored.versionId === chosen.versionId ? stored.currentStepId : void 0;
+      this.show(chosen, stepId);
     } catch {
     }
   }
   onRouteChange() {
-    this.renderer.destroy();
-    this.activeId = null;
-    this.impressionId = null;
+    if (this.destroyed) return;
+    const activeGuide = this.activeGuide();
+    if (activeGuide) {
+      const advanced = this.advanceForRoute(activeGuide);
+      if (!advanced) this.renderActiveGuide();
+      else if (!this.active) return;
+    } else if (this.active) {
+      this.renderer.destroy();
+      this.active = null;
+    } else if (this.pausedGuide) this.advanceForRoute(this.pausedGuide);
     void this.evaluate();
   }
   onCustomEvent(name) {
+    var _a;
+    const activeGuide = this.activeGuide();
+    if (activeGuide) {
+      const step = this.currentGuideStep(activeGuide);
+      if (((_a = step == null ? void 0 : step.advance) == null ? void 0 : _a.type) === "custom_event" && step.advance.eventName === name) {
+        this.advanceGuide();
+        return;
+      }
+    }
     void this.evaluate(name);
   }
   destroy() {
     this.destroyed = true;
     this.renderer.destroy();
-    this.activeId = null;
+    this.active = null;
+    this.pausedGuide = null;
+    this.queued = null;
   }
-  async shown(experience) {
-    if (this.activeId !== experience.id || this.impressionId) return;
-    this.state.markSeen(experience.id);
-    const result = await this.post(experience, "shown");
-    this.impressionId = (result == null ? void 0 : result.impressionId) ?? null;
+  async fetchExperiences(trigger) {
+    const query = new URLSearchParams({ url: location.href, anonymousId: this.session.getAnonymousId(), sessionId: this.session.getSessionId() });
+    const userId = this.session.getIdentifiedUserId();
+    if (userId) query.set("trackedUserId", userId);
+    if (trigger) query.set("trigger", trigger);
+    const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experiences?${query}`, { credentials: "omit" });
+    if (!response.ok) return [];
+    const manifest = await response.json();
+    return Array.isArray(manifest.experiences) ? manifest.experiences : [];
   }
-  handleAction(experience, action) {
+  show(experience, requestedStepId) {
+    var _a, _b;
+    if (((_a = this.queued) == null ? void 0 : _a.id) === experience.id) this.queued = null;
+    const definition = isGuideDefinition(experience.definition) ? experience.definition : null;
+    const currentStepId = (definition == null ? void 0 : definition.steps.some((step) => step.id === requestedStepId)) ? requestedStepId : (_b = definition == null ? void 0 : definition.steps[0]) == null ? void 0 : _b.id;
+    const runtime = { experience, currentStepId, impressionId: null, shownRequested: false, shownPromise: null };
+    this.active = runtime;
+    if (currentStepId) this.persistGuide(runtime, "active");
+    const mounted = this.renderer.render(experience, this.callbacks(runtime), currentStepId);
+    if (!mounted && this.active === runtime) {
+      this.active = null;
+      if (currentStepId) this.state.clearGuideProgress(experience.id);
+    }
+  }
+  callbacks(runtime) {
+    return {
+      onVisible: () => this.shown(runtime),
+      onDismiss: () => void this.finish(runtime, "dismissed"),
+      onAction: (action) => this.handleAction(runtime, action),
+      onComplete: () => void this.finish(runtime, "completed"),
+      onGuideAdvance: () => this.advanceGuide(),
+      onGuideBack: () => this.backGuide(),
+      onUnavailable: () => {
+        if (this.active !== runtime) return;
+        this.active = null;
+        if (runtime.currentStepId) {
+          this.pausedGuide = runtime;
+          this.persistGuide(runtime, "paused");
+        }
+      }
+    };
+  }
+  shown(runtime) {
+    if (runtime.shownRequested) return;
+    runtime.shownRequested = true;
+    this.state.markSeen(runtime.experience.id);
+    runtime.shownPromise = this.post(runtime, "shown").then((result) => {
+      runtime.impressionId = (result == null ? void 0 : result.impressionId) ?? null;
+    });
+  }
+  handleAction(runtime, action) {
     var _a;
-    void this.record(experience, "action", action.type);
+    void this.recordAction(runtime, action.type);
     if (action.type === "open_url" && action.url) window.location.assign(action.url);
     if (action.type === "track_event" && action.eventName) (_a = this.trackEvent) == null ? void 0 : _a.call(this, action.eventName);
   }
-  async record(experience, event, action) {
-    await this.post(experience, event, action);
-    if (event !== "action") {
-      this.activeId = null;
-      this.impressionId = null;
-    }
+  async recordAction(runtime, action) {
+    await runtime.shownPromise;
+    await this.post(runtime, "action", action);
   }
-  async post(experience, event, action) {
+  async finish(runtime, event) {
+    if (this.active === runtime) {
+      this.renderer.destroy();
+      this.active = null;
+    }
+    if (runtime.currentStepId) this.state.clearGuideProgress(runtime.experience.id);
+    await runtime.shownPromise;
+    await this.post(runtime, event);
+    this.justFinishedId = runtime.experience.id;
+    if (!this.destroyed) void this.evaluate();
+  }
+  advanceGuide() {
+    const runtime = this.activeGuide();
+    if (!runtime) return;
+    const definition = runtime.experience.definition;
+    const index = definition.steps.findIndex((step) => step.id === runtime.currentStepId);
+    if (index < 0) return;
+    if (index === definition.steps.length - 1) {
+      void this.finish(runtime, "completed");
+      return;
+    }
+    runtime.currentStepId = definition.steps[index + 1].id;
+    this.persistGuide(runtime, "active");
+    this.renderActiveGuide();
+  }
+  backGuide() {
+    const runtime = this.activeGuide();
+    if (!runtime) return;
+    const definition = runtime.experience.definition;
+    const index = definition.steps.findIndex((step) => step.id === runtime.currentStepId);
+    if (index <= 0) return;
+    runtime.currentStepId = definition.steps[index - 1].id;
+    this.persistGuide(runtime, "active");
+    this.renderActiveGuide();
+  }
+  renderActiveGuide() {
+    const runtime = this.activeGuide();
+    if (!runtime) return;
+    this.renderer.render(runtime.experience, this.callbacks(runtime), runtime.currentStepId);
+  }
+  pauseGuide() {
+    const runtime = this.activeGuide();
+    if (!runtime) return;
+    this.renderer.destroy();
+    this.active = null;
+    this.pausedGuide = runtime;
+    this.persistGuide(runtime, "paused");
+  }
+  resumeGuide() {
+    const runtime = this.pausedGuide;
+    if (!runtime) return;
+    this.pausedGuide = null;
+    this.active = runtime;
+    this.persistGuide(runtime, "active");
+    this.renderActiveGuide();
+  }
+  advanceForRoute(runtime) {
+    var _a;
+    const step = this.currentGuideStep(runtime);
+    if (((_a = step == null ? void 0 : step.advance) == null ? void 0 : _a.type) !== "route" || !matchesRules(currentPagePath(), step.advance.pageRules)) return false;
+    if (runtime === this.active) this.advanceGuide();
+    else {
+      const definition = runtime.experience.definition;
+      const index = definition.steps.findIndex((item) => item.id === runtime.currentStepId);
+      if (index >= 0 && index < definition.steps.length - 1) {
+        runtime.currentStepId = definition.steps[index + 1].id;
+        this.persistGuide(runtime, "paused");
+      }
+    }
+    return true;
+  }
+  currentGuideStep(runtime) {
+    if (!runtime || !isGuideDefinition(runtime.experience.definition)) return void 0;
+    return runtime.experience.definition.steps.find((step) => step.id === runtime.currentStepId);
+  }
+  activeGuide() {
+    const runtime = this.active;
+    return (runtime == null ? void 0 : runtime.currentStepId) && isGuideDefinition(runtime.experience.definition) ? runtime : null;
+  }
+  persistGuide(runtime, status) {
+    if (runtime.currentStepId) this.state.setGuideProgress({ experienceId: runtime.experience.id, versionId: runtime.experience.versionId, currentStepId: runtime.currentStepId, status });
+  }
+  async post(runtime, event, action) {
+    const experience = runtime.experience;
     try {
-      const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: this.impressionId ?? void 0, event, action }) });
+      const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: runtime.impressionId ?? void 0, event, action }) });
       return response.ok && response.status !== 204 ? await response.json() : null;
     } catch {
       return null;
     }
   }
+}
+function currentPagePath() {
+  return `${location.pathname}${location.search}${location.hash}`;
+}
+function matchesRules(pagePath, rules) {
+  const matches = (rule) => {
+    if (rule.operator === "equals") return pagePath === rule.value;
+    if (rule.operator === "starts_with") return pagePath.startsWith(rule.value);
+    if (rule.operator === "ends_with") return pagePath.endsWith(rule.value);
+    if (rule.operator === "contains") return pagePath.includes(rule.value);
+    const escaped = rule.value.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+    return new RegExp(`^${escaped}$`).test(pagePath);
+  };
+  const includes = rules.filter((rule) => rule.kind === "include");
+  return includes.length > 0 && !rules.some((rule) => rule.kind === "exclude" && matches(rule)) && includes.some(matches);
 }
 const bundledRuntimeProviders = {
   experiences: {

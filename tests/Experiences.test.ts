@@ -104,14 +104,43 @@ describe("experience editor and runtime", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1); expect(String(fetchMock.mock.calls[0][0])).toContain("/experiences?"); loader.destroy();
   });
 
-  it("renders per-step Guide builders while preserving legacy steps and Back/Next", () => {
+  it("treats a legacy Guide step with no advance setting as button advancement", () => {
     const first = document.createElement("button"); first.id = "first"; const second = document.createElement("button"); second.id = "second"; document.body.append(first, second);
     const guide: DeliveredExperience = { id: "guide_1", versionId: "v1", kind: "guide", widgetType: null, priority: 1, definition: { design, targeting: { pageRules: [], audience: { type: "all" }, trigger: { type: "page_load" }, frequency: { mode: "once" }, priority: 0 }, steps: [
       { id: "one", content: { heading: "First", body: "One", primaryAction: { label: "Next", type: "next_step" } }, builder: { version: 1, projectData: {}, html: '<section class="movecues-widget"><h2>Builder First</h2><button data-movecues-action-id="primary">Next</button></section>', css: ".movecues-widget{color:rgb(12,34,56)}" }, target: { primarySelector: "#first", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
       { id: "two", content: { heading: "Second", body: "Two", primaryAction: { label: "Finish", type: "next_step" } }, target: { primarySelector: "#second", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
     ] } };
-    const renderer = new ExperienceRenderer(); renderer.render(guide, { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() });
-    const root = document.querySelector("[data-movecues-experience]")!.shadowRoot!; expect(root.querySelector(".movecues-widget")?.textContent).toContain("Builder First"); expect(root.querySelector("style[data-movecues-builder-style]")?.textContent).toContain("rgb(12,34,56)"); root.querySelector<HTMLButtonElement>('[data-movecues-action-id="primary"]')!.click(); const secondRoot = document.querySelector("[data-movecues-experience]")!.shadowRoot!; expect(secondRoot.textContent).toContain("Second"); expect(secondRoot.querySelector(".movecues-widget")).toBeNull(); expect(secondRoot.querySelector("footer")!.textContent).toContain("Back"); renderer.destroy();
+    const renderer = new ExperienceRenderer(); const advance = vi.fn(); const back = vi.fn(); const callbacks = { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn(), onGuideAdvance: advance, onGuideBack: back }; renderer.render(guide, callbacks, "one");
+    const root = document.querySelector("[data-movecues-experience]")!.shadowRoot!; expect(root.querySelector(".movecues-widget")?.textContent).toContain("Builder First"); root.querySelector<HTMLButtonElement>('[data-movecues-action-id="primary"]')!.click(); expect(advance).toHaveBeenCalledOnce(); renderer.render(guide, callbacks, "two"); const secondRoot = document.querySelector("[data-movecues-experience]")!.shadowRoot!; expect(secondRoot.textContent).toContain("Second"); secondRoot.querySelector<HTMLButtonElement>(".secondary")!.click(); expect(back).toHaveBeenCalledOnce(); renderer.destroy();
+  });
+
+  it("advances the active Guide from its real target click and matching custom event", async () => {
+    const first = document.createElement("button"); first.id = "advance-first"; const second = document.createElement("button"); second.id = "advance-second"; const third = document.createElement("button"); third.id = "advance-third"; document.body.append(first, second, third); let hostClicks = 0; first.addEventListener("click", () => hostClicks++);
+    const guide: DeliveredExperience = { id: "guide_advance", versionId: "v1", kind: "guide", widgetType: null, priority: 40, definition: { design, steps: [
+      { id: "click", content: { heading: "Click step", body: "One" }, advance: { type: "element_click" }, target: { primarySelector: "#advance-first", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
+      { id: "event", content: { heading: "Event step", body: "Two" }, advance: { type: "custom_event", eventName: "saved" }, target: { primarySelector: "#advance-second", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
+      { id: "done", content: { heading: "Done step", body: "Three" }, target: { primarySelector: "#advance-third", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
+    ] } };
+    const fetchMock = experienceFetch(() => [guide]); vi.stubGlobal("fetch", fetchMock); const loader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await loader.evaluate(); first.click(); await Promise.resolve(); expect(hostClicks).toBe(1); expect(activeExperienceText()).toContain("Event step"); loader.onCustomEvent("other"); await Promise.resolve(); expect(activeExperienceText()).toContain("Event step"); loader.onCustomEvent("saved"); expect(activeExperienceText()).toContain("Done step"); loader.destroy();
+  });
+
+  it("keeps the current Guide step across an SPA route change and records one impression", async () => {
+    const first = document.createElement("button"); first.id = "route-first"; const second = document.createElement("button"); second.id = "route-second"; document.body.append(first, second);
+    const guide: DeliveredExperience = { id: "guide_route", versionId: "v1", kind: "guide", widgetType: null, priority: 40, definition: { design, steps: [
+      { id: "route", content: { heading: "Route step", body: "One" }, advance: { type: "route", pageRules: [{ id: "next", kind: "include", operator: "equals", value: "/next" }] }, target: { primarySelector: "#route-first", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
+      { id: "after", content: { heading: "After route", body: "Two" }, target: { primarySelector: "#route-second", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
+    ] } };
+    const fetchMock = experienceFetch(() => [guide]); vi.stubGlobal("fetch", fetchMock); const loader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await loader.evaluate(); history.pushState({}, "", "/next"); loader.onRouteChange(); expect(activeExperienceText()).toContain("After route"); await Promise.resolve(); const shown = postedEvents(fetchMock).filter(event => event.experienceId === guide.id && event.event === "shown"); expect(shown).toHaveLength(1); expect(JSON.parse(sessionStorage.getItem("__movecues_active_guide__")!)).toMatchObject({ currentStepId: "after", status: "active" }); loader.destroy();
+  });
+
+  it("pauses a Guide for a higher-priority interrupt and resumes the same step without another impression", async () => {
+    const first = document.createElement("button"); first.id = "interrupt-first"; const second = document.createElement("button"); second.id = "interrupt-second"; document.body.append(first, second);
+    const guide: DeliveredExperience = { id: "guide_interrupt", versionId: "v1", kind: "guide", widgetType: null, priority: 40, definition: { design, steps: [
+      { id: "one", content: { heading: "Guide one", body: "One", primaryAction: { label: "Next", type: "next_step" } }, target: { primarySelector: "#interrupt-first", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
+      { id: "two", content: { heading: "Guide two", body: "Two" }, target: { primarySelector: "#interrupt-second", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
+    ] } };
+    const modal = base("modal"); modal.id = "modal_interrupt"; modal.priority = 80; modal.interruptPolicy = "interrupt";
+    const fetchMock = experienceFetch(trigger => trigger === "open_modal" ? [modal] : [guide]); vi.stubGlobal("fetch", fetchMock); const loader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await loader.evaluate(); document.querySelector("[data-movecues-experience]")!.shadowRoot!.querySelector<HTMLButtonElement>(".primary")!.click(); expect(activeExperienceText()).toContain("Guide two"); loader.onCustomEvent("open_modal"); await vi.waitFor(() => expect(activeExperienceText()).toContain("Hello")); expect(JSON.parse(sessionStorage.getItem("__movecues_active_guide__")!)).toMatchObject({ currentStepId: "two", status: "paused" }); document.querySelector("[data-movecues-experience]")!.shadowRoot!.querySelector<HTMLButtonElement>(".close")!.click(); await vi.waitFor(() => expect(activeExperienceText()).toContain("Guide two")); const guideShown = postedEvents(fetchMock).filter(event => event.experienceId === guide.id && event.event === "shown"); expect(guideShown).toHaveLength(1); loader.destroy();
   });
 
   it("waits for a delayed SPA target and cleans up on timeout or destroy", async () => {
@@ -129,3 +158,13 @@ describe("experience editor and runtime", () => {
 });
 
 function isGuide(value: DeliveredExperience): value is DeliveredExperience & { definition: { steps: unknown[] } } { return "steps" in value.definition; }
+const runtimeSession = { getAnonymousId: () => "anon_1", getSessionId: () => "session_1", getPageViewId: () => "pageview_1", getIdentifiedUserId: () => null };
+function experienceFetch(manifest: (trigger: string | null) => DeliveredExperience[]) {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/experience-events")) { const event = JSON.parse(String(init?.body)); return { ok: true, status: event.event === "shown" ? 201 : 204, json: async () => ({ impressionId: `imp_${event.experienceId}` }) }; }
+    return { ok: true, status: 200, json: async () => ({ experiences: manifest(new URL(url).searchParams.get("trigger")) }) };
+  });
+}
+function postedEvents(fetchMock: ReturnType<typeof vi.fn>): Array<{ experienceId: string; event: string }> { return fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(String(init?.body))); }
+function activeExperienceText(): string { return document.querySelector("[data-movecues-experience]")?.shadowRoot?.textContent ?? ""; }

@@ -1982,6 +1982,26 @@
       "experience editor"
     );
   }
+  const EDITOR_CONTINUATION_KEY = "__movecues_experience_editor_session__";
+  function readEditorContinuation() {
+    try {
+      const value = JSON.parse(sessionStorage.getItem(EDITOR_CONTINUATION_KEY) ?? "null");
+      if (!value || typeof value.sessionId !== "string" || !value.sessionId || typeof value.accessToken !== "string" || !value.accessToken || typeof value.expiresAt !== "string" || !Number.isFinite(Date.parse(value.expiresAt)) || Date.parse(value.expiresAt) <= Date.now()) {
+        clearEditorContinuation();
+        return null;
+      }
+      return value;
+    } catch {
+      clearEditorContinuation();
+      return null;
+    }
+  }
+  function clearEditorContinuation() {
+    try {
+      sessionStorage.removeItem(EDITOR_CONTINUATION_KEY);
+    } catch {
+    }
+  }
   class Analytics {
     constructor(runtimeProviders = {}) {
       this.runtimeProviders = runtimeProviders;
@@ -2005,10 +2025,11 @@
       this.debugEnabled = !!this.config.debug;
       const generation = ++this.generation;
       const editorToken = new URL(location.href).searchParams.get("movecues_editor_token");
-      if (editorToken && !this.editorAttempted) {
+      const editorContinuation = editorToken ? null : readEditorContinuation();
+      if ((editorToken || editorContinuation) && !this.editorAttempted) {
         this.initialized = true;
         this.editorAttempted = true;
-        void this.initializeEditor(editorToken, userConfig, generation);
+        void this.initializeEditor(editorToken, editorContinuation, userConfig, generation);
         return;
       }
       if (this.config.respectDoNotTrack && isDoNotTrackEnabled()) {
@@ -2068,6 +2089,7 @@
       (_d = this.editor) == null ? void 0 : _d.destroy();
       this.editor = null;
       this.editorMode = false;
+      this.editorAttempted = false;
       this.initialized = false;
       this.log("destroyed");
     }
@@ -2115,7 +2137,7 @@
       }
       return true;
     }
-    async initializeEditor(editorToken, userConfig, generation) {
+    async initializeEditor(editorToken, continuation, userConfig, generation) {
       try {
         const runtime = this.runtimeProviders.editor ?? await loadEditorRuntime(this.config.editorRuntimeBundleUrl);
         if (!this.initialized || generation !== this.generation) return;
@@ -2124,7 +2146,7 @@
           return;
         }
         const editor = runtime.createController(this.config.endpoint);
-        const started = await editor.start(editorToken);
+        const started = editorToken ? await editor.start(editorToken) : continuation ? await editor.resume(continuation) : false;
         if (!this.initialized || generation !== this.generation) {
           editor.destroy();
           return;
@@ -2143,6 +2165,7 @@
     }
     fallbackFromEditor(userConfig, generation) {
       if (!this.initialized || generation !== this.generation) return;
+      clearEditorContinuation();
       this.initialized = false;
       this.init(userConfig);
     }

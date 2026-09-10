@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lumina | Pricing</title>
+    <style>
+        :root { --primary:#6366f1; --secondary:#a855f7; --dark:#0f172a; --muted:#64748b; --light:#f8fafc; }
+        * { box-sizing:border-box; margin:0; font-family:'Segoe UI',system-ui,sans-serif; } body { background:var(--light); color:var(--dark); line-height:1.6; }
+        nav { display:flex; justify-content:space-between; align-items:center; padding:1.25rem 5%; background:white; position:sticky; top:0; z-index:2; box-shadow:0 2px 12px #0f172a12; } nav a { color:var(--dark); text-decoration:none; font-weight:600; } nav a:hover,.active { color:var(--primary); }
+        .logo { color:var(--primary); font-size:1.5rem; font-weight:800; } .nav-links { display:flex; gap:1.75rem; } header { padding:6rem 5% 4rem; text-align:center; background:linear-gradient(135deg,var(--dark),#312e81); color:white; } header h1 { font-size:clamp(2.5rem,6vw,4rem); margin-bottom:.75rem; } header p { color:#cbd5e1; font-size:1.15rem; }
+        main { max-width:1100px; margin:auto; padding:4rem 5%; } .plans { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:1.5rem; align-items:stretch; } .plan { background:white; border:1px solid #e2e8f0; border-radius:1rem; padding:2rem; display:flex; flex-direction:column; } .plan.featured { border:2px solid var(--primary); box-shadow:0 15px 35px #6366f133; transform:translateY(-10px); }
+        .badge { color:var(--primary); font-size:.8rem; font-weight:800; text-transform:uppercase; letter-spacing:.08em; } h2 { margin:.5rem 0; font-size:1.6rem; } .price { font-size:2.5rem; font-weight:800; margin-bottom:1.5rem; } .price small { font-size:.95rem; color:var(--muted); font-weight:400; } ul { list-style:none; padding:0; color:var(--muted); flex:1; } li { margin:.8rem 0; } li::before { content:'✓'; color:var(--primary); font-weight:800; margin-right:.6rem; }
+        .btn { display:block; text-align:center; margin-top:2rem; padding:.8rem 1rem; border-radius:999px; background:linear-gradient(135deg,var(--primary),var(--secondary)); color:white; text-decoration:none; font-weight:700; } footer { padding:2rem 5%; text-align:center; background:var(--dark); color:#94a3b8; } @media (max-width:600px) { nav { align-items:flex-start; gap:1rem; } .nav-links { gap:.75rem; font-size:.9rem; } .plan.featured { transform:none; } }
+    </style>
+    <!-- Current SDK install used by this example. -->
+    <script async src="../../dist/sdk.js" data-site-id="site_tlh00zlo4buy61twqjccpmik" data-endpoint="http://localhost:3000"></script>
+</head>
+<body>
+    <nav><a class="logo" href="index.html">Lumina</a><div class="nav-links"><a href="index.html">Home</a><a href="features.html">Features</a><a class="active" href="pricing.html">Pricing</a></div></nav>
+    <header><h1>Simple pricing that scales.</h1><p>Start free, then choose the plan that fits your team.</p></header>
+    <main><section class="plans">
+        <article class="plan"><h2>Starter</h2><p class="price">$0 <small>/ forever</small></p><ul><li>Up to 3 team members</li><li>Basic analytics</li><li>7-day data retention</li><li>Community support</li></ul><a class="btn" href="index.html#signup">Start for free</a></article>
+        <article class="plan featured"><span class="badge">Most popular</span><h2>Pro</h2><p class="price">$24 <small>/ user / month</small></p><ul><li>Unlimited team members</li><li>Advanced analytics and funnels</li><li>Session replay</li><li>Priority support</li></ul><a class="btn" href="index.html#signup">Choose Pro</a></article>
+        <article class="plan"><h2>Scale</h2><p class="price">Custom</p><ul><li>Everything in Pro</li><li>Custom data retention</li><li>Dedicated success manager</li><li>Security and compliance review</li></ul><a class="btn" href="mailto:sales@lumina.example">Talk to sales</a></article>
+    </section></main>
+    <footer><p>&copy; 2026 Lumina Technologies. All rights reserved.</p></footer>
+</body>
+</html>

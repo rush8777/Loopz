@@ -10,8 +10,14 @@ export interface ExperienceLoaderRuntime {
     onCustomEvent(name: string): void;
     destroy(): void;
 }
+export interface EditorSession {
+    sessionId: string;
+    accessToken: string;
+    expiresAt: string;
+}
 export interface EditorControllerRuntime {
     start(rawToken: string): Promise<boolean>;
+    resume(session: EditorSession): Promise<boolean>;
     destroy(): void;
 }
 export interface ExperienceRuntime {

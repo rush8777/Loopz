@@ -110,7 +110,7 @@ export type {
   FeedbackConfig,
 } from "./types/config";
 
-export type { ExperienceKind, WidgetType, ExperienceTarget, RuntimeDefinition, DeliveredExperience } from "./experiences/types";
+export type { ExperienceKind, WidgetType, ExperienceTarget, GuideAdvance, GuideStep, PageRule, RuntimeDefinition, DeliveredExperience } from "./experiences/types";
 
 export type { FunnelStep } from "./types/funnel";
 

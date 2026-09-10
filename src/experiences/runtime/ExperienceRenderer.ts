@@ -13,6 +13,8 @@ export interface ExperienceRendererCallbacks {
   onDismiss: () => void;
   onAction: (action: ExperienceAction) => void;
   onComplete: () => void;
+  onGuideAdvance?: () => void;
+  onGuideBack?: () => void;
   onUnavailable?: () => void;
 }
 
@@ -20,11 +22,11 @@ export class ExperienceRenderer {
   private host: HTMLElement | null = null;
   private renderer: { destroy(): void } | null = null;
   private cancelPendingTarget: (() => void) | null = null;
-  private step = 0;
+  private cleanupAdvance: (() => void) | null = null;
 
-  render(experience: DeliveredExperience, callbacks: ExperienceRendererCallbacks): boolean {
-    this.destroy(); this.step = 0;
-    if (isGuideDefinition(experience.definition)) return this.renderGuide(experience, experience.definition, callbacks);
+  render(experience: DeliveredExperience, callbacks: ExperienceRendererCallbacks, guideStepId?: string): boolean {
+    this.destroy();
+    if (isGuideDefinition(experience.definition)) return this.renderGuide(experience, experience.definition, callbacks, guideStepId);
     return this.renderWidget(experience, experience.definition, callbacks);
   }
 
@@ -57,8 +59,9 @@ export class ExperienceRenderer {
     if (experience.widgetType !== "anchored_card" && experience.widgetType !== "hotspot") requestAnimationFrame(callbacks.onVisible); return true;
   }
 
-  private renderGuide(experience: DeliveredExperience, definition: RuntimeGuideDefinition, callbacks: ExperienceRendererCallbacks): boolean {
-    const step = definition.steps[this.step]; if (!step) return false;
+  private renderGuide(experience: DeliveredExperience, definition: RuntimeGuideDefinition, callbacks: ExperienceRendererCallbacks, guideStepId?: string): boolean {
+    const stepIndex = guideStepId ? definition.steps.findIndex(item => item.id === guideStepId) : 0;
+    const step = definition.steps[stepIndex]; if (!step) return false;
     const mount = (target: Element) => {
     const root = this.root(experience.id); const renderer = new AnchoredCardRenderer(); this.renderer = renderer;
     const behavior: ExperienceBehavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset };
@@ -67,20 +70,36 @@ export class ExperienceRenderer {
       onSecondary: () => { callbacks.onDismiss(); this.destroy(); },
       onPrimary: () => {
         const action = step.content.primaryAction; if (action) callbacks.onAction(action);
-        if (this.step < definition.steps.length - 1) { this.clearSurface(); this.step++; this.renderGuide(experience, definition, callbacks); }
-        else { callbacks.onComplete(); this.destroy(); }
+        if ((step.advance?.type ?? "button") === "button") callbacks.onGuideAdvance?.();
       },
     }, step.builder, "anchored_card");
-    if (this.step > 0) {
+    if (stepIndex > 0) {
       const back = document.createElement("button"); back.className = "secondary"; back.textContent = "Back";
-      back.addEventListener("click", () => { this.clearSurface(); this.step--; this.renderGuide(experience, definition, callbacks); });
+      back.addEventListener("click", () => callbacks.onGuideBack?.());
       card.querySelector("footer")?.prepend(back);
     }
+    this.listenForAdvance(target, step.advance?.type ?? "button", step.advance?.type === "element_hover" ? step.advance.durationMs : undefined, callbacks.onGuideAdvance);
     requestAnimationFrame(callbacks.onVisible);
     };
     const target = findTarget(step.target);
     if (target) mount(target); else this.cancelPendingTarget = waitForTarget(step.target, (element) => { this.cancelPendingTarget = null; mount(element); }, () => { this.cancelPendingTarget = null; callbacks.onUnavailable?.(); });
     return true;
+  }
+
+  private listenForAdvance(target: Element, type: string, durationMs: number | undefined, advance?: () => void): void {
+    if (!advance) return;
+    if (type === "element_click") {
+      let active = true;
+      const click = () => queueMicrotask(() => { if (active) advance(); });
+      target.addEventListener("click", click);
+      this.cleanupAdvance = () => { active = false; target.removeEventListener("click", click); };
+    } else if (type === "element_hover") {
+      let timer: number | null = null;
+      const leave = () => { if (timer !== null) window.clearTimeout(timer); timer = null; };
+      const enter = () => { leave(); timer = window.setTimeout(advance, durationMs ?? 500); };
+      target.addEventListener("mouseenter", enter); target.addEventListener("mouseleave", leave);
+      this.cleanupAdvance = () => { leave(); target.removeEventListener("mouseenter", enter); target.removeEventListener("mouseleave", leave); };
+    }
   }
 
   private callbacks(content: ExperienceContent, callbacks: ExperienceRendererCallbacks): RenderCallbacks {
@@ -91,8 +110,8 @@ export class ExperienceRenderer {
     };
   }
 
-  private clearSurface(): void { this.cancelPendingTarget?.(); this.cancelPendingTarget = null; this.renderer?.destroy(); this.renderer = null; this.host?.remove(); this.host = null; }
-  destroy(): void { this.clearSurface(); this.step = 0; }
+  private clearSurface(): void { this.cleanupAdvance?.(); this.cleanupAdvance = null; this.cancelPendingTarget?.(); this.cancelPendingTarget = null; this.renderer?.destroy(); this.renderer = null; this.host?.remove(); this.host = null; }
+  destroy(): void { this.clearSurface(); }
 }
 
 const STYLES = `

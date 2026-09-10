@@ -225,7 +225,7 @@ function fakeExperienceRuntime(loader: ExperienceLoaderRuntime): ExperienceRunti
 }
 
 function fakeEditorRuntime(start: ReturnType<typeof vi.fn>, destroy: ReturnType<typeof vi.fn>): EditorRuntime {
-  return { createController: vi.fn(() => ({ start, destroy })) };
+  return { createController: vi.fn(() => ({ start, resume: vi.fn().mockResolvedValue(false), destroy })) };
 }
 
 function installSuccessfulFetch(): ReturnType<typeof vi.fn> {

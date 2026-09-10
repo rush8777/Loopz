@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lumina | Features</title>
+    <style>
+        :root { --primary:#6366f1; --secondary:#a855f7; --dark:#0f172a; --muted:#64748b; --light:#f8fafc; }
+        * { box-sizing:border-box; margin:0; font-family:'Segoe UI',system-ui,sans-serif; }
+        body { background:var(--light); color:var(--dark); line-height:1.6; }
+        nav { display:flex; justify-content:space-between; align-items:center; padding:1.25rem 5%; background:white; position:sticky; top:0; z-index:2; box-shadow:0 2px 12px #0f172a12; }
+        nav a { color:var(--dark); text-decoration:none; font-weight:600; } nav a:hover,.active { color:var(--primary); }
+        .logo { color:var(--primary); font-size:1.5rem; font-weight:800; } .nav-links { display:flex; gap:1.75rem; }
+        .hero { padding:7rem 5% 5rem; text-align:center; background:linear-gradient(135deg,var(--dark),#312e81); color:white; }
+        .hero h1 { font-size:clamp(2.5rem,6vw,4.5rem); line-height:1.1; margin-bottom:1rem; } .hero p { color:#cbd5e1; font-size:1.2rem; max-width:650px; margin:auto; }
+        main { max-width:1150px; margin:auto; padding:5rem 5%; } h2 { text-align:center; font-size:2.25rem; margin-bottom:2.5rem; }
+        .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:1.5rem; } .card { background:white; border:1px solid #e2e8f0; border-radius:1rem; padding:2rem; box-shadow:0 10px 30px #0f172a08; }
+        .icon { font-size:2rem; margin-bottom:1rem; } h3 { margin-bottom:.75rem; font-size:1.3rem; } .card p { color:var(--muted); }
+        .cta { margin-top:4rem; border-radius:1.25rem; padding:3rem; text-align:center; background:linear-gradient(135deg,var(--primary),var(--secondary)); color:white; } .cta h2 { margin-bottom:.5rem; }
+        .btn { display:inline-block; margin-top:1.5rem; padding:.8rem 1.5rem; border-radius:999px; background:white; color:var(--primary); text-decoration:none; font-weight:700; } footer { padding:2rem 5%; text-align:center; background:var(--dark); color:#94a3b8; }
+        @media (max-width:600px) { nav { align-items:flex-start; gap:1rem; } .nav-links { gap:.75rem; font-size:.9rem; } }
+    </style>
+    <!-- Current SDK install used by this example. -->
+    <script async src="../../dist/sdk.js" data-site-id="site_tlh00zlo4buy61twqjccpmik" data-endpoint="http://localhost:3000"></script>
+</head>
+<body>
+    <nav><a class="logo" href="index.html">Lumina</a><div class="nav-links"><a href="index.html">Home</a><a class="active" href="features.html">Features</a><a href="pricing.html">Pricing</a></div></nav>
+    <header class="hero"><h1>Tools that move work forward.</h1><p>Everything your team needs to understand its work, automate routine tasks, and deliver exceptional products.</p></header>
+    <main><h2>Built for modern teams</h2><section class="grid">
+        <article class="card"><div class="icon">⚡</div><h3>Lightning fast</h3><p>Optimized performance and a globally distributed edge network keep every interaction quick.</p></article>
+        <article class="card"><div class="icon">🛡️</div><h3>Bank-grade security</h3><p>Encryption at rest and in transit, with SOC 2 Type II practices built into your workflow.</p></article>
+        <article class="card"><div class="icon">🤖</div><h3>AI assistant</h3><p>Automate repetitive work and get real-time suggestions tailored to how your team operates.</p></article>
+        <article class="card"><div class="icon">📊</div><h3>Actionable analytics</h3><p>See what is working with clear dashboards, funnels, and insights that guide better decisions.</p></article>
+        <article class="card"><div class="icon">🔗</div><h3>Connected workflows</h3><p>Bring your tools and teams together with flexible integrations and a single source of truth.</p></article>
+        <article class="card"><div class="icon">🌍</div><h3>Ready to scale</h3><p>From your first project to your biggest launch, Lumina grows with your organization.</p></article>
+    </section><section class="cta"><h2>Ready to work brighter?</h2><p>Start exploring Lumina today.</p><a class="btn" href="pricing.html">View plans</a></section></main>
+    <footer><p>&copy; 2026 Lumina Technologies. All rights reserved.</p></footer>
+</body>
+</html>

@@ -3,303 +3,71 @@
   function isGuideDefinition(value) {
     return "steps" in value;
   }
-  class EditorBridge {
-    constructor(apiBase, sessionId, accessToken) {
-      this.apiBase = apiBase;
-      this.sessionId = sessionId;
-      this.accessToken = accessToken;
-    }
-    headers() {
-      return { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}` };
-    }
-    async load() {
-      const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { headers: this.headers(), credentials: "omit" });
-      if (!response.ok) throw new Error("Editor session expired");
-      return response.json();
-    }
-    async save(definition) {
-      const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { method: "PATCH", headers: this.headers(), credentials: "omit", body: JSON.stringify({ definition }) });
-      if (!response.ok) throw new Error("Draft could not be saved");
+  const EDITOR_CONTINUATION_KEY = "__movecues_experience_editor_session__";
+  function storeEditorContinuation(session) {
+    try {
+      sessionStorage.setItem(EDITOR_CONTINUATION_KEY, JSON.stringify(session));
+    } catch {
     }
   }
-  const SENSITIVE_INPUT_TYPES = /* @__PURE__ */ new Set(["password", "email", "tel", "credit-card", "cc-number"]);
-  const SENSITIVE_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA", "SELECT"]);
-  const PRIVATE_ATTRIBUTES = ["data-private", "data-ignore", "data-analytics-ignore"];
-  class SensitiveElementDetector {
-    isSensitiveFormElement(el) {
-      const tag = el.tagName;
-      if (!SENSITIVE_TAGS.has(tag)) return false;
-      if (tag === "INPUT") {
-        const type = (el.getAttribute("type") || "text").toLowerCase();
-        if (SENSITIVE_INPUT_TYPES.has(type)) return true;
-        if (type === "text" || type === "search" || type === "number") return true;
-      }
-      return tag === "TEXTAREA" || tag === "SELECT" ? false : tag === "INPUT";
-    }
-    hasPrivacyMarker(el) {
-      return PRIVATE_ATTRIBUTES.some((attr) => el.hasAttribute(attr));
-    }
-    /** Walk up the tree - if any ancestor (or the element itself) is marked private, the whole subtree is private. */
-    isWithinPrivateSubtree(el) {
-      let node = el;
-      while (node) {
-        if (this.hasPrivacyMarker(node)) return true;
-        node = node.parentElement;
-      }
-      return false;
+  function clearEditorContinuation() {
+    try {
+      sessionStorage.removeItem(EDITOR_CONTINUATION_KEY);
+    } catch {
     }
   }
-  const MAX_LABEL_LENGTH = 60;
-  const OVERRIDE_ATTR = "data-movecues-name";
-  const detector = new SensitiveElementDetector();
-  function clean(text) {
-    if (!text) return void 0;
-    const trimmed = text.replace(/\s+/g, " ").trim();
-    if (!trimmed) return void 0;
-    return trimmed.length > MAX_LABEL_LENGTH ? `${trimmed.slice(0, MAX_LABEL_LENGTH - 1)}…` : trimmed;
-  }
-  function computeElementLabel(el) {
-    const override = clean(el.getAttribute(OVERRIDE_ATTR));
-    if (override) return override;
-    const ariaLabel = clean(el.getAttribute("aria-label"));
-    if (ariaLabel) return ariaLabel;
-    const labelledBy = el.getAttribute("aria-labelledby");
-    if (labelledBy) {
-      const labelText = labelledBy.split(/\s+/).map((id) => {
-        var _a;
-        return (_a = document.getElementById(id)) == null ? void 0 : _a.textContent;
-      }).filter(Boolean).join(" ");
-      const cleaned = clean(labelText);
-      if (cleaned) return cleaned;
-    }
-    if (!detector.isWithinPrivateSubtree(el)) {
-      const text = clean(el.textContent);
-      if (text) return text;
-    }
-    const alt = clean(el.getAttribute("alt"));
-    if (alt) return alt;
-    const title = clean(el.getAttribute("title"));
-    if (title) return title;
-    const placeholder = clean(el.getAttribute("placeholder"));
-    if (placeholder) return placeholder;
-    return semanticFallback(el);
-  }
-  function semanticFallback(el) {
-    const tag = el.tagName.toLowerCase();
-    const role = el.getAttribute("role");
-    if (tag === "button" || role === "button") {
-      return el.getAttribute("type") === "submit" ? "Submit button" : "Button";
-    }
-    if (tag === "a" || role === "link") return "Link";
-    if (tag === "input") {
-      const type = (el.getAttribute("type") || "text").toLowerCase();
-      return `${type.charAt(0).toUpperCase()}${type.slice(1)} field`;
-    }
-    if (tag === "select") return "Dropdown";
-    if (tag === "textarea") return "Text field";
-    return tag.charAt(0).toUpperCase() + tag.slice(1);
-  }
-  function computeElementRole(el) {
-    const explicit = el.getAttribute("role");
-    if (explicit) return explicit;
-    const tag = el.tagName.toLowerCase();
-    if (tag === "button") return "button";
-    if (tag === "a") return "link";
-    if (tag === "input") return `input:${(el.getAttribute("type") || "text").toLowerCase()}`;
-    if (tag === "select") return "select";
-    if (tag === "textarea") return "textarea";
-    return void 0;
-  }
-  const STABLE_DATA_ATTRS = ["data-testid", "data-test", "data-qa", "data-cy", "data-analytics-id"];
-  const SEMANTIC_ATTRS = ["role", "aria-label", "name", "type", "href"];
-  const DYNAMIC_CLASS_PATTERN = /^(css-|sc-|jsx-|_|[a-z0-9]{6,}$)/i;
-  const TAILWIND_UTILITY_PATTERN = /^(-?(m|p)[trblxy]?-|w-|h-|min-|max-|inset-|top-|right-|bottom-|left-|z-|order-|col-|row-|gap-|space-|grid-|flex-\d|flex$|inline-flex$|inline-block$|inline$|block$|hidden$|table|items-|justify-|content-|self-|place-|text-|font-|leading-|tracking-|whitespace-|break-|truncate$|bg-|from-|via-|to-|border|divide-|rounded|shadow|opacity-|blur-|brightness-|contrast-|grayscale|invert|saturate|sepia|backdrop-|transition|duration-|ease-|delay-|animate-|cursor-|select-|resize-|scroll-|snap-|touch-|pointer-events-|will-change-|appearance-|outline-|ring-|overflow-|overscroll-|absolute$|relative$|fixed$|sticky$|static$|visible$|invisible$|float-|clear-|isolate$|object-|aspect-|columns-|underline$|line-through$|no-underline$|uppercase$|lowercase$|capitalize$|normal-case$|italic$|not-italic$|antialiased$)/;
-  const TAILWIND_VARIANT_PREFIX_PATTERN = /^(sm|md|lg|xl|2xl|hover|focus|active|disabled|dark|group-hover|focus-visible|first|last|odd|even):/;
-  function isTailwindUtilityClass(cls) {
-    const unescaped = cls.replace(/\\/g, "");
-    return TAILWIND_UTILITY_PATTERN.test(unescaped) || TAILWIND_VARIANT_PREFIX_PATTERN.test(unescaped);
-  }
-  function isStableClass(cls) {
-    if (!cls) return false;
-    if (DYNAMIC_CLASS_PATTERN.test(cls)) return false;
-    if (/^\d/.test(cls)) return false;
-    if (isTailwindUtilityClass(cls)) return false;
-    return true;
-  }
-  const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const NUMERIC_SEGMENT = /^\d+$/;
-  const PREFIXED_HEX_ID_SEGMENT = /^[a-z]{1,12}_[0-9a-f]{6,}$/i;
-  const BARE_HEX_ID_SEGMENT = /^[0-9a-f]{12,}$/i;
-  function canonicalizePathSegment(segment) {
-    if (UUID_SEGMENT.test(segment) || NUMERIC_SEGMENT.test(segment) || PREFIXED_HEX_ID_SEGMENT.test(segment) || BARE_HEX_ID_SEGMENT.test(segment)) {
-      return ":id";
-    }
-    return segment;
-  }
-  const SAFE_FRAGMENT_ID = /^[a-z][a-z0-9_.:-]{0,99}$/i;
-  const SAFE_HASH_ROUTE = /^\/[a-z0-9_./:-]{0,199}$/i;
-  function canonicalizePath(path) {
-    return path.split("/").map((segment) => segment ? canonicalizePathSegment(segment) : segment).join("/");
-  }
-  function canonicalizeHref(href) {
-    if (href.startsWith("#/")) {
-      const hashPath = href.slice(1).split("?")[0].split("#")[0];
-      return SAFE_HASH_ROUTE.test(hashPath) ? `#${canonicalizePath(hashPath)}` : null;
-    }
-    if (href.startsWith("#")) {
-      const fragment = href.slice(1);
-      return SAFE_FRAGMENT_ID.test(fragment) ? `#${fragment}` : null;
-    }
-    const path = href.split("?")[0].split("#")[0];
-    return path ? canonicalizePath(path) : null;
-  }
-  class SelectorGenerator {
-    generate(el) {
-      const id = el.getAttribute("id");
-      if (id && this.isUniqueId(id)) {
-        return `${el.tagName.toLowerCase()}#${cssEscape(id)}`;
-      }
-      for (const attr of STABLE_DATA_ATTRS) {
-        const value = el.getAttribute(attr);
-        if (value) {
-          return `${el.tagName.toLowerCase()}[${attr}="${cssEscape(value)}"]`;
-        }
-      }
-      for (const attr of SEMANTIC_ATTRS) {
-        const rawValue = el.getAttribute(attr);
-        if (!rawValue) continue;
-        const value = attr === "href" ? canonicalizeHref(rawValue) : rawValue;
-        if (!value) continue;
-        if (value.length < 100) {
-          return `${el.tagName.toLowerCase()}[${attr}="${cssEscape(value)}"]`;
-        }
-      }
-      const classes = this.getClassList(el).filter(isStableClass);
-      if (classes.length > 0) {
-        return `${el.tagName.toLowerCase()}.${classes.map(cssEscape).join(".")}`;
-      }
-      return this.limitedStructuralPath(el);
-    }
-    describe(el) {
-      const classes = this.getClassList(el);
-      return {
-        tagName: el.tagName.toLowerCase(),
-        id: el.getAttribute("id") || void 0,
-        classes: classes.length ? classes : void 0,
-        selector: this.generate(el),
-        label: computeElementLabel(el),
-        role: computeElementRole(el)
-      };
-    }
-    getClassList(el) {
-      const raw = el.getAttribute("class");
-      if (!raw) return [];
-      return raw.split(/\s+/).filter(Boolean).slice(0, 5);
-    }
-    isUniqueId(id) {
-      try {
-        return document.querySelectorAll(`#${cssEscape(id)}`).length === 1;
-      } catch {
-        return false;
-      }
-    }
-    limitedStructuralPath(el, maxDepth = 3) {
-      const parts = [];
-      let node = el;
-      let depth = 0;
-      while (node && node !== document.body && depth < maxDepth) {
-        const tag = node.tagName.toLowerCase();
-        const parent = node.parentElement;
-        if (parent) {
-          const siblings = Array.from(parent.children).filter((c) => c.tagName === node.tagName);
-          const idx = siblings.indexOf(node) + 1;
-          parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${idx})` : tag);
-        } else {
-          parts.unshift(tag);
-        }
-        node = parent;
-        depth++;
-      }
-      return parts.join(" > ") || el.tagName.toLowerCase();
-    }
-  }
-  function cssEscape(value) {
-    if (typeof CSS !== "undefined" && CSS.escape) return CSS.escape(value);
-    return value.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
-  }
-  class HighlightOverlay {
+  class RouteObserver {
     constructor() {
-      this.element = document.createElement("div");
-      this.element.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #2563eb;background:rgba(37,99,235,.12);display:none;box-sizing:border-box";
-      document.documentElement.appendChild(this.element);
+      this.listeners = /* @__PURE__ */ new Set();
+      this.lastUrl = location.href;
+      this.installed = false;
+      this.originalPushState = history.pushState;
+      this.originalReplaceState = history.replaceState;
+      this.onPopState = () => this.checkForChange();
+      this.onHashChange = () => this.checkForChange();
     }
-    show(target) {
-      const rect = target.getBoundingClientRect();
-      Object.assign(this.element.style, { display: "block", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
-    }
-    hide() {
-      this.element.style.display = "none";
-    }
-    destroy() {
-      this.element.remove();
-    }
-  }
-  function reliability(selector) {
-    if (/#[a-z][\w:-]*|\[data-(?:testid|test|qa|cy|analytics-id)=/i.test(selector)) return "reliable";
-    if (/\[(?:role|aria-label|name|type|href)=|\.[a-z][\w-]*/i.test(selector) && !selector.includes(":nth-of-type")) return "moderate";
-    return "fragile";
-  }
-  class ElementPicker {
-    constructor() {
-      this.overlay = null;
-      this.generator = new SelectorGenerator();
-      this.resolve = null;
-      this.move = (event) => {
-        var _a, _b;
-        const target = document.elementFromPoint(event.clientX, event.clientY);
-        if (target && !target.closest("[data-movecues-editor]")) (_a = this.overlay) == null ? void 0 : _a.show(target);
-        else (_b = this.overlay) == null ? void 0 : _b.hide();
+    start() {
+      if (this.installed) return;
+      this.installed = true;
+      const self = this;
+      history.pushState = function(...args) {
+        const result = self.originalPushState.apply(this, args);
+        self.checkForChange();
+        return result;
       };
-      this.click = (event) => {
-        const target = document.elementFromPoint(event.clientX, event.clientY);
-        if (!target || target.closest("[data-movecues-editor]")) return;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        const descriptor = this.generator.describe(target);
-        const selector = descriptor.selector;
-        this.finish({ primarySelector: selector, fallbackSelectors: [], label: descriptor.label, role: descriptor.role, tagName: descriptor.tagName, reliability: reliability(selector) });
+      history.replaceState = function(...args) {
+        const result = self.originalReplaceState.apply(this, args);
+        self.checkForChange();
+        return result;
       };
-      this.key = (event) => {
-        if (event.key === "Escape") this.finish(null);
-      };
+      window.addEventListener("popstate", this.onPopState);
+      window.addEventListener("hashchange", this.onHashChange);
     }
-    pick() {
-      this.cancel();
-      this.overlay = new HighlightOverlay();
-      document.addEventListener("pointermove", this.move, true);
-      document.addEventListener("click", this.click, true);
-      document.addEventListener("keydown", this.key, true);
-      return new Promise((resolve) => {
-        this.resolve = resolve;
-      });
+    stop() {
+      if (!this.installed) return;
+      this.installed = false;
+      history.pushState = this.originalPushState;
+      history.replaceState = this.originalReplaceState;
+      window.removeEventListener("popstate", this.onPopState);
+      window.removeEventListener("hashchange", this.onHashChange);
     }
-    cancel() {
-      if (this.resolve) this.finish(null);
-      else this.cleanup();
+    onChange(fn) {
+      this.listeners.add(fn);
+      return () => this.listeners.delete(fn);
     }
-    finish(value) {
-      const resolve = this.resolve;
-      this.resolve = null;
-      this.cleanup();
-      resolve == null ? void 0 : resolve(value);
-    }
-    cleanup() {
-      var _a;
-      document.removeEventListener("pointermove", this.move, true);
-      document.removeEventListener("click", this.click, true);
-      document.removeEventListener("keydown", this.key, true);
-      (_a = this.overlay) == null ? void 0 : _a.destroy();
-      this.overlay = null;
+    checkForChange() {
+      setTimeout(() => {
+        const url = location.href;
+        if (url !== this.lastUrl) {
+          this.lastUrl = url;
+          for (const fn of this.listeners) {
+            try {
+              fn(url);
+            } catch {
+            }
+          }
+        }
+      }, 0);
     }
   }
   const ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "H1", "H2", "H3", "H4", "P", "SPAN", "BUTTON", "IMG", "HR"]);
@@ -698,12 +466,11 @@ ${ISOLATION_CSS}`;
       this.host = null;
       this.renderer = null;
       this.cancelPendingTarget = null;
-      this.step = 0;
+      this.cleanupAdvance = null;
     }
-    render(experience, callbacks) {
+    render(experience, callbacks, guideStepId) {
       this.destroy();
-      this.step = 0;
-      if (isGuideDefinition(experience.definition)) return this.renderGuide(experience, experience.definition, callbacks);
+      if (isGuideDefinition(experience.definition)) return this.renderGuide(experience, experience.definition, callbacks, guideStepId);
       return this.renderWidget(experience, experience.definition, callbacks);
     }
     root(experienceId) {
@@ -766,11 +533,12 @@ ${ISOLATION_CSS}`;
       if (experience.widgetType !== "anchored_card" && experience.widgetType !== "hotspot") requestAnimationFrame(callbacks.onVisible);
       return true;
     }
-    renderGuide(experience, definition, callbacks) {
-      const step = definition.steps[this.step];
+    renderGuide(experience, definition, callbacks, guideStepId) {
+      const stepIndex = guideStepId ? definition.steps.findIndex((item) => item.id === guideStepId) : 0;
+      const step = definition.steps[stepIndex];
       if (!step) return false;
       const mount = (target2) => {
-        var _a;
+        var _a, _b, _c;
         const root = this.root(experience.id);
         const renderer = new AnchoredCardRenderer();
         this.renderer = renderer;
@@ -785,29 +553,23 @@ ${ISOLATION_CSS}`;
             this.destroy();
           },
           onPrimary: () => {
+            var _a2, _b2;
             const action = step.content.primaryAction;
             if (action) callbacks.onAction(action);
-            if (this.step < definition.steps.length - 1) {
-              this.clearSurface();
-              this.step++;
-              this.renderGuide(experience, definition, callbacks);
-            } else {
-              callbacks.onComplete();
-              this.destroy();
-            }
+            if ((((_a2 = step.advance) == null ? void 0 : _a2.type) ?? "button") === "button") (_b2 = callbacks.onGuideAdvance) == null ? void 0 : _b2.call(callbacks);
           }
         }, step.builder, "anchored_card");
-        if (this.step > 0) {
+        if (stepIndex > 0) {
           const back = document.createElement("button");
           back.className = "secondary";
           back.textContent = "Back";
           back.addEventListener("click", () => {
-            this.clearSurface();
-            this.step--;
-            this.renderGuide(experience, definition, callbacks);
+            var _a2;
+            return (_a2 = callbacks.onGuideBack) == null ? void 0 : _a2.call(callbacks);
           });
           (_a = card.querySelector("footer")) == null ? void 0 : _a.prepend(back);
         }
+        this.listenForAdvance(target2, ((_b = step.advance) == null ? void 0 : _b.type) ?? "button", ((_c = step.advance) == null ? void 0 : _c.type) === "element_hover" ? step.advance.durationMs : void 0, callbacks.onGuideAdvance);
         requestAnimationFrame(callbacks.onVisible);
       };
       const target = findTarget(step.target);
@@ -821,6 +583,37 @@ ${ISOLATION_CSS}`;
         (_a = callbacks.onUnavailable) == null ? void 0 : _a.call(callbacks);
       });
       return true;
+    }
+    listenForAdvance(target, type, durationMs, advance) {
+      if (!advance) return;
+      if (type === "element_click") {
+        let active = true;
+        const click = () => queueMicrotask(() => {
+          if (active) advance();
+        });
+        target.addEventListener("click", click);
+        this.cleanupAdvance = () => {
+          active = false;
+          target.removeEventListener("click", click);
+        };
+      } else if (type === "element_hover") {
+        let timer = null;
+        const leave = () => {
+          if (timer !== null) window.clearTimeout(timer);
+          timer = null;
+        };
+        const enter = () => {
+          leave();
+          timer = window.setTimeout(advance, durationMs ?? 500);
+        };
+        target.addEventListener("mouseenter", enter);
+        target.addEventListener("mouseleave", leave);
+        this.cleanupAdvance = () => {
+          leave();
+          target.removeEventListener("mouseenter", enter);
+          target.removeEventListener("mouseleave", leave);
+        };
+      }
     }
     callbacks(content, callbacks) {
       return {
@@ -843,17 +636,18 @@ ${ISOLATION_CSS}`;
       };
     }
     clearSurface() {
-      var _a, _b, _c;
-      (_a = this.cancelPendingTarget) == null ? void 0 : _a.call(this);
+      var _a, _b, _c, _d;
+      (_a = this.cleanupAdvance) == null ? void 0 : _a.call(this);
+      this.cleanupAdvance = null;
+      (_b = this.cancelPendingTarget) == null ? void 0 : _b.call(this);
       this.cancelPendingTarget = null;
-      (_b = this.renderer) == null ? void 0 : _b.destroy();
+      (_c = this.renderer) == null ? void 0 : _c.destroy();
       this.renderer = null;
-      (_c = this.host) == null ? void 0 : _c.remove();
+      (_d = this.host) == null ? void 0 : _d.remove();
       this.host = null;
     }
     destroy() {
       this.clearSurface();
-      this.step = 0;
     }
   }
   const STYLES = `
@@ -868,250 +662,898 @@ ${ISOLATION_CSS}`;
   .banner{left:0;right:0;width:auto!important;max-width:none;border-radius:0!important;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner[data-position=top]{top:0}.banner[data-position=bottom]{bottom:0}.banner h2,.banner p{grid-column:1}.banner footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
   .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--movecues-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--movecues-hotspot);border-radius:50%;animation:movecues-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes movecues-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
 `;
+  class EditorBridge {
+    constructor(apiBase, sessionId, accessToken) {
+      this.apiBase = apiBase;
+      this.sessionId = sessionId;
+      this.accessToken = accessToken;
+    }
+    headers() {
+      return { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}` };
+    }
+    async load() {
+      const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { headers: this.headers(), credentials: "omit" });
+      if (!response.ok) throw new Error("Editor session expired");
+      return response.json();
+    }
+    async save(definition) {
+      const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { method: "PATCH", headers: this.headers(), credentials: "omit", body: JSON.stringify({ definition }) });
+      if (!response.ok) throw new Error("Draft could not be saved");
+    }
+  }
+  const SENSITIVE_INPUT_TYPES = /* @__PURE__ */ new Set(["password", "email", "tel", "credit-card", "cc-number"]);
+  const SENSITIVE_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA", "SELECT"]);
+  const PRIVATE_ATTRIBUTES = ["data-private", "data-ignore", "data-analytics-ignore"];
+  class SensitiveElementDetector {
+    isSensitiveFormElement(el) {
+      const tag = el.tagName;
+      if (!SENSITIVE_TAGS.has(tag)) return false;
+      if (tag === "INPUT") {
+        const type = (el.getAttribute("type") || "text").toLowerCase();
+        if (SENSITIVE_INPUT_TYPES.has(type)) return true;
+        if (type === "text" || type === "search" || type === "number") return true;
+      }
+      return tag === "TEXTAREA" || tag === "SELECT" ? false : tag === "INPUT";
+    }
+    hasPrivacyMarker(el) {
+      return PRIVATE_ATTRIBUTES.some((attr) => el.hasAttribute(attr));
+    }
+    /** Walk up the tree - if any ancestor (or the element itself) is marked private, the whole subtree is private. */
+    isWithinPrivateSubtree(el) {
+      let node = el;
+      while (node) {
+        if (this.hasPrivacyMarker(node)) return true;
+        node = node.parentElement;
+      }
+      return false;
+    }
+  }
+  const MAX_LABEL_LENGTH = 60;
+  const OVERRIDE_ATTR = "data-movecues-name";
+  const detector = new SensitiveElementDetector();
+  function clean(text) {
+    if (!text) return void 0;
+    const trimmed = text.replace(/\s+/g, " ").trim();
+    if (!trimmed) return void 0;
+    return trimmed.length > MAX_LABEL_LENGTH ? `${trimmed.slice(0, MAX_LABEL_LENGTH - 1)}…` : trimmed;
+  }
+  function computeElementLabel(el) {
+    const override = clean(el.getAttribute(OVERRIDE_ATTR));
+    if (override) return override;
+    const ariaLabel = clean(el.getAttribute("aria-label"));
+    if (ariaLabel) return ariaLabel;
+    const labelledBy = el.getAttribute("aria-labelledby");
+    if (labelledBy) {
+      const labelText = labelledBy.split(/\s+/).map((id) => {
+        var _a;
+        return (_a = document.getElementById(id)) == null ? void 0 : _a.textContent;
+      }).filter(Boolean).join(" ");
+      const cleaned = clean(labelText);
+      if (cleaned) return cleaned;
+    }
+    if (!detector.isWithinPrivateSubtree(el)) {
+      const text = clean(el.textContent);
+      if (text) return text;
+    }
+    const alt = clean(el.getAttribute("alt"));
+    if (alt) return alt;
+    const title = clean(el.getAttribute("title"));
+    if (title) return title;
+    const placeholder = clean(el.getAttribute("placeholder"));
+    if (placeholder) return placeholder;
+    return semanticFallback(el);
+  }
+  function semanticFallback(el) {
+    const tag = el.tagName.toLowerCase();
+    const role = el.getAttribute("role");
+    if (tag === "button" || role === "button") {
+      return el.getAttribute("type") === "submit" ? "Submit button" : "Button";
+    }
+    if (tag === "a" || role === "link") return "Link";
+    if (tag === "input") {
+      const type = (el.getAttribute("type") || "text").toLowerCase();
+      return `${type.charAt(0).toUpperCase()}${type.slice(1)} field`;
+    }
+    if (tag === "select") return "Dropdown";
+    if (tag === "textarea") return "Text field";
+    return tag.charAt(0).toUpperCase() + tag.slice(1);
+  }
+  function computeElementRole(el) {
+    const explicit = el.getAttribute("role");
+    if (explicit) return explicit;
+    const tag = el.tagName.toLowerCase();
+    if (tag === "button") return "button";
+    if (tag === "a") return "link";
+    if (tag === "input") return `input:${(el.getAttribute("type") || "text").toLowerCase()}`;
+    if (tag === "select") return "select";
+    if (tag === "textarea") return "textarea";
+    return void 0;
+  }
+  const STABLE_DATA_ATTRS = ["data-testid", "data-test", "data-qa", "data-cy", "data-analytics-id"];
+  const SEMANTIC_ATTRS = ["role", "aria-label", "name", "type", "href"];
+  const DYNAMIC_CLASS_PATTERN = /^(css-|sc-|jsx-|_|[a-z0-9]{6,}$)/i;
+  const TAILWIND_UTILITY_PATTERN = /^(-?(m|p)[trblxy]?-|w-|h-|min-|max-|inset-|top-|right-|bottom-|left-|z-|order-|col-|row-|gap-|space-|grid-|flex-\d|flex$|inline-flex$|inline-block$|inline$|block$|hidden$|table|items-|justify-|content-|self-|place-|text-|font-|leading-|tracking-|whitespace-|break-|truncate$|bg-|from-|via-|to-|border|divide-|rounded|shadow|opacity-|blur-|brightness-|contrast-|grayscale|invert|saturate|sepia|backdrop-|transition|duration-|ease-|delay-|animate-|cursor-|select-|resize-|scroll-|snap-|touch-|pointer-events-|will-change-|appearance-|outline-|ring-|overflow-|overscroll-|absolute$|relative$|fixed$|sticky$|static$|visible$|invisible$|float-|clear-|isolate$|object-|aspect-|columns-|underline$|line-through$|no-underline$|uppercase$|lowercase$|capitalize$|normal-case$|italic$|not-italic$|antialiased$)/;
+  const TAILWIND_VARIANT_PREFIX_PATTERN = /^(sm|md|lg|xl|2xl|hover|focus|active|disabled|dark|group-hover|focus-visible|first|last|odd|even):/;
+  function isTailwindUtilityClass(cls) {
+    const unescaped = cls.replace(/\\/g, "");
+    return TAILWIND_UTILITY_PATTERN.test(unescaped) || TAILWIND_VARIANT_PREFIX_PATTERN.test(unescaped);
+  }
+  function isStableClass(cls) {
+    if (!cls) return false;
+    if (DYNAMIC_CLASS_PATTERN.test(cls)) return false;
+    if (/^\d/.test(cls)) return false;
+    if (isTailwindUtilityClass(cls)) return false;
+    return true;
+  }
+  const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const NUMERIC_SEGMENT = /^\d+$/;
+  const PREFIXED_HEX_ID_SEGMENT = /^[a-z]{1,12}_[0-9a-f]{6,}$/i;
+  const BARE_HEX_ID_SEGMENT = /^[0-9a-f]{12,}$/i;
+  function canonicalizePathSegment(segment) {
+    if (UUID_SEGMENT.test(segment) || NUMERIC_SEGMENT.test(segment) || PREFIXED_HEX_ID_SEGMENT.test(segment) || BARE_HEX_ID_SEGMENT.test(segment)) {
+      return ":id";
+    }
+    return segment;
+  }
+  const SAFE_FRAGMENT_ID = /^[a-z][a-z0-9_.:-]{0,99}$/i;
+  const SAFE_HASH_ROUTE = /^\/[a-z0-9_./:-]{0,199}$/i;
+  function canonicalizePath(path) {
+    return path.split("/").map((segment) => segment ? canonicalizePathSegment(segment) : segment).join("/");
+  }
+  function canonicalizeHref(href) {
+    if (href.startsWith("#/")) {
+      const hashPath = href.slice(1).split("?")[0].split("#")[0];
+      return SAFE_HASH_ROUTE.test(hashPath) ? `#${canonicalizePath(hashPath)}` : null;
+    }
+    if (href.startsWith("#")) {
+      const fragment = href.slice(1);
+      return SAFE_FRAGMENT_ID.test(fragment) ? `#${fragment}` : null;
+    }
+    const path = href.split("?")[0].split("#")[0];
+    return path ? canonicalizePath(path) : null;
+  }
+  class SelectorGenerator {
+    generate(el) {
+      const id = el.getAttribute("id");
+      if (id && this.isUniqueId(id)) {
+        return `${el.tagName.toLowerCase()}#${cssEscape(id)}`;
+      }
+      for (const attr of STABLE_DATA_ATTRS) {
+        const value = el.getAttribute(attr);
+        if (value) {
+          return `${el.tagName.toLowerCase()}[${attr}="${cssEscape(value)}"]`;
+        }
+      }
+      for (const attr of SEMANTIC_ATTRS) {
+        const rawValue = el.getAttribute(attr);
+        if (!rawValue) continue;
+        const value = attr === "href" ? canonicalizeHref(rawValue) : rawValue;
+        if (!value) continue;
+        if (value.length < 100) {
+          return `${el.tagName.toLowerCase()}[${attr}="${cssEscape(value)}"]`;
+        }
+      }
+      const classes = this.getClassList(el).filter(isStableClass);
+      if (classes.length > 0) {
+        return `${el.tagName.toLowerCase()}.${classes.map(cssEscape).join(".")}`;
+      }
+      return this.limitedStructuralPath(el);
+    }
+    describe(el) {
+      const classes = this.getClassList(el);
+      return {
+        tagName: el.tagName.toLowerCase(),
+        id: el.getAttribute("id") || void 0,
+        classes: classes.length ? classes : void 0,
+        selector: this.generate(el),
+        label: computeElementLabel(el),
+        role: computeElementRole(el)
+      };
+    }
+    getClassList(el) {
+      const raw = el.getAttribute("class");
+      if (!raw) return [];
+      return raw.split(/\s+/).filter(Boolean).slice(0, 5);
+    }
+    isUniqueId(id) {
+      try {
+        return document.querySelectorAll(`#${cssEscape(id)}`).length === 1;
+      } catch {
+        return false;
+      }
+    }
+    limitedStructuralPath(el, maxDepth = 3) {
+      const parts = [];
+      let node = el;
+      let depth = 0;
+      while (node && node !== document.body && depth < maxDepth) {
+        const tag = node.tagName.toLowerCase();
+        const parent = node.parentElement;
+        if (parent) {
+          const siblings = Array.from(parent.children).filter((c) => c.tagName === node.tagName);
+          const idx = siblings.indexOf(node) + 1;
+          parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${idx})` : tag);
+        } else {
+          parts.unshift(tag);
+        }
+        node = parent;
+        depth++;
+      }
+      return parts.join(" > ") || el.tagName.toLowerCase();
+    }
+  }
+  function cssEscape(value) {
+    if (typeof CSS !== "undefined" && CSS.escape) return CSS.escape(value);
+    return value.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+  }
+  class HighlightOverlay {
+    constructor() {
+      this.element = document.createElement("div");
+      this.element.dataset.movecuesPickerOverlay = "";
+      this.element.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #2563eb;background:rgba(37,99,235,.12);display:none;box-sizing:border-box";
+      document.documentElement.appendChild(this.element);
+    }
+    show(target) {
+      const rect = target.getBoundingClientRect();
+      Object.assign(this.element.style, { display: "block", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+    }
+    hide() {
+      this.element.style.display = "none";
+    }
+    destroy() {
+      this.element.remove();
+    }
+  }
+  function reliability(selector) {
+    if (/#[a-z][\w:-]*|\[data-(?:testid|test|qa|cy|analytics-id)=/i.test(selector)) return "reliable";
+    if (/\[(?:role|aria-label|name|type|href)=|\.[a-z][\w-]*/i.test(selector) && !selector.includes(":nth-of-type")) return "moderate";
+    return "fragile";
+  }
+  class ElementPicker {
+    constructor() {
+      this.overlay = null;
+      this.generator = new SelectorGenerator();
+      this.resolve = null;
+      this.shiftPassthrough = false;
+      this.move = (event) => {
+        var _a, _b, _c;
+        if (this.shiftPassthrough || event.shiftKey) {
+          (_a = this.overlay) == null ? void 0 : _a.hide();
+          return;
+        }
+        const target = document.elementFromPoint(event.clientX, event.clientY);
+        if (target && !isMovcuesSurface(target)) (_b = this.overlay) == null ? void 0 : _b.show(target);
+        else (_c = this.overlay) == null ? void 0 : _c.hide();
+      };
+      this.click = (event) => {
+        if (this.shiftPassthrough || event.shiftKey || event.composedPath().some((item) => item instanceof Element && isMovcuesSurface(item))) return;
+        const target = document.elementFromPoint(event.clientX, event.clientY);
+        if (!target || isMovcuesSurface(target)) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const descriptor = this.generator.describe(target);
+        const selector = descriptor.selector;
+        this.finish({ primarySelector: selector, fallbackSelectors: [], label: descriptor.label, role: descriptor.role, tagName: descriptor.tagName, reliability: reliability(selector) });
+      };
+      this.keyDown = (event) => {
+        var _a;
+        if (event.key === "Escape") this.finish(null);
+        else if (event.key === "Shift") {
+          this.shiftPassthrough = true;
+          (_a = this.overlay) == null ? void 0 : _a.hide();
+        }
+      };
+      this.keyUp = (event) => {
+        if (event.key === "Shift") this.shiftPassthrough = false;
+      };
+      this.resetPassthrough = () => {
+        this.shiftPassthrough = false;
+      };
+    }
+    pick() {
+      this.cancel();
+      this.overlay = new HighlightOverlay();
+      document.addEventListener("pointermove", this.move, true);
+      document.addEventListener("click", this.click, true);
+      document.addEventListener("keydown", this.keyDown, true);
+      document.addEventListener("keyup", this.keyUp, true);
+      window.addEventListener("blur", this.resetPassthrough);
+      document.addEventListener("visibilitychange", this.resetPassthrough);
+      return new Promise((resolve) => {
+        this.resolve = resolve;
+      });
+    }
+    cancel() {
+      if (this.resolve) this.finish(null);
+      else this.cleanup();
+    }
+    finish(value) {
+      const resolve = this.resolve;
+      this.resolve = null;
+      this.cleanup();
+      resolve == null ? void 0 : resolve(value);
+    }
+    cleanup() {
+      var _a;
+      document.removeEventListener("pointermove", this.move, true);
+      document.removeEventListener("click", this.click, true);
+      document.removeEventListener("keydown", this.keyDown, true);
+      document.removeEventListener("keyup", this.keyUp, true);
+      window.removeEventListener("blur", this.resetPassthrough);
+      document.removeEventListener("visibilitychange", this.resetPassthrough);
+      this.shiftPassthrough = false;
+      (_a = this.overlay) == null ? void 0 : _a.destroy();
+      this.overlay = null;
+    }
+  }
+  function isMovcuesSurface(element) {
+    if (element.closest("[data-movecues-editor],[data-movecues-experience],[data-movecues-picker-overlay]")) return true;
+    const root = element.getRootNode();
+    return root instanceof ShadowRoot && isMovcuesSurface(root.host);
+  }
   class EditorModeController {
     constructor(apiBase) {
       this.apiBase = apiBase;
       this.host = null;
+      this.root = null;
       this.picker = new ElementPicker();
+      this.preview = new ExperienceRenderer();
+      this.routeObserver = new RouteObserver();
+      this.routeUnsubscribe = null;
+      this.mutationObserver = null;
+      this.dragCleanup = null;
       this.expiryTimer = 0;
       this.validationTimer = 0;
-      this.preview = new ExperienceRenderer();
+      this.saveTimer = 0;
+      this.saveInFlight = null;
+      this.targetRefreshTimer = 0;
+      this.selectionGeneration = 0;
+      this.bridge = null;
+      this.draft = null;
+      this.definition = null;
+      this.guide = null;
+      this.stepIndex = 0;
+      this.mode = "select";
+      this.dirty = false;
+      this.previewRendered = false;
+      this.currentPath = "";
     }
     async start(rawToken) {
       try {
-        const response = await fetch(`${this.apiBase}/public/experience-editor/exchange`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", body: JSON.stringify({ token: rawToken }) });
+        const response = await fetch(`${this.apiBase}/public/experience-editor/exchange`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "omit",
+          body: JSON.stringify({ token: rawToken })
+        });
         if (!response.ok) return false;
         const session = await response.json();
+        if (!validSession(session)) return false;
         const clean2 = new URL(location.href);
         const requestedStep = Number(clean2.searchParams.get("movecues_editor_step") ?? "0");
         clean2.searchParams.delete("movecues_editor_token");
         clean2.searchParams.delete("movecues_editor_step");
         history.replaceState(history.state, "", clean2.toString());
-        const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
-        this.mount(await bridge.load(), bridge, requestedStep);
-        this.expiryTimer = window.setTimeout(() => this.destroy(), Math.max(0, new Date(session.expiresAt).getTime() - Date.now()));
-        return true;
+        return await this.activate(session, requestedStep);
       } catch {
         this.destroy();
         return false;
       }
     }
-    mount(draft, bridge, requestedStep = 0) {
-      var _a, _b, _c;
-      this.host = document.createElement("div");
-      this.host.dataset.movecuesEditor = "";
-      const root = this.host.attachShadow({ mode: "open" });
-      const definition = draft.version.definition;
-      const guide = isGuideDefinition(definition) ? definition : null;
-      let stepIndex = guide ? Math.max(0, Math.min(requestedStep, guide.steps.length - 1)) : 0;
-      const stepTabs = guide ? `<div class="steps"><b data-step-label>Editing step 1 of ${guide.steps.length}</b><div>${guide.steps.map((_, index) => `<button data-step="${index}" class="${index === 0 ? "active" : ""}">Step ${index + 1}</button>`).join("")}</div></div>` : "";
-      root.innerHTML = `<style>${STYLE}</style><aside><header><b>movecues visual editor</b><small>${escapeText(draft.experience.name)}</small></header><nav>${["Content", "Design", "Behavior", "Targeting", "Publish"].map((x, i) => `<button data-tab="${i}" class="${i === 0 ? "active" : ""}">${x}</button>`).join("")}</nav><main>${stepTabs}<section data-panel="0"><label>Heading<input data-heading></label><label>Body<textarea data-body></textarea></label></section><section data-panel="1" hidden><label>Width<select data-width><option value="sm">Small</option><option value="md">Medium</option><option value="lg">Large</option></select></label><label>Background<input data-background type="color"></label><label>Text color<input data-foreground type="color"></label><label>Primary color<input data-primary type="color"></label></section><section data-panel="2" hidden><div data-for="anchored"><label>Placement<select data-placement><option value="auto">Auto</option><option value="top">Top</option><option value="right">Right</option><option value="bottom">Bottom</option><option value="left">Left</option></select></label><label>Offset<input data-offset type="number" min="0" max="100"></label></div><div data-for="toast"><label>Toast position<select data-toast-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label><label>Auto-dismiss ms<input data-auto-dismiss type="number" min="500" placeholder="Disabled"></label></div><div data-for="cursor"><label>Horizontal offset<input data-cursor-x type="number"></label><label>Vertical offset<input data-cursor-y type="number"></label></div><div data-for="modal"><label>Layout<select data-modal-layout><option value="center">Centered</option><option value="fullscreen">Fullscreen</option></select></label></div><div data-for="slideout"><label>Edge position<select data-slideout-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="center-left">Center left</option><option value="center-right">Center right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label></div><div data-for="overlay"><label class="row"><input data-backdrop type="checkbox"> Backdrop</label><label>Backdrop opacity<input data-backdrop-opacity type="number" min="0" max="0.9" step="0.05"></label><label class="row"><input data-close-backdrop type="checkbox"> Dismiss on backdrop click</label></div><div data-for="hotspot"><label>Beacon style<select data-hotspot-style><option value="pulse">Pulse</option><option value="dot">Dot</option><option value="question">Question mark</option></select></label><label>Beacon color<input data-hotspot-color type="color"></label></div><label class="row"><input data-dismissible type="checkbox"> Dismissible</label><div data-for="target"><button data-pick>Reselect target</button><p data-reliability></p></div></section><section data-panel="3" hidden><label>Frequency<select data-frequency><option value="once">Once ever</option><option value="once_per_session">Once per session</option><option value="every_time">Every qualifying time</option></select></label><label>Priority<input data-priority type="number" min="-1000" max="1000"></label><p>Saved Page, Segment, and event targeting are configured securely in the movecues dashboard.</p></section><section data-panel="4" hidden><p>Preview is live on this page. Save the draft here, then return to movecues to publish or pause it.</p><button data-save>Save draft</button></section><p data-status>Draft autosaves as you edit.</p></main></aside>`;
-      (_a = root.querySelector('[data-for="overlay"]')) == null ? void 0 : _a.insertAdjacentHTML("beforebegin", '<div data-for="banner"><label>Banner position<select data-banner-position><option value="top">Top</option><option value="bottom">Bottom</option></select></label></div>');
-      document.documentElement.appendChild(this.host);
-      const currentContent = () => guide ? guide.steps[stepIndex].content : definition.content;
-      const currentBehavior = () => guide ? guide.steps[stepIndex].behavior : definition.behavior;
-      const heading = root.querySelector("[data-heading]");
-      const body = root.querySelector("[data-body]");
-      const placement = root.querySelector("[data-placement]");
-      const offset = root.querySelector("[data-offset]");
-      const dismissible = root.querySelector("[data-dismissible]");
-      const status = root.querySelector("[data-status]");
-      const widgetType = draft.experience.widgetType;
-      const activeGroups = new Set(guide || widgetType === "anchored_card" ? ["anchored", "target"] : widgetType === "hotspot" ? ["anchored", "hotspot", "target"] : widgetType === "modal" ? ["modal", "overlay"] : widgetType === "slideout" ? ["slideout", "overlay"] : widgetType === "banner" ? ["banner"] : widgetType === "toast" ? ["toast"] : ["cursor"]);
-      root.querySelectorAll("[data-for]").forEach((group) => {
-        group.hidden = !activeGroups.has(group.dataset.for);
-      });
-      const field = (selector) => root.querySelector(selector);
-      const bannerPosition = field("[data-banner-position]");
-      bannerPosition.value = currentBehavior().bannerPosition ?? "top";
-      const syncStep = () => {
-        var _a2, _b2, _c2;
-        const content = currentContent(), behavior = currentBehavior();
-        heading.value = content.heading;
-        body.value = content.body;
-        placement.value = behavior.placement ?? "auto";
-        offset.value = String(behavior.offset ?? 8);
-        dismissible.checked = behavior.dismissible ?? true;
-        field("[data-toast-position]").value = behavior.toastPosition ?? "bottom-right";
-        field("[data-auto-dismiss]").value = behavior.autoDismissMs ? String(behavior.autoDismissMs) : "";
-        field("[data-cursor-x]").value = String(((_a2 = behavior.cursorOffset) == null ? void 0 : _a2.x) ?? 16);
-        field("[data-cursor-y]").value = String(((_b2 = behavior.cursorOffset) == null ? void 0 : _b2.y) ?? 16);
-        field("[data-modal-layout]").value = behavior.modalLayout ?? "center";
-        field("[data-slideout-position]").value = behavior.slideoutPosition ?? "bottom-right";
-        field("[data-backdrop]").checked = behavior.backdrop ?? widgetType === "modal";
-        field("[data-backdrop-opacity]").value = String(behavior.backdropOpacity ?? (widgetType === "modal" ? 0.45 : 0.35));
-        field("[data-close-backdrop]").checked = behavior.closeOnBackdrop ?? false;
-        field("[data-hotspot-style]").value = behavior.hotspotStyle ?? "pulse";
-        field("[data-hotspot-color]").value = behavior.hotspotColor ?? definition.design.theme.primary;
-        (_c2 = root.querySelector("[data-step-label]")) == null ? void 0 : _c2.replaceChildren(`Editing step ${stepIndex + 1} of ${(guide == null ? void 0 : guide.steps.length) ?? 1}`);
-        root.querySelectorAll("[data-step]").forEach((button) => button.classList.toggle("active", Number(button.dataset.step) === stepIndex));
-      };
-      let saveTimer = 0;
-      const renderPreview = () => {
-        const previewDefinition = guide ? { ...definition, steps: [guide.steps[stepIndex]] } : definition;
-        return this.preview.render({ id: draft.experience.id, versionId: draft.version.id, kind: draft.experience.kind, widgetType: draft.experience.widgetType, priority: 0, definition: previewDefinition }, { onVisible: () => void 0, onDismiss: () => window.setTimeout(renderPreview, 0), onAction: () => void 0, onComplete: () => window.setTimeout(renderPreview, 0) });
-      };
-      const persist = async () => {
-        status.textContent = "Saving…";
-        try {
-          await bridge.save(definition);
-          status.textContent = "Draft saved.";
-        } catch {
-          status.textContent = "Editor session expired or was revoked.";
-          this.destroy();
-        }
-      };
-      const save = () => {
-        renderPreview();
-        clearTimeout(saveTimer);
-        saveTimer = window.setTimeout(persist, 350);
-      };
-      syncStep();
-      heading.addEventListener("input", () => {
-        currentContent().heading = heading.value;
-        save();
-      });
-      body.addEventListener("input", () => {
-        currentContent().body = body.value;
-        save();
-      });
-      placement.addEventListener("change", () => {
-        currentBehavior().placement = placement.value;
-        save();
-      });
-      offset.addEventListener("input", () => {
-        currentBehavior().offset = Number(offset.value);
-        save();
-      });
-      dismissible.addEventListener("change", () => {
-        currentBehavior().dismissible = dismissible.checked;
-        save();
-      });
-      field("[data-toast-position]").addEventListener("change", (event) => {
-        currentBehavior().toastPosition = event.currentTarget.value;
-        save();
-      });
-      field("[data-auto-dismiss]").addEventListener("input", (event) => {
-        const value = event.currentTarget.value;
-        currentBehavior().autoDismissMs = value ? Number(value) : null;
-        save();
-      });
-      field("[data-cursor-x]").addEventListener("input", (event) => {
-        var _a2;
-        currentBehavior().cursorOffset = { x: Number(event.currentTarget.value), y: ((_a2 = currentBehavior().cursorOffset) == null ? void 0 : _a2.y) ?? 16 };
-        save();
-      });
-      field("[data-cursor-y]").addEventListener("input", (event) => {
-        var _a2;
-        currentBehavior().cursorOffset = { x: ((_a2 = currentBehavior().cursorOffset) == null ? void 0 : _a2.x) ?? 16, y: Number(event.currentTarget.value) };
-        save();
-      });
-      field("[data-modal-layout]").addEventListener("change", (event) => {
-        currentBehavior().modalLayout = event.currentTarget.value;
-        save();
-      });
-      field("[data-slideout-position]").addEventListener("change", (event) => {
-        currentBehavior().slideoutPosition = event.currentTarget.value;
-        save();
-      });
-      field("[data-backdrop]").addEventListener("change", (event) => {
-        currentBehavior().backdrop = event.currentTarget.checked;
-        save();
-      });
-      field("[data-backdrop-opacity]").addEventListener("input", (event) => {
-        currentBehavior().backdropOpacity = Number(event.currentTarget.value);
-        save();
-      });
-      field("[data-close-backdrop]").addEventListener("change", (event) => {
-        currentBehavior().closeOnBackdrop = event.currentTarget.checked;
-        save();
-      });
-      field("[data-hotspot-style]").addEventListener("change", (event) => {
-        currentBehavior().hotspotStyle = event.currentTarget.value;
-        save();
-      });
-      field("[data-hotspot-color]").addEventListener("input", (event) => {
-        currentBehavior().hotspotColor = event.currentTarget.value;
-        save();
-      });
-      bannerPosition.addEventListener("change", () => {
-        currentBehavior().bannerPosition = bannerPosition.value;
-        save();
-      });
-      const width = root.querySelector("[data-width]");
-      width.value = definition.design.width;
-      width.addEventListener("change", () => {
-        definition.design.width = width.value;
-        save();
-      });
-      for (const key of ["background", "foreground", "primary"]) {
-        const input = root.querySelector(`[data-${key}]`);
-        input.value = definition.design.theme[key];
-        input.addEventListener("input", () => {
-          definition.design.theme[key] = input.value;
-          save();
-        });
+    async resume(session) {
+      if (!validSession(session)) {
+        clearEditorContinuation();
+        return false;
       }
-      const targeting = definition.targeting;
-      const frequency = root.querySelector("[data-frequency]");
-      frequency.value = targeting.frequency.mode;
-      frequency.addEventListener("change", () => {
-        targeting.frequency.mode = frequency.value;
-        save();
-      });
-      const priority = root.querySelector("[data-priority]");
-      priority.value = String(targeting.priority);
-      priority.addEventListener("input", () => {
-        targeting.priority = Number(priority.value);
-        save();
-      });
-      root.querySelectorAll("[data-step]").forEach((button) => button.addEventListener("click", () => {
-        stepIndex = Number(button.dataset.step);
-        syncStep();
-        renderPreview();
-      }));
-      (_b = root.querySelector("[data-pick]")) == null ? void 0 : _b.addEventListener("click", async () => {
-        status.textContent = `Click the element step ${stepIndex + 1} should attach to.`;
-        const target = await this.picker.pick();
-        if (!target) {
-          status.textContent = "Selection cancelled.";
-          return;
-        }
-        this.setTarget(definition, target, stepIndex);
-        root.querySelector("[data-reliability]").textContent = target.reliability === "fragile" ? "Warning: this selector is fragile and may change with the page layout." : `${target.reliability} selector`;
-        save();
-      });
-      (_c = root.querySelector("[data-save]")) == null ? void 0 : _c.addEventListener("click", () => void persist());
-      root.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => {
-        root.querySelectorAll("[data-tab]").forEach((item) => item.classList.remove("active"));
-        button.classList.add("active");
-        root.querySelectorAll("[data-panel]").forEach((panel) => panel.hidden = panel.dataset.panel !== button.dataset.tab);
-      }));
-      renderPreview();
+      try {
+        return await this.activate(session, 0);
+      } catch {
+        this.destroy();
+        return false;
+      }
+    }
+    async activate(session, requestedStep) {
+      this.teardown(false);
+      const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
+      let draft;
+      try {
+        draft = await bridge.load();
+      } catch {
+        clearEditorContinuation();
+        return false;
+      }
+      this.bridge = bridge;
+      this.draft = draft;
+      this.definition = draft.version.definition;
+      this.guide = isGuideDefinition(this.definition) ? this.definition : null;
+      this.stepIndex = this.guide ? clampStep(requestedStep, this.guide.steps.length) : 0;
+      this.currentPath = currentPagePath();
+      this.mode = "select";
+      storeEditorContinuation(session);
+      this.mount();
+      this.expiryTimer = window.setTimeout(() => this.destroy(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
       this.validationTimer = window.setInterval(() => {
         void bridge.load().catch(() => this.destroy());
       }, 15e3);
+      return true;
     }
-    setTarget(definition, target, stepIndex = 0) {
-      if (isGuideDefinition(definition)) definition.steps[stepIndex].target = target;
-      else definition.target = target;
+    mount() {
+      if (!this.draft || !this.definition) return;
+      this.host = document.createElement("div");
+      this.host.dataset.movecuesEditor = "";
+      this.root = this.host.attachShadow({ mode: "open" });
+      this.root.innerHTML = `<style>${STYLE}</style>${this.panelMarkup(this.draft)}`;
+      document.documentElement.appendChild(this.host);
+      this.bindPanel();
+      this.syncPanel();
+      this.renderPreview();
+      this.startPicker();
+      this.routeUnsubscribe = this.routeObserver.onChange(() => this.onRouteChange());
+      this.routeObserver.start();
+      if (typeof MutationObserver !== "undefined") {
+        this.mutationObserver = new MutationObserver(() => this.scheduleTargetRefresh());
+        this.mutationObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["id", "class", "data-testid", "data-test", "data-qa", "data-cy", "aria-label", "role", "name", "href", "hidden"] });
+      }
+    }
+    panelMarkup(draft) {
+      const guideMarkup = this.guide ? `<section class="section" data-guide><div class="eyebrow">Guide</div><div class="step-flow">${this.guide.steps.map((_, index) => `<button class="step" type="button" data-step="${index}" aria-label="Open step ${index + 1}">${index + 1} <span data-step-icon>○</span></button>`).join('<span class="arrow">→</span>')}</div><div class="muted" data-step-label></div></section>` : "";
+      return `<aside>
+      <header data-drag-handle>
+        <div class="header-copy"><strong>Movcues Live Editor</strong><span>${escapeText(draft.experience.name)}</span><small><i></i> Connected · <span data-save-state>Draft saved</span></small></div>
+        <div class="header-actions"><button type="button" data-minimize aria-label="Minimize editor">—</button><button type="button" data-close aria-label="Close editor">×</button></div>
+      </header>
+      <main>
+        <div class="modebar"><button type="button" data-mode="select">Select</button><button type="button" data-mode="navigate">Navigate</button></div>
+        <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
+        ${guideMarkup}
+        <section class="section" data-for="target">
+          <div class="eyebrow">Target</div><strong class="truncate" data-target-label>Not selected</strong><div class="reliability" data-reliability></div>
+          <button class="secondary-button" type="button" data-pick>Reselect target</button>
+        </section>
+        <section class="section" data-placement-section>
+          <div class="eyebrow">Placement</div>
+          <div data-for="anchored"><div class="placement-grid">${placementButton("top", "Top")}${placementButton("left", "Left")}${placementButton("auto", "Auto")}${placementButton("right", "Right")}${placementButton("bottom", "Bottom")}</div><label>Alignment<select data-alignment><option value="start">Start</option><option value="center">Center</option><option value="end">End</option></select></label><label>Offset<div class="number"><input data-offset type="number" min="0" max="100"><span>px</span></div></label></div>
+          <div data-for="toast"><label>Position<select data-toast-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label><label>Auto-dismiss<div class="number"><input data-auto-dismiss type="number" min="500" placeholder="Disabled"><span>ms</span></div></label></div>
+          <div data-for="modal"><label>Layout<select data-modal-layout><option value="center">Centered</option><option value="fullscreen">Fullscreen</option></select></label><label class="check"><input data-backdrop type="checkbox"> Backdrop</label><label>Backdrop opacity<input data-backdrop-opacity type="number" min="0" max="0.9" step="0.05"></label><label class="check"><input data-close-backdrop type="checkbox"> Dismiss on backdrop click</label></div>
+          <div data-for="slideout"><label>Position<select data-slideout-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="center-left">Center left</option><option value="center-right">Center right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label></div>
+          <div data-for="banner"><label>Position<select data-banner-position><option value="top">Top</option><option value="bottom">Bottom</option></select></label></div>
+          <div data-for="cursor"><label>X offset<div class="number"><input data-cursor-x type="number"><span>px</span></div></label><label>Y offset<div class="number"><input data-cursor-y type="number"><span>px</span></div></label></div>
+          <div data-for="hotspot"><label>Beacon style<select data-hotspot-style><option value="pulse">Pulse</option><option value="dot">Dot</option><option value="question">Question mark</option></select></label><label>Beacon color<input data-hotspot-color type="color"></label></div>
+        </section>
+        <section class="section" data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
+        <section class="section"><div class="eyebrow">Configured</div><dl data-configured></dl></section>
+        <section class="section live"><div class="eyebrow">Live status</div><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></section>
+        <p class="hint" data-mode-hint></p>
+      </main>
+    </aside>`;
+    }
+    bindPanel() {
+      var _a, _b;
+      const root = this.root;
+      root.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this.setMode(button.dataset.mode)));
+      root.querySelectorAll("[data-pick]").forEach((button) => button.addEventListener("click", () => {
+        if (this.mode === "navigate") this.setMode("select");
+        else this.startPicker();
+      }));
+      root.querySelectorAll("[data-step]").forEach((button) => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
+      (_a = root.querySelector("[data-minimize]")) == null ? void 0 : _a.addEventListener("click", () => {
+        const aside = root.querySelector("aside");
+        aside.classList.toggle("minimized");
+        const button = root.querySelector("[data-minimize]");
+        button.textContent = aside.classList.contains("minimized") ? "+" : "—";
+      });
+      (_b = root.querySelector("[data-close]")) == null ? void 0 : _b.addEventListener("click", () => void this.close());
+      this.bindDrag();
+      this.onSelect("[data-alignment]", (value) => {
+        this.currentBehavior().alignment = value;
+      });
+      this.onInput("[data-offset]", (value) => {
+        this.currentBehavior().offset = numberValue(value, 8);
+      });
+      root.querySelectorAll("[data-placement]").forEach((button) => button.addEventListener("click", () => {
+        this.currentBehavior().placement = button.dataset.placement;
+        this.changed();
+      }));
+      this.onSelect("[data-toast-position]", (value) => {
+        this.currentBehavior().toastPosition = value;
+      });
+      this.onInput("[data-auto-dismiss]", (value) => {
+        this.currentBehavior().autoDismissMs = value ? numberValue(value, 0) : null;
+      });
+      this.onSelect("[data-modal-layout]", (value) => {
+        this.currentBehavior().modalLayout = value;
+      });
+      this.onCheck("[data-backdrop]", (value) => {
+        this.currentBehavior().backdrop = value;
+      });
+      this.onInput("[data-backdrop-opacity]", (value) => {
+        this.currentBehavior().backdropOpacity = numberValue(value, 0.45);
+      });
+      this.onCheck("[data-close-backdrop]", (value) => {
+        this.currentBehavior().closeOnBackdrop = value;
+      });
+      this.onSelect("[data-slideout-position]", (value) => {
+        this.currentBehavior().slideoutPosition = value;
+      });
+      this.onSelect("[data-banner-position]", (value) => {
+        this.currentBehavior().bannerPosition = value;
+      });
+      this.onInput("[data-cursor-x]", (value) => {
+        var _a2;
+        this.currentBehavior().cursorOffset = { x: numberValue(value, 16), y: ((_a2 = this.currentBehavior().cursorOffset) == null ? void 0 : _a2.y) ?? 16 };
+      });
+      this.onInput("[data-cursor-y]", (value) => {
+        var _a2;
+        this.currentBehavior().cursorOffset = { x: ((_a2 = this.currentBehavior().cursorOffset) == null ? void 0 : _a2.x) ?? 16, y: numberValue(value, 16) };
+      });
+      this.onSelect("[data-hotspot-style]", (value) => {
+        this.currentBehavior().hotspotStyle = value;
+      });
+      this.onInput("[data-hotspot-color]", (value) => {
+        this.currentBehavior().hotspotColor = value;
+      });
+    }
+    bindDrag() {
+      var _a, _b;
+      const handle = (_a = this.root) == null ? void 0 : _a.querySelector("[data-drag-handle]");
+      const aside = (_b = this.root) == null ? void 0 : _b.querySelector("aside");
+      if (!handle || !aside) return;
+      handle.addEventListener("pointerdown", (event) => {
+        var _a2;
+        if (event.target.closest("button")) return;
+        const rect = aside.getBoundingClientRect();
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const move = (next) => {
+          aside.style.right = "auto";
+          aside.style.left = `${Math.max(4, Math.min(innerWidth - rect.width - 4, rect.left + next.clientX - startX))}px`;
+          aside.style.top = `${Math.max(4, Math.min(innerHeight - 48, rect.top + next.clientY - startY))}px`;
+        };
+        const stop = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", stop);
+          this.dragCleanup = null;
+        };
+        (_a2 = this.dragCleanup) == null ? void 0 : _a2.call(this);
+        this.dragCleanup = stop;
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", stop);
+      });
+    }
+    onSelect(selector, update) {
+      var _a, _b;
+      (_b = (_a = this.root) == null ? void 0 : _a.querySelector(selector)) == null ? void 0 : _b.addEventListener("change", (event) => {
+        update(event.currentTarget.value);
+        this.changed();
+      });
+    }
+    onInput(selector, update) {
+      var _a, _b;
+      (_b = (_a = this.root) == null ? void 0 : _a.querySelector(selector)) == null ? void 0 : _b.addEventListener("input", (event) => {
+        update(event.currentTarget.value);
+        this.changed();
+      });
+    }
+    onCheck(selector, update) {
+      var _a, _b;
+      (_b = (_a = this.root) == null ? void 0 : _a.querySelector(selector)) == null ? void 0 : _b.addEventListener("change", (event) => {
+        update(event.currentTarget.checked);
+        this.changed();
+      });
+    }
+    switchStep(index) {
+      if (!this.guide || index < 0 || index >= this.guide.steps.length || index === this.stepIndex) return;
+      this.selectionGeneration++;
+      this.picker.cancel();
+      this.stepIndex = index;
+      this.syncPanel();
+      if (this.mode === "select") {
+        this.renderPreview();
+        this.startPicker();
+      }
+    }
+    setMode(mode) {
+      if (this.mode === mode && (mode !== "select" || this.pickerIsSelecting())) return;
+      this.selectionGeneration++;
+      this.picker.cancel();
+      this.mode = mode;
+      if (mode === "navigate") {
+        this.preview.destroy();
+        this.previewRendered = false;
+        this.syncPanel();
+        if (!this.dirty) this.setText("[data-save-state]", "Draft saved");
+        return;
+      }
+      this.renderPreview();
+      this.syncPanel();
+      this.startPicker();
+    }
+    startPicker() {
+      if (!this.isTargetedType() || this.mode !== "select") return;
+      const generation = ++this.selectionGeneration;
+      this.setText("[data-mode-hint]", "Select an element · Hold Shift to interact temporarily");
+      void this.picker.pick().then((target) => {
+        if (generation !== this.selectionGeneration || !this.definition || !target) return;
+        this.setTarget(target);
+        this.changed();
+      });
+    }
+    pickerIsSelecting() {
+      return !!document.querySelector("[data-movecues-picker-overlay]");
+    }
+    changed() {
+      this.dirty = true;
+      this.syncPanel();
+      if (this.mode === "select") this.renderPreview();
+      this.setText("[data-save-state]", "Saving…");
+      clearTimeout(this.saveTimer);
+      this.saveTimer = window.setTimeout(() => void this.persist(), 350);
+    }
+    async persist() {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = 0;
+      if (this.saveInFlight) {
+        const saved2 = await this.saveInFlight;
+        return saved2 && this.dirty ? this.persist() : saved2;
+      }
+      if (!this.dirty || !this.bridge || !this.definition) return true;
+      this.dirty = false;
+      const bridge = this.bridge;
+      const definition = this.definition;
+      const request = bridge.save(definition).then(() => {
+        this.setText("[data-save-state]", this.dirty ? "Saving…" : "Draft saved");
+        return true;
+      }).catch(() => {
+        this.setText("[data-save-state]", "Session expired");
+        this.destroy();
+        return false;
+      });
+      this.saveInFlight = request;
+      const saved = await request;
+      if (this.saveInFlight === request) this.saveInFlight = null;
+      if (saved && this.dirty && !this.saveTimer) this.saveTimer = window.setTimeout(() => void this.persist(), 350);
+      return saved;
+    }
+    async close() {
+      if (this.dirty && !await this.persist()) return;
+      this.destroy();
+    }
+    renderPreview() {
+      if (!this.definition || !this.draft || this.mode === "navigate") return;
+      this.previewRendered = false;
+      const definition = this.guide ? { ...this.definition, steps: [this.guide.steps[this.stepIndex]] } : this.definition;
+      this.preview.render({
+        id: this.draft.experience.id,
+        versionId: this.draft.version.id,
+        kind: this.draft.experience.kind,
+        widgetType: this.draft.experience.widgetType,
+        priority: 0,
+        definition
+      }, {
+        onVisible: () => {
+          this.previewRendered = true;
+          this.updateDiagnostics();
+        },
+        onDismiss: () => window.setTimeout(() => this.renderPreview(), 0),
+        onAction: () => void 0,
+        onComplete: () => window.setTimeout(() => this.renderPreview(), 0),
+        onUnavailable: () => {
+          this.previewRendered = false;
+          this.updateDiagnostics();
+        }
+      });
+      this.updateDiagnostics();
+    }
+    syncPanel() {
+      var _a, _b;
+      if (!this.root || !this.definition || !this.draft) return;
+      const behavior = this.currentBehavior();
+      const widgetType = this.draft.experience.widgetType;
+      const activeGroups = new Set(this.guide || widgetType === "anchored_card" ? ["target", "anchored"] : widgetType === "hotspot" ? ["target", "anchored", "hotspot"] : widgetType === "toast" ? ["toast"] : widgetType === "modal" ? ["modal"] : widgetType === "slideout" ? ["slideout"] : widgetType === "banner" ? ["banner"] : ["cursor"]);
+      this.root.querySelectorAll("[data-for]").forEach((group) => {
+        group.hidden = !activeGroups.has(group.dataset.for);
+      });
+      this.root.querySelector("[data-step-summary]").hidden = !this.guide;
+      this.root.querySelectorAll("[data-mode]").forEach((button) => button.classList.toggle("active", button.dataset.mode === this.mode));
+      this.root.querySelectorAll("[data-placement]").forEach((button) => button.classList.toggle("active", button.dataset.placement === (behavior.placement ?? "auto")));
+      this.setValue("[data-alignment]", behavior.alignment ?? "center");
+      this.setValue("[data-offset]", String(behavior.offset ?? 8));
+      this.setValue("[data-toast-position]", behavior.toastPosition ?? "bottom-right");
+      this.setValue("[data-auto-dismiss]", behavior.autoDismissMs ? String(behavior.autoDismissMs) : "");
+      this.setValue("[data-modal-layout]", behavior.modalLayout ?? "center");
+      this.setChecked("[data-backdrop]", behavior.backdrop ?? widgetType === "modal");
+      this.setValue("[data-backdrop-opacity]", String(behavior.backdropOpacity ?? 0.45));
+      this.setChecked("[data-close-backdrop]", behavior.closeOnBackdrop ?? false);
+      this.setValue("[data-slideout-position]", behavior.slideoutPosition ?? "bottom-right");
+      this.setValue("[data-banner-position]", behavior.bannerPosition ?? "top");
+      this.setValue("[data-cursor-x]", String(((_a = behavior.cursorOffset) == null ? void 0 : _a.x) ?? 16));
+      this.setValue("[data-cursor-y]", String(((_b = behavior.cursorOffset) == null ? void 0 : _b.y) ?? 16));
+      this.setValue("[data-hotspot-style]", behavior.hotspotStyle ?? "pulse");
+      this.setValue("[data-hotspot-color]", behavior.hotspotColor ?? this.definition.design.theme.primary);
+      if (this.guide) {
+        const step = this.guide.steps[this.stepIndex];
+        this.setText("[data-step-label]", `Step ${this.stepIndex + 1} of ${this.guide.steps.length}`);
+        this.setText("[data-advance]", formatAdvance(step.advance));
+        this.setText("[data-dismissible]", step.behavior.dismissible ?? true ? "Yes" : "No");
+      }
+      this.renderConfigured(this.definition.targeting);
+      this.updateDiagnostics();
+      this.setText("[data-mode-hint]", this.mode === "navigate" ? "Customer app interaction is enabled" : this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "Live placement preview");
+    }
+    renderConfigured(targeting) {
+      var _a;
+      const items = [];
+      items.push(["Trigger", targeting.trigger.type === "custom_event" ? `Custom event · ${targeting.trigger.eventName}` : "Page load"]);
+      items.push(["Page", formatPageRules(targeting.pageRules)]);
+      items.push(["Frequency", formatFrequency(targeting.frequency)]);
+      items.push(["Priority", String(targeting.priority)]);
+      items.push(["Interrupt", targeting.interruptPolicy === "interrupt" ? "Interrupt" : "Wait"]);
+      if (this.guide) items.push(["Advance", formatAdvance(this.guide.steps[this.stepIndex].advance)]);
+      const configured = (_a = this.root) == null ? void 0 : _a.querySelector("[data-configured]");
+      if (configured) configured.innerHTML = items.map(([label, value]) => `<dt>${escapeText(label)}</dt><dd>${escapeText(value)}</dd>`).join("");
+    }
+    updateDiagnostics() {
+      if (!this.root) return;
+      const target = this.currentTarget();
+      const targeted = this.isTargetedType();
+      const found = targeted && !!findTarget(target);
+      this.setText("[data-current-path]", this.currentPath || currentPagePath());
+      this.setText("[data-preview-status]", `${this.previewRendered ? "✓" : "○"} Preview ${this.previewRendered ? "rendered" : this.mode === "navigate" ? "paused for navigation" : "waiting"}`);
+      const previewStatus = this.root.querySelector("[data-preview-status]");
+      previewStatus == null ? void 0 : previewStatus.classList.toggle("status-ok", this.previewRendered);
+      const liveTarget = this.root.querySelector("[data-live-target]");
+      if (liveTarget) {
+        liveTarget.hidden = !targeted;
+        liveTarget.textContent = found ? "✓ Target found" : target ? "✕ Target not found" : "○ Target not configured";
+        liveTarget.className = found ? "status-ok" : target ? "status-error" : "muted";
+      }
+      this.setText("[data-target-label]", (target == null ? void 0 : target.label) || (target == null ? void 0 : target.primarySelector) || "Not selected");
+      this.setText("[data-reliability]", target ? `${reliabilityIcon(target.reliability)} ${capitalize(target.reliability)} selector` : "○ No selector configured");
+      const reliability2 = this.root.querySelector("[data-reliability]");
+      if (reliability2) reliability2.dataset.level = (target == null ? void 0 : target.reliability) ?? "none";
+      const missing = this.root.querySelector("[data-missing-selector]");
+      if (missing) {
+        missing.hidden = !target || found;
+        const code = missing.querySelector("code");
+        if (code) code.textContent = (target == null ? void 0 : target.primarySelector) ?? "";
+      }
+      if (this.guide) this.root.querySelectorAll("[data-step]").forEach((button, index) => {
+        const stepTarget = this.guide.steps[index].target;
+        const state = index === this.stepIndex ? "current" : !stepTarget ? "unconfigured" : findTarget(stepTarget) ? "found" : "missing";
+        button.dataset.stepStatus = state;
+        const icon = button.querySelector("[data-step-icon]");
+        if (icon) icon.textContent = state === "current" ? "●" : state === "found" ? "✓" : state === "missing" ? "⚠" : "○";
+        button.classList.toggle("active", index === this.stepIndex);
+      });
+    }
+    scheduleTargetRefresh() {
+      clearTimeout(this.targetRefreshTimer);
+      this.targetRefreshTimer = window.setTimeout(() => this.updateDiagnostics(), 80);
+    }
+    onRouteChange() {
+      var _a;
+      const previous = this.currentPath;
+      const next = currentPagePath();
+      if (next === previous) return;
+      this.currentPath = next;
+      const notice = (_a = this.root) == null ? void 0 : _a.querySelector("[data-route-notice]");
+      if (notice) notice.hidden = false;
+      this.setText("[data-route-change]", `${previous} → ${next}`);
+      this.updateDiagnostics();
+      if (this.mode === "select") this.renderPreview();
+    }
+    currentTarget() {
+      var _a;
+      if (!this.definition) return void 0;
+      return this.guide ? (_a = this.guide.steps[this.stepIndex]) == null ? void 0 : _a.target : this.definition.target;
+    }
+    currentBehavior() {
+      if (!this.definition) return { dismissible: true };
+      return this.guide ? this.guide.steps[this.stepIndex].behavior : this.definition.behavior;
+    }
+    setTarget(target) {
+      if (!this.definition) return;
+      if (this.guide) this.guide.steps[this.stepIndex].target = target;
+      else this.definition.target = target;
+    }
+    isTargetedType() {
+      var _a;
+      const type = (_a = this.draft) == null ? void 0 : _a.experience.widgetType;
+      return !!this.guide || type === "anchored_card" || type === "hotspot";
+    }
+    setText(selector, value) {
+      var _a;
+      const element = (_a = this.root) == null ? void 0 : _a.querySelector(selector);
+      if (element) element.textContent = value;
+    }
+    setValue(selector, value) {
+      var _a;
+      const element = (_a = this.root) == null ? void 0 : _a.querySelector(selector);
+      if (element) element.value = value;
+    }
+    setChecked(selector, value) {
+      var _a;
+      const element = (_a = this.root) == null ? void 0 : _a.querySelector(selector);
+      if (element) element.checked = value;
     }
     destroy() {
-      var _a;
+      this.teardown(true);
+    }
+    teardown(clearContinuation) {
+      var _a, _b, _c, _d;
       clearTimeout(this.expiryTimer);
       clearInterval(this.validationTimer);
+      clearTimeout(this.saveTimer);
+      clearTimeout(this.targetRefreshTimer);
+      this.selectionGeneration++;
+      (_a = this.routeUnsubscribe) == null ? void 0 : _a.call(this);
+      this.routeUnsubscribe = null;
+      this.routeObserver.stop();
+      (_b = this.mutationObserver) == null ? void 0 : _b.disconnect();
+      this.mutationObserver = null;
+      (_c = this.dragCleanup) == null ? void 0 : _c.call(this);
+      this.dragCleanup = null;
       this.preview.destroy();
       this.picker.cancel();
-      (_a = this.host) == null ? void 0 : _a.remove();
+      (_d = this.host) == null ? void 0 : _d.remove();
       this.host = null;
+      this.root = null;
+      this.bridge = null;
+      this.draft = null;
+      this.definition = null;
+      this.guide = null;
+      this.dirty = false;
+      this.previewRendered = false;
+      this.saveInFlight = null;
+      if (clearContinuation) clearEditorContinuation();
     }
+  }
+  function placementButton(value, label) {
+    return `<button type="button" data-placement="${value}">${label}</button>`;
+  }
+  function clampStep(value, length) {
+    return Number.isFinite(value) && length ? Math.max(0, Math.min(Math.trunc(value), length - 1)) : 0;
+  }
+  function validSession(value) {
+    return !!value && typeof value.sessionId === "string" && !!value.sessionId && typeof value.accessToken === "string" && !!value.accessToken && typeof value.expiresAt === "string" && Number.isFinite(Date.parse(value.expiresAt)) && Date.parse(value.expiresAt) > Date.now();
+  }
+  function numberValue(value, fallback) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  function currentPagePath() {
+    return `${location.pathname}${location.search}${location.hash}`;
+  }
+  function capitalize(value) {
+    return value.charAt(0).toUpperCase() + value.slice(1);
+  }
+  function reliabilityIcon(value) {
+    return value === "reliable" ? "✓" : value === "moderate" ? "●" : "⚠";
+  }
+  function formatFrequency(value) {
+    const mode = value.mode === "once" ? "Once ever" : value.mode === "once_per_session" ? "Once per session" : "Every qualifying time";
+    const limits = [value.maxImpressions ? `max ${value.maxImpressions}` : "", value.cooldownHours ? `${value.cooldownHours}h cooldown` : ""].filter(Boolean);
+    return limits.length ? `${mode} · ${limits.join(" · ")}` : mode;
+  }
+  function formatPageRules(rules) {
+    if (!rules.length) return "All pages";
+    return rules.map((rule) => `${rule.kind === "exclude" ? "Exclude" : "Include"} ${rule.value}`).join(" · ");
+  }
+  function formatAdvance(advance) {
+    if (!advance || advance.type === "button") return "Button click";
+    if (advance.type === "element_click") return "Target element click";
+    if (advance.type === "element_hover") return `Target element hover${advance.durationMs ? ` · ${advance.durationMs}ms` : ""}`;
+    if (advance.type === "custom_event") return `Custom event · ${advance.eventName}`;
+    return `Route · ${formatPageRules(advance.pageRules)}`;
   }
   function escapeText(value) {
     const span = document.createElement("span");
     span.textContent = value;
     return span.innerHTML;
   }
-  const STYLE = `:host{all:initial}aside{position:fixed;right:16px;top:16px;width:340px;z-index:2147483647;background:#fff;color:#111827;border:1px solid #d1d5db;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.28);font:14px ui-sans-serif,system-ui,sans-serif}header{display:flex;flex-direction:column;padding:16px;border-bottom:1px solid #e5e7eb}small,p{color:#6b7280;margin:0;font-size:12px}nav,.steps>div{display:flex;overflow:auto;border-bottom:1px solid #e5e7eb}nav button,.steps button{border:0;background:transparent;padding:10px 8px;font-size:11px;cursor:pointer}nav button.active,.steps button.active{color:#2563eb;border-bottom:2px solid #2563eb}.steps{display:grid;gap:6px}.steps b{font-size:12px}main{display:grid;gap:12px;padding:16px}section{display:grid;gap:12px}label{display:grid;gap:5px;font-size:12px;font-weight:600}label.row{display:flex;align-items:center}label.row input{width:auto}input,textarea,select{box-sizing:border-box;width:100%;border:1px solid #d1d5db;border-radius:7px;padding:8px;font:14px inherit;background:#fff}textarea{min-height:88px;resize:vertical}main button{border:0;border-radius:7px;padding:9px;background:#111827;color:#fff;cursor:pointer}`;
+  const STYLE = `
+:host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:312px;max-height:calc(100vh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100vh - 82px);overflow:auto}.minimized{width:260px}.minimized main{display:none}.modebar{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{padding:7px}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-flow{display:flex;align-items:center;overflow:auto}.step{flex:none;padding:4px 6px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.arrow{color:#cbd5e1;font-size:10px}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}[hidden]{display:none!important}
+`;
   const runtime = {
     createController: (apiBase) => new EditorModeController(apiBase)
   };

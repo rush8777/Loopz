@@ -12,8 +12,15 @@ export interface ExperienceLoaderRuntime {
   destroy(): void;
 }
 
+export interface EditorSession {
+  sessionId: string;
+  accessToken: string;
+  expiresAt: string;
+}
+
 export interface EditorControllerRuntime {
   start(rawToken: string): Promise<boolean>;
+  resume(session: EditorSession): Promise<boolean>;
   destroy(): void;
 }
 
