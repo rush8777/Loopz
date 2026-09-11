@@ -1,5 +1,5 @@
 export type ExperienceKind = "guide" | "widget";
-export type WidgetType = "anchored_card" | "toast" | "cursor_follow" | "modal" | "slideout" | "hotspot" | "banner";
+export type WidgetType = "anchored_card" | "toast" | "cursor_follow" | "modal" | "slideout" | "hotspot" | "banner" | "survey";
 export interface ExperienceAction {
     label: string;
     type: "dismiss" | "next_step" | "open_url" | "track_event";
@@ -137,12 +137,73 @@ export interface GuideStep {
     target?: ExperienceTarget;
     behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "dismissible">;
 }
+export interface SurveyOption {
+    id: string;
+    label: string;
+}
+export type SurveyQuestion = {
+    id: string;
+    type: "single_choice";
+    label: string;
+    required?: boolean;
+    options: SurveyOption[];
+} | {
+    id: string;
+    type: "multiple_choice";
+    label: string;
+    required?: boolean;
+    options: SurveyOption[];
+} | {
+    id: string;
+    type: "short_text";
+    label: string;
+    required?: boolean;
+    placeholder?: string;
+    maxLength?: number;
+} | {
+    id: string;
+    type: "long_text";
+    label: string;
+    required?: boolean;
+    placeholder?: string;
+    maxLength?: number;
+} | {
+    id: string;
+    type: "rating";
+    label: string;
+    required?: boolean;
+    min: number;
+    max: number;
+} | {
+    id: string;
+    type: "nps";
+    label: string;
+    required?: boolean;
+};
+export interface SurveyStep {
+    id: string;
+    content: {
+        heading: string;
+        body: string;
+    };
+    questions: SurveyQuestion[];
+    builder?: WidgetBuilderState;
+    size?: ExperienceSize;
+}
+export interface SurveyConfig {
+    steps: SurveyStep[];
+    showProgress: boolean;
+    allowBack: boolean;
+    submitLabel: string;
+}
+export type SurveyAnswers = Record<string, string | string[] | number>;
 export interface RuntimeWidgetDefinition {
     content: ExperienceContent;
     design: ExperienceDesign;
     behavior: ExperienceBehavior;
     builder?: WidgetBuilderState;
     target?: ExperienceTarget;
+    survey?: SurveyConfig;
 }
 export interface RuntimeGuideDefinition {
     steps: GuideStep[];

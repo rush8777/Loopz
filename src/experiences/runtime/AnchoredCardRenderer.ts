@@ -34,7 +34,7 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
   const close = behavior.dismissible ? `<button class="close" data-dismiss aria-label="Dismiss">×</button>` : "";
   card.innerHTML = close;
   card.querySelector("[data-dismiss]")?.addEventListener("click", callbacks.onDismiss);
-  if (!builder || !mountBuilderContent(root, card, builder, callbacks)) {
+  if (!builder || !mountBuilderContent(root, card, builder, callbacks, widgetType === "survey")) {
     const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText(content.primaryAction.label)}</button>` : "";
     const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText(content.secondaryAction.label)}</button>` : "";
     card.insertAdjacentHTML("beforeend", `<div class="legacy-content"><h2>${escapeText(content.heading)}</h2><p>${escapeText(content.body)}</p><footer>${secondary}${primary}</footer></div>`);

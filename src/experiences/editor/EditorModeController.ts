@@ -8,6 +8,7 @@ import type {
   PageRule,
   RuntimeGuideDefinition,
   RuntimeWidgetDefinition,
+  SurveyConfig,
 } from "../types";
 import { isGuideDefinition } from "../types";
 import type { EditorAuthoringState, EditorContinuation, EditorSession } from "../runtimeInterfaces";
@@ -41,6 +42,7 @@ export class EditorModeController {
   private draft: EditorDraft | null = null;
   private definition: EditorDefinition | null = null;
   private guide: RuntimeGuideDefinition | null = null;
+  private survey: SurveyConfig | null = null;
   private stepIndex = 0;
   private mode: EditorMode = "select";
   private dirty = false;
@@ -99,9 +101,11 @@ export class EditorModeController {
     this.draft = draft;
     this.definition = draft.version.definition;
     this.guide = isGuideDefinition(this.definition) ? this.definition : null;
+    this.survey = !this.guide && draft.experience.widgetType === "survey" ? (this.definition as RuntimeWidgetDefinition).survey ?? null : null;
+    const selectableSteps = this.guide?.steps ?? this.survey?.steps;
     const restored = options.restoredState?.experienceId === draft.experience.id ? options.restoredState : undefined;
-    const restoredIndex = this.guide && restored?.selectedStepId ? this.guide.steps.findIndex(step => step.id === restored.selectedStepId) : -1;
-    this.stepIndex = this.guide ? restoredIndex >= 0 ? restoredIndex : clampStep(options.requestedStep ?? 0, this.guide.steps.length) : 0;
+    const restoredIndex = selectableSteps && restored?.selectedStepId ? selectableSteps.findIndex(step => step.id === restored.selectedStepId) : -1;
+    this.stepIndex = selectableSteps ? restoredIndex >= 0 ? restoredIndex : clampStep(options.requestedStep ?? 0, selectableSteps.length) : 0;
     this.currentPath = currentPagePath();
     this.mode = restored?.mode ?? "select";
     this.updateContinuation();
@@ -133,7 +137,8 @@ export class EditorModeController {
   }
 
   private panelMarkup(draft: EditorDraft): string {
-    const guideMarkup = this.guide ? `<section class="section" data-guide><div class="eyebrow">Guide</div><div class="step-flow">${this.guide.steps.map((_, index) => `<button class="step" type="button" data-step="${index}" aria-label="Open step ${index + 1}">${index + 1} <span data-step-icon>○</span></button>`).join('<span class="arrow">→</span>')}</div><div class="muted" data-step-label></div></section>` : "";
+    const selectableSteps = this.guide?.steps ?? this.survey?.steps;
+    const guideMarkup = selectableSteps ? `<section class="section" data-guide><div class="eyebrow">${this.guide ? "Guide" : "Survey"}</div><div class="step-flow">${selectableSteps.map((_, index) => `<button class="step" type="button" data-step="${index}" aria-label="Open step ${index + 1}">${index + 1} <span data-step-icon>○</span></button>`).join('<span class="arrow">→</span>')}</div><div class="muted" data-step-label></div></section>` : "";
     return `<aside>
       <header data-drag-handle>
         <div class="header-copy"><strong>Movcues Live Editor</strong><span>${escapeText(draft.experience.name)}</span><small><i></i> Connected · <span data-save-state>Draft saved</span></small></div>
@@ -226,7 +231,8 @@ export class EditorModeController {
   }
 
   private switchStep(index: number): void {
-    if (!this.guide || index < 0 || index >= this.guide.steps.length || index === this.stepIndex) return;
+    const steps = this.guide?.steps ?? this.survey?.steps;
+    if (!steps || index < 0 || index >= steps.length || index === this.stepIndex) return;
     this.selectionGeneration++;
     this.picker.cancel();
     this.stepIndex = index;
@@ -313,6 +319,7 @@ export class EditorModeController {
     if (!this.definition || !this.draft || this.mode === "navigate") return;
     this.previewRendered = false;
     const definition = this.guide ? { ...this.definition, steps: [this.guide.steps[this.stepIndex]] } as EditorDefinition : this.definition;
+    const selectedStepId = this.survey?.steps[this.stepIndex]?.id;
     this.preview.render({
       id: this.draft.experience.id,
       versionId: this.draft.version.id,
@@ -326,7 +333,7 @@ export class EditorModeController {
       onAction: () => void 0,
       onComplete: () => window.setTimeout(() => this.renderPreview(), 0),
       onUnavailable: () => { this.previewRendered = false; this.updateDiagnostics(); },
-    });
+    }, selectedStepId);
     this.updateDiagnostics();
   }
 
@@ -334,7 +341,7 @@ export class EditorModeController {
     if (!this.root || !this.definition || !this.draft) return;
     const behavior = this.currentBehavior();
     const widgetType = this.draft.experience.widgetType;
-    const activeGroups = new Set<string>(this.guide || widgetType === "anchored_card" ? ["target", "anchored"] : widgetType === "hotspot" ? ["target", "anchored", "hotspot"] : widgetType === "toast" ? ["toast"] : widgetType === "modal" ? ["modal"] : widgetType === "slideout" ? ["slideout"] : widgetType === "banner" ? ["banner"] : ["cursor"]);
+    const activeGroups = new Set<string>(this.guide || widgetType === "anchored_card" ? ["target", "anchored"] : widgetType === "hotspot" ? ["target", "anchored", "hotspot"] : widgetType === "toast" ? ["toast"] : widgetType === "modal" || widgetType === "survey" ? ["modal"] : widgetType === "slideout" ? ["slideout"] : widgetType === "banner" ? ["banner"] : ["cursor"]);
     this.root.querySelectorAll<HTMLElement>("[data-for]").forEach(group => { group.hidden = !activeGroups.has(group.dataset.for!); });
     this.root.querySelector<HTMLElement>("[data-step-summary]")!.hidden = !this.guide;
     this.root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.classList.toggle("active", button.dataset.mode === this.mode));
@@ -361,6 +368,7 @@ export class EditorModeController {
       this.setText("[data-advance]", formatAdvance(step.advance));
       this.setText("[data-dismissible]", (step.behavior.dismissible ?? true) ? "Yes" : "No");
     }
+    if (this.survey) this.setText("[data-step-label]", `Step ${this.stepIndex + 1} of ${this.survey.steps.length}`);
     this.renderConfigured(this.definition.targeting);
     this.updateDiagnostics();
     this.setText("[data-mode-hint]", this.mode === "navigate" ? "Customer app interaction is enabled" : this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "Live placement preview");
@@ -409,6 +417,11 @@ export class EditorModeController {
       button.dataset.stepStatus = state;
       const icon = button.querySelector("[data-step-icon]"); if (icon) icon.textContent = state === "current" ? "●" : state === "found" ? "✓" : state === "missing" ? "⚠" : "○";
       button.classList.toggle("active", index === this.stepIndex);
+    });
+    else if (this.survey) this.root.querySelectorAll<HTMLButtonElement>("[data-step]").forEach((button, index) => {
+      button.dataset.stepStatus = index === this.stepIndex ? "current" : "found";
+      button.classList.toggle("active", index === this.stepIndex);
+      const icon = button.querySelector("[data-step-icon]"); if (icon) icon.textContent = index === this.stepIndex ? "●" : "✓";
     });
   }
 
@@ -459,7 +472,7 @@ export class EditorModeController {
       session: this.session,
       editorState: {
         experienceId: this.draft.experience.id,
-        selectedStepId: this.guide?.steps[this.stepIndex]?.id,
+        selectedStepId: this.guide?.steps[this.stepIndex]?.id ?? this.survey?.steps[this.stepIndex]?.id,
         mode: this.mode,
       },
     });
@@ -490,7 +503,7 @@ export class EditorModeController {
     this.preview.destroy();
     this.picker.cancel();
     this.host?.remove();
-    this.host = null; this.root = null; this.bridge = null; this.session = null; this.draft = null; this.definition = null; this.guide = null;
+    this.host = null; this.root = null; this.bridge = null; this.session = null; this.draft = null; this.definition = null; this.guide = null; this.survey = null;
     this.dirty = false; this.previewRendered = false; this.saveInFlight = null;
     if (clearContinuation) clearEditorContinuation();
   }

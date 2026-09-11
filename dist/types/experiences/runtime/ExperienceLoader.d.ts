@@ -35,4 +35,7 @@ export declare class ExperienceLoader {
     private activeGuide;
     private persistGuide;
     private post;
+    private ensureSurveyResponse;
+    private persistSurvey;
+    private surveyIdentity;
 }

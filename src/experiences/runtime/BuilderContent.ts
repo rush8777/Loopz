@@ -1,11 +1,11 @@
 import type { WidgetBuilderState } from "../types";
 import type { RenderCallbacks } from "./AnchoredCardRenderer";
 
-const ALLOWED_TAGS = new Set(["DIV", "SECTION", "H1", "H2", "H3", "H4", "P", "SPAN", "BUTTON", "IMG", "HR"]);
-const ALLOWED_ATTRIBUTES = new Set(["class", "id", "title", "role", "aria-label", "alt", "src", "width", "height", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type"]);
+const ALLOWED_TAGS = new Set(["DIV", "SECTION", "H1", "H2", "H3", "H4", "P", "SPAN", "BUTTON", "IMG", "HR", "LABEL"]);
+const ALLOWED_ATTRIBUTES = new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "width", "height", "type", "placeholder", "maxlength", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type", "data-movecues-question-id", "data-movecues-question-type", "data-movecues-question-input", "data-movecues-option-id", "data-movecues-survey-action", "data-movecues-survey-progress", "data-movecues-survey-progress-bar", "data-movecues-survey-step-id"]);
 
-export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder: WidgetBuilderState, callbacks: RenderCallbacks): boolean {
-  const html = sanitizeBuilderHtml(builder.html);
+export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder: WidgetBuilderState, callbacks: RenderCallbacks, allowSurveyInputs = false): boolean {
+  const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
   const css = safeBuilderCss(builder.css);
   if (!html || css === null) return false;
   let style = root.querySelector<HTMLStyleElement>("style[data-movecues-builder-style]");
@@ -28,11 +28,12 @@ export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder
 
 const ISOLATION_CSS = `[data-movecues-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-movecues-builder-surface]>.movecues-widget{position:relative!important;inset:auto!important}`;
 
-export function sanitizeBuilderHtml(input: string): ChildNode[] | null {
+export function sanitizeBuilderHtml(input: string, allowSurveyInputs = false): ChildNode[] | null {
   const template = document.createElement("template");
   template.innerHTML = input;
   for (const element of Array.from(template.content.querySelectorAll("*"))) {
-    if (!ALLOWED_TAGS.has(element.tagName)) {
+    const allowedTag = ALLOWED_TAGS.has(element.tagName) || (allowSurveyInputs && (element.tagName === "INPUT" || element.tagName === "TEXTAREA"));
+    if (!allowedTag) {
       if (/^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO)$/i.test(element.tagName)) element.remove();
       else element.replaceWith(...Array.from(element.childNodes));
       continue;
@@ -46,6 +47,10 @@ export function sanitizeBuilderHtml(input: string): ChildNode[] | null {
     if (element.tagName === "IMG") {
       const source = element.getAttribute("src") ?? "";
       if (source && !/^(https?:|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(source)) element.removeAttribute("src");
+    }
+    if (element.tagName === "INPUT") {
+      const type = (element.getAttribute("type") ?? "text").toLowerCase();
+      if (!["text", "radio", "checkbox", "number"].includes(type)) element.setAttribute("type", "text");
     }
   }
   const root = template.content.querySelector(".movecues-widget");

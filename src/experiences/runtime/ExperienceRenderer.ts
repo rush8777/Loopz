@@ -1,4 +1,4 @@
-import type { DeliveredExperience, ExperienceAction, ExperienceBehavior, ExperienceContent, RuntimeGuideDefinition, RuntimeWidgetDefinition } from "../types";
+import type { DeliveredExperience, ExperienceAction, ExperienceBehavior, ExperienceContent, RuntimeGuideDefinition, RuntimeWidgetDefinition, SurveyAnswers } from "../types";
 import { isGuideDefinition } from "../types";
 import { AnchoredCardRenderer, findTarget, waitForTarget, type RenderCallbacks } from "./AnchoredCardRenderer";
 import { ToastRenderer } from "./ToastRenderer";
@@ -7,6 +7,7 @@ import { ModalRenderer } from "./ModalRenderer";
 import { SlideoutRenderer } from "./SlideoutRenderer";
 import { HotspotRenderer } from "./HotspotRenderer";
 import { BannerRenderer } from "./BannerRenderer";
+import { SurveyRenderer } from "./SurveyRenderer";
 
 export interface ExperienceRendererCallbacks {
   onVisible: () => void;
@@ -16,6 +17,8 @@ export interface ExperienceRendererCallbacks {
   onGuideAdvance?: () => void;
   onGuideBack?: () => void;
   onUnavailable?: () => void;
+  onSurveyProgress?: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
+  onSurveySubmit?: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
 }
 
 export class ExperienceRenderer {
@@ -27,7 +30,7 @@ export class ExperienceRenderer {
   render(experience: DeliveredExperience, callbacks: ExperienceRendererCallbacks, guideStepId?: string): boolean {
     this.destroy();
     if (isGuideDefinition(experience.definition)) return this.renderGuide(experience, experience.definition, callbacks, guideStepId);
-    return this.renderWidget(experience, experience.definition, callbacks);
+    return this.renderWidget(experience, experience.definition, callbacks, guideStepId);
   }
 
   private root(experienceId: string): ShadowRoot {
@@ -35,7 +38,7 @@ export class ExperienceRenderer {
     const root = this.host.attachShadow({ mode: "open" }); const style = document.createElement("style"); style.textContent = STYLES; root.appendChild(style); document.documentElement.appendChild(this.host); return root;
   }
 
-  private renderWidget(experience: DeliveredExperience, definition: RuntimeWidgetDefinition, callbacks: ExperienceRendererCallbacks): boolean {
+  private renderWidget(experience: DeliveredExperience, definition: RuntimeWidgetDefinition, callbacks: ExperienceRendererCallbacks, requestedStepId?: string): boolean {
     if (experience.widgetType === "anchored_card" || experience.widgetType === "hotspot") {
       const mount = (target: Element) => { const root = this.root(experience.id); const renderer = experience.widgetType === "hotspot" ? new HotspotRenderer() : new AnchoredCardRenderer(); this.renderer = renderer; renderer.render(root, target, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder, experience.widgetType ?? "anchored_card"); requestAnimationFrame(callbacks.onVisible); };
       const target = findTarget(definition.target);
@@ -49,6 +52,9 @@ export class ExperienceRenderer {
     } else if (experience.widgetType === "modal") {
       const root = this.root(experience.id); const renderer = new ModalRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
+    } else if (experience.widgetType === "survey" && definition.survey) {
+      const root = this.root(experience.id); const renderer = new SurveyRenderer(); this.renderer = renderer;
+      renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId) => callbacks.onSurveyProgress?.(answers, stepId), onSubmit: (answers, stepId) => callbacks.onSurveySubmit?.(answers, stepId) }, requestedStepId);
     } else if (experience.widgetType === "slideout") {
       const root = this.root(experience.id); const renderer = new SlideoutRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
@@ -125,4 +131,5 @@ const STYLES = `
   .slideout[data-position=top-left]{top:16px;left:16px}.slideout[data-position=top-right]{top:16px;right:16px}.slideout[data-position=bottom-left]{bottom:16px;left:16px}.slideout[data-position=bottom-right]{bottom:16px;right:16px}.slideout[data-position=center-left]{left:16px;top:50%;transform:translateY(-50%)}.slideout[data-position=center-right]{right:16px;top:50%;transform:translateY(-50%)}
   .banner{left:0;right:0;width:auto!important;max-width:none;border-radius:0!important;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner[data-position=top]{top:0}.banner[data-position=bottom]{bottom:0}.banner h2,.banner p{grid-column:1}.banner footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
   .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--movecues-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--movecues-hotspot);border-radius:50%;animation:movecues-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes movecues-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
+  .movecues-survey-question.has-error{outline:2px solid #fecaca;outline-offset:6px;border-radius:6px}.movecues-survey-validation{color:#b91c1c}.movecues-survey-option.is-selected{border-color:var(--movecues-primary)!important;background:color-mix(in srgb,var(--movecues-primary) 12%,white)!important}.movecues-survey-input{font:inherit}
 `;

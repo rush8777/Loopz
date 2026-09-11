@@ -8,10 +8,10 @@
       return [...experiences].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))[0] ?? null;
     }
   }
-  const ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "H1", "H2", "H3", "H4", "P", "SPAN", "BUTTON", "IMG", "HR"]);
-  const ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "alt", "src", "width", "height", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type"]);
-  function mountBuilderContent(root, card, builder, callbacks) {
-    const html = sanitizeBuilderHtml(builder.html);
+  const ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "H1", "H2", "H3", "H4", "P", "SPAN", "BUTTON", "IMG", "HR", "LABEL"]);
+  const ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "width", "height", "type", "placeholder", "maxlength", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type", "data-movecues-question-id", "data-movecues-question-type", "data-movecues-question-input", "data-movecues-option-id", "data-movecues-survey-action", "data-movecues-survey-progress", "data-movecues-survey-progress-bar", "data-movecues-survey-step-id"]);
+  function mountBuilderContent(root, card, builder, callbacks, allowSurveyInputs = false) {
+    const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
     const css = safeBuilderCss(builder.css);
     if (!html || css === null) return false;
     let style = root.querySelector("style[data-movecues-builder-style]");
@@ -37,11 +37,12 @@ ${ISOLATION_CSS}`;
     return true;
   }
   const ISOLATION_CSS = `[data-movecues-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-movecues-builder-surface]>.movecues-widget{position:relative!important;inset:auto!important}`;
-  function sanitizeBuilderHtml(input) {
+  function sanitizeBuilderHtml(input, allowSurveyInputs = false) {
     const template = document.createElement("template");
     template.innerHTML = input;
     for (const element of Array.from(template.content.querySelectorAll("*"))) {
-      if (!ALLOWED_TAGS.has(element.tagName)) {
+      const allowedTag = ALLOWED_TAGS.has(element.tagName) || allowSurveyInputs && (element.tagName === "INPUT" || element.tagName === "TEXTAREA");
+      if (!allowedTag) {
         if (/^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO)$/i.test(element.tagName)) element.remove();
         else element.replaceWith(...Array.from(element.childNodes));
         continue;
@@ -55,6 +56,10 @@ ${ISOLATION_CSS}`;
       if (element.tagName === "IMG") {
         const source = element.getAttribute("src") ?? "";
         if (source && !/^(https?:|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(source)) element.removeAttribute("src");
+      }
+      if (element.tagName === "INPUT") {
+        const type = (element.getAttribute("type") ?? "text").toLowerCase();
+        if (!["text", "radio", "checkbox", "number"].includes(type)) element.setAttribute("type", "text");
       }
     }
     const root = template.content.querySelector(".movecues-widget");
@@ -78,13 +83,14 @@ ${ISOLATION_CSS}`;
     return css;
   }
   const WIDGET_SIZE_CONSTRAINTS = {
-    anchored_card: { width: { default: 320, min: 240, max: 480 }, height: {}, viewportGutter: 24 },
+    anchored_card: { width: { default: 320, min: 240, max: 480 }, height: { allowFixed: true, min: 120, max: 700 }, viewportGutter: 24 },
     toast: { width: { default: 380, min: 280, max: 520 }, height: {}, viewportGutter: 24 },
     cursor_follow: { width: { default: 280, min: 200, max: 360 }, height: {}, viewportGutter: 24 },
     modal: { width: { default: 600, min: 320, max: 960, allowFull: true }, height: { allowFixed: true, allowViewport: true, min: 200, max: 900 }, viewportGutter: 24 },
     slideout: { width: { default: 400, min: 320, max: 640 }, height: { allowFixed: true, allowViewport: true, min: 240, max: 900 }, viewportGutter: 24 },
     hotspot: { width: { default: 300, min: 220, max: 420 }, height: {}, viewportGutter: 24 },
-    banner: { width: { default: "full" }, height: {}, viewportGutter: 0 }
+    banner: { width: { default: "full" }, height: {}, viewportGutter: 0 },
+    survey: { width: { default: 700, min: 320, max: 960, allowFull: true }, height: { allowFixed: true, allowViewport: true, min: 200, max: 900 }, viewportGutter: 24 }
   };
   function normalizeWidgetSize(widgetType, design) {
     var _a, _b;
@@ -184,7 +190,7 @@ ${ISOLATION_CSS}`;
     const close = behavior.dismissible ? `<button class="close" data-dismiss aria-label="Dismiss">×</button>` : "";
     card.innerHTML = close;
     (_a = card.querySelector("[data-dismiss]")) == null ? void 0 : _a.addEventListener("click", callbacks.onDismiss);
-    if (!builder || !mountBuilderContent(root, card, builder, callbacks)) {
+    if (!builder || !mountBuilderContent(root, card, builder, callbacks, widgetType === "survey")) {
       const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText(content.primaryAction.label)}</button>` : "";
       const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText(content.secondaryAction.label)}</button>` : "";
       card.insertAdjacentHTML("beforeend", `<div class="legacy-content"><h2>${escapeText(content.heading)}</h2><p>${escapeText(content.body)}</p><footer>${secondary}${primary}</footer></div>`);
@@ -328,7 +334,7 @@ ${ISOLATION_CSS}`;
     }
   }
   class ModalRenderer {
-    render(root, content, design, behavior, callbacks, builder) {
+    render(root, content, design, behavior, callbacks, builder, widgetType = "modal") {
       if (behavior.backdrop !== false) {
         const backdrop = document.createElement("div");
         backdrop.className = "backdrop";
@@ -336,7 +342,7 @@ ${ISOLATION_CSS}`;
         if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
         root.appendChild(backdrop);
       }
-      const card = buildCard(root, content, design, behavior, callbacks, builder, "modal");
+      const card = buildCard(root, content, design, behavior, callbacks, builder, widgetType);
       card.classList.add("modal");
       card.dataset.layout = behavior.modalLayout ?? "center";
       return card;
@@ -424,6 +430,260 @@ ${ISOLATION_CSS}`;
     destroy() {
     }
   }
+  class SurveyRenderer {
+    constructor() {
+      this.modal = new ModalRenderer();
+      this.stepIndex = 0;
+      this.answers = {};
+      this.root = null;
+      this.submitting = false;
+    }
+    render(root, content, design, behavior, survey, callbacks, requestedStepId) {
+      if (!survey.steps.length) return null;
+      this.root = root;
+      this.content = content;
+      this.design = design;
+      this.behavior = behavior;
+      this.survey = survey;
+      this.callbacks = callbacks;
+      const requested = requestedStepId ? survey.steps.findIndex((step) => step.id === requestedStepId) : -1;
+      this.stepIndex = requested >= 0 ? requested : 0;
+      return this.renderStep();
+    }
+    renderStep() {
+      var _a;
+      const root = this.root;
+      const step = this.survey.steps[this.stepIndex];
+      const baseStyle = root.firstElementChild;
+      Array.from(root.children).forEach((element) => {
+        if (element !== baseStyle) element.remove();
+      });
+      const content = { heading: step.content.heading || this.content.heading, body: step.content.body || this.content.body };
+      const stepDesign = step.size ? { ...this.design, size: step.size } : this.design;
+      const card = this.modal.render(root, content, stepDesign, this.behavior, { onDismiss: this.callbacks.onDismiss, onPrimary: () => void 0, onSecondary: () => void 0 }, step.builder, "survey");
+      let surface = card.querySelector(".movecues-widget");
+      if (!surface) {
+        (_a = card.querySelector(".legacy-content")) == null ? void 0 : _a.remove();
+        surface = document.createElement("section");
+        surface.className = "movecues-widget movecues-widget--survey";
+        card.appendChild(surface);
+      }
+      surface.dataset.movecuesSurveyStepId = step.id;
+      this.syncQuestions(surface, step.questions);
+      this.syncNavigation(surface);
+      return card;
+    }
+    syncQuestions(surface, questions) {
+      var _a;
+      const ids = new Set(questions.map((question) => question.id));
+      surface.querySelectorAll("[data-movecues-question-id]").forEach((node) => {
+        if (!ids.has(node.dataset.movecuesQuestionId ?? "")) node.remove();
+      });
+      let navigation = ((_a = surface.querySelector("[data-movecues-survey-action]")) == null ? void 0 : _a.parentElement) ?? null;
+      for (const question of questions) {
+        const matches = Array.from(surface.querySelectorAll(`[data-movecues-question-id="${cssEscape(question.id)}"]`));
+        matches.slice(1).forEach((node2) => node2.remove());
+        const node = matches[0] ?? createQuestionNode(question);
+        if (!matches[0]) surface.insertBefore(node, navigation);
+        node.dataset.movecuesQuestionType = question.type;
+        node.classList.add("movecues-survey-question", `movecues-survey-question--${question.type}`);
+        this.bindQuestion(node, question);
+        navigation = navigation ?? node.nextElementSibling;
+      }
+    }
+    bindQuestion(node, question) {
+      var _a;
+      node.classList.remove("has-error");
+      if (question.type === "single_choice" || question.type === "multiple_choice" || question.type === "rating" || question.type === "nps") {
+        const allowed = question.type === "rating" ? range(question.min, question.max).map(String) : question.type === "nps" ? range(0, 10).map(String) : question.options.map((option) => option.id);
+        let controls = Array.from(node.querySelectorAll("[data-movecues-option-id]"));
+        if (!controls.length) {
+          const holder = document.createElement("div");
+          holder.className = "movecues-survey-options";
+          for (const value of allowed) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "movecues-survey-option";
+            button.dataset.movecuesOptionId = value;
+            button.textContent = question.type === "single_choice" || question.type === "multiple_choice" ? ((_a = question.options.find((option) => option.id === value)) == null ? void 0 : _a.label) ?? value : value;
+            holder.appendChild(button);
+          }
+          node.appendChild(holder);
+          controls = Array.from(holder.children);
+        }
+        controls.forEach((control) => {
+          const optionId = control.dataset.movecuesOptionId;
+          control.setAttribute("role", "button");
+          const update = () => {
+            const answer = this.answers[question.id];
+            const selected = Array.isArray(answer) ? answer.includes(optionId) : String(answer ?? "") === optionId;
+            control.classList.toggle("is-selected", selected);
+            control.setAttribute("aria-pressed", String(selected));
+          };
+          update();
+          control.onclick = () => {
+            if (!allowed.includes(optionId)) return;
+            if (question.type === "multiple_choice") {
+              const current = Array.isArray(this.answers[question.id]) ? this.answers[question.id] : [];
+              this.answers[question.id] = current.includes(optionId) ? current.filter((value) => value !== optionId) : [...current, optionId];
+            } else this.answers[question.id] = question.type === "rating" || question.type === "nps" ? Number(optionId) : optionId;
+            node.classList.remove("has-error");
+            controls.forEach((item) => {
+              const value = item.dataset.movecuesOptionId;
+              const answer = this.answers[question.id];
+              const selected = Array.isArray(answer) ? answer.includes(value) : String(answer) === value;
+              item.classList.toggle("is-selected", selected);
+              item.setAttribute("aria-pressed", String(selected));
+            });
+          };
+        });
+        return;
+      }
+      let input = node.querySelector("[data-movecues-question-input]");
+      if (!input) {
+        input = question.type === "long_text" ? document.createElement("textarea") : document.createElement("input");
+        input.dataset.movecuesQuestionInput = "";
+        input.className = "movecues-survey-input";
+        node.appendChild(input);
+      }
+      input.value = typeof this.answers[question.id] === "string" ? this.answers[question.id] : "";
+      input.placeholder = question.placeholder ?? "";
+      if (question.maxLength) input.maxLength = question.maxLength;
+      input.oninput = () => {
+        this.answers[question.id] = input.value.slice(0, question.maxLength ?? 1e4);
+        node.classList.remove("has-error");
+      };
+    }
+    syncNavigation(surface) {
+      var _a;
+      const final = this.stepIndex === this.survey.steps.length - 1;
+      const step = this.survey.steps[this.stepIndex];
+      const buttons = Array.from(surface.querySelectorAll("[data-movecues-survey-action]"));
+      let back = buttons.find((button) => button.dataset.movecuesSurveyAction === "back");
+      let next = buttons.find((button) => button.dataset.movecuesSurveyAction === "next");
+      let submit = buttons.find((button) => button.dataset.movecuesSurveyAction === "submit");
+      const holder = ((_a = buttons[0]) == null ? void 0 : _a.parentElement) ?? surface;
+      if (this.survey.allowBack && this.stepIndex > 0 && !back) {
+        back = surveyButton("back", "Back");
+        holder.prepend(back);
+      }
+      if (!final && !next) {
+        next = submit ?? surveyButton("next", "Next →");
+        next.dataset.movecuesSurveyAction = "next";
+        holder.appendChild(next);
+        submit = void 0;
+      }
+      if (final && !submit) {
+        submit = next ?? surveyButton("submit", this.survey.submitLabel);
+        submit.dataset.movecuesSurveyAction = "submit";
+        holder.appendChild(submit);
+        next = void 0;
+      }
+      if (back) {
+        back.hidden = !this.survey.allowBack || this.stepIndex === 0;
+        back.onclick = () => {
+          if (this.stepIndex === 0) return;
+          void this.callbacks.onProgress({ ...this.answers }, step.id);
+          this.stepIndex--;
+          this.renderStep();
+        };
+      }
+      if (next) {
+        next.hidden = final;
+        next.onclick = async () => {
+          if (!this.validateStep()) return;
+          next.disabled = true;
+          try {
+            await this.callbacks.onProgress({ ...this.answers }, step.id);
+            this.stepIndex++;
+            this.renderStep();
+          } finally {
+            if (next.isConnected) next.disabled = false;
+          }
+        };
+      }
+      if (submit) {
+        submit.hidden = !final;
+        submit.textContent = this.survey.submitLabel;
+        submit.onclick = async () => {
+          if (this.submitting || !this.validateAll()) return;
+          this.submitting = true;
+          submit.disabled = true;
+          try {
+            await this.callbacks.onSubmit({ ...this.answers }, step.id);
+          } finally {
+            this.submitting = false;
+            if (submit.isConnected) submit.disabled = false;
+          }
+        };
+      }
+      const progress = surface.querySelector("[data-movecues-survey-progress]");
+      if (progress) progress.hidden = !this.survey.showProgress;
+      const progressLabel = progress == null ? void 0 : progress.querySelector("span:not([data-movecues-survey-progress-bar])");
+      if (progressLabel && !progressLabel.querySelector("[data-movecues-survey-progress-bar]")) progressLabel.textContent = `Step ${this.stepIndex + 1} of ${this.survey.steps.length}`;
+      const bar = surface.querySelector("[data-movecues-survey-progress-bar]");
+      if (bar) bar.style.width = `${(this.stepIndex + 1) / this.survey.steps.length * 100}%`;
+    }
+    validateStep() {
+      return this.validateQuestions(this.survey.steps[this.stepIndex].questions);
+    }
+    validateAll() {
+      let valid = true;
+      let currentValid = true;
+      for (const step of this.survey.steps) {
+        const stepValid = this.validateQuestions(step.questions, step === this.survey.steps[this.stepIndex]);
+        if (step === this.survey.steps[this.stepIndex]) currentValid = stepValid;
+        if (!stepValid) valid = false;
+      }
+      if (!valid && currentValid && this.root) {
+        const status = this.root.querySelector(".movecues-survey-validation");
+        if (status) status.textContent = "Please go back and answer all required questions before submitting.";
+      }
+      return valid;
+    }
+    validateQuestions(questions, show = true) {
+      const missing = questions.filter((question) => question.required && isEmpty(this.answers[question.id]));
+      if (show && this.root) {
+        missing.forEach((question) => {
+          var _a;
+          return (_a = this.root.querySelector(`[data-movecues-question-id="${cssEscape(question.id)}"]`)) == null ? void 0 : _a.classList.add("has-error");
+        });
+        const status = this.root.querySelector(".movecues-survey-validation");
+        if (status) status.textContent = missing.length ? "Please answer the required questions before continuing." : "";
+      }
+      return missing.length === 0;
+    }
+    destroy() {
+      this.modal.destroy();
+      this.root = null;
+    }
+  }
+  function createQuestionNode(question) {
+    const node = document.createElement("div");
+    node.dataset.movecuesQuestionId = question.id;
+    const label = document.createElement("p");
+    label.className = "movecues-survey-question__label";
+    label.textContent = `${question.label}${question.required ? " *" : ""}`;
+    node.appendChild(label);
+    return node;
+  }
+  function surveyButton(action, label) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `movecues-survey-button${action === "back" ? " movecues-survey-button--back" : ""}`;
+    button.dataset.movecuesSurveyAction = action;
+    button.textContent = label;
+    return button;
+  }
+  function isEmpty(value) {
+    return value === void 0 || value === "" || Array.isArray(value) && value.length === 0;
+  }
+  function range(min, max) {
+    return Array.from({ length: max - min + 1 }, (_, index) => min + index);
+  }
+  function cssEscape(value) {
+    return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(value) : value.replace(/["\\]/g, "\\$&");
+  }
   class ExperienceRenderer {
     constructor() {
       this.host = null;
@@ -434,7 +694,7 @@ ${ISOLATION_CSS}`;
     render(experience, callbacks, guideStepId) {
       this.destroy();
       if (isGuideDefinition(experience.definition)) return this.renderGuide(experience, experience.definition, callbacks, guideStepId);
-      return this.renderWidget(experience, experience.definition, callbacks);
+      return this.renderWidget(experience, experience.definition, callbacks, guideStepId);
     }
     root(experienceId) {
       this.host = document.createElement("div");
@@ -448,7 +708,7 @@ ${ISOLATION_CSS}`;
       document.documentElement.appendChild(this.host);
       return root;
     }
-    renderWidget(experience, definition, callbacks) {
+    renderWidget(experience, definition, callbacks, requestedStepId) {
       if (experience.widgetType === "anchored_card" || experience.widgetType === "hotspot") {
         const mount = (target2) => {
           const root = this.root(experience.id);
@@ -482,6 +742,17 @@ ${ISOLATION_CSS}`;
         const renderer = new ModalRenderer();
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
+      } else if (experience.widgetType === "survey" && definition.survey) {
+        const root = this.root(experience.id);
+        const renderer = new SurveyRenderer();
+        this.renderer = renderer;
+        renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId) => {
+          var _a;
+          return (_a = callbacks.onSurveyProgress) == null ? void 0 : _a.call(callbacks, answers, stepId);
+        }, onSubmit: (answers, stepId) => {
+          var _a;
+          return (_a = callbacks.onSurveySubmit) == null ? void 0 : _a.call(callbacks, answers, stepId);
+        } }, requestedStepId);
       } else if (experience.widgetType === "slideout") {
         const root = this.root(experience.id);
         const renderer = new SlideoutRenderer();
@@ -624,6 +895,7 @@ ${ISOLATION_CSS}`;
   .slideout[data-position=top-left]{top:16px;left:16px}.slideout[data-position=top-right]{top:16px;right:16px}.slideout[data-position=bottom-left]{bottom:16px;left:16px}.slideout[data-position=bottom-right]{bottom:16px;right:16px}.slideout[data-position=center-left]{left:16px;top:50%;transform:translateY(-50%)}.slideout[data-position=center-right]{right:16px;top:50%;transform:translateY(-50%)}
   .banner{left:0;right:0;width:auto!important;max-width:none;border-radius:0!important;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner[data-position=top]{top:0}.banner[data-position=bottom]{bottom:0}.banner h2,.banner p{grid-column:1}.banner footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
   .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--movecues-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--movecues-hotspot);border-radius:50%;animation:movecues-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes movecues-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
+  .movecues-survey-question.has-error{outline:2px solid #fecaca;outline-offset:6px;border-radius:6px}.movecues-survey-validation{color:#b91c1c}.movecues-survey-option.is-selected{border-color:var(--movecues-primary)!important;background:color-mix(in srgb,var(--movecues-primary) 12%,white)!important}.movecues-survey-input{font:inherit}
 `;
   const ONCE_KEY = "__movecues_experiences_seen__";
   const SESSION_KEY = "__movecues_experiences_session_seen__";
@@ -773,7 +1045,7 @@ ${ISOLATION_CSS}`;
       const definition = isGuideDefinition(experience.definition) ? experience.definition : null;
       const currentStepId = (definition == null ? void 0 : definition.steps.some((step) => step.id === requestedStepId)) ? requestedStepId : (_b = definition == null ? void 0 : definition.steps[0]) == null ? void 0 : _b.id;
       const impressionId = (progress == null ? void 0 : progress.impressionId) ?? experience.impressionId ?? null;
-      const runtime2 = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId), shownPromise: null };
+      const runtime2 = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId), shownPromise: null, surveyResponseId: null, surveyResponsePromise: null, surveyAnswers: {} };
       this.active = runtime2;
       if (currentStepId) this.persistGuide(runtime2, "active");
       const mounted = currentStepId ? progress && this.advanceForRoute(runtime2) ? true : (this.renderActiveGuide(), true) : this.renderer.render(experience, this.callbacks(runtime2), currentStepId);
@@ -797,6 +1069,11 @@ ${ISOLATION_CSS}`;
             this.pausedGuide = runtime2;
             this.persistGuide(runtime2, "paused");
           }
+        },
+        onSurveyProgress: (answers, stepId) => this.persistSurvey(runtime2, answers, stepId),
+        onSurveySubmit: async (answers, stepId) => {
+          await this.persistSurvey(runtime2, answers, stepId, "submitted");
+          await this.finish(runtime2, "completed", true);
         }
       };
     }
@@ -809,6 +1086,7 @@ ${ISOLATION_CSS}`;
         if (this.active === runtime2) this.persistGuide(runtime2, "active");
         else if (this.pausedGuide === runtime2) this.persistGuide(runtime2, "paused");
       });
+      if (runtime2.experience.widgetType === "survey") void runtime2.shownPromise.then(() => this.ensureSurveyResponse(runtime2));
     }
     handleAction(runtime2, action) {
       var _a;
@@ -820,12 +1098,13 @@ ${ISOLATION_CSS}`;
       await runtime2.shownPromise;
       await this.post(runtime2, "action", action);
     }
-    async finish(runtime2, event) {
+    async finish(runtime2, event, surveyAlreadyPersisted = false) {
       if (this.active === runtime2) {
         this.renderer.destroy();
         this.active = null;
       }
       if (runtime2.currentStepId) this.state.clearGuideProgress(runtime2.experience.id);
+      if (runtime2.experience.widgetType === "survey" && event === "dismissed" && !surveyAlreadyPersisted) await this.persistSurvey(runtime2, runtime2.surveyAnswers, null, "abandoned");
       await runtime2.shownPromise;
       await this.post(runtime2, event);
       this.justFinishedId = runtime2.experience.id;
@@ -917,6 +1196,39 @@ ${ISOLATION_CSS}`;
       } catch {
         return null;
       }
+    }
+    async ensureSurveyResponse(runtime2) {
+      if (runtime2.surveyResponseId) return runtime2.surveyResponseId;
+      if (runtime2.surveyResponsePromise) return runtime2.surveyResponsePromise;
+      runtime2.surveyResponsePromise = (async () => {
+        if (!runtime2.shownRequested) this.shown(runtime2);
+        await runtime2.shownPromise;
+        if (!runtime2.impressionId) return null;
+        try {
+          const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/survey-responses`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify(this.surveyIdentity(runtime2)) });
+          if (!response.ok) return null;
+          const body = await response.json();
+          runtime2.surveyResponseId = body.responseId ?? null;
+          return runtime2.surveyResponseId;
+        } catch {
+          return null;
+        }
+      })();
+      const result = await runtime2.surveyResponsePromise;
+      runtime2.surveyResponsePromise = null;
+      return result;
+    }
+    async persistSurvey(runtime2, answers, currentStepId, state) {
+      const responseId = await this.ensureSurveyResponse(runtime2);
+      if (!responseId || !runtime2.impressionId) return;
+      runtime2.surveyAnswers = { ...answers };
+      try {
+        await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/survey-responses/${encodeURIComponent(responseId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ ...this.surveyIdentity(runtime2), currentStepId, answers, ...state === "submitted" ? { submitted: true } : {}, ...state === "abandoned" ? { abandoned: true } : {} }) });
+      } catch {
+      }
+    }
+    surveyIdentity(runtime2) {
+      return { experienceId: runtime2.experience.id, versionId: runtime2.experience.versionId, impressionId: runtime2.impressionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId() };
     }
   }
   function currentPagePath() {

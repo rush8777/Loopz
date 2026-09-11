@@ -20,6 +20,7 @@ export declare class EditorModeController {
     private draft;
     private definition;
     private guide;
+    private survey;
     private stepIndex;
     private mode;
     private dirty;

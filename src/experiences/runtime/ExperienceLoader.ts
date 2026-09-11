@@ -1,4 +1,4 @@
-import type { DeliveredExperience, ExperienceAction, PageRule, RuntimeGuideDefinition } from "../types";
+import type { DeliveredExperience, ExperienceAction, PageRule, RuntimeGuideDefinition, SurveyAnswers } from "../types";
 import { isGuideDefinition } from "../types";
 import type { ExperienceSession } from "../runtimeInterfaces";
 import { EligibilityEngine } from "./EligibilityEngine";
@@ -11,6 +11,9 @@ interface ActiveExperience {
   impressionId: string | null;
   shownRequested: boolean;
   shownPromise: Promise<void> | null;
+  surveyResponseId: string | null;
+  surveyResponsePromise: Promise<string | null> | null;
+  surveyAnswers: SurveyAnswers;
 }
 
 export class ExperienceLoader {
@@ -96,7 +99,7 @@ export class ExperienceLoader {
     const definition = isGuideDefinition(experience.definition) ? experience.definition : null;
     const currentStepId = definition?.steps.some(step => step.id === requestedStepId) ? requestedStepId : definition?.steps[0]?.id;
     const impressionId = progress?.impressionId ?? experience.impressionId ?? null;
-    const runtime: ActiveExperience = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId), shownPromise: null };
+    const runtime: ActiveExperience = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId), shownPromise: null, surveyResponseId: null, surveyResponsePromise: null, surveyAnswers: {} };
     this.active = runtime;
     if (currentStepId) this.persistGuide(runtime, "active");
     const mounted = currentStepId
@@ -118,6 +121,8 @@ export class ExperienceLoader {
         this.active = null;
         if (runtime.currentStepId) { this.pausedGuide = runtime; this.persistGuide(runtime, "paused"); }
       },
+      onSurveyProgress: (answers: SurveyAnswers, stepId: string) => this.persistSurvey(runtime, answers, stepId),
+      onSurveySubmit: async (answers: SurveyAnswers, stepId: string) => { await this.persistSurvey(runtime, answers, stepId, "submitted"); await this.finish(runtime, "completed", true); },
     };
   }
 
@@ -130,6 +135,7 @@ export class ExperienceLoader {
       if (this.active === runtime) this.persistGuide(runtime, "active");
       else if (this.pausedGuide === runtime) this.persistGuide(runtime, "paused");
     });
+    if (runtime.experience.widgetType === "survey") void runtime.shownPromise.then(() => this.ensureSurveyResponse(runtime));
   }
 
   private handleAction(runtime: ActiveExperience, action: ExperienceAction): void {
@@ -142,9 +148,10 @@ export class ExperienceLoader {
     await runtime.shownPromise; await this.post(runtime, "action", action);
   }
 
-  private async finish(runtime: ActiveExperience, event: "dismissed" | "completed"): Promise<void> {
+  private async finish(runtime: ActiveExperience, event: "dismissed" | "completed", surveyAlreadyPersisted = false): Promise<void> {
     if (this.active === runtime) { this.renderer.destroy(); this.active = null; }
     if (runtime.currentStepId) this.state.clearGuideProgress(runtime.experience.id);
+    if (runtime.experience.widgetType === "survey" && event === "dismissed" && !surveyAlreadyPersisted) await this.persistSurvey(runtime, runtime.surveyAnswers, null, "abandoned");
     await runtime.shownPromise; await this.post(runtime, event);
     this.justFinishedId = runtime.experience.id;
     if (!this.destroyed) void this.evaluate();
@@ -225,6 +232,38 @@ export class ExperienceLoader {
       const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? undefined, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: runtime.impressionId ?? undefined, event, action }) });
       return response.ok && response.status !== 204 ? await response.json() as { impressionId?: string } : null;
     } catch { return null; }
+  }
+
+  private async ensureSurveyResponse(runtime: ActiveExperience): Promise<string | null> {
+    if (runtime.surveyResponseId) return runtime.surveyResponseId;
+    if (runtime.surveyResponsePromise) return runtime.surveyResponsePromise;
+    runtime.surveyResponsePromise = (async () => {
+      if (!runtime.shownRequested) this.shown(runtime);
+      await runtime.shownPromise;
+      if (!runtime.impressionId) return null;
+      try {
+        const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/survey-responses`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify(this.surveyIdentity(runtime)) });
+        if (!response.ok) return null;
+        const body = await response.json() as { responseId?: string };
+        runtime.surveyResponseId = body.responseId ?? null;
+        return runtime.surveyResponseId;
+      } catch { return null; }
+    })();
+    const result = await runtime.surveyResponsePromise;
+    runtime.surveyResponsePromise = null;
+    return result;
+  }
+
+  private async persistSurvey(runtime: ActiveExperience, answers: SurveyAnswers, currentStepId: string | null, state?: "submitted" | "abandoned"): Promise<void> {
+    const responseId = await this.ensureSurveyResponse(runtime); if (!responseId || !runtime.impressionId) return;
+    runtime.surveyAnswers = { ...answers };
+    try {
+      await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/survey-responses/${encodeURIComponent(responseId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ ...this.surveyIdentity(runtime), currentStepId, answers, ...(state === "submitted" ? { submitted: true } : {}), ...(state === "abandoned" ? { abandoned: true } : {}) }) });
+    } catch { /* response persistence must never affect host code */ }
+  }
+
+  private surveyIdentity(runtime: ActiveExperience) {
+    return { experienceId: runtime.experience.id, versionId: runtime.experience.versionId, impressionId: runtime.impressionId!, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? undefined, sessionId: this.session.getSessionId() };
   }
 }
 

@@ -2,7 +2,7 @@ import type { ExperienceBehavior, ExperienceContent, ExperienceDesign, WidgetBui
 import { buildCard, type RenderCallbacks } from "./AnchoredCardRenderer";
 
 export class ModalRenderer {
-  render(root: ShadowRoot, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState): HTMLElement {
+  render(root: ShadowRoot, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState, widgetType: "modal" | "survey" = "modal"): HTMLElement {
     if (behavior.backdrop !== false) {
       const backdrop = document.createElement("div");
       backdrop.className = "backdrop";
@@ -10,7 +10,7 @@ export class ModalRenderer {
       if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
       root.appendChild(backdrop);
     }
-    const card = buildCard(root, content, design, behavior, callbacks, builder, "modal");
+    const card = buildCard(root, content, design, behavior, callbacks, builder, widgetType);
     card.classList.add("modal");
     card.dataset.layout = behavior.modalLayout ?? "center";
     return card;

@@ -1,4 +1,4 @@
-import type { DeliveredExperience, ExperienceAction } from "../types";
+import type { DeliveredExperience, ExperienceAction, SurveyAnswers } from "../types";
 export interface ExperienceRendererCallbacks {
     onVisible: () => void;
     onDismiss: () => void;
@@ -7,6 +7,8 @@ export interface ExperienceRendererCallbacks {
     onGuideAdvance?: () => void;
     onGuideBack?: () => void;
     onUnavailable?: () => void;
+    onSurveyProgress?: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
+    onSurveySubmit?: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
 }
 export declare class ExperienceRenderer {
     private host;

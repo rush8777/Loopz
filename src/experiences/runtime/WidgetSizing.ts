@@ -7,13 +7,14 @@ interface WidgetSizeConstraint {
 }
 
 export const WIDGET_SIZE_CONSTRAINTS: Record<WidgetType, WidgetSizeConstraint> = {
-  anchored_card: { width: { default: 320, min: 240, max: 480 }, height: {}, viewportGutter: 24 },
+  anchored_card: { width: { default: 320, min: 240, max: 480 }, height: { allowFixed: true, min: 120, max: 700 }, viewportGutter: 24 },
   toast: { width: { default: 380, min: 280, max: 520 }, height: {}, viewportGutter: 24 },
   cursor_follow: { width: { default: 280, min: 200, max: 360 }, height: {}, viewportGutter: 24 },
   modal: { width: { default: 600, min: 320, max: 960, allowFull: true }, height: { allowFixed: true, allowViewport: true, min: 200, max: 900 }, viewportGutter: 24 },
   slideout: { width: { default: 400, min: 320, max: 640 }, height: { allowFixed: true, allowViewport: true, min: 240, max: 900 }, viewportGutter: 24 },
   hotspot: { width: { default: 300, min: 220, max: 420 }, height: {}, viewportGutter: 24 },
   banner: { width: { default: "full" }, height: {}, viewportGutter: 0 },
+  survey: { width: { default: 700, min: 320, max: 960, allowFull: true }, height: { allowFixed: true, allowViewport: true, min: 200, max: 900 }, viewportGutter: 24 },
 };
 
 export function normalizeWidgetSize(widgetType: WidgetType, design: ExperienceDesign): ExperienceSize {
