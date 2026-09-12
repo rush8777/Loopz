@@ -2317,7 +2317,7 @@ function isGuideDefinition(value) {
   return "steps" in value;
 }
 const ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "H1", "H2", "H3", "H4", "P", "SPAN", "BUTTON", "IMG", "HR", "LABEL"]);
-const ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "width", "height", "type", "placeholder", "maxlength", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type", "data-movecues-question-id", "data-movecues-question-type", "data-movecues-question-input", "data-movecues-option-id", "data-movecues-survey-action", "data-movecues-survey-progress", "data-movecues-survey-progress-bar", "data-movecues-survey-step-id"]);
+const ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "width", "height", "type", "placeholder", "maxlength", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type", "data-movecues-question-id", "data-movecues-question-type", "data-movecues-question-input", "data-movecues-option-id", "data-movecues-survey-action", "data-movecues-survey-controls", "data-movecues-survey-progress", "data-movecues-survey-progress-bar", "data-movecues-survey-step-id"]);
 function mountBuilderContent(root, card, builder, callbacks, allowSurveyInputs = false) {
   const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
   const css = safeBuilderCss(builder.css);
@@ -2344,7 +2344,7 @@ ${ISOLATION_CSS}`;
   });
   return true;
 }
-const ISOLATION_CSS = `[data-movecues-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-movecues-builder-surface]>.movecues-widget{position:relative!important;inset:auto!important}`;
+const ISOLATION_CSS = `[data-movecues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movecues-builder-surface]>.movecues-widget{position:relative!important;inset:auto!important}`;
 function sanitizeBuilderHtml(input, allowSurveyInputs = false) {
   const template = document.createElement("template");
   template.innerHTML = input;
@@ -2428,8 +2428,7 @@ function applyWidgetSizeEnvelope(card, widgetType, design) {
   }
   card.style.height = size.height.mode === "fixed" ? `${size.height.value}px` : size.height.mode === "viewport" ? `calc(100vh - ${gutter}px)` : "auto";
   card.style.maxHeight = `calc(100vh - ${gutter}px)`;
-  card.style.overflowX = "hidden";
-  card.style.overflowY = "auto";
+  card.style.overflow = "visible";
 }
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? Math.round(value) : min));
@@ -2871,6 +2870,51 @@ class SurveyRenderer {
     let next = buttons.find((button) => button.dataset.movecuesSurveyAction === "next");
     let submit = buttons.find((button) => button.dataset.movecuesSurveyAction === "submit");
     const holder = ((_a = buttons[0]) == null ? void 0 : _a.parentElement) ?? surface;
+    const builderOwnsControls = Boolean(surface.querySelector("[data-movecues-survey-controls]"));
+    if (builderOwnsControls) {
+      if (back) {
+        back.hidden = !this.survey.allowBack || this.stepIndex === 0;
+        back.onclick = () => {
+          if (this.stepIndex === 0) return;
+          void this.callbacks.onProgress({ ...this.answers }, step.id);
+          this.stepIndex--;
+          this.renderStep();
+        };
+      }
+      if (next) {
+        const nextButton = next;
+        nextButton.hidden = final;
+        nextButton.onclick = async () => {
+          if (!this.validateStep()) return;
+          nextButton.disabled = true;
+          try {
+            await this.callbacks.onProgress({ ...this.answers }, step.id);
+            this.stepIndex++;
+            this.renderStep();
+          } finally {
+            if (nextButton.isConnected) nextButton.disabled = false;
+          }
+        };
+      }
+      if (submit) {
+        const submitButton = submit;
+        submitButton.hidden = !final;
+        submitButton.textContent = this.survey.submitLabel;
+        submitButton.onclick = async () => {
+          if (this.submitting || !this.validateAll()) return;
+          this.submitting = true;
+          submitButton.disabled = true;
+          try {
+            await this.callbacks.onSubmit({ ...this.answers }, step.id);
+          } finally {
+            this.submitting = false;
+            if (submitButton.isConnected) submitButton.disabled = false;
+          }
+        };
+      }
+      this.syncProgress(surface);
+      return;
+    }
     if (this.survey.allowBack && this.stepIndex > 0 && !back) {
       back = surveyButton("back", "Back");
       holder.prepend(back);
@@ -2925,6 +2969,9 @@ class SurveyRenderer {
         }
       };
     }
+    this.syncProgress(surface);
+  }
+  syncProgress(surface) {
     const progress = surface.querySelector("[data-movecues-survey-progress]");
     if (progress) progress.hidden = !this.survey.showProgress;
     const progressLabel = progress == null ? void 0 : progress.querySelector("span:not([data-movecues-survey-progress-bar])");
@@ -3195,7 +3242,7 @@ class ExperienceRenderer {
 const STYLES = `
   :host{all:initial}.card{pointer-events:auto;position:fixed;box-sizing:border-box;width:320px;max-width:calc(100vw - 16px);padding:18px;background:var(--movecues-bg);color:var(--movecues-fg);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-shadow:0 12px 38px rgba(0,0,0,.22);border:1px solid rgba(0,0,0,.12)}
   .card[data-width=sm]{width:260px}.card[data-width=lg]{width:400px}.card[data-radius=sm]{border-radius:6px}.card[data-radius=md]{border-radius:12px}.card[data-radius=lg]{border-radius:20px}
-  .builder-card{padding:0;background:transparent;border:0;box-shadow:none}.builder-content{box-sizing:border-box;width:100%;height:100%;max-width:100%;overflow:hidden}.builder-card>.close{z-index:2}
+  .builder-card{padding:0;background:transparent;border:0;box-shadow:none}.builder-content{box-sizing:border-box;width:100%;max-width:100%;overflow:visible}.builder-card>.close{z-index:2}
   h2{font:600 17px/1.3 ui-sans-serif,system-ui,sans-serif;margin:0 24px 7px 0}p{margin:0;white-space:pre-wrap}footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}button{border:0;border-radius:7px;padding:8px 12px;font:600 13px ui-sans-serif,system-ui,sans-serif;cursor:pointer}.primary{background:var(--movecues-primary);color:#fff}.secondary{background:transparent;color:inherit}.close{position:absolute;right:8px;top:7px;padding:3px 7px;background:transparent;color:inherit;font-size:20px}
   .toast{position:fixed!important}.toast[data-position=top-left]{top:16px;left:16px}.toast[data-position=top-right]{top:16px;right:16px}.toast[data-position=bottom-left]{bottom:16px;left:16px}.toast[data-position=bottom-right]{bottom:16px;right:16px}.cursor{will-change:left,top}@media(prefers-reduced-motion:reduce){.card{transition:none!important}}
   .backdrop{pointer-events:auto;position:fixed;inset:0;background:rgba(0,0,0,var(--movecues-backdrop-opacity,.45))}

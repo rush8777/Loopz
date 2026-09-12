@@ -86,12 +86,24 @@ export class SurveyRenderer {
     let next = buttons.find(button => button.dataset.movecuesSurveyAction === "next");
     let submit = buttons.find(button => button.dataset.movecuesSurveyAction === "submit");
     const holder = buttons[0]?.parentElement ?? surface;
+    const builderOwnsControls = Boolean(surface.querySelector("[data-movecues-survey-controls]"));
+    if (builderOwnsControls) {
+      if (back) { back.hidden = !this.survey.allowBack || this.stepIndex === 0; back.onclick = () => { if (this.stepIndex === 0) return; void this.callbacks.onProgress({ ...this.answers }, step.id); this.stepIndex--; this.renderStep(); }; }
+      if (next) { const nextButton = next; nextButton.hidden = final; nextButton.onclick = async () => { if (!this.validateStep()) return; nextButton.disabled = true; try { await this.callbacks.onProgress({ ...this.answers }, step.id); this.stepIndex++; this.renderStep(); } finally { if (nextButton.isConnected) nextButton.disabled = false; } }; }
+      if (submit) { const submitButton = submit; submitButton.hidden = !final; submitButton.textContent = this.survey.submitLabel; submitButton.onclick = async () => { if (this.submitting || !this.validateAll()) return; this.submitting = true; submitButton.disabled = true; try { await this.callbacks.onSubmit({ ...this.answers }, step.id); } finally { this.submitting = false; if (submitButton.isConnected) submitButton.disabled = false; } }; }
+      this.syncProgress(surface);
+      return;
+    }
     if (this.survey.allowBack && this.stepIndex > 0 && !back) { back = surveyButton("back", "Back"); holder.prepend(back); }
     if (!final && !next) { next = submit ?? surveyButton("next", "Next →"); next.dataset.movecuesSurveyAction = "next"; holder.appendChild(next); submit = undefined; }
     if (final && !submit) { submit = next ?? surveyButton("submit", this.survey.submitLabel); submit.dataset.movecuesSurveyAction = "submit"; holder.appendChild(submit); next = undefined; }
     if (back) { back.hidden = !this.survey.allowBack || this.stepIndex === 0; back.onclick = () => { if (this.stepIndex === 0) return; void this.callbacks.onProgress({ ...this.answers }, step.id); this.stepIndex--; this.renderStep(); }; }
     if (next) { next.hidden = final; next.onclick = async () => { if (!this.validateStep()) return; next!.disabled = true; try { await this.callbacks.onProgress({ ...this.answers }, step.id); this.stepIndex++; this.renderStep(); } finally { if (next.isConnected) next.disabled = false; } }; }
     if (submit) { submit.hidden = !final; submit.textContent = this.survey.submitLabel; submit.onclick = async () => { if (this.submitting || !this.validateAll()) return; this.submitting = true; submit!.disabled = true; try { await this.callbacks.onSubmit({ ...this.answers }, step.id); } finally { this.submitting = false; if (submit.isConnected) submit.disabled = false; } }; }
+    this.syncProgress(surface);
+  }
+
+  private syncProgress(surface: HTMLElement): void {
     const progress = surface.querySelector<HTMLElement>("[data-movecues-survey-progress]"); if (progress) progress.hidden = !this.survey.showProgress;
     const progressLabel = progress?.querySelector<HTMLElement>("span:not([data-movecues-survey-progress-bar])"); if (progressLabel && !progressLabel.querySelector("[data-movecues-survey-progress-bar]")) progressLabel.textContent = `Step ${this.stepIndex + 1} of ${this.survey.steps.length}`;
     const bar = surface.querySelector<HTMLElement>("[data-movecues-survey-progress-bar]"); if (bar) bar.style.width = `${((this.stepIndex + 1) / this.survey.steps.length) * 100}%`;

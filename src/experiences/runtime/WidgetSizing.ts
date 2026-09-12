@@ -45,7 +45,10 @@ export function applyWidgetSizeEnvelope(card: HTMLElement, widgetType: WidgetTyp
   }
   card.style.height = size.height.mode === "fixed" ? `${size.height.value}px` : size.height.mode === "viewport" ? `calc(100vh - ${gutter}px)` : "auto";
   card.style.maxHeight = `calc(100vh - ${gutter}px)`;
-  card.style.overflowX = "hidden"; card.style.overflowY = "auto";
+  // Builder widgets manage their own internal overflow. Keeping this outer
+  // placement card visible prevents it from cutting off authored shadows and
+  // other deliberate visual overflow at the card's exact size boundary.
+  card.style.overflow = "visible";
 }
 
 function clamp(value: number, min: number, max: number): number { return Math.min(max, Math.max(min, Number.isFinite(value) ? Math.round(value) : min)); }

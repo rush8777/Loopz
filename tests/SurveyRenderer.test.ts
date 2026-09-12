@@ -19,4 +19,15 @@ describe("SurveyRenderer", () => {
     expect(root.querySelector('[data-movecues-option-id="b"]')?.classList.contains("is-selected")).toBe(true); root.querySelector<HTMLButtonElement>('[data-movecues-survey-action="next"]')!.click(); await vi.waitFor(() => expect(root.querySelector<HTMLInputElement>("[data-movecues-question-input]")?.value).toBe("Because"));
     root.querySelector<HTMLButtonElement>('[data-movecues-survey-action="submit"]')!.click(); await vi.waitFor(() => expect(submit).toHaveBeenCalledWith({ choice: "b", detail: "Because" }, "followup")); renderer.destroy();
   });
+
+  it("does not recreate builder-owned controls that the designer removed", () => {
+    const builderWithoutBackOrSubmit = { version: 1 as const, projectData: {}, html: '<section class="movecues-widget"><div data-movecues-survey-controls="builder"><button data-movecues-survey-action="next">Next</button></div></section>', css: ".movecues-widget{padding:20px}" };
+    const survey: SurveyConfig = { showProgress: false, allowBack: true, submitLabel: "Send", steps: [
+      { id: "first", content: { heading: "First", body: "" }, questions: [], builder: builderWithoutBackOrSubmit },
+      { id: "final", content: { heading: "Final", body: "" }, questions: [], builder: builderWithoutBackOrSubmit },
+    ] };
+    const host = document.createElement("div"); const root = host.attachShadow({ mode: "open" }); root.appendChild(document.createElement("style")); document.body.appendChild(host);
+    new SurveyRenderer().render(root, { heading: "Survey", body: "" }, { width: "md", theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } }, { dismissible: true, backdrop: true }, survey, { onDismiss: vi.fn(), onProgress: vi.fn(), onSubmit: vi.fn() }, "final");
+    expect(root.querySelector('[data-movecues-survey-action="back"]')).toBeNull(); expect(root.querySelector('[data-movecues-survey-action="submit"]')).toBeNull(); expect(root.querySelector<HTMLButtonElement>('[data-movecues-survey-action="next"]')?.hidden).toBe(true);
+  });
 });

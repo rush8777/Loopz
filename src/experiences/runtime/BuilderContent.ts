@@ -2,7 +2,7 @@ import type { WidgetBuilderState } from "../types";
 import type { RenderCallbacks } from "./AnchoredCardRenderer";
 
 const ALLOWED_TAGS = new Set(["DIV", "SECTION", "H1", "H2", "H3", "H4", "P", "SPAN", "BUTTON", "IMG", "HR", "LABEL"]);
-const ALLOWED_ATTRIBUTES = new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "width", "height", "type", "placeholder", "maxlength", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type", "data-movecues-question-id", "data-movecues-question-type", "data-movecues-question-input", "data-movecues-option-id", "data-movecues-survey-action", "data-movecues-survey-progress", "data-movecues-survey-progress-bar", "data-movecues-survey-step-id"]);
+const ALLOWED_ATTRIBUTES = new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "width", "height", "type", "placeholder", "maxlength", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type", "data-movecues-question-id", "data-movecues-question-type", "data-movecues-question-input", "data-movecues-option-id", "data-movecues-survey-action", "data-movecues-survey-controls", "data-movecues-survey-progress", "data-movecues-survey-progress-bar", "data-movecues-survey-step-id"]);
 
 export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder: WidgetBuilderState, callbacks: RenderCallbacks, allowSurveyInputs = false): boolean {
   const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
@@ -26,7 +26,11 @@ export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder
   return true;
 }
 
-const ISOLATION_CSS = `[data-movecues-builder-surface]{position:relative;overflow:hidden;contain:layout style paint}[data-movecues-builder-surface]>.movecues-widget{position:relative!important;inset:auto!important}`;
+// Keep the builder surface scoped, but do not clip its visual overflow. The
+// authored widget owns internal scrolling (`.movecues-widget { overflow: … }`)
+// while shadows, outlines, and corner decorations must be able to paint beyond
+// its layout box just as they do in the GrapesJS canvas.
+const ISOLATION_CSS = `[data-movecues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movecues-builder-surface]>.movecues-widget{position:relative!important;inset:auto!important}`;
 
 export function sanitizeBuilderHtml(input: string, allowSurveyInputs = false): ChildNode[] | null {
   const template = document.createElement("template");
