@@ -65,3 +65,5 @@ export function useAnalytics(): Analytics | null {
 //   <button onClick={addToCart}>Add to cart</button>
 // is captured automatically - no analytics code in the click handler.
 // For custom events: const analytics = useAnalytics(); analytics?.event(...)
+// Example: analytics?.event("checkout_started", { plan: "pro" });
+// Example identity binding: analytics?.identify("user_123", { role: "admin" });

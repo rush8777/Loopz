@@ -1178,6 +1178,18 @@
       localStore.set(ANON_ID_KEY, this.anonymousId);
       sessionStore.set("__aa_identified_user__", userId);
     }
+    /** Start a fresh visitor/session after logout or an account switch. */
+    reset() {
+      this.anonymousId = generateId("anon");
+      this.sessionId = generateId("sess");
+      this.pageViewId = generateId("pv");
+      this.lastActivity = now();
+      this.sessionJustStarted = true;
+      localStore.set(ANON_ID_KEY, this.anonymousId);
+      sessionStore.set(SESSION_ID_KEY, this.sessionId);
+      sessionStore.set(SESSION_LAST_ACTIVE_KEY, String(this.lastActivity));
+      sessionStore.remove("__aa_identified_user__");
+    }
     getIdentifiedUserId() {
       return sessionStore.get("__aa_identified_user__");
     }
@@ -2120,6 +2132,13 @@
       this.enqueueEvent("identify", payload);
       this.log(`identify: ${userId}`, attributes);
     }
+    /** Clear the active identity and begin future activity as a new visitor. */
+    reset() {
+      if (!this.requireInit()) return;
+      this.session.reset();
+      this.trackPageView();
+      this.log("identity reset");
+    }
     page() {
       if (!this.requireInit()) return;
       this.trackPageView();
@@ -2316,6 +2335,7 @@
     "destroy",
     "event",
     "identify",
+    "reset",
     "page",
     "defineFunnel",
     "enableDebug",
@@ -2335,6 +2355,7 @@
       destroy: () => analytics2.destroy(),
       event: (...args) => analytics2.event(args[0], args[1]),
       identify: (...args) => analytics2.identify(args[0], args[1]),
+      reset: () => analytics2.reset(),
       page: () => analytics2.page(),
       defineFunnel: (...args) => analytics2.defineFunnel(args[0], args[1]),
       enableDebug: () => analytics2.enableDebug(),

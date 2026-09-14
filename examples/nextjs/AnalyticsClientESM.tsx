@@ -23,6 +23,8 @@ export function AnalyticsClientESM({ siteId }: { siteId: string }) {
   useEffect(() => {
     const analytics = createAnalytics({ siteId });
     analyticsRef.current = analytics;
+    analytics.identify("demo_user_001", { framework: "nextjs", integration: "esm" });
+    analytics.event("app_started", { framework: "nextjs", integration: "esm" });
 
     return () => {
       analytics.destroy();
@@ -48,6 +50,9 @@ export function AnalyticsClientESM({ siteId }: { siteId: string }) {
 //       </html>
 //     );
 //   }
+//
+// For custom business events in a page/component:
+// analyticsRef.current?.event("checkout_started", { plan: "pro" });
 //
 // Next.js client-side navigations use the History API under the hood, so
 // RouteObserver's pushState/replaceState patching picks up route changes

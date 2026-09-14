@@ -29,5 +29,7 @@ export declare class SessionManager {
     getPageViewId(): string;
     /** Allow identify() to bind a known user id to the anonymous id (kept locally only). */
     identify(userId: string): void;
+    /** Start a fresh visitor/session after logout or an account switch. */
+    reset(): void;
     getIdentifiedUserId(): string | null;
 }

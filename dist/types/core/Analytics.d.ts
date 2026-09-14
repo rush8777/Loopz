@@ -33,6 +33,8 @@ export declare class Analytics {
     destroy(): void;
     event(name: string, properties?: Record<string, unknown>): void;
     identify(userId: string, attributes?: Record<string, unknown>): void;
+    /** Clear the active identity and begin future activity as a new visitor. */
+    reset(): void;
     page(): void;
     defineFunnel(name: string, steps: FunnelStep[]): void;
     enableDebug(): void;

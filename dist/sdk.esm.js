@@ -1176,6 +1176,18 @@ class SessionManager {
     localStore.set(ANON_ID_KEY, this.anonymousId);
     sessionStore.set("__aa_identified_user__", userId);
   }
+  /** Start a fresh visitor/session after logout or an account switch. */
+  reset() {
+    this.anonymousId = generateId("anon");
+    this.sessionId = generateId("sess");
+    this.pageViewId = generateId("pv");
+    this.lastActivity = now();
+    this.sessionJustStarted = true;
+    localStore.set(ANON_ID_KEY, this.anonymousId);
+    sessionStore.set(SESSION_ID_KEY, this.sessionId);
+    sessionStore.set(SESSION_LAST_ACTIVE_KEY, String(this.lastActivity));
+    sessionStore.remove("__aa_identified_user__");
+  }
   getIdentifiedUserId() {
     return sessionStore.get("__aa_identified_user__");
   }
@@ -2123,6 +2135,13 @@ let Analytics$1 = class Analytics {
     const payload = { userId, traits: attributes };
     this.enqueueEvent("identify", payload);
     this.log(`identify: ${userId}`, attributes);
+  }
+  /** Clear the active identity and begin future activity as a new visitor. */
+  reset() {
+    if (!this.requireInit()) return;
+    this.session.reset();
+    this.trackPageView();
+    this.log("identity reset");
   }
   page() {
     if (!this.requireInit()) return;

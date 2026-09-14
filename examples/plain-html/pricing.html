@@ -15,6 +15,23 @@
     </style>
     <!-- Current SDK install used by this example. -->
     <script async src="../../dist/sdk.js" data-site-id="site_tlh00zlo4buy61twqjccpmik" data-endpoint="http://localhost:3000"></script>
+    <script>
+        window.addEventListener("load", function () {
+            analytics.event("pricing_viewed", { source: document.referrer || "direct" });
+            analytics.defineFunnel("demo_signup", [
+                { event: "signup_started" },
+                { event: "pricing_viewed" },
+                { event: "signup_completed" }
+            ]);
+            document.querySelectorAll(".plan .btn").forEach(function (link) {
+                link.addEventListener("click", function () {
+                    var plan = link.closest(".plan").querySelector("h2").textContent.toLowerCase();
+                    analytics.event("plan_selected", { plan: plan });
+                    analytics.event(plan === "scale" ? "sales_contact_clicked" : "signup_started", { plan: plan, source: "pricing" });
+                });
+            });
+        });
+    </script>
 </head>
 <body>
     <nav><a class="logo" href="index.html">Lumina</a><div class="nav-links"><a href="index.html">Home</a><a href="features.html">Features</a><a href="dashboard.html">Dashboard</a><a href="integrations.html">Integrations</a><a href="security.html">Security</a><a href="about.html">About</a><a class="active" href="pricing.html">Pricing</a><a href="contact.html">Contact</a></div></nav>

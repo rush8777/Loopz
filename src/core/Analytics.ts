@@ -176,6 +176,14 @@ export class Analytics {
     this.log(`identify: ${userId}`, attributes);
   }
 
+  /** Clear the active identity and begin future activity as a new visitor. */
+  reset(): void {
+    if (!this.requireInit()) return;
+    this.session.reset();
+    this.trackPageView();
+    this.log("identity reset");
+  }
+
   page(): void {
     if (!this.requireInit()) return;
     this.trackPageView();

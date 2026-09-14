@@ -100,6 +100,19 @@ export class SessionManager {
     sessionStore.set("__aa_identified_user__", userId);
   }
 
+  /** Start a fresh visitor/session after logout or an account switch. */
+  reset(): void {
+    this.anonymousId = generateId("anon");
+    this.sessionId = generateId("sess");
+    this.pageViewId = generateId("pv");
+    this.lastActivity = now();
+    this.sessionJustStarted = true;
+    localStore.set(ANON_ID_KEY, this.anonymousId);
+    sessionStore.set(SESSION_ID_KEY, this.sessionId);
+    sessionStore.set(SESSION_LAST_ACTIVE_KEY, String(this.lastActivity));
+    sessionStore.remove("__aa_identified_user__");
+  }
+
   getIdentifiedUserId(): string | null {
     return sessionStore.get("__aa_identified_user__");
   }

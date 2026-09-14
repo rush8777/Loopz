@@ -9,6 +9,22 @@
     </style>
     <!-- Current SDK install used by this example. -->
     <script async src="../../dist/sdk.js" data-site-id="site_tlh00zlo4buy61twqjccpmik" data-endpoint="http://localhost:3000"></script>
+    <script>
+        window.addEventListener("load", function () {
+            analytics.identify("demo_user_001", { role: "product_manager", plan: "trial" });
+            analytics.defineFunnel("demo_signup", [
+                { event: "signup_started" },
+                { event: "pricing_viewed" },
+                { event: "signup_completed" }
+            ]);
+            analytics.event("landing_page_viewed", { campaign: "sdk_examples" });
+            document.querySelectorAll('a[href="pricing.html"]').forEach(function (link) {
+                link.addEventListener("click", function () {
+                    analytics.event("signup_started", { source: "homepage_cta" });
+                });
+            });
+        });
+    </script>
 </head>
 <body>
     <nav><a class="logo" href="index.html">lumina<span>.</span></a><div class="nav-links"><a href="features.html">Features</a><a href="dashboard.html">Dashboard</a><a href="integrations.html">Integrations</a><a href="security.html">Security</a><a href="about.html">About</a><a href="pricing.html">Pricing</a><a href="contact.html">Contact</a></div><a class="btn btn-primary" href="pricing.html">Get started</a></nav>
