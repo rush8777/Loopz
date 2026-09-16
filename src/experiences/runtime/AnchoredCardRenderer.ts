@@ -34,7 +34,8 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
   const close = behavior.dismissible ? `<button class="close" data-dismiss aria-label="Dismiss">×</button>` : "";
   card.innerHTML = close;
   card.querySelector("[data-dismiss]")?.addEventListener("click", callbacks.onDismiss);
-  if (!builder || !mountBuilderContent(root, card, builder, callbacks, widgetType === "survey")) {
+  const mountedBuilder = Boolean(builder && mountBuilderContent(root, card, builder, callbacks, widgetType === "survey"));
+  if (!mountedBuilder) {
     const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText(content.primaryAction.label)}</button>` : "";
     const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText(content.secondaryAction.label)}</button>` : "";
     card.insertAdjacentHTML("beforeend", `<div class="legacy-content"><h2>${escapeText(content.heading)}</h2><p>${escapeText(content.body)}</p><footer>${secondary}${primary}</footer></div>`);
@@ -42,7 +43,22 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
     card.querySelector("[data-secondary]")?.addEventListener("click", callbacks.onSecondary);
   }
   root.appendChild(card);
+  if (mountedBuilder && widgetType === "anchored_card") fitAnchoredBuilderEnvelope(card);
   return card;
+}
+
+/**
+ * Old mixed-guide drafts can contain a modal-sized guide envelope around a
+ * narrower authored anchored card. Placement and the runtime close button use
+ * the envelope, so collapse only a genuinely oversized envelope to its visual
+ * root before calculating target-relative coordinates.
+ */
+function fitAnchoredBuilderEnvelope(card: HTMLElement): void {
+  const widget = card.querySelector<HTMLElement>(".builder-content > .movecues-widget");
+  if (!widget) return;
+  const cardRect = card.getBoundingClientRect(); const widgetRect = widget.getBoundingClientRect();
+  if (widgetRect.width > 0 && cardRect.width - widgetRect.width > 0.5) card.style.width = `${Math.ceil(widgetRect.width)}px`;
+  if (widgetRect.height > 0 && cardRect.height - widgetRect.height > 0.5) card.style.height = `${Math.ceil(widgetRect.height)}px`;
 }
 
 export class AnchoredCardRenderer {

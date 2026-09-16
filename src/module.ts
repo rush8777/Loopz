@@ -110,7 +110,7 @@ export type {
   FeedbackConfig,
 } from "./types/config";
 
-export type { ExperienceKind, WidgetType, ExperienceTarget, GuideAdvance, GuideStep, SurveyConfig, SurveyStep, SurveyQuestion, SurveyOption, SurveyAnswers, PageRule, RuntimeDefinition, DeliveredExperience } from "./experiences/types";
+export type { ExperienceKind, WidgetType, ExperienceTarget, GuideAdvance, GuideStep, GuideStepPattern, SurveyConfig, SurveyStep, SurveyQuestion, SurveyOption, SurveyAnswers, PageRule, RuntimeDefinition, DeliveredExperience } from "./experiences/types";
 
 export type { FunnelStep } from "./types/funnel";
 

@@ -1,5 +1,5 @@
 import type { DeliveredExperience, ExperienceAction, PageRule, RuntimeGuideDefinition, SurveyAnswers } from "../types";
-import { isGuideDefinition } from "../types";
+import { guideStepRequiresTarget, isGuideDefinition } from "../types";
 import type { ExperienceSession } from "../runtimeInterfaces";
 import { EligibilityEngine } from "./EligibilityEngine";
 import { ExperienceRenderer } from "./ExperienceRenderer";
@@ -186,7 +186,8 @@ export class ExperienceLoader {
   }
 
   private currentGuideStepMatchesPage(runtime: ActiveExperience): boolean {
-    const pagePath = this.currentGuideStep(runtime)?.target?.targetContext?.pagePath;
+    const step = this.currentGuideStep(runtime);
+    const pagePath = step && guideStepRequiresTarget(step) ? step.target?.targetContext?.pagePath : undefined;
     return !pagePath || pagePath === currentPagePath();
   }
 

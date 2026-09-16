@@ -1,5 +1,11 @@
 (function() {
   "use strict";
+  function getGuideStepPattern(step) {
+    return step.pattern ?? "anchored_card";
+  }
+  function guideStepRequiresTarget(step) {
+    return getGuideStepPattern(step) === "anchored_card";
+  }
   function isGuideDefinition(value) {
     return "steps" in value;
   }
@@ -251,7 +257,8 @@ ${ISOLATION_CSS}`;
     const close = behavior.dismissible ? `<button class="close" data-dismiss aria-label="Dismiss">×</button>` : "";
     card.innerHTML = close;
     (_a = card.querySelector("[data-dismiss]")) == null ? void 0 : _a.addEventListener("click", callbacks.onDismiss);
-    if (!builder || !mountBuilderContent(root, card, builder, callbacks, widgetType === "survey")) {
+    const mountedBuilder = Boolean(builder && mountBuilderContent(root, card, builder, callbacks, widgetType === "survey"));
+    if (!mountedBuilder) {
       const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText$1(content.primaryAction.label)}</button>` : "";
       const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText$1(content.secondaryAction.label)}</button>` : "";
       card.insertAdjacentHTML("beforeend", `<div class="legacy-content"><h2>${escapeText$1(content.heading)}</h2><p>${escapeText$1(content.body)}</p><footer>${secondary}${primary}</footer></div>`);
@@ -259,7 +266,16 @@ ${ISOLATION_CSS}`;
       (_c = card.querySelector("[data-secondary]")) == null ? void 0 : _c.addEventListener("click", callbacks.onSecondary);
     }
     root.appendChild(card);
+    if (mountedBuilder && widgetType === "anchored_card") fitAnchoredBuilderEnvelope(card);
     return card;
+  }
+  function fitAnchoredBuilderEnvelope(card) {
+    const widget = card.querySelector(".builder-content > .movecues-widget");
+    if (!widget) return;
+    const cardRect = card.getBoundingClientRect();
+    const widgetRect = widget.getBoundingClientRect();
+    if (widgetRect.width > 0 && cardRect.width - widgetRect.width > 0.5) card.style.width = `${Math.ceil(widgetRect.width)}px`;
+    if (widgetRect.height > 0 && cardRect.height - widgetRect.height > 0.5) card.style.height = `${Math.ceil(widgetRect.height)}px`;
   }
   class AnchoredCardRenderer {
     constructor() {
@@ -521,7 +537,7 @@ ${ISOLATION_CSS}`;
       });
       const content = { heading: step.content.heading || this.content.heading, body: step.content.body || this.content.body };
       const stepDesign = step.size ? { ...this.design, size: step.size } : this.design;
-      const card = this.modal.render(root, content, stepDesign, this.behavior, { onDismiss: this.callbacks.onDismiss, onPrimary: () => void 0, onSecondary: () => void 0 }, step.builder, "survey");
+      const card = this.modal.render(root, content, stepDesign, this.behavior, { onDismiss: this.callbacks.onDismiss, onPrimary: this.callbacks.onDismiss, onSecondary: this.callbacks.onDismiss }, step.builder, "survey");
       let surface = card.querySelector(".movecues-widget");
       if (!surface) {
         (_a = card.querySelector(".legacy-content")) == null ? void 0 : _a.remove();
@@ -616,114 +632,57 @@ ${ISOLATION_CSS}`;
       };
     }
     syncNavigation(surface) {
-      var _a;
       const final = this.stepIndex === this.survey.steps.length - 1;
       const step = this.survey.steps[this.stepIndex];
       const buttons = Array.from(surface.querySelectorAll("[data-movecues-survey-action]"));
-      let back = buttons.find((button) => button.dataset.movecuesSurveyAction === "back");
-      let next = buttons.find((button) => button.dataset.movecuesSurveyAction === "next");
-      let submit = buttons.find((button) => button.dataset.movecuesSurveyAction === "submit");
-      const holder = ((_a = buttons[0]) == null ? void 0 : _a.parentElement) ?? surface;
-      const builderOwnsControls = Boolean(surface.querySelector("[data-movecues-survey-controls]"));
-      if (builderOwnsControls) {
-        if (back) {
-          back.hidden = !this.survey.allowBack || this.stepIndex === 0;
-          back.onclick = () => {
-            if (this.stepIndex === 0) return;
-            void this.callbacks.onProgress({ ...this.answers }, step.id);
-            this.stepIndex--;
-            this.renderStep();
-          };
-        }
-        if (next) {
-          const nextButton = next;
-          nextButton.hidden = final;
-          nextButton.onclick = async () => {
-            if (!this.validateStep()) return;
-            nextButton.disabled = true;
-            try {
-              await this.callbacks.onProgress({ ...this.answers }, step.id);
-              this.stepIndex++;
-              this.renderStep();
-            } finally {
-              if (nextButton.isConnected) nextButton.disabled = false;
-            }
-          };
-        }
-        if (submit) {
-          const submitButton = submit;
-          submitButton.hidden = !final;
-          submitButton.textContent = this.survey.submitLabel;
-          submitButton.onclick = async () => {
-            if (this.submitting || !this.validateAll()) return;
-            this.submitting = true;
-            submitButton.disabled = true;
-            try {
-              await this.callbacks.onSubmit({ ...this.answers }, step.id);
-            } finally {
-              this.submitting = false;
-              if (submitButton.isConnected) submitButton.disabled = false;
-            }
-          };
-        }
-        this.syncProgress(surface);
-        return;
-      }
-      if (this.survey.allowBack && this.stepIndex > 0 && !back) {
-        back = surveyButton("back", "Back");
-        holder.prepend(back);
-      }
-      if (!final && !next) {
-        next = submit ?? surveyButton("next", "Next →");
-        next.dataset.movecuesSurveyAction = "next";
-        holder.appendChild(next);
-        submit = void 0;
-      }
-      if (final && !submit) {
-        submit = next ?? surveyButton("submit", this.survey.submitLabel);
-        submit.dataset.movecuesSurveyAction = "submit";
-        holder.appendChild(submit);
-        next = void 0;
-      }
-      if (back) {
-        back.hidden = !this.survey.allowBack || this.stepIndex === 0;
-        back.onclick = () => {
-          if (this.stepIndex === 0) return;
+      const back = buttons.filter((button) => button.dataset.movecuesSurveyAction === "back");
+      const next = buttons.filter((button) => button.dataset.movecuesSurveyAction === "next");
+      const submit = buttons.filter((button) => button.dataset.movecuesSurveyAction === "submit");
+      const legacyControls = Boolean(surface.querySelector("[data-movecues-survey-controls]"));
+      for (const button of back) {
+        button.hidden = !this.survey.allowBack || this.stepIndex === 0;
+        button.onclick = () => {
+          if (!this.survey.allowBack || this.stepIndex === 0) return;
           void this.callbacks.onProgress({ ...this.answers }, step.id);
           this.stepIndex--;
           this.renderStep();
         };
       }
-      if (next) {
-        next.hidden = final;
-        next.onclick = async () => {
+      for (const button of next) {
+        button.hidden = final;
+        button.onclick = async () => {
           if (!this.validateStep()) return;
-          next.disabled = true;
+          this.setDisabled(next, true);
           try {
             await this.callbacks.onProgress({ ...this.answers }, step.id);
             this.stepIndex++;
             this.renderStep();
           } finally {
-            if (next.isConnected) next.disabled = false;
+            this.setDisabled(next, false);
           }
         };
       }
-      if (submit) {
-        submit.hidden = !final;
-        submit.textContent = this.survey.submitLabel;
-        submit.onclick = async () => {
+      for (const button of submit) {
+        button.hidden = !final;
+        if (legacyControls) button.textContent = this.survey.submitLabel;
+        button.onclick = async () => {
           if (this.submitting || !this.validateAll()) return;
           this.submitting = true;
-          submit.disabled = true;
+          this.setDisabled(submit, true);
           try {
             await this.callbacks.onSubmit({ ...this.answers }, step.id);
           } finally {
             this.submitting = false;
-            if (submit.isConnected) submit.disabled = false;
+            this.setDisabled(submit, false);
           }
         };
       }
       this.syncProgress(surface);
+    }
+    setDisabled(buttons, disabled) {
+      buttons.forEach((button) => {
+        if (button.isConnected) button.disabled = disabled;
+      });
     }
     syncProgress(surface) {
       const progress = surface.querySelector("[data-movecues-survey-progress]");
@@ -775,14 +734,6 @@ ${ISOLATION_CSS}`;
     label.textContent = `${question.label}${question.required ? " *" : ""}`;
     node.appendChild(label);
     return node;
-  }
-  function surveyButton(action, label) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `movecues-survey-button${action === "back" ? " movecues-survey-button--back" : ""}`;
-    button.dataset.movecuesSurveyAction = action;
-    button.textContent = label;
-    return button;
   }
   function isEmpty(value) {
     return value === void 0 || value === "" || Array.isArray(value) && value.length === 0;
@@ -880,39 +831,54 @@ ${ISOLATION_CSS}`;
       const stepIndex = guideStepId ? definition.steps.findIndex((item) => item.id === guideStepId) : 0;
       const step = definition.steps[stepIndex];
       if (!step) return false;
+      const stepDesign = step.size ? { ...definition.design, size: step.size } : definition.design;
+      const stepCallbacks = {
+        onDismiss: () => {
+          callbacks.onDismiss();
+          this.destroy();
+        },
+        onSecondary: () => {
+          callbacks.onDismiss();
+          this.destroy();
+        },
+        onPrimary: () => {
+          var _a, _b;
+          const action = step.content.primaryAction;
+          if (action) callbacks.onAction(action);
+          if ((((_a = step.advance) == null ? void 0 : _a.type) ?? "button") === "button") (_b = callbacks.onGuideAdvance) == null ? void 0 : _b.call(callbacks);
+        }
+      };
+      const addBack = (card) => {
+        var _a;
+        if (stepIndex === 0) return;
+        const back = document.createElement("button");
+        back.className = "secondary";
+        back.textContent = "Back";
+        back.addEventListener("click", () => {
+          var _a2;
+          return (_a2 = callbacks.onGuideBack) == null ? void 0 : _a2.call(callbacks);
+        });
+        (_a = card.querySelector("footer")) == null ? void 0 : _a.prepend(back);
+      };
+      if (getGuideStepPattern(step) === "modal") {
+        const root = this.root(experience.id);
+        const renderer = new ModalRenderer();
+        this.renderer = renderer;
+        const behavior = { dismissible: step.behavior.dismissible ?? true };
+        const card = renderer.render(root, step.content, stepDesign, behavior, stepCallbacks, step.builder);
+        addBack(card);
+        requestAnimationFrame(callbacks.onVisible);
+        return true;
+      }
       const mount = (target2) => {
-        var _a, _b, _c;
+        var _a, _b;
         const root = this.root(experience.id);
         const renderer = new AnchoredCardRenderer();
         this.renderer = renderer;
         const behavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset };
-        const card = renderer.render(root, target2, step.content, definition.design, behavior, {
-          onDismiss: () => {
-            callbacks.onDismiss();
-            this.destroy();
-          },
-          onSecondary: () => {
-            callbacks.onDismiss();
-            this.destroy();
-          },
-          onPrimary: () => {
-            var _a2, _b2;
-            const action = step.content.primaryAction;
-            if (action) callbacks.onAction(action);
-            if ((((_a2 = step.advance) == null ? void 0 : _a2.type) ?? "button") === "button") (_b2 = callbacks.onGuideAdvance) == null ? void 0 : _b2.call(callbacks);
-          }
-        }, step.builder, "anchored_card");
-        if (stepIndex > 0) {
-          const back = document.createElement("button");
-          back.className = "secondary";
-          back.textContent = "Back";
-          back.addEventListener("click", () => {
-            var _a2;
-            return (_a2 = callbacks.onGuideBack) == null ? void 0 : _a2.call(callbacks);
-          });
-          (_a = card.querySelector("footer")) == null ? void 0 : _a.prepend(back);
-        }
-        this.listenForAdvance(target2, ((_b = step.advance) == null ? void 0 : _b.type) ?? "button", ((_c = step.advance) == null ? void 0 : _c.type) === "element_hover" ? step.advance.durationMs : void 0, callbacks.onGuideAdvance);
+        const card = renderer.render(root, target2, step.content, stepDesign, behavior, stepCallbacks, step.builder, "anchored_card");
+        addBack(card);
+        this.listenForAdvance(target2, ((_a = step.advance) == null ? void 0 : _a.type) ?? "button", ((_b = step.advance) == null ? void 0 : _b.type) === "element_hover" ? step.advance.durationMs : void 0, callbacks.onGuideAdvance);
         requestAnimationFrame(callbacks.onVisible);
       };
       const target = findTarget(step.target);
@@ -1720,10 +1686,13 @@ ${ISOLATION_CSS}`;
       if (!this.root || !this.definition || !this.draft) return;
       const behavior = this.currentBehavior();
       const widgetType = this.draft.experience.widgetType;
-      const activeGroups = new Set(this.guide || widgetType === "anchored_card" ? ["target", "anchored"] : widgetType === "hotspot" ? ["target", "anchored", "hotspot"] : widgetType === "toast" ? ["toast"] : widgetType === "modal" || widgetType === "survey" ? ["modal"] : widgetType === "slideout" ? ["slideout"] : widgetType === "banner" ? ["banner"] : ["cursor"]);
+      const guidePattern = this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : null;
+      const activeGroups = new Set(guidePattern === "anchored_card" || !this.guide && widgetType === "anchored_card" ? ["target", "anchored"] : guidePattern === "modal" ? [] : widgetType === "hotspot" ? ["target", "anchored", "hotspot"] : widgetType === "toast" ? ["toast"] : widgetType === "modal" || widgetType === "survey" ? ["modal"] : widgetType === "slideout" ? ["slideout"] : widgetType === "banner" ? ["banner"] : ["cursor"]);
       this.root.querySelectorAll("[data-for]").forEach((group) => {
         group.hidden = !activeGroups.has(group.dataset.for);
       });
+      const placementSection = this.root.querySelector("[data-placement-section]");
+      if (placementSection) placementSection.hidden = Boolean(this.guide && guidePattern === "modal");
       this.root.querySelector("[data-step-summary]").hidden = !this.guide;
       this.root.querySelectorAll("[data-mode]").forEach((button) => button.classList.toggle("active", button.dataset.mode === this.mode));
       this.root.querySelectorAll("[data-placement]").forEach((button) => button.classList.toggle("active", button.dataset.placement === (behavior.placement ?? "auto")));
@@ -1791,8 +1760,9 @@ ${ISOLATION_CSS}`;
         if (code) code.textContent = (target == null ? void 0 : target.primarySelector) ?? "";
       }
       if (this.guide) this.root.querySelectorAll("[data-step]").forEach((button, index) => {
-        const stepTarget = this.guide.steps[index].target;
-        const state = index === this.stepIndex ? "current" : this.targetStatus(stepTarget);
+        const guideStep = this.guide.steps[index];
+        const stepTarget = guideStep.target;
+        const state = index === this.stepIndex ? "current" : guideStepRequiresTarget(guideStep) ? this.targetStatus(stepTarget) : "found";
         button.dataset.stepStatus = state;
         const icon = button.querySelector("[data-step-icon]");
         if (icon) icon.textContent = state === "current" ? "●" : state === "found" ? "✓" : state === "missing" ? "⚠" : "○";
@@ -1823,9 +1793,12 @@ ${ISOLATION_CSS}`;
       if (this.mode === "select") this.renderPreview();
     }
     currentTarget() {
-      var _a;
       if (!this.definition) return void 0;
-      return this.guide ? (_a = this.guide.steps[this.stepIndex]) == null ? void 0 : _a.target : this.definition.target;
+      if (this.guide) {
+        const step = this.guide.steps[this.stepIndex];
+        return step && guideStepRequiresTarget(step) ? step.target : void 0;
+      }
+      return this.definition.target;
     }
     targetStatus(target) {
       var _a;
@@ -1840,8 +1813,11 @@ ${ISOLATION_CSS}`;
     setTarget(target) {
       if (!this.definition) return;
       const contextualTarget = { ...target, targetContext: { pagePath: currentPagePath() } };
-      if (this.guide) this.guide.steps[this.stepIndex].target = contextualTarget;
-      else this.definition.target = contextualTarget;
+      if (this.guide) {
+        const step = this.guide.steps[this.stepIndex];
+        if (!guideStepRequiresTarget(step)) return;
+        step.target = contextualTarget;
+      } else this.definition.target = contextualTarget;
     }
     updateContinuation() {
       var _a, _b, _c, _d;
@@ -1858,7 +1834,7 @@ ${ISOLATION_CSS}`;
     isTargetedType() {
       var _a;
       const type = (_a = this.draft) == null ? void 0 : _a.experience.widgetType;
-      return !!this.guide || type === "anchored_card" || type === "hotspot";
+      return this.guide ? guideStepRequiresTarget(this.guide.steps[this.stepIndex]) : type === "anchored_card" || type === "hotspot";
     }
     setText(selector, value) {
       var _a;

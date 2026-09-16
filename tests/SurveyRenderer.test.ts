@@ -30,4 +30,34 @@ describe("SurveyRenderer", () => {
     new SurveyRenderer().render(root, { heading: "Survey", body: "" }, { width: "md", theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } }, { dismissible: true, backdrop: true }, survey, { onDismiss: vi.fn(), onProgress: vi.fn(), onSubmit: vi.fn() }, "final");
     expect(root.querySelector('[data-movecues-survey-action="back"]')).toBeNull(); expect(root.querySelector('[data-movecues-survey-action="submit"]')).toBeNull(); expect(root.querySelector<HTMLButtonElement>('[data-movecues-survey-action="next"]')?.hidden).toBe(true);
   });
+
+  it("uses every authored survey action, without inferring it from labels, classes, or order", () => {
+    const authored = (actions: string) => ({ version: 1 as const, projectData: {}, html: `<section class="movecues-widget"><div class="movecues-survey-validation"></div>${actions}</section>`, css: ".movecues-widget{padding:20px}" });
+    const buttons = '<button class="movecues-widget__button" data-movecues-survey-action="submit">Continue</button><button class="movecues-widget__button movecues-widget__button--secondary" data-movecues-survey-action="back">Anything</button><button data-movecues-survey-action="next">Forward A</button><button class="movecues-widget__button--secondary" data-movecues-survey-action="next">Forward B</button>';
+    const survey: SurveyConfig = { showProgress: false, allowBack: true, submitLabel: "Ignored for authored labels", steps: [
+      { id: "first", content: { heading: "First", body: "" }, questions: [], builder: authored(buttons) },
+      { id: "middle", content: { heading: "Middle", body: "" }, questions: [], builder: authored(buttons) },
+      { id: "final", content: { heading: "Final", body: "" }, questions: [], builder: authored(buttons) },
+    ] };
+    const host = document.createElement("div"); const root = host.attachShadow({ mode: "open" }); root.appendChild(document.createElement("style")); document.body.appendChild(host);
+    const render = (step: string) => new SurveyRenderer().render(root, { heading: "Survey", body: "" }, { width: "md", theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } }, { dismissible: true, backdrop: true }, survey, { onDismiss: vi.fn(), onProgress: vi.fn(), onSubmit: vi.fn() }, step);
+    const hidden = (action: string) => Array.from(root.querySelectorAll<HTMLButtonElement>(`[data-movecues-survey-action="${action}"]`)).map(button => button.hidden);
+    render("first"); expect(hidden("back")).toEqual([true]); expect(hidden("next")).toEqual([false, false]); expect(hidden("submit")).toEqual([true]);
+    render("middle"); expect(hidden("back")).toEqual([false]); expect(hidden("next")).toEqual([false, false]); expect(hidden("submit")).toEqual([true]);
+    render("final"); expect(hidden("back")).toEqual([false]); expect(hidden("next")).toEqual([true, true]); const finalSubmit = root.querySelector<HTMLButtonElement>('[data-movecues-survey-action="submit"]')!; expect(finalSubmit.hidden).toBe(false); expect(finalSubmit.textContent).toBe("Continue");
+  });
+
+  it("does not add controls when a new survey author omitted them", () => {
+    const survey: SurveyConfig = { showProgress: false, allowBack: true, submitLabel: "Send", steps: [{ id: "only", content: { heading: "Only", body: "" }, questions: [], builder: { version: 1, projectData: {}, html: '<section class="movecues-widget"><div class="movecues-survey-validation"></div></section>', css: ".movecues-widget{padding:20px}" } }] };
+    const host = document.createElement("div"); const root = host.attachShadow({ mode: "open" }); root.appendChild(document.createElement("style")); document.body.appendChild(host);
+    new SurveyRenderer().render(root, { heading: "Survey", body: "" }, { width: "md", theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } }, { dismissible: true, backdrop: true }, survey, { onDismiss: vi.fn(), onProgress: vi.fn(), onSubmit: vi.fn() });
+    expect(root.querySelectorAll("[data-movecues-survey-action]")).toHaveLength(0);
+  });
+
+  it("shows only authored Submit controls for a single step", () => {
+    const survey: SurveyConfig = { showProgress: false, allowBack: true, submitLabel: "Send", steps: [{ id: "only", content: { heading: "Only", body: "" }, questions: [], builder: { version: 1, projectData: {}, html: '<section class="movecues-widget"><button data-movecues-survey-action="back">Back label</button><button data-movecues-survey-action="next">Next label</button><button data-movecues-survey-action="submit">Finish label</button></section>', css: ".movecues-widget{padding:20px}" } }] };
+    const host = document.createElement("div"); const root = host.attachShadow({ mode: "open" }); root.appendChild(document.createElement("style")); document.body.appendChild(host);
+    new SurveyRenderer().render(root, { heading: "Survey", body: "" }, { width: "md", theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } }, { dismissible: true, backdrop: true }, survey, { onDismiss: vi.fn(), onProgress: vi.fn(), onSubmit: vi.fn() });
+    expect(root.querySelector<HTMLButtonElement>('[data-movecues-survey-action="back"]')?.hidden).toBe(true); expect(root.querySelector<HTMLButtonElement>('[data-movecues-survey-action="next"]')?.hidden).toBe(true); expect(root.querySelector<HTMLButtonElement>('[data-movecues-survey-action="submit"]')?.hidden).toBe(false);
+  });
 });

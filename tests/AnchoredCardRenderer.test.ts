@@ -86,6 +86,24 @@ describe("AnchoredCardRenderer target visibility", () => {
     expect(card.style.pointerEvents).toBe("none");
     renderer.destroy();
   });
+
+  it("collapses a stale oversized envelope to the authored anchored widget", () => {
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("card")) return rect(0, 0, Number.parseFloat(this.style.width) || 600, Number.parseFloat(this.style.height) || 200);
+      if (this.classList.contains("movecues-widget")) return rect(0, 0, 400, 168);
+      return rect(0, 0, 0, 0);
+    });
+    const host = document.createElement("div"); const root = host.attachShadow({ mode: "open" });
+    const target = document.createElement("button"); target.getBoundingClientRect = () => rect(850, 300, 120, 40);
+    document.body.append(target, host);
+    const renderer = new AnchoredCardRenderer();
+    const card = renderer.render(root, target, content, { ...design, size: { width: { mode: "fixed", value: 480 }, height: { mode: "fixed", value: 300 } } }, { ...behavior, placement: "left" }, { onDismiss: vi.fn(), onPrimary: vi.fn(), onSecondary: vi.fn() }, { version: 1, projectData: {}, html: '<section class="movecues-widget">Authored card</section>', css: ".movecues-widget{width:400px;height:168px}" }, "anchored_card");
+
+    expect(card.style.width).toBe("400px");
+    expect(card.style.height).toBe("168px");
+    expect(card.style.left).toBe("442px");
+    renderer.destroy();
+  });
 });
 
 function renderAt(targetBounds: DOMRect | (() => DOMRect)): { target: HTMLElement; card: HTMLElement; renderer: AnchoredCardRenderer } {

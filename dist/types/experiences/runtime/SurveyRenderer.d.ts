@@ -20,6 +20,7 @@ export declare class SurveyRenderer {
     private syncQuestions;
     private bindQuestion;
     private syncNavigation;
+    private setDisabled;
     private syncProgress;
     private validateStep;
     private validateAll;

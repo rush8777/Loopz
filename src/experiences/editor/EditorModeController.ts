@@ -10,7 +10,7 @@ import type {
   RuntimeWidgetDefinition,
   SurveyConfig,
 } from "../types";
-import { isGuideDefinition } from "../types";
+import { getGuideStepPattern, guideStepRequiresTarget, isGuideDefinition } from "../types";
 import type { EditorAuthoringState, EditorContinuation, EditorSession } from "../runtimeInterfaces";
 import { clearEditorContinuation, storeEditorContinuation } from "../editorContinuation";
 import { RouteObserver } from "../../dom/RouteObserver";
@@ -341,8 +341,10 @@ export class EditorModeController {
     if (!this.root || !this.definition || !this.draft) return;
     const behavior = this.currentBehavior();
     const widgetType = this.draft.experience.widgetType;
-    const activeGroups = new Set<string>(this.guide || widgetType === "anchored_card" ? ["target", "anchored"] : widgetType === "hotspot" ? ["target", "anchored", "hotspot"] : widgetType === "toast" ? ["toast"] : widgetType === "modal" || widgetType === "survey" ? ["modal"] : widgetType === "slideout" ? ["slideout"] : widgetType === "banner" ? ["banner"] : ["cursor"]);
+    const guidePattern = this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : null;
+    const activeGroups = new Set<string>(guidePattern === "anchored_card" || (!this.guide && widgetType === "anchored_card") ? ["target", "anchored"] : guidePattern === "modal" ? [] : widgetType === "hotspot" ? ["target", "anchored", "hotspot"] : widgetType === "toast" ? ["toast"] : widgetType === "modal" || widgetType === "survey" ? ["modal"] : widgetType === "slideout" ? ["slideout"] : widgetType === "banner" ? ["banner"] : ["cursor"]);
     this.root.querySelectorAll<HTMLElement>("[data-for]").forEach(group => { group.hidden = !activeGroups.has(group.dataset.for!); });
+    const placementSection = this.root.querySelector<HTMLElement>("[data-placement-section]"); if (placementSection) placementSection.hidden = Boolean(this.guide && guidePattern === "modal");
     this.root.querySelector<HTMLElement>("[data-step-summary]")!.hidden = !this.guide;
     this.root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.classList.toggle("active", button.dataset.mode === this.mode));
     this.root.querySelectorAll<HTMLButtonElement>("[data-placement]").forEach(button => button.classList.toggle("active", button.dataset.placement === (behavior.placement ?? "auto")));
@@ -412,8 +414,9 @@ export class EditorModeController {
       const code = missing.querySelector("code"); if (code) code.textContent = target?.primarySelector ?? "";
     }
     if (this.guide) this.root.querySelectorAll<HTMLButtonElement>("[data-step]").forEach((button, index) => {
-      const stepTarget = this.guide!.steps[index].target;
-      const state = index === this.stepIndex ? "current" : this.targetStatus(stepTarget);
+      const guideStep = this.guide!.steps[index];
+      const stepTarget = guideStep.target;
+      const state = index === this.stepIndex ? "current" : guideStepRequiresTarget(guideStep) ? this.targetStatus(stepTarget) : "found";
       button.dataset.stepStatus = state;
       const icon = button.querySelector("[data-step-icon]"); if (icon) icon.textContent = state === "current" ? "●" : state === "found" ? "✓" : state === "missing" ? "⚠" : "○";
       button.classList.toggle("active", index === this.stepIndex);
@@ -445,7 +448,8 @@ export class EditorModeController {
 
   private currentTarget(): ExperienceTarget | undefined {
     if (!this.definition) return undefined;
-    return this.guide ? this.guide.steps[this.stepIndex]?.target : (this.definition as RuntimeWidgetDefinition).target;
+    if (this.guide) { const step = this.guide.steps[this.stepIndex]; return step && guideStepRequiresTarget(step) ? step.target : undefined; }
+    return (this.definition as RuntimeWidgetDefinition).target;
   }
 
   private targetStatus(target?: ExperienceTarget): TargetStatus {
@@ -462,7 +466,7 @@ export class EditorModeController {
   private setTarget(target: ExperienceTarget): void {
     if (!this.definition) return;
     const contextualTarget: ExperienceTarget = { ...target, targetContext: { pagePath: currentPagePath() } };
-    if (this.guide) this.guide.steps[this.stepIndex].target = contextualTarget;
+    if (this.guide) { const step = this.guide.steps[this.stepIndex]; if (!guideStepRequiresTarget(step)) return; step.target = contextualTarget; }
     else (this.definition as RuntimeWidgetDefinition).target = contextualTarget;
   }
 
@@ -480,7 +484,7 @@ export class EditorModeController {
 
   private isTargetedType(): boolean {
     const type = this.draft?.experience.widgetType;
-    return !!this.guide || type === "anchored_card" || type === "hotspot";
+    return this.guide ? guideStepRequiresTarget(this.guide.steps[this.stepIndex]) : type === "anchored_card" || type === "hotspot";
   }
 
   private setText(selector: string, value: string): void { const element = this.root?.querySelector<HTMLElement>(selector); if (element) element.textContent = value; }

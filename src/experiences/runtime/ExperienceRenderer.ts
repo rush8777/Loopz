@@ -1,5 +1,5 @@
 import type { DeliveredExperience, ExperienceAction, ExperienceBehavior, ExperienceContent, RuntimeGuideDefinition, RuntimeWidgetDefinition, SurveyAnswers } from "../types";
-import { isGuideDefinition } from "../types";
+import { getGuideStepPattern, isGuideDefinition } from "../types";
 import { AnchoredCardRenderer, findTarget, waitForTarget, type RenderCallbacks } from "./AnchoredCardRenderer";
 import { ToastRenderer } from "./ToastRenderer";
 import { CursorFollowRenderer } from "./CursorFollowRenderer";
@@ -68,24 +68,36 @@ export class ExperienceRenderer {
   private renderGuide(experience: DeliveredExperience, definition: RuntimeGuideDefinition, callbacks: ExperienceRendererCallbacks, guideStepId?: string): boolean {
     const stepIndex = guideStepId ? definition.steps.findIndex(item => item.id === guideStepId) : 0;
     const step = definition.steps[stepIndex]; if (!step) return false;
-    const mount = (target: Element) => {
-    const root = this.root(experience.id); const renderer = new AnchoredCardRenderer(); this.renderer = renderer;
-    const behavior: ExperienceBehavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset };
-    const card = renderer.render(root, target, step.content, definition.design, behavior, {
+    const stepDesign = step.size ? { ...definition.design, size: step.size } : definition.design;
+    const stepCallbacks: RenderCallbacks = {
       onDismiss: () => { callbacks.onDismiss(); this.destroy(); },
       onSecondary: () => { callbacks.onDismiss(); this.destroy(); },
       onPrimary: () => {
         const action = step.content.primaryAction; if (action) callbacks.onAction(action);
         if ((step.advance?.type ?? "button") === "button") callbacks.onGuideAdvance?.();
       },
-    }, step.builder, "anchored_card");
-    if (stepIndex > 0) {
+    };
+    const addBack = (card: HTMLElement) => {
+      if (stepIndex === 0) return;
       const back = document.createElement("button"); back.className = "secondary"; back.textContent = "Back";
       back.addEventListener("click", () => callbacks.onGuideBack?.());
       card.querySelector("footer")?.prepend(back);
+    };
+    if (getGuideStepPattern(step) === "modal") {
+      const root = this.root(experience.id); const renderer = new ModalRenderer(); this.renderer = renderer;
+      const behavior: ExperienceBehavior = { dismissible: step.behavior.dismissible ?? true };
+      const card = renderer.render(root, step.content, stepDesign, behavior, stepCallbacks, step.builder);
+      addBack(card);
+      requestAnimationFrame(callbacks.onVisible);
+      return true;
     }
-    this.listenForAdvance(target, step.advance?.type ?? "button", step.advance?.type === "element_hover" ? step.advance.durationMs : undefined, callbacks.onGuideAdvance);
-    requestAnimationFrame(callbacks.onVisible);
+    const mount = (target: Element) => {
+      const root = this.root(experience.id); const renderer = new AnchoredCardRenderer(); this.renderer = renderer;
+      const behavior: ExperienceBehavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset };
+      const card = renderer.render(root, target, step.content, stepDesign, behavior, stepCallbacks, step.builder, "anchored_card");
+      addBack(card);
+      this.listenForAdvance(target, step.advance?.type ?? "button", step.advance?.type === "element_hover" ? step.advance.durationMs : undefined, callbacks.onGuideAdvance);
+      requestAnimationFrame(callbacks.onVisible);
     };
     const target = findTarget(step.target);
     if (target) mount(target); else this.cancelPendingTarget = waitForTarget(step.target, (element) => { this.cancelPendingTarget = null; mount(element); }, () => { this.cancelPendingTarget = null; callbacks.onUnavailable?.(); });

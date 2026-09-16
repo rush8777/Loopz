@@ -11,7 +11,11 @@ export interface ExperienceBehavior { dismissible: boolean; zIndex?: number; pla
 export interface PageRule { id: string; kind: "include" | "exclude"; operator: "equals" | "starts_with" | "ends_with" | "contains" | "matches_pattern"; value: string }
 export interface ExperienceTargeting { pageRules: PageRule[]; audience: { type: "all" } | { type: "segment"; segmentId: string } | { type: "segment_rules"; logic: "all" | "any"; conditions: Array<{ id: string; segmentId: string; operator: "matches" | "not_matches" }> }; trigger: { type: "page_load" } | { type: "custom_event"; eventName: string }; frequency: { mode: "once" | "once_per_session" | "every_time"; cooldownHours?: number; maxImpressions?: number }; priority: number; interruptPolicy?: "queue" | "interrupt"; schedule?: { startsAt?: string; endsAt?: string }; allowedOrigins?: string[] }
 export type GuideAdvance = { type: "button" } | { type: "element_click" } | { type: "element_hover"; durationMs?: number } | { type: "custom_event"; eventName: string } | { type: "route"; pageRules: PageRule[] };
-export interface GuideStep { id: string; content: ExperienceContent; builder?: WidgetBuilderState; advance?: GuideAdvance; target?: ExperienceTarget; behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "dismissible"> }
+export type GuideStepPattern = "anchored_card" | "modal";
+export interface GuideStep { id: string; pattern?: GuideStepPattern; content: ExperienceContent; builder?: WidgetBuilderState; size?: ExperienceSize; advance?: GuideAdvance; target?: ExperienceTarget; behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "dismissible"> }
+export function getGuideStepPattern(step: Pick<GuideStep, "pattern">): GuideStepPattern { return step.pattern ?? "anchored_card"; }
+export function guideStepRequiresTarget(step: Pick<GuideStep, "pattern">): boolean { return getGuideStepPattern(step) === "anchored_card"; }
+export function guideStepSupportsTargetAdvance(step: Pick<GuideStep, "pattern">): boolean { return guideStepRequiresTarget(step); }
 export interface SurveyOption { id: string; label: string }
 export type SurveyQuestion =
   | { id: string; type: "single_choice"; label: string; required?: boolean; options: SurveyOption[] }

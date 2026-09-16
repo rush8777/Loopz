@@ -109,6 +109,14 @@ describe("live placement editor", () => {
     expect(editorRoot().querySelector("[data-live-target]")?.textContent).toContain("Found on current page");
   });
 
+  it("renders a Modal Guide step without target picking or missing-target diagnostics", async () => {
+    const first = document.createElement("button"); first.id = "first"; document.body.appendChild(first);
+    const draft = guideDraft(); if (!("steps" in draft.version.definition)) throw new Error("Expected Guide"); draft.version.definition.steps[1] = { id: "two", pattern: "modal", content: { heading: "Modal step", body: "No target" }, advance: { type: "button" }, behavior: { dismissible: true } };
+    vi.stubGlobal("fetch", editorFetch(draft)); controller = new EditorModeController("https://api.example.com"); expect(await controller.start("one-time-token")).toBe(true);
+    editorRoot().querySelector<HTMLButtonElement>('[data-step="1"]')!.click();
+    expect(activePreviewText()).toContain("Modal step"); expect(document.querySelector("[data-movecues-experience]")?.shadowRoot?.querySelector(".modal")).not.toBeNull(); expect(editorRoot().querySelector<HTMLElement>('[data-for="target"]')?.hidden).toBe(true); expect(editorRoot().querySelector<HTMLElement>("[data-missing-selector]")?.hidden).toBe(true); expect(document.querySelector("[data-movecues-picker-overlay]")).toBeNull();
+  });
+
   it("reports a Guide target configured on another page without marking it missing", async () => {
     history.replaceState({}, "", "/settings");
     const draft = guideDraft();

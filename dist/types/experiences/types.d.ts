@@ -129,14 +129,20 @@ export type GuideAdvance = {
     type: "route";
     pageRules: PageRule[];
 };
+export type GuideStepPattern = "anchored_card" | "modal";
 export interface GuideStep {
     id: string;
+    pattern?: GuideStepPattern;
     content: ExperienceContent;
     builder?: WidgetBuilderState;
+    size?: ExperienceSize;
     advance?: GuideAdvance;
     target?: ExperienceTarget;
     behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "dismissible">;
 }
+export declare function getGuideStepPattern(step: Pick<GuideStep, "pattern">): GuideStepPattern;
+export declare function guideStepRequiresTarget(step: Pick<GuideStep, "pattern">): boolean;
+export declare function guideStepSupportsTargetAdvance(step: Pick<GuideStep, "pattern">): boolean;
 export interface SurveyOption {
     id: string;
     label: string;

@@ -124,6 +124,19 @@ describe("experience editor and runtime", () => {
     const fetchMock = experienceFetch(() => [guide]); vi.stubGlobal("fetch", fetchMock); const loader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await loader.evaluate(); first.click(); await Promise.resolve(); expect(hostClicks).toBe(1); expect(activeExperienceText()).toContain("Event step"); loader.onCustomEvent("other"); await Promise.resolve(); expect(activeExperienceText()).toContain("Event step"); loader.onCustomEvent("saved"); expect(activeExperienceText()).toContain("Done step"); loader.destroy();
   });
 
+  it("renders and advances one Guide across Modal and Anchored Card patterns", async () => {
+    const target = document.createElement("button"); target.id = "mixed-guide-target"; document.body.appendChild(target);
+    const guide: DeliveredExperience = { id: "guide_mixed", versionId: "v1", kind: "guide", widgetType: null, priority: 40, definition: { design, steps: [
+      { id: "modal-first", pattern: "modal", content: { heading: "Modal first", body: "One", primaryAction: { label: "Next", type: "next_step" } }, advance: { type: "button" }, behavior: { dismissible: true } },
+      { id: "anchored", pattern: "anchored_card", content: { heading: "Anchored middle", body: "Two", primaryAction: { label: "Next", type: "next_step" } }, advance: { type: "button" }, target: { primarySelector: "#mixed-guide-target", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true, placement: "auto", alignment: "center", offset: 8 } },
+      { id: "modal-last", pattern: "modal", content: { heading: "Modal last", body: "Three", primaryAction: { label: "Finish", type: "next_step" } }, advance: { type: "button" }, behavior: { dismissible: true } },
+    ] } };
+    const fetchMock = experienceFetch(() => [guide]); vi.stubGlobal("fetch", fetchMock); const loader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await loader.evaluate();
+    let root = document.querySelector("[data-movecues-experience]")!.shadowRoot!; expect(root.querySelector(".modal")?.textContent).toContain("Modal first"); root.querySelector<HTMLButtonElement>(".primary")!.click();
+    root = document.querySelector("[data-movecues-experience]")!.shadowRoot!; expect(root.querySelector(".modal")).toBeNull(); expect(root.querySelector(".card")?.textContent).toContain("Anchored middle"); root.querySelector<HTMLButtonElement>(".primary")!.click();
+    root = document.querySelector("[data-movecues-experience]")!.shadowRoot!; expect(root.querySelector(".modal")?.textContent).toContain("Modal last"); loader.destroy();
+  });
+
   it("waits for the next Guide step's page before rendering it", async () => {
     history.replaceState({}, "", "/first");
     const first = document.createElement("button"); first.id = "cross-page-first"; const nextPageTarget = document.createElement("button"); nextPageTarget.id = "cross-page-next"; document.body.append(first, nextPageTarget);
