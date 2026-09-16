@@ -14,6 +14,8 @@ interface ActiveExperience {
   surveyResponseId: string | null;
   surveyResponsePromise: Promise<string | null> | null;
   surveyAnswers: SurveyAnswers;
+  stepStartedAt: number | null;
+  visibleStepId: string | null;
 }
 
 export class ExperienceLoader {
@@ -99,7 +101,7 @@ export class ExperienceLoader {
     const definition = isGuideDefinition(experience.definition) ? experience.definition : null;
     const currentStepId = definition?.steps.some(step => step.id === requestedStepId) ? requestedStepId : definition?.steps[0]?.id;
     const impressionId = progress?.impressionId ?? experience.impressionId ?? null;
-    const runtime: ActiveExperience = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId), shownPromise: null, surveyResponseId: null, surveyResponsePromise: null, surveyAnswers: {} };
+    const runtime: ActiveExperience = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId), shownPromise: null, surveyResponseId: null, surveyResponsePromise: null, surveyAnswers: {}, stepStartedAt: null, visibleStepId: null };
     this.active = runtime;
     if (currentStepId) this.persistGuide(runtime, "active");
     const mounted = currentStepId
@@ -110,7 +112,7 @@ export class ExperienceLoader {
 
   private callbacks(runtime: ActiveExperience) {
     return {
-      onVisible: () => this.shown(runtime),
+      onVisible: () => { this.shown(runtime); this.stepVisible(runtime); },
       onDismiss: () => void this.finish(runtime, "dismissed"),
       onAction: (action: ExperienceAction) => this.handleAction(runtime, action),
       onComplete: () => void this.finish(runtime, "completed"),
@@ -121,7 +123,7 @@ export class ExperienceLoader {
         this.active = null;
         if (runtime.currentStepId) { this.pausedGuide = runtime; this.persistGuide(runtime, "paused"); }
       },
-      onSurveyProgress: (answers: SurveyAnswers, stepId: string) => this.persistSurvey(runtime, answers, stepId),
+      onSurveyProgress: async (answers: SurveyAnswers, stepId: string, direction: "next" | "back") => { await this.persistSurvey(runtime, answers, stepId); if (direction === "next") void this.post(runtime, "interaction", undefined, "survey_step_completed", { stepId, stepIndex: this.surveyStepIndex(runtime, stepId) }); },
       onSurveySubmit: async (answers: SurveyAnswers, stepId: string) => { await this.persistSurvey(runtime, answers, stepId, "submitted"); await this.finish(runtime, "completed", true); },
     };
   }
@@ -130,29 +132,32 @@ export class ExperienceLoader {
     if (runtime.shownRequested) return;
     runtime.shownRequested = true;
     this.state.markSeen(runtime.experience.id);
-    runtime.shownPromise = this.post(runtime, "shown").then(result => {
+    runtime.shownPromise = this.post(runtime, "shown", undefined, "experience_shown").then(result => {
       runtime.impressionId = result?.impressionId ?? null;
       if (this.active === runtime) this.persistGuide(runtime, "active");
       else if (this.pausedGuide === runtime) this.persistGuide(runtime, "paused");
     });
-    if (runtime.experience.widgetType === "survey") void runtime.shownPromise.then(() => this.ensureSurveyResponse(runtime));
+    if (runtime.experience.widgetType === "survey") void runtime.shownPromise.then(async () => { await this.ensureSurveyResponse(runtime); await this.post(runtime, "interaction", undefined, "survey_started"); });
   }
 
   private handleAction(runtime: ActiveExperience, action: ExperienceAction): void {
-    void this.recordAction(runtime, action.type);
+    if (!isGuideDefinition(runtime.experience.definition)) void this.recordAction(runtime, action.type);
     if (action.type === "open_url" && action.url) window.location.assign(action.url);
     if (action.type === "track_event" && action.eventName) this.trackEvent?.(action.eventName);
   }
 
   private async recordAction(runtime: ActiveExperience, action: string): Promise<void> {
-    await runtime.shownPromise; await this.post(runtime, "action", action);
+    await runtime.shownPromise; await this.post(runtime, "action", action, "widget_interacted");
   }
 
   private async finish(runtime: ActiveExperience, event: "dismissed" | "completed", surveyAlreadyPersisted = false): Promise<void> {
     if (this.active === runtime) { this.renderer.destroy(); this.active = null; }
     if (runtime.currentStepId) this.state.clearGuideProgress(runtime.experience.id);
     if (runtime.experience.widgetType === "survey" && event === "dismissed" && !surveyAlreadyPersisted) await this.persistSurvey(runtime, runtime.surveyAnswers, null, "abandoned");
-    await runtime.shownPromise; await this.post(runtime, event);
+    await runtime.shownPromise;
+    const guide = isGuideDefinition(runtime.experience.definition);
+    const eventType = guide ? (event === "completed" ? "guide_completed" : "guide_dismissed") : runtime.experience.widgetType === "survey" ? (event === "completed" ? "survey_submitted" : "survey_abandoned") : event === "dismissed" ? "widget_dismissed" : "widget_interacted";
+    await this.post(runtime, event, undefined, eventType, guide ? this.currentStepPayload(runtime, event === "dismissed") : undefined);
     this.justFinishedId = runtime.experience.id;
     if (!this.destroyed) void this.evaluate();
   }
@@ -162,6 +167,7 @@ export class ExperienceLoader {
     const definition = runtime.experience.definition;
     const index = definition.steps.findIndex(step => step.id === runtime.currentStepId);
     if (index < 0) return;
+    void this.post(runtime, "interaction", undefined, "guide_step_completed", this.currentStepPayload(runtime, true));
     if (index === definition.steps.length - 1) { void this.finish(runtime, "completed"); return; }
     runtime.currentStepId = definition.steps[index + 1].id;
     this.persistGuide(runtime, "active");
@@ -174,6 +180,7 @@ export class ExperienceLoader {
     const index = definition.steps.findIndex(step => step.id === runtime.currentStepId);
     if (index <= 0) return;
     runtime.currentStepId = definition.steps[index - 1].id;
+    runtime.stepStartedAt = null; runtime.visibleStepId = null;
     this.persistGuide(runtime, "active");
     this.renderActiveGuide();
   }
@@ -183,6 +190,27 @@ export class ExperienceLoader {
     this.renderer.destroy();
     if (!this.currentGuideStepMatchesPage(runtime)) return;
     this.renderer.render(runtime.experience, this.callbacks(runtime), runtime.currentStepId);
+  }
+
+  private stepVisible(runtime: ActiveExperience): void {
+    if (!runtime.currentStepId || runtime.visibleStepId === runtime.currentStepId) return;
+    runtime.visibleStepId = runtime.currentStepId;
+    runtime.stepStartedAt = performance.now();
+    const definition = runtime.experience.definition as RuntimeGuideDefinition;
+    const stepIndex = definition.steps.findIndex(step => step.id === runtime.currentStepId);
+    void (runtime.shownPromise ?? Promise.resolve()).then(() => this.post(runtime, "interaction", undefined, "guide_step_shown", { stepId: runtime.currentStepId!, stepIndex }));
+  }
+
+  private currentStepPayload(runtime: ActiveExperience, includeDuration: boolean): { stepId: string; stepIndex: number; durationMs?: number } | undefined {
+    if (!runtime.currentStepId || !isGuideDefinition(runtime.experience.definition)) return undefined;
+    const stepIndex = runtime.experience.definition.steps.findIndex(step => step.id === runtime.currentStepId);
+    const durationMs = includeDuration && runtime.stepStartedAt !== null ? Math.max(0, Math.round(performance.now() - runtime.stepStartedAt)) : undefined;
+    return { stepId: runtime.currentStepId, stepIndex, ...(durationMs !== undefined ? { durationMs } : {}) };
+  }
+
+  private surveyStepIndex(runtime: ActiveExperience, stepId: string): number {
+    const definition = runtime.experience.definition;
+    return !isGuideDefinition(definition) ? definition.survey?.steps.findIndex(step => step.id === stepId) ?? -1 : -1;
   }
 
   private currentGuideStepMatchesPage(runtime: ActiveExperience): boolean {
@@ -227,10 +255,11 @@ export class ExperienceLoader {
     if (runtime.currentStepId) this.state.setGuideProgress({ experienceId: runtime.experience.id, versionId: runtime.experience.versionId, currentStepId: runtime.currentStepId, status, ...(runtime.impressionId ? { impressionId: runtime.impressionId } : {}) });
   }
 
-  private async post(runtime: ActiveExperience, event: "shown" | "dismissed" | "completed" | "action", action?: string): Promise<{ impressionId?: string } | null> {
+  private async post(runtime: ActiveExperience, event: "shown" | "dismissed" | "completed" | "action" | "interaction", action?: string, eventType: "experience_shown" | "guide_step_shown" | "guide_step_completed" | "guide_completed" | "guide_dismissed" | "survey_started" | "survey_step_completed" | "survey_submitted" | "survey_abandoned" | "widget_interacted" | "widget_dismissed" = "widget_interacted", detail?: { stepId: string; stepIndex: number; durationMs?: number }): Promise<{ impressionId?: string } | null> {
     const experience = runtime.experience;
     try {
-      const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? undefined, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: runtime.impressionId ?? undefined, event, action }) });
+      if (event !== "shown" && runtime.shownPromise) await runtime.shownPromise;
+      const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? undefined, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: runtime.impressionId ?? undefined, event, eventType, timestamp: Date.now(), action, ...detail }) });
       return response.ok && response.status !== 204 ? await response.json() as { impressionId?: string } : null;
     } catch { return null; }
   }

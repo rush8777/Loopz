@@ -17,7 +17,7 @@ export interface ExperienceRendererCallbacks {
   onGuideAdvance?: () => void;
   onGuideBack?: () => void;
   onUnavailable?: () => void;
-  onSurveyProgress?: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
+  onSurveyProgress?: (answers: SurveyAnswers, currentStepId: string, direction: "next" | "back") => Promise<void> | void;
   onSurveySubmit?: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
 }
 
@@ -54,7 +54,7 @@ export class ExperienceRenderer {
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
     } else if (experience.widgetType === "survey" && definition.survey) {
       const root = this.root(experience.id); const renderer = new SurveyRenderer(); this.renderer = renderer;
-      renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId) => callbacks.onSurveyProgress?.(answers, stepId), onSubmit: (answers, stepId) => callbacks.onSurveySubmit?.(answers, stepId) }, requestedStepId);
+      renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId, direction) => callbacks.onSurveyProgress?.(answers, stepId, direction), onSubmit: (answers, stepId) => callbacks.onSurveySubmit?.(answers, stepId) }, requestedStepId);
     } else if (experience.widgetType === "slideout") {
       const root = this.root(experience.id); const renderer = new SlideoutRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);

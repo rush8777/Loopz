@@ -3,7 +3,7 @@ import { ModalRenderer } from "./ModalRenderer";
 
 export interface SurveyCallbacks {
   onDismiss: () => void;
-  onProgress: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
+  onProgress: (answers: SurveyAnswers, currentStepId: string, direction: "next" | "back") => Promise<void> | void;
   onSubmit: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
 }
 
@@ -90,7 +90,7 @@ export class SurveyRenderer {
       button.hidden = !this.survey.allowBack || this.stepIndex === 0;
       button.onclick = () => {
         if (!this.survey.allowBack || this.stepIndex === 0) return;
-        void this.callbacks.onProgress({ ...this.answers }, step.id);
+        void this.callbacks.onProgress({ ...this.answers }, step.id, "back");
         this.stepIndex--;
         this.renderStep();
       };
@@ -100,7 +100,7 @@ export class SurveyRenderer {
       button.onclick = async () => {
         if (!this.validateStep()) return;
         this.setDisabled(next, true);
-        try { await this.callbacks.onProgress({ ...this.answers }, step.id); this.stepIndex++; this.renderStep(); }
+        try { await this.callbacks.onProgress({ ...this.answers }, step.id, "next"); this.stepIndex++; this.renderStep(); }
         finally { this.setDisabled(next, false); }
       };
     }
