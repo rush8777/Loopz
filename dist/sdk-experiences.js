@@ -581,7 +581,7 @@ ${ISOLATION_CSS}`;
         button.hidden = !this.survey.allowBack || this.stepIndex === 0;
         button.onclick = () => {
           if (!this.survey.allowBack || this.stepIndex === 0) return;
-          void this.callbacks.onProgress({ ...this.answers }, step.id);
+          void this.callbacks.onProgress({ ...this.answers }, step.id, "back");
           this.stepIndex--;
           this.renderStep();
         };
@@ -592,7 +592,7 @@ ${ISOLATION_CSS}`;
           if (!this.validateStep()) return;
           this.setDisabled(next, true);
           try {
-            await this.callbacks.onProgress({ ...this.answers }, step.id);
+            await this.callbacks.onProgress({ ...this.answers }, step.id, "next");
             this.stepIndex++;
             this.renderStep();
           } finally {
@@ -682,34 +682,150 @@ ${ISOLATION_CSS}`;
   function cssEscape(value) {
     return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(value) : value.replace(/["\\]/g, "\\$&");
   }
+  class StackingContextResolver {
+    resolve(element) {
+      if (!element) return { element: null, zIndex: 0, chain: [] };
+      const chain = [];
+      let current = element;
+      while (current && current !== document.documentElement) {
+        const style = getComputedStyle(current);
+        chain.push({ element: current, zIndex: numericZIndex(style.zIndex), createsStackingContext: createsStackingContext(style) });
+        current = current.parentElement;
+      }
+      const outermost = [...chain].reverse().find((entry) => entry.createsStackingContext);
+      return { element: (outermost == null ? void 0 : outermost.element) ?? null, zIndex: (outermost == null ? void 0 : outermost.zIndex) ?? 0, chain };
+    }
+  }
+  function numericZIndex(value) {
+    if (!value || value === "auto") return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+  }
+  function createsStackingContext(style) {
+    const position2 = style.position;
+    if ((position2 === "absolute" || position2 === "relative") && numericZIndex(style.zIndex) !== null || position2 === "fixed" || position2 === "sticky") return true;
+    if (Number.parseFloat(style.opacity || "1") < 1) return true;
+    if (property(style, "transform") !== "none" || property(style, "filter") !== "none" || property(style, "perspective") !== "none") return true;
+    if (style.isolation === "isolate" || !!style.mixBlendMode && style.mixBlendMode !== "normal") return true;
+    const contain = property(style, "contain");
+    if (/(^|\s)(layout|paint|strict|content)(\s|$)/.test(contain)) return true;
+    const willChange = property(style, "willChange").split(",").map((value) => value.trim());
+    return willChange.some((value) => ["transform", "opacity", "filter", "perspective", "contain"].includes(value));
+  }
+  function property(style, name) {
+    return (style[name] || "none").trim();
+  }
+  const ALWAYS_ON_TOP_Z_INDEX = 2147483e3;
+  const SAFE_DEFAULT_Z_INDEX = 1;
+  class LayerManager {
+    constructor(resolver = new StackingContextResolver(), findTarget2 = findUniqueTarget) {
+      this.resolver = resolver;
+      this.findTarget = findTarget2;
+    }
+    resolve(options) {
+      if (!options.layer) {
+        if (options.legacyZIndex !== void 0) return { zIndex: options.legacyZIndex, mode: "legacy", context: null };
+        return { zIndex: ALWAYS_ON_TOP_Z_INDEX, mode: "legacy", context: null };
+      }
+      const layer = options.layer;
+      if (layer.mode === "always_on_top") return { zIndex: ALWAYS_ON_TOP_Z_INDEX, mode: layer.mode, context: null };
+      if (layer.mode === "custom") return { zIndex: layer.zIndex, mode: layer.mode, context: null };
+      if (layer.mode === "relative") {
+        const reference = this.findTarget(layer.target);
+        if (!reference) {
+          const automatic = this.auto(options.targetElement);
+          return { ...automatic, mode: layer.mode, fallback: "relative_target_missing" };
+        }
+        const context = this.resolver.resolve(reference);
+        return { zIndex: bounded(context.zIndex + (layer.relation === "above" ? 1 : -1)), mode: layer.mode, context };
+      }
+      return this.auto(options.targetElement);
+    }
+    auto(targetElement) {
+      const context = this.resolver.resolve(targetElement ?? null);
+      return { zIndex: targetElement ? bounded(context.zIndex + 1) : SAFE_DEFAULT_Z_INDEX, mode: "auto", context };
+    }
+    apply(host, options) {
+      let observers = [];
+      let active = true;
+      let last = this.resolve(options);
+      const disconnect = () => {
+        observers.forEach((observer) => observer.disconnect());
+        observers = [];
+      };
+      const refresh = () => {
+        var _a;
+        if (!active) return last;
+        disconnect();
+        const resolution = this.resolve(options);
+        last = resolution;
+        host.style.zIndex = String(resolution.zIndex);
+        if (resolution.fallback) host.dataset.movecuesLayerFallback = resolution.fallback;
+        else delete host.dataset.movecuesLayerFallback;
+        const watched = ((_a = options.layer) == null ? void 0 : _a.mode) === "relative" ? this.findTarget(options.layer.target) : options.targetElement;
+        if (watched && typeof MutationObserver !== "undefined") {
+          const observer = new MutationObserver(() => {
+            if (active) refresh();
+          });
+          for (let element = watched; element; element = element.parentElement) {
+            observer.observe(element, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
+            if (element.parentElement) observer.observe(element.parentElement, { childList: true });
+          }
+          observers.push(observer);
+        }
+        return resolution;
+      };
+      refresh();
+      return { refresh, destroy: () => {
+        active = false;
+        disconnect();
+      } };
+    }
+  }
+  function findUniqueTarget(target) {
+    for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
+      try {
+        const matches = document.querySelectorAll(selector);
+        if (matches.length === 1) return matches[0];
+      } catch {
+      }
+    }
+    return null;
+  }
+  function bounded(value) {
+    return Math.max(-2147483648, Math.min(2147483647, value));
+  }
   class ExperienceRenderer {
     constructor() {
       this.host = null;
       this.renderer = null;
       this.cancelPendingTarget = null;
       this.cleanupAdvance = null;
+      this.appliedLayer = null;
+      this.layerManager = new LayerManager();
     }
     render(experience, callbacks, guideStepId) {
       this.destroy();
       if (isGuideDefinition(experience.definition)) return this.renderGuide(experience, experience.definition, callbacks, guideStepId);
       return this.renderWidget(experience, experience.definition, callbacks, guideStepId);
     }
-    root(experienceId) {
+    root(experienceId, behavior, targetElement) {
       this.host = document.createElement("div");
       this.host.dataset.movecuesExperience = experienceId;
       this.host.dataset.movecuesExperienceRoot = experienceId;
-      this.host.style.cssText = "position:fixed;inset:0;z-index:2147483000;pointer-events:none";
+      this.host.style.cssText = "position:fixed;inset:0;pointer-events:none";
       const root = this.host.attachShadow({ mode: "open" });
       const style = document.createElement("style");
       style.textContent = STYLES;
       root.appendChild(style);
       document.documentElement.appendChild(this.host);
+      this.appliedLayer = this.layerManager.apply(this.host, { layer: behavior.layer, legacyZIndex: behavior.zIndex, targetElement });
       return root;
     }
     renderWidget(experience, definition, callbacks, requestedStepId) {
       if (experience.widgetType === "anchored_card" || experience.widgetType === "hotspot") {
         const mount = (target2) => {
-          const root = this.root(experience.id);
+          const root = this.root(experience.id, definition.behavior, target2);
           const renderer = experience.widgetType === "hotspot" ? new HotspotRenderer() : new AnchoredCardRenderer();
           this.renderer = renderer;
           renderer.render(root, target2, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder, experience.widgetType ?? "anchored_card");
@@ -726,38 +842,38 @@ ${ISOLATION_CSS}`;
           (_a = callbacks.onUnavailable) == null ? void 0 : _a.call(callbacks);
         });
       } else if (experience.widgetType === "toast") {
-        const root = this.root(experience.id);
+        const root = this.root(experience.id, definition.behavior);
         const renderer = new ToastRenderer();
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else if (experience.widgetType === "cursor_follow") {
-        const root = this.root(experience.id);
+        const root = this.root(experience.id, definition.behavior);
         const renderer = new CursorFollowRenderer();
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else if (experience.widgetType === "modal") {
-        const root = this.root(experience.id);
+        const root = this.root(experience.id, definition.behavior);
         const renderer = new ModalRenderer();
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else if (experience.widgetType === "survey" && definition.survey) {
-        const root = this.root(experience.id);
+        const root = this.root(experience.id, definition.behavior);
         const renderer = new SurveyRenderer();
         this.renderer = renderer;
-        renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId) => {
+        renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId, direction) => {
           var _a;
-          return (_a = callbacks.onSurveyProgress) == null ? void 0 : _a.call(callbacks, answers, stepId);
+          return (_a = callbacks.onSurveyProgress) == null ? void 0 : _a.call(callbacks, answers, stepId, direction);
         }, onSubmit: (answers, stepId) => {
           var _a;
           return (_a = callbacks.onSurveySubmit) == null ? void 0 : _a.call(callbacks, answers, stepId);
         } }, requestedStepId);
       } else if (experience.widgetType === "slideout") {
-        const root = this.root(experience.id);
+        const root = this.root(experience.id, definition.behavior);
         const renderer = new SlideoutRenderer();
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else if (experience.widgetType === "banner") {
-        const root = this.root(experience.id);
+        const root = this.root(experience.id, definition.behavior);
         const renderer = new BannerRenderer();
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
@@ -766,6 +882,7 @@ ${ISOLATION_CSS}`;
       return true;
     }
     renderGuide(experience, definition, callbacks, guideStepId) {
+      var _a;
       const stepIndex = guideStepId ? definition.steps.findIndex((item) => item.id === guideStepId) : 0;
       const step = definition.steps[stepIndex];
       if (!step) return false;
@@ -780,26 +897,26 @@ ${ISOLATION_CSS}`;
           this.destroy();
         },
         onPrimary: () => {
-          var _a, _b;
+          var _a2, _b;
           const action = step.content.primaryAction;
           if (action) callbacks.onAction(action);
-          if ((((_a = step.advance) == null ? void 0 : _a.type) ?? "button") === "button") (_b = callbacks.onGuideAdvance) == null ? void 0 : _b.call(callbacks);
+          if ((((_a2 = step.advance) == null ? void 0 : _a2.type) ?? "button") === "button") (_b = callbacks.onGuideAdvance) == null ? void 0 : _b.call(callbacks);
         }
       };
       const addBack = (card) => {
-        var _a;
+        var _a2;
         if (stepIndex === 0) return;
         const back = document.createElement("button");
         back.className = "secondary";
         back.textContent = "Back";
         back.addEventListener("click", () => {
-          var _a2;
-          return (_a2 = callbacks.onGuideBack) == null ? void 0 : _a2.call(callbacks);
+          var _a3;
+          return (_a3 = callbacks.onGuideBack) == null ? void 0 : _a3.call(callbacks);
         });
-        (_a = card.querySelector("footer")) == null ? void 0 : _a.prepend(back);
+        (_a2 = card.querySelector("footer")) == null ? void 0 : _a2.prepend(back);
       };
       if (getGuideStepPattern(step) === "modal") {
-        const root = this.root(experience.id);
+        const root = this.root(experience.id, { layer: (_a = definition.behavior) == null ? void 0 : _a.layer });
         const renderer = new ModalRenderer();
         this.renderer = renderer;
         const behavior = { dismissible: step.behavior.dismissible ?? true };
@@ -809,14 +926,14 @@ ${ISOLATION_CSS}`;
         return true;
       }
       const mount = (target2) => {
-        var _a, _b;
-        const root = this.root(experience.id);
+        var _a2, _b, _c;
+        const root = this.root(experience.id, { layer: (_a2 = definition.behavior) == null ? void 0 : _a2.layer }, target2);
         const renderer = new AnchoredCardRenderer();
         this.renderer = renderer;
         const behavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset };
         const card = renderer.render(root, target2, step.content, stepDesign, behavior, stepCallbacks, step.builder, "anchored_card");
         addBack(card);
-        this.listenForAdvance(target2, ((_a = step.advance) == null ? void 0 : _a.type) ?? "button", ((_b = step.advance) == null ? void 0 : _b.type) === "element_hover" ? step.advance.durationMs : void 0, callbacks.onGuideAdvance);
+        this.listenForAdvance(target2, ((_b = step.advance) == null ? void 0 : _b.type) ?? "button", ((_c = step.advance) == null ? void 0 : _c.type) === "element_hover" ? step.advance.durationMs : void 0, callbacks.onGuideAdvance);
         requestAnimationFrame(callbacks.onVisible);
       };
       const target = findTarget(step.target);
@@ -825,9 +942,9 @@ ${ISOLATION_CSS}`;
         this.cancelPendingTarget = null;
         mount(element);
       }, () => {
-        var _a;
+        var _a2;
         this.cancelPendingTarget = null;
-        (_a = callbacks.onUnavailable) == null ? void 0 : _a.call(callbacks);
+        (_a2 = callbacks.onUnavailable) == null ? void 0 : _a2.call(callbacks);
       });
       return true;
     }
@@ -883,14 +1000,16 @@ ${ISOLATION_CSS}`;
       };
     }
     clearSurface() {
-      var _a, _b, _c, _d;
+      var _a, _b, _c, _d, _e;
       (_a = this.cleanupAdvance) == null ? void 0 : _a.call(this);
       this.cleanupAdvance = null;
       (_b = this.cancelPendingTarget) == null ? void 0 : _b.call(this);
       this.cancelPendingTarget = null;
       (_c = this.renderer) == null ? void 0 : _c.destroy();
       this.renderer = null;
-      (_d = this.host) == null ? void 0 : _d.remove();
+      (_d = this.appliedLayer) == null ? void 0 : _d.destroy();
+      this.appliedLayer = null;
+      (_e = this.host) == null ? void 0 : _e.remove();
       this.host = null;
     }
     destroy() {
@@ -1058,7 +1177,7 @@ ${ISOLATION_CSS}`;
       const definition = isGuideDefinition(experience.definition) ? experience.definition : null;
       const currentStepId = (definition == null ? void 0 : definition.steps.some((step) => step.id === requestedStepId)) ? requestedStepId : (_b = definition == null ? void 0 : definition.steps[0]) == null ? void 0 : _b.id;
       const impressionId = (progress == null ? void 0 : progress.impressionId) ?? experience.impressionId ?? null;
-      const runtime2 = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId), shownPromise: null, surveyResponseId: null, surveyResponsePromise: null, surveyAnswers: {} };
+      const runtime2 = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId), shownPromise: null, surveyResponseId: null, surveyResponsePromise: null, surveyAnswers: {}, stepStartedAt: null, visibleStepId: null };
       this.active = runtime2;
       if (currentStepId) this.persistGuide(runtime2, "active");
       const mounted = currentStepId ? progress && this.advanceForRoute(runtime2) ? true : (this.renderActiveGuide(), true) : this.renderer.render(experience, this.callbacks(runtime2), currentStepId);
@@ -1069,7 +1188,10 @@ ${ISOLATION_CSS}`;
     }
     callbacks(runtime2) {
       return {
-        onVisible: () => this.shown(runtime2),
+        onVisible: () => {
+          this.shown(runtime2);
+          this.stepVisible(runtime2);
+        },
         onDismiss: () => void this.finish(runtime2, "dismissed"),
         onAction: (action) => this.handleAction(runtime2, action),
         onComplete: () => void this.finish(runtime2, "completed"),
@@ -1083,7 +1205,10 @@ ${ISOLATION_CSS}`;
             this.persistGuide(runtime2, "paused");
           }
         },
-        onSurveyProgress: (answers, stepId) => this.persistSurvey(runtime2, answers, stepId),
+        onSurveyProgress: async (answers, stepId, direction) => {
+          await this.persistSurvey(runtime2, answers, stepId);
+          if (direction === "next") void this.post(runtime2, "interaction", void 0, "survey_step_completed", { stepId, stepIndex: this.surveyStepIndex(runtime2, stepId) });
+        },
         onSurveySubmit: async (answers, stepId) => {
           await this.persistSurvey(runtime2, answers, stepId, "submitted");
           await this.finish(runtime2, "completed", true);
@@ -1094,22 +1219,25 @@ ${ISOLATION_CSS}`;
       if (runtime2.shownRequested) return;
       runtime2.shownRequested = true;
       this.state.markSeen(runtime2.experience.id);
-      runtime2.shownPromise = this.post(runtime2, "shown").then((result) => {
+      runtime2.shownPromise = this.post(runtime2, "shown", void 0, "experience_shown").then((result) => {
         runtime2.impressionId = (result == null ? void 0 : result.impressionId) ?? null;
         if (this.active === runtime2) this.persistGuide(runtime2, "active");
         else if (this.pausedGuide === runtime2) this.persistGuide(runtime2, "paused");
       });
-      if (runtime2.experience.widgetType === "survey") void runtime2.shownPromise.then(() => this.ensureSurveyResponse(runtime2));
+      if (runtime2.experience.widgetType === "survey") void runtime2.shownPromise.then(async () => {
+        await this.ensureSurveyResponse(runtime2);
+        await this.post(runtime2, "interaction", void 0, "survey_started");
+      });
     }
     handleAction(runtime2, action) {
       var _a;
-      void this.recordAction(runtime2, action.type);
+      if (!isGuideDefinition(runtime2.experience.definition)) void this.recordAction(runtime2, action.type);
       if (action.type === "open_url" && action.url) window.location.assign(action.url);
       if (action.type === "track_event" && action.eventName) (_a = this.trackEvent) == null ? void 0 : _a.call(this, action.eventName);
     }
     async recordAction(runtime2, action) {
       await runtime2.shownPromise;
-      await this.post(runtime2, "action", action);
+      await this.post(runtime2, "action", action, "widget_interacted");
     }
     async finish(runtime2, event, surveyAlreadyPersisted = false) {
       if (this.active === runtime2) {
@@ -1119,7 +1247,9 @@ ${ISOLATION_CSS}`;
       if (runtime2.currentStepId) this.state.clearGuideProgress(runtime2.experience.id);
       if (runtime2.experience.widgetType === "survey" && event === "dismissed" && !surveyAlreadyPersisted) await this.persistSurvey(runtime2, runtime2.surveyAnswers, null, "abandoned");
       await runtime2.shownPromise;
-      await this.post(runtime2, event);
+      const guide = isGuideDefinition(runtime2.experience.definition);
+      const eventType = guide ? event === "completed" ? "guide_completed" : "guide_dismissed" : runtime2.experience.widgetType === "survey" ? event === "completed" ? "survey_submitted" : "survey_abandoned" : event === "dismissed" ? "widget_dismissed" : "widget_interacted";
+      await this.post(runtime2, event, void 0, eventType, guide ? this.currentStepPayload(runtime2, event === "dismissed") : void 0);
       this.justFinishedId = runtime2.experience.id;
       if (!this.destroyed) void this.evaluate();
     }
@@ -1129,6 +1259,7 @@ ${ISOLATION_CSS}`;
       const definition = runtime2.experience.definition;
       const index = definition.steps.findIndex((step) => step.id === runtime2.currentStepId);
       if (index < 0) return;
+      void this.post(runtime2, "interaction", void 0, "guide_step_completed", this.currentStepPayload(runtime2, true));
       if (index === definition.steps.length - 1) {
         void this.finish(runtime2, "completed");
         return;
@@ -1144,6 +1275,8 @@ ${ISOLATION_CSS}`;
       const index = definition.steps.findIndex((step) => step.id === runtime2.currentStepId);
       if (index <= 0) return;
       runtime2.currentStepId = definition.steps[index - 1].id;
+      runtime2.stepStartedAt = null;
+      runtime2.visibleStepId = null;
       this.persistGuide(runtime2, "active");
       this.renderActiveGuide();
     }
@@ -1153,6 +1286,25 @@ ${ISOLATION_CSS}`;
       this.renderer.destroy();
       if (!this.currentGuideStepMatchesPage(runtime2)) return;
       this.renderer.render(runtime2.experience, this.callbacks(runtime2), runtime2.currentStepId);
+    }
+    stepVisible(runtime2) {
+      if (!runtime2.currentStepId || runtime2.visibleStepId === runtime2.currentStepId) return;
+      runtime2.visibleStepId = runtime2.currentStepId;
+      runtime2.stepStartedAt = performance.now();
+      const definition = runtime2.experience.definition;
+      const stepIndex = definition.steps.findIndex((step) => step.id === runtime2.currentStepId);
+      void (runtime2.shownPromise ?? Promise.resolve()).then(() => this.post(runtime2, "interaction", void 0, "guide_step_shown", { stepId: runtime2.currentStepId, stepIndex }));
+    }
+    currentStepPayload(runtime2, includeDuration) {
+      if (!runtime2.currentStepId || !isGuideDefinition(runtime2.experience.definition)) return void 0;
+      const stepIndex = runtime2.experience.definition.steps.findIndex((step) => step.id === runtime2.currentStepId);
+      const durationMs = includeDuration && runtime2.stepStartedAt !== null ? Math.max(0, Math.round(performance.now() - runtime2.stepStartedAt)) : void 0;
+      return { stepId: runtime2.currentStepId, stepIndex, ...durationMs !== void 0 ? { durationMs } : {} };
+    }
+    surveyStepIndex(runtime2, stepId) {
+      var _a;
+      const definition = runtime2.experience.definition;
+      return !isGuideDefinition(definition) ? ((_a = definition.survey) == null ? void 0 : _a.steps.findIndex((step) => step.id === stepId)) ?? -1 : -1;
     }
     currentGuideStepMatchesPage(runtime2) {
       var _a, _b;
@@ -1202,10 +1354,11 @@ ${ISOLATION_CSS}`;
     persistGuide(runtime2, status) {
       if (runtime2.currentStepId) this.state.setGuideProgress({ experienceId: runtime2.experience.id, versionId: runtime2.experience.versionId, currentStepId: runtime2.currentStepId, status, ...runtime2.impressionId ? { impressionId: runtime2.impressionId } : {} });
     }
-    async post(runtime2, event, action) {
+    async post(runtime2, event, action, eventType = "widget_interacted", detail) {
       const experience = runtime2.experience;
       try {
-        const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: runtime2.impressionId ?? void 0, event, action }) });
+        if (event !== "shown" && runtime2.shownPromise) await runtime2.shownPromise;
+        const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: runtime2.impressionId ?? void 0, event, eventType, timestamp: Date.now(), action, ...detail }) });
         return response.ok && response.status !== 204 ? await response.json() : null;
       } catch {
         return null;

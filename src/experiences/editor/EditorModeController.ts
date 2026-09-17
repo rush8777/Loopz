@@ -2,6 +2,7 @@ import type {
   EditorDefinition,
   EditorDraft,
   ExperienceBehavior,
+  ExperienceLayer,
   ExperienceTarget,
   ExperienceTargeting,
   GuideAdvance,
@@ -152,6 +153,13 @@ export class EditorModeController {
           <div class="eyebrow">Target</div><strong class="truncate" data-target-label>Not selected</strong><div class="reliability" data-reliability></div>
           <button class="secondary-button" type="button" data-pick>Reselect target</button>
         </section>
+        <section class="section" data-layering-section>
+          <div class="eyebrow">Layering</div>
+          <label>Policy<select data-layer-mode><option value="auto">Automatic</option><option value="relative">Relative to an element</option><option value="always_on_top">Always on top</option><option value="custom">Advanced / Custom</option></select></label>
+          <div class="muted" data-layer-description></div>
+          <div data-layer-relative hidden><strong class="truncate" data-layer-target>Not selected</strong><button class="secondary-button" type="button" data-pick-layer>Select element from page</button><label>Relationship<select data-layer-relation><option value="above">Above</option><option value="below">Below</option></select></label></div>
+          <label data-layer-custom hidden>Custom z-index<input data-layer-z-index type="number" min="1" max="2147483647"></label>
+        </section>
         <section class="section" data-placement-section>
           <div class="eyebrow">Placement</div>
           <div data-for="anchored"><div class="placement-grid">${placementButton("top", "Top")}${placementButton("left", "Left")}${placementButton("auto", "Auto")}${placementButton("right", "Right")}${placementButton("bottom", "Bottom")}</div><label>Alignment<select data-alignment><option value="start">Start</option><option value="center">Center</option><option value="end">End</option></select></label><label>Offset<div class="number"><input data-offset type="number" min="0" max="100"><span>px</span></div></label></div>
@@ -174,6 +182,7 @@ export class EditorModeController {
     const root = this.root!;
     root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.addEventListener("click", () => this.setMode(button.dataset.mode as EditorMode)));
     root.querySelectorAll<HTMLButtonElement>("[data-pick]").forEach(button => button.addEventListener("click", () => { if (this.mode === "navigate") this.setMode("select"); else this.startPicker(); }));
+    root.querySelector<HTMLButtonElement>("[data-pick-layer]")?.addEventListener("click", () => this.startLayerPicker());
     root.querySelectorAll<HTMLButtonElement>("[data-step]").forEach(button => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
     root.querySelector<HTMLButtonElement>("[data-minimize]")?.addEventListener("click", () => {
       const aside = root.querySelector("aside")!; aside.classList.toggle("minimized");
@@ -183,6 +192,14 @@ export class EditorModeController {
     this.bindDrag();
 
     this.onSelect("[data-alignment]", value => { this.currentBehavior().alignment = value as NonNullable<ExperienceBehavior["alignment"]>; });
+    this.onSelect("[data-layer-mode]", value => {
+      if (value === "relative") { this.startLayerPicker(); return; }
+      if (value === "auto") this.setLayer({ mode: "auto" });
+      else if (value === "always_on_top") this.setLayer({ mode: "always_on_top" });
+      else { const current = this.currentLayer(); this.setLayer({ mode: "custom", zIndex: current?.mode === "custom" ? current.zIndex : 1000 }); }
+    });
+    this.onSelect("[data-layer-relation]", value => { const layer = this.currentLayer(); if (layer?.mode === "relative") this.setLayer({ ...layer, relation: value as "above" | "below" }); });
+    this.onInput("[data-layer-z-index]", value => { this.setLayer({ mode: "custom", zIndex: Math.max(1, Math.min(2_147_483_647, Math.trunc(numberValue(value, 1000)))) }); });
     this.onInput("[data-offset]", value => { this.currentBehavior().offset = numberValue(value, 8); });
     root.querySelectorAll<HTMLButtonElement>("[data-placement]").forEach(button => button.addEventListener("click", () => { this.currentBehavior().placement = button.dataset.placement as NonNullable<ExperienceBehavior["placement"]>; this.changed(); }));
     this.onSelect("[data-toast-position]", value => { this.currentBehavior().toastPosition = value as NonNullable<ExperienceBehavior["toastPosition"]>; });
@@ -271,6 +288,19 @@ export class EditorModeController {
     });
   }
 
+  private startLayerPicker(): void {
+    if (this.mode === "navigate") this.mode = "select";
+    const generation = ++this.selectionGeneration;
+    this.picker.cancel();
+    this.setText("[data-mode-hint]", "Select the page element this experience should appear above or below");
+    void this.picker.pick().then(target => {
+      if (generation !== this.selectionGeneration || !this.definition || !target) return;
+      const current = this.currentLayer();
+      this.setLayer({ mode: "relative", relation: current?.mode === "relative" ? current.relation : "above", target: { ...target, targetContext: { pagePath: currentPagePath() } } });
+      this.changed();
+    });
+  }
+
   private pickerIsSelecting(): boolean {
     return !!document.querySelector("[data-movecues-picker-overlay]");
   }
@@ -348,6 +378,15 @@ export class EditorModeController {
     this.root.querySelector<HTMLElement>("[data-step-summary]")!.hidden = !this.guide;
     this.root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.classList.toggle("active", button.dataset.mode === this.mode));
     this.root.querySelectorAll<HTMLButtonElement>("[data-placement]").forEach(button => button.classList.toggle("active", button.dataset.placement === (behavior.placement ?? "auto")));
+
+    const layer = this.currentLayer();
+    const layerMode = layer?.mode ?? "always_on_top";
+    this.setValue("[data-layer-mode]", layerMode);
+    const relative = this.root.querySelector<HTMLElement>("[data-layer-relative]"); if (relative) relative.hidden = layer?.mode !== "relative";
+    const custom = this.root.querySelector<HTMLElement>("[data-layer-custom]"); if (custom) custom.hidden = layer?.mode !== "custom";
+    this.setText("[data-layer-description]", layerMode === "auto" ? "Respect the application's UI layers." : layerMode === "relative" ? "Place this experience around a selected page element." : layerMode === "custom" ? "Use an advanced numeric layer." : layer ? "Keep this experience above normal application UI." : "Legacy compatibility: keep this experience above normal application UI.");
+    if (layer?.mode === "relative") { this.setText("[data-layer-target]", layer.target.label ?? layer.target.primarySelector); this.setValue("[data-layer-relation]", layer.relation); }
+    if (layer?.mode === "custom") this.setValue("[data-layer-z-index]", String(layer.zIndex));
 
     this.setValue("[data-alignment]", behavior.alignment ?? "center");
     this.setValue("[data-offset]", String(behavior.offset ?? 8));
@@ -461,6 +500,17 @@ export class EditorModeController {
   private currentBehavior(): ExperienceBehavior {
     if (!this.definition) return { dismissible: true };
     return (this.guide ? this.guide.steps[this.stepIndex].behavior : (this.definition as RuntimeWidgetDefinition).behavior) as ExperienceBehavior;
+  }
+
+  private currentLayer(): ExperienceLayer | undefined {
+    if (!this.definition) return undefined;
+    return this.guide ? this.guide.behavior?.layer : (this.definition as RuntimeWidgetDefinition).behavior.layer;
+  }
+
+  private setLayer(layer: ExperienceLayer): void {
+    if (!this.definition) return;
+    if (this.guide) this.guide.behavior = { ...this.guide.behavior, layer };
+    else (this.definition as RuntimeWidgetDefinition).behavior.layer = layer;
   }
 
   private setTarget(target: ExperienceTarget): void {

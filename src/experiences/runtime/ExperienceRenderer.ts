@@ -8,6 +8,7 @@ import { SlideoutRenderer } from "./SlideoutRenderer";
 import { HotspotRenderer } from "./HotspotRenderer";
 import { BannerRenderer } from "./BannerRenderer";
 import { SurveyRenderer } from "./SurveyRenderer";
+import { LayerManager, type AppliedLayer } from "./layering/LayerManager";
 
 export interface ExperienceRendererCallbacks {
   onVisible: () => void;
@@ -26,6 +27,8 @@ export class ExperienceRenderer {
   private renderer: { destroy(): void } | null = null;
   private cancelPendingTarget: (() => void) | null = null;
   private cleanupAdvance: (() => void) | null = null;
+  private appliedLayer: AppliedLayer | null = null;
+  private layerManager = new LayerManager();
 
   render(experience: DeliveredExperience, callbacks: ExperienceRendererCallbacks, guideStepId?: string): boolean {
     this.destroy();
@@ -33,33 +36,35 @@ export class ExperienceRenderer {
     return this.renderWidget(experience, experience.definition, callbacks, guideStepId);
   }
 
-  private root(experienceId: string): ShadowRoot {
-    this.host = document.createElement("div"); this.host.dataset.movecuesExperience = experienceId; this.host.dataset.movecuesExperienceRoot = experienceId; this.host.style.cssText = "position:fixed;inset:0;z-index:2147483000;pointer-events:none";
-    const root = this.host.attachShadow({ mode: "open" }); const style = document.createElement("style"); style.textContent = STYLES; root.appendChild(style); document.documentElement.appendChild(this.host); return root;
+  private root(experienceId: string, behavior: Pick<ExperienceBehavior, "layer" | "zIndex">, targetElement?: Element | null): ShadowRoot {
+    this.host = document.createElement("div"); this.host.dataset.movecuesExperience = experienceId; this.host.dataset.movecuesExperienceRoot = experienceId; this.host.style.cssText = "position:fixed;inset:0;pointer-events:none";
+    const root = this.host.attachShadow({ mode: "open" }); const style = document.createElement("style"); style.textContent = STYLES; root.appendChild(style); document.documentElement.appendChild(this.host);
+    this.appliedLayer = this.layerManager.apply(this.host, { layer: behavior.layer, legacyZIndex: behavior.zIndex, targetElement });
+    return root;
   }
 
   private renderWidget(experience: DeliveredExperience, definition: RuntimeWidgetDefinition, callbacks: ExperienceRendererCallbacks, requestedStepId?: string): boolean {
     if (experience.widgetType === "anchored_card" || experience.widgetType === "hotspot") {
-      const mount = (target: Element) => { const root = this.root(experience.id); const renderer = experience.widgetType === "hotspot" ? new HotspotRenderer() : new AnchoredCardRenderer(); this.renderer = renderer; renderer.render(root, target, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder, experience.widgetType ?? "anchored_card"); requestAnimationFrame(callbacks.onVisible); };
+      const mount = (target: Element) => { const root = this.root(experience.id, definition.behavior, target); const renderer = experience.widgetType === "hotspot" ? new HotspotRenderer() : new AnchoredCardRenderer(); this.renderer = renderer; renderer.render(root, target, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder, experience.widgetType ?? "anchored_card"); requestAnimationFrame(callbacks.onVisible); };
       const target = findTarget(definition.target);
       if (target) mount(target); else this.cancelPendingTarget = waitForTarget(definition.target, (element) => { this.cancelPendingTarget = null; mount(element); }, () => { this.cancelPendingTarget = null; callbacks.onUnavailable?.(); });
     } else if (experience.widgetType === "toast") {
-      const root = this.root(experience.id); const renderer = new ToastRenderer(); this.renderer = renderer;
+      const root = this.root(experience.id, definition.behavior); const renderer = new ToastRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
     } else if (experience.widgetType === "cursor_follow") {
-      const root = this.root(experience.id); const renderer = new CursorFollowRenderer(); this.renderer = renderer;
+      const root = this.root(experience.id, definition.behavior); const renderer = new CursorFollowRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
     } else if (experience.widgetType === "modal") {
-      const root = this.root(experience.id); const renderer = new ModalRenderer(); this.renderer = renderer;
+      const root = this.root(experience.id, definition.behavior); const renderer = new ModalRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
     } else if (experience.widgetType === "survey" && definition.survey) {
-      const root = this.root(experience.id); const renderer = new SurveyRenderer(); this.renderer = renderer;
+      const root = this.root(experience.id, definition.behavior); const renderer = new SurveyRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId, direction) => callbacks.onSurveyProgress?.(answers, stepId, direction), onSubmit: (answers, stepId) => callbacks.onSurveySubmit?.(answers, stepId) }, requestedStepId);
     } else if (experience.widgetType === "slideout") {
-      const root = this.root(experience.id); const renderer = new SlideoutRenderer(); this.renderer = renderer;
+      const root = this.root(experience.id, definition.behavior); const renderer = new SlideoutRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
     } else if (experience.widgetType === "banner") {
-      const root = this.root(experience.id); const renderer = new BannerRenderer(); this.renderer = renderer;
+      const root = this.root(experience.id, definition.behavior); const renderer = new BannerRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
     } else return false;
     if (experience.widgetType !== "anchored_card" && experience.widgetType !== "hotspot") requestAnimationFrame(callbacks.onVisible); return true;
@@ -84,7 +89,7 @@ export class ExperienceRenderer {
       card.querySelector("footer")?.prepend(back);
     };
     if (getGuideStepPattern(step) === "modal") {
-      const root = this.root(experience.id); const renderer = new ModalRenderer(); this.renderer = renderer;
+      const root = this.root(experience.id, { layer: definition.behavior?.layer }); const renderer = new ModalRenderer(); this.renderer = renderer;
       const behavior: ExperienceBehavior = { dismissible: step.behavior.dismissible ?? true };
       const card = renderer.render(root, step.content, stepDesign, behavior, stepCallbacks, step.builder);
       addBack(card);
@@ -92,7 +97,7 @@ export class ExperienceRenderer {
       return true;
     }
     const mount = (target: Element) => {
-      const root = this.root(experience.id); const renderer = new AnchoredCardRenderer(); this.renderer = renderer;
+      const root = this.root(experience.id, { layer: definition.behavior?.layer }, target); const renderer = new AnchoredCardRenderer(); this.renderer = renderer;
       const behavior: ExperienceBehavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset };
       const card = renderer.render(root, target, step.content, stepDesign, behavior, stepCallbacks, step.builder, "anchored_card");
       addBack(card);
@@ -128,7 +133,7 @@ export class ExperienceRenderer {
     };
   }
 
-  private clearSurface(): void { this.cleanupAdvance?.(); this.cleanupAdvance = null; this.cancelPendingTarget?.(); this.cancelPendingTarget = null; this.renderer?.destroy(); this.renderer = null; this.host?.remove(); this.host = null; }
+  private clearSurface(): void { this.cleanupAdvance?.(); this.cleanupAdvance = null; this.cancelPendingTarget?.(); this.cancelPendingTarget = null; this.renderer?.destroy(); this.renderer = null; this.appliedLayer?.destroy(); this.appliedLayer = null; this.host?.remove(); this.host = null; }
   destroy(): void { this.clearSurface(); }
 }
 

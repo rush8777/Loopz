@@ -66,6 +66,20 @@ describe("live placement editor", () => {
     expect(customerClicks).toBe(1);
   });
 
+  it("uses the existing page picker for a relative layer reference", async () => {
+    const reference = document.createElement("div"); reference.id = "customer-modal"; reference.setAttribute("aria-label", "Checkout modal"); document.body.appendChild(reference);
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => reference });
+    const fetchMock = editorFetch(widgetDraft("toast")); vi.stubGlobal("fetch", fetchMock);
+    controller = new EditorModeController("https://api.example.com"); expect(await controller.start("one-time-token")).toBe(true);
+
+    const mode = editorRoot().querySelector<HTMLSelectElement>("[data-layer-mode]")!; mode.value = "relative"; mode.dispatchEvent(new Event("change", { bubbles: true }));
+    reference.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 4, clientY: 4 }));
+
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH" && JSON.parse(String(init.body)).definition.behavior.layer?.mode === "relative")).toBe(true));
+    const save = [...fetchMock.mock.calls].reverse().find(([, init]) => init?.method === "PATCH")!;
+    expect(JSON.parse(String(save[1]?.body)).definition.behavior.layer).toMatchObject({ mode: "relative", relation: "above", target: { label: "Checkout modal", targetContext: { pagePath: "/dashboard" } } });
+  });
+
   it("restores the selected Guide step ID and mode on full-page editor continuation without analytics collectors", async () => {
     const fetchMock = editorFetch(guideDraft()); vi.stubGlobal("fetch", fetchMock);
     controller = new EditorModeController("https://api.example.com");
