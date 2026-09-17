@@ -7,7 +7,7 @@ export interface ExperienceRendererCallbacks {
     onGuideAdvance?: () => void;
     onGuideBack?: () => void;
     onUnavailable?: () => void;
-    onSurveyProgress?: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
+    onSurveyProgress?: (answers: SurveyAnswers, currentStepId: string, direction: "next" | "back") => Promise<void> | void;
     onSurveySubmit?: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
 }
 export declare class ExperienceRenderer {
@@ -15,6 +15,8 @@ export declare class ExperienceRenderer {
     private renderer;
     private cancelPendingTarget;
     private cleanupAdvance;
+    private appliedLayer;
+    private layerManager;
     render(experience: DeliveredExperience, callbacks: ExperienceRendererCallbacks, guideStepId?: string): boolean;
     private root;
     private renderWidget;

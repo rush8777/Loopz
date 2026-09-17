@@ -27,6 +27,9 @@ export declare class ExperienceLoader {
     private advanceGuide;
     private backGuide;
     private renderActiveGuide;
+    private stepVisible;
+    private currentStepPayload;
+    private surveyStepIndex;
     private currentGuideStepMatchesPage;
     private pauseGuide;
     private resumeGuide;

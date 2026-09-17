@@ -213,11 +213,14 @@ ${ISOLATION_CSS}`;
     let stopped = false;
     let observer = null;
     let timer = 0;
+    let frameId = null;
     const stop = () => {
       if (stopped) return;
       stopped = true;
       observer == null ? void 0 : observer.disconnect();
       clearTimeout(timer);
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      frameId = null;
     };
     const check = () => {
       if (stopped) return;
@@ -227,6 +230,13 @@ ${ISOLATION_CSS}`;
         onFound(element);
       }
     };
+    const scheduleCheck = () => {
+      if (stopped || frameId !== null) return;
+      frameId = requestAnimationFrame(() => {
+        frameId = null;
+        check();
+      });
+    };
     if (typeof MutationObserver === "undefined" || !document.documentElement) {
       timer = window.setTimeout(() => {
         stop();
@@ -234,7 +244,7 @@ ${ISOLATION_CSS}`;
       }, timeoutMs);
       return stop;
     }
-    observer = new MutationObserver(check);
+    observer = new MutationObserver(scheduleCheck);
     observer.observe(document.documentElement, { childList: true, subtree: true });
     timer = window.setTimeout(() => {
       if (!stopped) {
@@ -282,31 +292,84 @@ ${ISOLATION_CSS}`;
       this.cleanup = [];
     }
     render(root, target, content, design, behavior, callbacks, builder, widgetType) {
+      this.destroy();
       const card = buildCard(root, content, design, behavior, callbacks, builder, widgetType);
+      let frameId = null;
+      let destroyed = false;
+      let hidden = false;
+      let resolvedPlacement = null;
+      let cardSize = null;
+      let measureCard = true;
+      let lastLeft = null;
+      let lastTop = null;
+      const setHidden = (next) => {
+        if (hidden === next) return;
+        hidden = next;
+        card.style.visibility = next ? "hidden" : "";
+        card.style.pointerEvents = next ? "none" : "";
+      };
       const update = () => {
-        const rect = target.getBoundingClientRect();
-        if (!isVisibleTarget(target, card, rect)) {
-          card.style.visibility = "hidden";
-          card.style.pointerEvents = "none";
+        if (destroyed) return;
+        if (!target.isConnected) {
+          setHidden(true);
           return;
         }
-        card.style.visibility = "";
-        card.style.pointerEvents = "";
-        position(card, rect, behavior);
+        const rect = target.getBoundingClientRect();
+        if (measureCard || !cardSize) {
+          const bounds2 = card.getBoundingClientRect();
+          cardSize = { width: bounds2.width, height: bounds2.height };
+          measureCard = false;
+        }
+        const bounds = cardSize;
+        if (!resolvedPlacement) resolvedPlacement = resolvePlacement(rect, bounds, behavior);
+        const coordinates = coordinatesFor(rect, bounds, behavior, resolvedPlacement);
+        const naturalCardRect = rectAt(coordinates.left, coordinates.top, bounds.width, bounds.height);
+        if (!intersectsViewport(rect) && !intersectsViewport(naturalCardRect)) {
+          setHidden(true);
+          return;
+        }
+        setHidden(false);
+        const left = clampHorizontally(coordinates.left, bounds.width);
+        if (left !== lastLeft) {
+          lastLeft = left;
+          card.style.left = `${left}px`;
+        }
+        if (coordinates.top !== lastTop) {
+          lastTop = coordinates.top;
+          card.style.top = `${coordinates.top}px`;
+        }
       };
-      const onWindow = () => requestAnimationFrame(update);
-      window.addEventListener("scroll", onWindow, true);
-      window.addEventListener("resize", onWindow);
-      this.cleanup.push(() => window.removeEventListener("scroll", onWindow, true), () => window.removeEventListener("resize", onWindow));
+      const schedule = (reconsiderPlacement = false, remeasureCard = false) => {
+        if (destroyed) return;
+        if (reconsiderPlacement && isAutomaticPlacement(behavior)) resolvedPlacement = null;
+        if (remeasureCard) measureCard = true;
+        if (frameId !== null) return;
+        frameId = requestAnimationFrame(() => {
+          frameId = null;
+          update();
+        });
+      };
+      const onScroll = (event) => {
+        const scrollContainer = event.target;
+        if (target.isConnected && scrollContainer instanceof Element && !scrollContainer.contains(target)) return;
+        schedule();
+      };
+      const onResize = () => schedule(true, true);
+      window.addEventListener("scroll", onScroll, { capture: true, passive: true });
+      window.addEventListener("resize", onResize);
+      this.cleanup.push(
+        () => window.removeEventListener("scroll", onScroll, true),
+        () => window.removeEventListener("resize", onResize),
+        () => {
+          destroyed = true;
+          if (frameId !== null) cancelAnimationFrame(frameId);
+          frameId = null;
+        }
+      );
       if (typeof ResizeObserver !== "undefined") {
-        const observer = new ResizeObserver(update);
+        const observer = new ResizeObserver((entries) => schedule(true, entries.some((entry) => entry.target === card)));
         observer.observe(target);
         observer.observe(card);
-        this.cleanup.push(() => observer.disconnect());
-      }
-      if (typeof MutationObserver !== "undefined") {
-        const observer = new MutationObserver(onWindow);
-        observer.observe(document.body, { childList: true, subtree: true, attributes: true });
         this.cleanup.push(() => observer.disconnect());
       }
       update();
@@ -316,28 +379,20 @@ ${ISOLATION_CSS}`;
       this.cleanup.splice(0).forEach((fn) => fn());
     }
   }
-  function isVisibleTarget(target, card, rect) {
-    if (!target.isConnected || rect.width <= 0 || rect.height <= 0 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) return false;
-    if (typeof document.elementFromPoint !== "function") return true;
-    const left = Math.max(0, rect.left);
-    const right = Math.min(window.innerWidth, rect.right);
-    const top = Math.max(0, rect.top);
-    const bottom = Math.min(window.innerHeight, rect.bottom);
-    const root = card.getRootNode();
-    const cardHost = root instanceof ShadowRoot ? root.host : null;
-    for (const horizontal of [0.2, 0.5, 0.8]) for (const vertical of [0.2, 0.5, 0.8]) {
-      const hit = document.elementFromPoint(left + (right - left) * horizontal, top + (bottom - top) * vertical);
-      if (!hit || hit === target || target.contains(hit) || hit === cardHost) return true;
-    }
-    return false;
+  function isAutomaticPlacement(behavior) {
+    return !behavior.placement || behavior.placement === "auto";
   }
-  function position(card, rect, behavior) {
+  function resolvePlacement(rect, bounds, behavior) {
+    if (!isAutomaticPlacement(behavior)) return behavior.placement;
     const gap = behavior.offset ?? 8;
-    const bounds = card.getBoundingClientRect();
-    const margin = 8;
-    let placement = behavior.placement === "auto" || !behavior.placement ? "bottom" : behavior.placement;
-    if (placement === "bottom" && rect.bottom + gap + bounds.height > innerHeight) placement = "top";
-    if (placement === "top" && rect.top - gap - bounds.height < 0) placement = "bottom";
+    const spaceBelow = innerHeight - rect.bottom - gap;
+    const spaceAbove = rect.top - gap;
+    if (spaceBelow >= bounds.height) return "bottom";
+    if (spaceAbove >= bounds.height) return "top";
+    return spaceBelow >= spaceAbove ? "bottom" : "top";
+  }
+  function coordinatesFor(rect, bounds, behavior, placement) {
+    const gap = behavior.offset ?? 8;
     let left = rect.left + (rect.width - bounds.width) / 2;
     let top = rect.bottom + gap;
     if (placement === "top") top = rect.top - bounds.height - gap;
@@ -351,8 +406,17 @@ ${ISOLATION_CSS}`;
     }
     if (behavior.alignment === "start" && (placement === "top" || placement === "bottom")) left = rect.left;
     if (behavior.alignment === "end" && (placement === "top" || placement === "bottom")) left = rect.right - bounds.width;
-    card.style.left = `${Math.max(margin, Math.min(left, innerWidth - bounds.width - margin))}px`;
-    card.style.top = `${Math.max(margin, Math.min(top, innerHeight - bounds.height - margin))}px`;
+    return { left, top };
+  }
+  function clampHorizontally(left, width) {
+    const margin = 8;
+    return Math.max(margin, Math.min(left, innerWidth - width - margin));
+  }
+  function rectAt(left, top, width, height) {
+    return { x: left, y: top, left, top, width, height, right: left + width, bottom: top + height, toJSON: () => ({}) };
+  }
+  function intersectsViewport(rect) {
+    return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
   }
   function escapeText$1(value) {
     const span = document.createElement("span");
@@ -451,6 +515,7 @@ ${ISOLATION_CSS}`;
       this.card = null;
     }
     render(root, target, content, design, behavior, callbacks, builder) {
+      this.destroy();
       const beacon = document.createElement("button");
       beacon.className = "hotspot";
       beacon.dataset.style = behavior.hotspotStyle ?? "pulse";
@@ -459,12 +524,31 @@ ${ISOLATION_CSS}`;
       beacon.setAttribute("aria-label", `Open ${content.heading}`);
       if (beacon.dataset.style === "question") beacon.textContent = "?";
       root.appendChild(beacon);
+      let frameId = null;
+      let destroyed = false;
+      let lastLeft = null;
+      let lastTop = null;
       const update = () => {
+        if (destroyed || !target.isConnected) return;
         const rect = target.getBoundingClientRect();
-        beacon.style.left = `${Math.max(4, Math.min(rect.right - 7, innerWidth - 18))}px`;
-        beacon.style.top = `${Math.max(4, Math.min(rect.top - 7, innerHeight - 18))}px`;
+        const left = Math.max(4, Math.min(rect.right - 7, innerWidth - 18));
+        const top = Math.max(4, Math.min(rect.top - 7, innerHeight - 18));
+        if (left !== lastLeft) {
+          lastLeft = left;
+          beacon.style.left = `${left}px`;
+        }
+        if (top !== lastTop) {
+          lastTop = top;
+          beacon.style.top = `${top}px`;
+        }
       };
-      const schedule = () => requestAnimationFrame(update);
+      const schedule = () => {
+        if (destroyed || frameId !== null) return;
+        frameId = requestAnimationFrame(() => {
+          frameId = null;
+          update();
+        });
+      };
       const toggle = () => {
         var _a;
         if (this.card) {
@@ -477,10 +561,24 @@ ${ISOLATION_CSS}`;
         this.cardRenderer = new AnchoredCardRenderer();
         this.card = this.cardRenderer.render(root, target, content, design, behavior, callbacks, builder, "hotspot");
       };
+      const onScroll = (event) => {
+        const scrollContainer = event.target;
+        if (scrollContainer instanceof Element && !scrollContainer.contains(target)) return;
+        schedule();
+      };
       beacon.addEventListener("click", toggle);
-      window.addEventListener("scroll", schedule, true);
+      window.addEventListener("scroll", onScroll, { capture: true, passive: true });
       window.addEventListener("resize", schedule);
-      this.cleanup.push(() => beacon.removeEventListener("click", toggle), () => window.removeEventListener("scroll", schedule, true), () => window.removeEventListener("resize", schedule));
+      this.cleanup.push(
+        () => beacon.removeEventListener("click", toggle),
+        () => window.removeEventListener("scroll", onScroll, true),
+        () => window.removeEventListener("resize", schedule),
+        () => {
+          destroyed = true;
+          if (frameId !== null) cancelAnimationFrame(frameId);
+          frameId = null;
+        }
+      );
       if (typeof ResizeObserver !== "undefined") {
         const observer = new ResizeObserver(schedule);
         observer.observe(target);
@@ -643,7 +741,7 @@ ${ISOLATION_CSS}`;
         button.hidden = !this.survey.allowBack || this.stepIndex === 0;
         button.onclick = () => {
           if (!this.survey.allowBack || this.stepIndex === 0) return;
-          void this.callbacks.onProgress({ ...this.answers }, step.id);
+          void this.callbacks.onProgress({ ...this.answers }, step.id, "back");
           this.stepIndex--;
           this.renderStep();
         };
@@ -654,7 +752,7 @@ ${ISOLATION_CSS}`;
           if (!this.validateStep()) return;
           this.setDisabled(next, true);
           try {
-            await this.callbacks.onProgress({ ...this.answers }, step.id);
+            await this.callbacks.onProgress({ ...this.answers }, step.id, "next");
             this.stepIndex++;
             this.renderStep();
           } finally {
@@ -744,34 +842,168 @@ ${ISOLATION_CSS}`;
   function cssEscape(value) {
     return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(value) : value.replace(/["\\]/g, "\\$&");
   }
+  class StackingContextResolver {
+    resolve(element) {
+      if (!element) return { element: null, zIndex: 0, chain: [] };
+      const chain = [];
+      let current = element;
+      while (current && current !== document.documentElement) {
+        const style = getComputedStyle(current);
+        chain.push({ element: current, zIndex: numericZIndex(style.zIndex), createsStackingContext: createsStackingContext(style) });
+        current = current.parentElement;
+      }
+      const outermost = [...chain].reverse().find((entry) => entry.createsStackingContext);
+      return { element: (outermost == null ? void 0 : outermost.element) ?? null, zIndex: (outermost == null ? void 0 : outermost.zIndex) ?? 0, chain };
+    }
+  }
+  function numericZIndex(value) {
+    if (!value || value === "auto") return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+  }
+  function createsStackingContext(style) {
+    const position = style.position;
+    if ((position === "absolute" || position === "relative") && numericZIndex(style.zIndex) !== null || position === "fixed" || position === "sticky") return true;
+    if (Number.parseFloat(style.opacity || "1") < 1) return true;
+    if (property(style, "transform") !== "none" || property(style, "filter") !== "none" || property(style, "perspective") !== "none") return true;
+    if (style.isolation === "isolate" || !!style.mixBlendMode && style.mixBlendMode !== "normal") return true;
+    const contain = property(style, "contain");
+    if (/(^|\s)(layout|paint|strict|content)(\s|$)/.test(contain)) return true;
+    const willChange = property(style, "willChange").split(",").map((value) => value.trim());
+    return willChange.some((value) => ["transform", "opacity", "filter", "perspective", "contain"].includes(value));
+  }
+  function property(style, name) {
+    return (style[name] || "none").trim();
+  }
+  const ALWAYS_ON_TOP_Z_INDEX = 2147483e3;
+  const SAFE_DEFAULT_Z_INDEX = 1;
+  class LayerManager {
+    constructor(resolver = new StackingContextResolver(), findTarget2 = findUniqueTarget) {
+      this.resolver = resolver;
+      this.findTarget = findTarget2;
+    }
+    resolve(options) {
+      if (!options.layer) {
+        if (options.legacyZIndex !== void 0) return { zIndex: options.legacyZIndex, mode: "legacy", context: null };
+        return { zIndex: ALWAYS_ON_TOP_Z_INDEX, mode: "legacy", context: null };
+      }
+      const layer = options.layer;
+      if (layer.mode === "always_on_top") return { zIndex: ALWAYS_ON_TOP_Z_INDEX, mode: layer.mode, context: null };
+      if (layer.mode === "custom") return { zIndex: layer.zIndex, mode: layer.mode, context: null };
+      if (layer.mode === "relative") {
+        const reference = this.findTarget(layer.target);
+        if (!reference) {
+          const automatic = this.auto(options.targetElement);
+          return { ...automatic, mode: layer.mode, fallback: "relative_target_missing" };
+        }
+        const context = this.resolver.resolve(reference);
+        return { zIndex: bounded(context.zIndex + (layer.relation === "above" ? 1 : -1)), mode: layer.mode, context };
+      }
+      return this.auto(options.targetElement);
+    }
+    auto(targetElement) {
+      const context = this.resolver.resolve(targetElement ?? null);
+      return { zIndex: targetElement ? bounded(context.zIndex + 1) : SAFE_DEFAULT_Z_INDEX, mode: "auto", context };
+    }
+    apply(host, options) {
+      let observers = [];
+      let active = true;
+      let frameId = null;
+      let last;
+      const disconnect = () => {
+        observers.forEach((observer) => observer.disconnect());
+        observers = [];
+      };
+      const refresh = () => {
+        var _a, _b, _c;
+        if (!active) return last;
+        if (frameId !== null) {
+          cancelAnimationFrame(frameId);
+          frameId = null;
+        }
+        disconnect();
+        const resolution = this.resolve(options);
+        last = resolution;
+        const zIndex = String(resolution.zIndex);
+        if (host.style.zIndex !== zIndex) host.style.zIndex = zIndex;
+        if (resolution.fallback) {
+          if (host.dataset.movecuesLayerFallback !== resolution.fallback) host.dataset.movecuesLayerFallback = resolution.fallback;
+        } else if (host.dataset.movecuesLayerFallback) delete host.dataset.movecuesLayerFallback;
+        const dynamicLayer = ((_a = options.layer) == null ? void 0 : _a.mode) === "auto" || ((_b = options.layer) == null ? void 0 : _b.mode) === "relative";
+        const watched = dynamicLayer ? ((_c = options.layer) == null ? void 0 : _c.mode) === "relative" ? this.findTarget(options.layer.target) : options.targetElement : null;
+        if (watched && typeof MutationObserver !== "undefined") {
+          const observer = new MutationObserver(() => scheduleRefresh());
+          for (let element = watched; element; element = element.parentElement) {
+            observer.observe(element, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
+            if (element.parentElement) observer.observe(element.parentElement, { childList: true });
+          }
+          observers.push(observer);
+        }
+        return resolution;
+      };
+      const scheduleRefresh = () => {
+        if (!active || frameId !== null) return;
+        frameId = requestAnimationFrame(() => {
+          frameId = null;
+          refresh();
+        });
+      };
+      refresh();
+      return {
+        refresh,
+        destroy: () => {
+          active = false;
+          disconnect();
+          if (frameId !== null) cancelAnimationFrame(frameId);
+          frameId = null;
+        }
+      };
+    }
+  }
+  function findUniqueTarget(target) {
+    for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
+      try {
+        const matches = document.querySelectorAll(selector);
+        if (matches.length === 1) return matches[0];
+      } catch {
+      }
+    }
+    return null;
+  }
+  function bounded(value) {
+    return Math.max(-2147483648, Math.min(2147483647, value));
+  }
   class ExperienceRenderer {
     constructor() {
       this.host = null;
       this.renderer = null;
       this.cancelPendingTarget = null;
       this.cleanupAdvance = null;
+      this.appliedLayer = null;
+      this.layerManager = new LayerManager();
     }
     render(experience, callbacks, guideStepId) {
       this.destroy();
       if (isGuideDefinition(experience.definition)) return this.renderGuide(experience, experience.definition, callbacks, guideStepId);
       return this.renderWidget(experience, experience.definition, callbacks, guideStepId);
     }
-    root(experienceId) {
+    root(experienceId, behavior, targetElement) {
       this.host = document.createElement("div");
       this.host.dataset.movecuesExperience = experienceId;
       this.host.dataset.movecuesExperienceRoot = experienceId;
-      this.host.style.cssText = "position:fixed;inset:0;z-index:2147483000;pointer-events:none";
+      this.host.style.cssText = "position:fixed;inset:0;pointer-events:none";
       const root = this.host.attachShadow({ mode: "open" });
       const style = document.createElement("style");
       style.textContent = STYLES;
       root.appendChild(style);
       document.documentElement.appendChild(this.host);
+      this.appliedLayer = this.layerManager.apply(this.host, { layer: behavior.layer, legacyZIndex: behavior.zIndex, targetElement });
       return root;
     }
     renderWidget(experience, definition, callbacks, requestedStepId) {
       if (experience.widgetType === "anchored_card" || experience.widgetType === "hotspot") {
         const mount = (target2) => {
-          const root = this.root(experience.id);
+          const root = this.root(experience.id, definition.behavior, target2);
           const renderer = experience.widgetType === "hotspot" ? new HotspotRenderer() : new AnchoredCardRenderer();
           this.renderer = renderer;
           renderer.render(root, target2, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder, experience.widgetType ?? "anchored_card");
@@ -788,38 +1020,38 @@ ${ISOLATION_CSS}`;
           (_a = callbacks.onUnavailable) == null ? void 0 : _a.call(callbacks);
         });
       } else if (experience.widgetType === "toast") {
-        const root = this.root(experience.id);
+        const root = this.root(experience.id, definition.behavior);
         const renderer = new ToastRenderer();
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else if (experience.widgetType === "cursor_follow") {
-        const root = this.root(experience.id);
+        const root = this.root(experience.id, definition.behavior);
         const renderer = new CursorFollowRenderer();
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else if (experience.widgetType === "modal") {
-        const root = this.root(experience.id);
+        const root = this.root(experience.id, definition.behavior);
         const renderer = new ModalRenderer();
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else if (experience.widgetType === "survey" && definition.survey) {
-        const root = this.root(experience.id);
+        const root = this.root(experience.id, definition.behavior);
         const renderer = new SurveyRenderer();
         this.renderer = renderer;
-        renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId) => {
+        renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId, direction) => {
           var _a;
-          return (_a = callbacks.onSurveyProgress) == null ? void 0 : _a.call(callbacks, answers, stepId);
+          return (_a = callbacks.onSurveyProgress) == null ? void 0 : _a.call(callbacks, answers, stepId, direction);
         }, onSubmit: (answers, stepId) => {
           var _a;
           return (_a = callbacks.onSurveySubmit) == null ? void 0 : _a.call(callbacks, answers, stepId);
         } }, requestedStepId);
       } else if (experience.widgetType === "slideout") {
-        const root = this.root(experience.id);
+        const root = this.root(experience.id, definition.behavior);
         const renderer = new SlideoutRenderer();
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else if (experience.widgetType === "banner") {
-        const root = this.root(experience.id);
+        const root = this.root(experience.id, definition.behavior);
         const renderer = new BannerRenderer();
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
@@ -828,6 +1060,7 @@ ${ISOLATION_CSS}`;
       return true;
     }
     renderGuide(experience, definition, callbacks, guideStepId) {
+      var _a;
       const stepIndex = guideStepId ? definition.steps.findIndex((item) => item.id === guideStepId) : 0;
       const step = definition.steps[stepIndex];
       if (!step) return false;
@@ -842,26 +1075,26 @@ ${ISOLATION_CSS}`;
           this.destroy();
         },
         onPrimary: () => {
-          var _a, _b;
+          var _a2, _b;
           const action = step.content.primaryAction;
           if (action) callbacks.onAction(action);
-          if ((((_a = step.advance) == null ? void 0 : _a.type) ?? "button") === "button") (_b = callbacks.onGuideAdvance) == null ? void 0 : _b.call(callbacks);
+          if ((((_a2 = step.advance) == null ? void 0 : _a2.type) ?? "button") === "button") (_b = callbacks.onGuideAdvance) == null ? void 0 : _b.call(callbacks);
         }
       };
       const addBack = (card) => {
-        var _a;
+        var _a2;
         if (stepIndex === 0) return;
         const back = document.createElement("button");
         back.className = "secondary";
         back.textContent = "Back";
         back.addEventListener("click", () => {
-          var _a2;
-          return (_a2 = callbacks.onGuideBack) == null ? void 0 : _a2.call(callbacks);
+          var _a3;
+          return (_a3 = callbacks.onGuideBack) == null ? void 0 : _a3.call(callbacks);
         });
-        (_a = card.querySelector("footer")) == null ? void 0 : _a.prepend(back);
+        (_a2 = card.querySelector("footer")) == null ? void 0 : _a2.prepend(back);
       };
       if (getGuideStepPattern(step) === "modal") {
-        const root = this.root(experience.id);
+        const root = this.root(experience.id, { layer: (_a = definition.behavior) == null ? void 0 : _a.layer });
         const renderer = new ModalRenderer();
         this.renderer = renderer;
         const behavior = { dismissible: step.behavior.dismissible ?? true };
@@ -871,14 +1104,14 @@ ${ISOLATION_CSS}`;
         return true;
       }
       const mount = (target2) => {
-        var _a, _b;
-        const root = this.root(experience.id);
+        var _a2, _b, _c;
+        const root = this.root(experience.id, { layer: (_a2 = definition.behavior) == null ? void 0 : _a2.layer }, target2);
         const renderer = new AnchoredCardRenderer();
         this.renderer = renderer;
         const behavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset };
         const card = renderer.render(root, target2, step.content, stepDesign, behavior, stepCallbacks, step.builder, "anchored_card");
         addBack(card);
-        this.listenForAdvance(target2, ((_a = step.advance) == null ? void 0 : _a.type) ?? "button", ((_b = step.advance) == null ? void 0 : _b.type) === "element_hover" ? step.advance.durationMs : void 0, callbacks.onGuideAdvance);
+        this.listenForAdvance(target2, ((_b = step.advance) == null ? void 0 : _b.type) ?? "button", ((_c = step.advance) == null ? void 0 : _c.type) === "element_hover" ? step.advance.durationMs : void 0, callbacks.onGuideAdvance);
         requestAnimationFrame(callbacks.onVisible);
       };
       const target = findTarget(step.target);
@@ -887,9 +1120,9 @@ ${ISOLATION_CSS}`;
         this.cancelPendingTarget = null;
         mount(element);
       }, () => {
-        var _a;
+        var _a2;
         this.cancelPendingTarget = null;
-        (_a = callbacks.onUnavailable) == null ? void 0 : _a.call(callbacks);
+        (_a2 = callbacks.onUnavailable) == null ? void 0 : _a2.call(callbacks);
       });
       return true;
     }
@@ -945,14 +1178,16 @@ ${ISOLATION_CSS}`;
       };
     }
     clearSurface() {
-      var _a, _b, _c, _d;
+      var _a, _b, _c, _d, _e;
       (_a = this.cleanupAdvance) == null ? void 0 : _a.call(this);
       this.cleanupAdvance = null;
       (_b = this.cancelPendingTarget) == null ? void 0 : _b.call(this);
       this.cancelPendingTarget = null;
       (_c = this.renderer) == null ? void 0 : _c.destroy();
       this.renderer = null;
-      (_d = this.host) == null ? void 0 : _d.remove();
+      (_d = this.appliedLayer) == null ? void 0 : _d.destroy();
+      this.appliedLayer = null;
+      (_e = this.host) == null ? void 0 : _e.remove();
       this.host = null;
     }
     destroy() {
@@ -1439,6 +1674,13 @@ ${ISOLATION_CSS}`;
           <div class="eyebrow">Target</div><strong class="truncate" data-target-label>Not selected</strong><div class="reliability" data-reliability></div>
           <button class="secondary-button" type="button" data-pick>Reselect target</button>
         </section>
+        <section class="section" data-layering-section>
+          <div class="eyebrow">Layering</div>
+          <label>Policy<select data-layer-mode><option value="auto">Automatic</option><option value="relative">Relative to an element</option><option value="always_on_top">Always on top</option><option value="custom">Advanced / Custom</option></select></label>
+          <div class="muted" data-layer-description></div>
+          <div data-layer-relative hidden><strong class="truncate" data-layer-target>Not selected</strong><button class="secondary-button" type="button" data-pick-layer>Select element from page</button><label>Relationship<select data-layer-relation><option value="above">Above</option><option value="below">Below</option></select></label></div>
+          <label data-layer-custom hidden>Custom z-index<input data-layer-z-index type="number" min="1" max="2147483647"></label>
+        </section>
         <section class="section" data-placement-section>
           <div class="eyebrow">Placement</div>
           <div data-for="anchored"><div class="placement-grid">${placementButton("top", "Top")}${placementButton("left", "Left")}${placementButton("auto", "Auto")}${placementButton("right", "Right")}${placementButton("bottom", "Bottom")}</div><label>Alignment<select data-alignment><option value="start">Start</option><option value="center">Center</option><option value="end">End</option></select></label><label>Offset<div class="number"><input data-offset type="number" min="0" max="100"><span>px</span></div></label></div>
@@ -1457,24 +1699,44 @@ ${ISOLATION_CSS}`;
     </aside>`;
     }
     bindPanel() {
-      var _a, _b;
+      var _a, _b, _c;
       const root = this.root;
       root.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this.setMode(button.dataset.mode)));
       root.querySelectorAll("[data-pick]").forEach((button) => button.addEventListener("click", () => {
         if (this.mode === "navigate") this.setMode("select");
         else this.startPicker();
       }));
+      (_a = root.querySelector("[data-pick-layer]")) == null ? void 0 : _a.addEventListener("click", () => this.startLayerPicker());
       root.querySelectorAll("[data-step]").forEach((button) => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
-      (_a = root.querySelector("[data-minimize]")) == null ? void 0 : _a.addEventListener("click", () => {
+      (_b = root.querySelector("[data-minimize]")) == null ? void 0 : _b.addEventListener("click", () => {
         const aside = root.querySelector("aside");
         aside.classList.toggle("minimized");
         const button = root.querySelector("[data-minimize]");
         button.textContent = aside.classList.contains("minimized") ? "+" : "—";
       });
-      (_b = root.querySelector("[data-close]")) == null ? void 0 : _b.addEventListener("click", () => void this.close());
+      (_c = root.querySelector("[data-close]")) == null ? void 0 : _c.addEventListener("click", () => void this.close());
       this.bindDrag();
       this.onSelect("[data-alignment]", (value) => {
         this.currentBehavior().alignment = value;
+      });
+      this.onSelect("[data-layer-mode]", (value) => {
+        if (value === "relative") {
+          this.startLayerPicker();
+          return;
+        }
+        if (value === "auto") this.setLayer({ mode: "auto" });
+        else if (value === "always_on_top") this.setLayer({ mode: "always_on_top" });
+        else {
+          const current = this.currentLayer();
+          this.setLayer({ mode: "custom", zIndex: (current == null ? void 0 : current.mode) === "custom" ? current.zIndex : 1e3 });
+        }
+      });
+      this.onSelect("[data-layer-relation]", (value) => {
+        const layer = this.currentLayer();
+        if ((layer == null ? void 0 : layer.mode) === "relative") this.setLayer({ ...layer, relation: value });
+      });
+      this.onInput("[data-layer-z-index]", (value) => {
+        this.setLayer({ mode: "custom", zIndex: Math.max(1, Math.min(2147483647, Math.trunc(numberValue(value, 1e3)))) });
       });
       this.onInput("[data-offset]", (value) => {
         this.currentBehavior().offset = numberValue(value, 8);
@@ -1612,6 +1874,18 @@ ${ISOLATION_CSS}`;
         this.changed();
       });
     }
+    startLayerPicker() {
+      if (this.mode === "navigate") this.mode = "select";
+      const generation = ++this.selectionGeneration;
+      this.picker.cancel();
+      this.setText("[data-mode-hint]", "Select the page element this experience should appear above or below");
+      void this.picker.pick().then((target) => {
+        if (generation !== this.selectionGeneration || !this.definition || !target) return;
+        const current = this.currentLayer();
+        this.setLayer({ mode: "relative", relation: (current == null ? void 0 : current.mode) === "relative" ? current.relation : "above", target: { ...target, targetContext: { pagePath: currentPagePath() } } });
+        this.changed();
+      });
+    }
     pickerIsSelecting() {
       return !!document.querySelector("[data-movecues-picker-overlay]");
     }
@@ -1696,6 +1970,19 @@ ${ISOLATION_CSS}`;
       this.root.querySelector("[data-step-summary]").hidden = !this.guide;
       this.root.querySelectorAll("[data-mode]").forEach((button) => button.classList.toggle("active", button.dataset.mode === this.mode));
       this.root.querySelectorAll("[data-placement]").forEach((button) => button.classList.toggle("active", button.dataset.placement === (behavior.placement ?? "auto")));
+      const layer = this.currentLayer();
+      const layerMode = (layer == null ? void 0 : layer.mode) ?? "always_on_top";
+      this.setValue("[data-layer-mode]", layerMode);
+      const relative = this.root.querySelector("[data-layer-relative]");
+      if (relative) relative.hidden = (layer == null ? void 0 : layer.mode) !== "relative";
+      const custom = this.root.querySelector("[data-layer-custom]");
+      if (custom) custom.hidden = (layer == null ? void 0 : layer.mode) !== "custom";
+      this.setText("[data-layer-description]", layerMode === "auto" ? "Respect the application's UI layers." : layerMode === "relative" ? "Place this experience around a selected page element." : layerMode === "custom" ? "Use an advanced numeric layer." : layer ? "Keep this experience above normal application UI." : "Legacy compatibility: keep this experience above normal application UI.");
+      if ((layer == null ? void 0 : layer.mode) === "relative") {
+        this.setText("[data-layer-target]", layer.target.label ?? layer.target.primarySelector);
+        this.setValue("[data-layer-relation]", layer.relation);
+      }
+      if ((layer == null ? void 0 : layer.mode) === "custom") this.setValue("[data-layer-z-index]", String(layer.zIndex));
       this.setValue("[data-alignment]", behavior.alignment ?? "center");
       this.setValue("[data-offset]", String(behavior.offset ?? 8));
       this.setValue("[data-toast-position]", behavior.toastPosition ?? "bottom-right");
@@ -1809,6 +2096,16 @@ ${ISOLATION_CSS}`;
     currentBehavior() {
       if (!this.definition) return { dismissible: true };
       return this.guide ? this.guide.steps[this.stepIndex].behavior : this.definition.behavior;
+    }
+    currentLayer() {
+      var _a;
+      if (!this.definition) return void 0;
+      return this.guide ? (_a = this.guide.behavior) == null ? void 0 : _a.layer : this.definition.behavior.layer;
+    }
+    setLayer(layer) {
+      if (!this.definition) return;
+      if (this.guide) this.guide.behavior = { ...this.guide.behavior, layer };
+      else this.definition.behavior.layer = layer;
     }
     setTarget(target) {
       if (!this.definition) return;

@@ -1,11 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ALWAYS_ON_TOP_Z_INDEX, LayerManager, SAFE_DEFAULT_Z_INDEX } from "../src/experiences/runtime/layering/LayerManager";
+import { StackingContextResolver } from "../src/experiences/runtime/layering/StackingContextResolver";
 import type { ExperienceTarget } from "../src/experiences/types";
 
 const referenceTarget: ExperienceTarget = { primarySelector: "#reference", fallbackSelectors: [], reliability: "reliable" };
 
 describe("LayerManager", () => {
   beforeEach(() => { document.body.innerHTML = ""; });
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it("places automatic anchored content above a page target but below navbars and modals", () => {
     const target = element("position:relative;z-index:0");
@@ -43,6 +45,30 @@ describe("LayerManager", () => {
     expect(manager.resolve({ layer: { mode: "always_on_top" } }).zIndex).toBe(ALWAYS_ON_TOP_Z_INDEX);
     expect(manager.resolve({ layer: { mode: "custom", zIndex: 321 } }).zIndex).toBe(321);
     // This remains an ordinary CSS layer; native dialog/popover top-layer semantics still win.
+  });
+
+  it("resolves an automatic stacking context only once during mount", () => {
+    const target = element("position:relative;z-index:4"); const host = element("");
+    document.body.append(target, host);
+    const resolver = new StackingContextResolver(); const resolve = vi.spyOn(resolver, "resolve");
+    const applied = new LayerManager(resolver).apply(host, { layer: { mode: "auto" }, targetElement: target });
+
+    expect(resolve).toHaveBeenCalledTimes(1);
+    applied.destroy();
+  });
+
+  it.each([
+    ["legacy", {}],
+    ["custom", { layer: { mode: "custom", zIndex: 42 } }],
+    ["always on top", { layer: { mode: "always_on_top" } }],
+  ] as const)("does not observe target ancestry for a static %s layer", (_name, options) => {
+    const constructed = vi.fn();
+    vi.stubGlobal("MutationObserver", class { constructor(_callback: MutationCallback) { constructed(); } observe(): void {} disconnect(): void {} });
+    const target = element(""); const host = element(""); document.body.append(target, host);
+    const applied = new LayerManager().apply(host, { ...options, targetElement: target });
+
+    expect(constructed).not.toHaveBeenCalled();
+    applied.destroy();
   });
 
   it("recomputes when the watched reference context changes", async () => {

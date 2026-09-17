@@ -1,7 +1,7 @@
 import type { ExperienceBehavior, ExperienceContent, ExperienceDesign, SurveyAnswers, SurveyConfig } from "../types";
 export interface SurveyCallbacks {
     onDismiss: () => void;
-    onProgress: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
+    onProgress: (answers: SurveyAnswers, currentStepId: string, direction: "next" | "back") => Promise<void> | void;
     onSubmit: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
 }
 export declare class SurveyRenderer {

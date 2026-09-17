@@ -57,18 +57,24 @@ export class LayerManager {
   apply(host: HTMLElement, options: LayerOptions): AppliedLayer {
     let observers: MutationObserver[] = [];
     let active = true;
-    let last = this.resolve(options);
+    let frameId: number | null = null;
+    let last!: LayerResolution;
     const disconnect = () => { observers.forEach(observer => observer.disconnect()); observers = []; };
     const refresh = () => {
       if (!active) return last;
+      if (frameId !== null) { cancelAnimationFrame(frameId); frameId = null; }
       disconnect();
       const resolution = this.resolve(options);
       last = resolution;
-      host.style.zIndex = String(resolution.zIndex);
-      if (resolution.fallback) host.dataset.movecuesLayerFallback = resolution.fallback; else delete host.dataset.movecuesLayerFallback;
-      const watched = options.layer?.mode === "relative" ? this.findTarget(options.layer.target) : options.targetElement;
+      const zIndex = String(resolution.zIndex);
+      if (host.style.zIndex !== zIndex) host.style.zIndex = zIndex;
+      if (resolution.fallback) {
+        if (host.dataset.movecuesLayerFallback !== resolution.fallback) host.dataset.movecuesLayerFallback = resolution.fallback;
+      } else if (host.dataset.movecuesLayerFallback) delete host.dataset.movecuesLayerFallback;
+      const dynamicLayer = options.layer?.mode === "auto" || options.layer?.mode === "relative";
+      const watched = dynamicLayer ? (options.layer?.mode === "relative" ? this.findTarget(options.layer.target) : options.targetElement) : null;
       if (watched && typeof MutationObserver !== "undefined") {
-        const observer = new MutationObserver(() => { if (active) refresh(); });
+        const observer = new MutationObserver(() => scheduleRefresh());
         for (let element: Element | null = watched; element; element = element.parentElement) {
           observer.observe(element, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
           if (element.parentElement) observer.observe(element.parentElement, { childList: true });
@@ -77,8 +83,20 @@ export class LayerManager {
       }
       return resolution;
     };
+    const scheduleRefresh = () => {
+      if (!active || frameId !== null) return;
+      frameId = requestAnimationFrame(() => { frameId = null; refresh(); });
+    };
     refresh();
-    return { refresh, destroy: () => { active = false; disconnect(); } };
+    return {
+      refresh,
+      destroy: () => {
+        active = false;
+        disconnect();
+        if (frameId !== null) cancelAnimationFrame(frameId);
+        frameId = null;
+      },
+    };
   }
 }
 

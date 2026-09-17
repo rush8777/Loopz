@@ -151,11 +151,14 @@ ${ISOLATION_CSS}`;
     let stopped = false;
     let observer = null;
     let timer = 0;
+    let frameId = null;
     const stop = () => {
       if (stopped) return;
       stopped = true;
       observer == null ? void 0 : observer.disconnect();
       clearTimeout(timer);
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      frameId = null;
     };
     const check = () => {
       if (stopped) return;
@@ -165,6 +168,13 @@ ${ISOLATION_CSS}`;
         onFound(element);
       }
     };
+    const scheduleCheck = () => {
+      if (stopped || frameId !== null) return;
+      frameId = requestAnimationFrame(() => {
+        frameId = null;
+        check();
+      });
+    };
     if (typeof MutationObserver === "undefined" || !document.documentElement) {
       timer = window.setTimeout(() => {
         stop();
@@ -172,7 +182,7 @@ ${ISOLATION_CSS}`;
       }, timeoutMs);
       return stop;
     }
-    observer = new MutationObserver(check);
+    observer = new MutationObserver(scheduleCheck);
     observer.observe(document.documentElement, { childList: true, subtree: true });
     timer = window.setTimeout(() => {
       if (!stopped) {
@@ -220,31 +230,84 @@ ${ISOLATION_CSS}`;
       this.cleanup = [];
     }
     render(root, target, content, design, behavior, callbacks, builder, widgetType) {
+      this.destroy();
       const card = buildCard(root, content, design, behavior, callbacks, builder, widgetType);
+      let frameId = null;
+      let destroyed = false;
+      let hidden = false;
+      let resolvedPlacement = null;
+      let cardSize = null;
+      let measureCard = true;
+      let lastLeft = null;
+      let lastTop = null;
+      const setHidden = (next) => {
+        if (hidden === next) return;
+        hidden = next;
+        card.style.visibility = next ? "hidden" : "";
+        card.style.pointerEvents = next ? "none" : "";
+      };
       const update = () => {
-        const rect = target.getBoundingClientRect();
-        if (!isVisibleTarget(target, card, rect)) {
-          card.style.visibility = "hidden";
-          card.style.pointerEvents = "none";
+        if (destroyed) return;
+        if (!target.isConnected) {
+          setHidden(true);
           return;
         }
-        card.style.visibility = "";
-        card.style.pointerEvents = "";
-        position(card, rect, behavior);
+        const rect = target.getBoundingClientRect();
+        if (measureCard || !cardSize) {
+          const bounds2 = card.getBoundingClientRect();
+          cardSize = { width: bounds2.width, height: bounds2.height };
+          measureCard = false;
+        }
+        const bounds = cardSize;
+        if (!resolvedPlacement) resolvedPlacement = resolvePlacement(rect, bounds, behavior);
+        const coordinates = coordinatesFor(rect, bounds, behavior, resolvedPlacement);
+        const naturalCardRect = rectAt(coordinates.left, coordinates.top, bounds.width, bounds.height);
+        if (!intersectsViewport(rect) && !intersectsViewport(naturalCardRect)) {
+          setHidden(true);
+          return;
+        }
+        setHidden(false);
+        const left = clampHorizontally(coordinates.left, bounds.width);
+        if (left !== lastLeft) {
+          lastLeft = left;
+          card.style.left = `${left}px`;
+        }
+        if (coordinates.top !== lastTop) {
+          lastTop = coordinates.top;
+          card.style.top = `${coordinates.top}px`;
+        }
       };
-      const onWindow = () => requestAnimationFrame(update);
-      window.addEventListener("scroll", onWindow, true);
-      window.addEventListener("resize", onWindow);
-      this.cleanup.push(() => window.removeEventListener("scroll", onWindow, true), () => window.removeEventListener("resize", onWindow));
+      const schedule = (reconsiderPlacement = false, remeasureCard = false) => {
+        if (destroyed) return;
+        if (reconsiderPlacement && isAutomaticPlacement(behavior)) resolvedPlacement = null;
+        if (remeasureCard) measureCard = true;
+        if (frameId !== null) return;
+        frameId = requestAnimationFrame(() => {
+          frameId = null;
+          update();
+        });
+      };
+      const onScroll = (event) => {
+        const scrollContainer = event.target;
+        if (target.isConnected && scrollContainer instanceof Element && !scrollContainer.contains(target)) return;
+        schedule();
+      };
+      const onResize = () => schedule(true, true);
+      window.addEventListener("scroll", onScroll, { capture: true, passive: true });
+      window.addEventListener("resize", onResize);
+      this.cleanup.push(
+        () => window.removeEventListener("scroll", onScroll, true),
+        () => window.removeEventListener("resize", onResize),
+        () => {
+          destroyed = true;
+          if (frameId !== null) cancelAnimationFrame(frameId);
+          frameId = null;
+        }
+      );
       if (typeof ResizeObserver !== "undefined") {
-        const observer = new ResizeObserver(update);
+        const observer = new ResizeObserver((entries) => schedule(true, entries.some((entry) => entry.target === card)));
         observer.observe(target);
         observer.observe(card);
-        this.cleanup.push(() => observer.disconnect());
-      }
-      if (typeof MutationObserver !== "undefined") {
-        const observer = new MutationObserver(onWindow);
-        observer.observe(document.body, { childList: true, subtree: true, attributes: true });
         this.cleanup.push(() => observer.disconnect());
       }
       update();
@@ -254,28 +317,20 @@ ${ISOLATION_CSS}`;
       this.cleanup.splice(0).forEach((fn) => fn());
     }
   }
-  function isVisibleTarget(target, card, rect) {
-    if (!target.isConnected || rect.width <= 0 || rect.height <= 0 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) return false;
-    if (typeof document.elementFromPoint !== "function") return true;
-    const left = Math.max(0, rect.left);
-    const right = Math.min(window.innerWidth, rect.right);
-    const top = Math.max(0, rect.top);
-    const bottom = Math.min(window.innerHeight, rect.bottom);
-    const root = card.getRootNode();
-    const cardHost = root instanceof ShadowRoot ? root.host : null;
-    for (const horizontal of [0.2, 0.5, 0.8]) for (const vertical of [0.2, 0.5, 0.8]) {
-      const hit = document.elementFromPoint(left + (right - left) * horizontal, top + (bottom - top) * vertical);
-      if (!hit || hit === target || target.contains(hit) || hit === cardHost) return true;
-    }
-    return false;
+  function isAutomaticPlacement(behavior) {
+    return !behavior.placement || behavior.placement === "auto";
   }
-  function position(card, rect, behavior) {
+  function resolvePlacement(rect, bounds, behavior) {
+    if (!isAutomaticPlacement(behavior)) return behavior.placement;
     const gap = behavior.offset ?? 8;
-    const bounds = card.getBoundingClientRect();
-    const margin = 8;
-    let placement = behavior.placement === "auto" || !behavior.placement ? "bottom" : behavior.placement;
-    if (placement === "bottom" && rect.bottom + gap + bounds.height > innerHeight) placement = "top";
-    if (placement === "top" && rect.top - gap - bounds.height < 0) placement = "bottom";
+    const spaceBelow = innerHeight - rect.bottom - gap;
+    const spaceAbove = rect.top - gap;
+    if (spaceBelow >= bounds.height) return "bottom";
+    if (spaceAbove >= bounds.height) return "top";
+    return spaceBelow >= spaceAbove ? "bottom" : "top";
+  }
+  function coordinatesFor(rect, bounds, behavior, placement) {
+    const gap = behavior.offset ?? 8;
     let left = rect.left + (rect.width - bounds.width) / 2;
     let top = rect.bottom + gap;
     if (placement === "top") top = rect.top - bounds.height - gap;
@@ -289,8 +344,17 @@ ${ISOLATION_CSS}`;
     }
     if (behavior.alignment === "start" && (placement === "top" || placement === "bottom")) left = rect.left;
     if (behavior.alignment === "end" && (placement === "top" || placement === "bottom")) left = rect.right - bounds.width;
-    card.style.left = `${Math.max(margin, Math.min(left, innerWidth - bounds.width - margin))}px`;
-    card.style.top = `${Math.max(margin, Math.min(top, innerHeight - bounds.height - margin))}px`;
+    return { left, top };
+  }
+  function clampHorizontally(left, width) {
+    const margin = 8;
+    return Math.max(margin, Math.min(left, innerWidth - width - margin));
+  }
+  function rectAt(left, top, width, height) {
+    return { x: left, y: top, left, top, width, height, right: left + width, bottom: top + height, toJSON: () => ({}) };
+  }
+  function intersectsViewport(rect) {
+    return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
   }
   function escapeText(value) {
     const span = document.createElement("span");
@@ -389,6 +453,7 @@ ${ISOLATION_CSS}`;
       this.card = null;
     }
     render(root, target, content, design, behavior, callbacks, builder) {
+      this.destroy();
       const beacon = document.createElement("button");
       beacon.className = "hotspot";
       beacon.dataset.style = behavior.hotspotStyle ?? "pulse";
@@ -397,12 +462,31 @@ ${ISOLATION_CSS}`;
       beacon.setAttribute("aria-label", `Open ${content.heading}`);
       if (beacon.dataset.style === "question") beacon.textContent = "?";
       root.appendChild(beacon);
+      let frameId = null;
+      let destroyed = false;
+      let lastLeft = null;
+      let lastTop = null;
       const update = () => {
+        if (destroyed || !target.isConnected) return;
         const rect = target.getBoundingClientRect();
-        beacon.style.left = `${Math.max(4, Math.min(rect.right - 7, innerWidth - 18))}px`;
-        beacon.style.top = `${Math.max(4, Math.min(rect.top - 7, innerHeight - 18))}px`;
+        const left = Math.max(4, Math.min(rect.right - 7, innerWidth - 18));
+        const top = Math.max(4, Math.min(rect.top - 7, innerHeight - 18));
+        if (left !== lastLeft) {
+          lastLeft = left;
+          beacon.style.left = `${left}px`;
+        }
+        if (top !== lastTop) {
+          lastTop = top;
+          beacon.style.top = `${top}px`;
+        }
       };
-      const schedule = () => requestAnimationFrame(update);
+      const schedule = () => {
+        if (destroyed || frameId !== null) return;
+        frameId = requestAnimationFrame(() => {
+          frameId = null;
+          update();
+        });
+      };
       const toggle = () => {
         var _a;
         if (this.card) {
@@ -415,10 +499,24 @@ ${ISOLATION_CSS}`;
         this.cardRenderer = new AnchoredCardRenderer();
         this.card = this.cardRenderer.render(root, target, content, design, behavior, callbacks, builder, "hotspot");
       };
+      const onScroll = (event) => {
+        const scrollContainer = event.target;
+        if (scrollContainer instanceof Element && !scrollContainer.contains(target)) return;
+        schedule();
+      };
       beacon.addEventListener("click", toggle);
-      window.addEventListener("scroll", schedule, true);
+      window.addEventListener("scroll", onScroll, { capture: true, passive: true });
       window.addEventListener("resize", schedule);
-      this.cleanup.push(() => beacon.removeEventListener("click", toggle), () => window.removeEventListener("scroll", schedule, true), () => window.removeEventListener("resize", schedule));
+      this.cleanup.push(
+        () => beacon.removeEventListener("click", toggle),
+        () => window.removeEventListener("scroll", onScroll, true),
+        () => window.removeEventListener("resize", schedule),
+        () => {
+          destroyed = true;
+          if (frameId !== null) cancelAnimationFrame(frameId);
+          frameId = null;
+        }
+      );
       if (typeof ResizeObserver !== "undefined") {
         const observer = new ResizeObserver(schedule);
         observer.observe(target);
@@ -702,8 +800,8 @@ ${ISOLATION_CSS}`;
     return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
   }
   function createsStackingContext(style) {
-    const position2 = style.position;
-    if ((position2 === "absolute" || position2 === "relative") && numericZIndex(style.zIndex) !== null || position2 === "fixed" || position2 === "sticky") return true;
+    const position = style.position;
+    if ((position === "absolute" || position === "relative") && numericZIndex(style.zIndex) !== null || position === "fixed" || position === "sticky") return true;
     if (Number.parseFloat(style.opacity || "1") < 1) return true;
     if (property(style, "transform") !== "none" || property(style, "filter") !== "none" || property(style, "perspective") !== "none") return true;
     if (style.isolation === "isolate" || !!style.mixBlendMode && style.mixBlendMode !== "normal") return true;
@@ -748,25 +846,31 @@ ${ISOLATION_CSS}`;
     apply(host, options) {
       let observers = [];
       let active = true;
-      let last = this.resolve(options);
+      let frameId = null;
+      let last;
       const disconnect = () => {
         observers.forEach((observer) => observer.disconnect());
         observers = [];
       };
       const refresh = () => {
-        var _a;
+        var _a, _b, _c;
         if (!active) return last;
+        if (frameId !== null) {
+          cancelAnimationFrame(frameId);
+          frameId = null;
+        }
         disconnect();
         const resolution = this.resolve(options);
         last = resolution;
-        host.style.zIndex = String(resolution.zIndex);
-        if (resolution.fallback) host.dataset.movecuesLayerFallback = resolution.fallback;
-        else delete host.dataset.movecuesLayerFallback;
-        const watched = ((_a = options.layer) == null ? void 0 : _a.mode) === "relative" ? this.findTarget(options.layer.target) : options.targetElement;
+        const zIndex = String(resolution.zIndex);
+        if (host.style.zIndex !== zIndex) host.style.zIndex = zIndex;
+        if (resolution.fallback) {
+          if (host.dataset.movecuesLayerFallback !== resolution.fallback) host.dataset.movecuesLayerFallback = resolution.fallback;
+        } else if (host.dataset.movecuesLayerFallback) delete host.dataset.movecuesLayerFallback;
+        const dynamicLayer = ((_a = options.layer) == null ? void 0 : _a.mode) === "auto" || ((_b = options.layer) == null ? void 0 : _b.mode) === "relative";
+        const watched = dynamicLayer ? ((_c = options.layer) == null ? void 0 : _c.mode) === "relative" ? this.findTarget(options.layer.target) : options.targetElement : null;
         if (watched && typeof MutationObserver !== "undefined") {
-          const observer = new MutationObserver(() => {
-            if (active) refresh();
-          });
+          const observer = new MutationObserver(() => scheduleRefresh());
           for (let element = watched; element; element = element.parentElement) {
             observer.observe(element, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
             if (element.parentElement) observer.observe(element.parentElement, { childList: true });
@@ -775,11 +879,23 @@ ${ISOLATION_CSS}`;
         }
         return resolution;
       };
+      const scheduleRefresh = () => {
+        if (!active || frameId !== null) return;
+        frameId = requestAnimationFrame(() => {
+          frameId = null;
+          refresh();
+        });
+      };
       refresh();
-      return { refresh, destroy: () => {
-        active = false;
-        disconnect();
-      } };
+      return {
+        refresh,
+        destroy: () => {
+          active = false;
+          disconnect();
+          if (frameId !== null) cancelAnimationFrame(frameId);
+          frameId = null;
+        }
+      };
     }
   }
   function findUniqueTarget(target) {

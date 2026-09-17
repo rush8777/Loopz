@@ -41,6 +41,7 @@ export declare class EditorModeController {
     private switchStep;
     private setMode;
     private startPicker;
+    private startLayerPicker;
     private pickerIsSelecting;
     private changed;
     private persist;
@@ -54,6 +55,8 @@ export declare class EditorModeController {
     private currentTarget;
     private targetStatus;
     private currentBehavior;
+    private currentLayer;
+    private setLayer;
     private setTarget;
     private updateContinuation;
     private isTargetedType;

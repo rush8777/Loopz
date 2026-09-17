@@ -1,27 +1,51 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AnchoredCardRenderer } from "../src/experiences/runtime/AnchoredCardRenderer";
+import { AnchoredCardRenderer, waitForTarget } from "../src/experiences/runtime/AnchoredCardRenderer";
 import type { ExperienceBehavior, ExperienceContent, ExperienceDesign } from "../src/experiences/types";
 
 const content: ExperienceContent = { heading: "Guide", body: "Anchored to the target" };
 const design: ExperienceDesign = { width: "md", theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } };
 const behavior: ExperienceBehavior = { dismissible: true, placement: "bottom" };
 
-describe("AnchoredCardRenderer target visibility", () => {
+let nextFrameId: number;
+let frames: Map<number, FrameRequestCallback>;
+let resizeObservers: MockResizeObserver[];
+let cardRectReads: number;
+
+class MockResizeObserver {
+  readonly observe = vi.fn();
+  readonly disconnect = vi.fn();
+  constructor(readonly callback: ResizeObserverCallback) { resizeObservers.push(this); }
+  fire(target?: Element): void {
+    const entries = target ? [{ target }] as ResizeObserverEntry[] : [];
+    this.callback(entries, this as unknown as ResizeObserver);
+  }
+}
+
+describe("AnchoredCardRenderer", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
-    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { callback(0); return 1; });
+    nextFrameId = 1;
+    frames = new Map();
+    resizeObservers = [];
+    cardRectReads = 0;
+    vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => { const id = nextFrameId++; frames.set(id, callback); return id; }));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn((id: number) => { frames.delete(id); }));
+    vi.stubGlobal("ResizeObserver", MockResizeObserver);
     vi.stubGlobal("innerWidth", 1000);
     vi.stubGlobal("innerHeight", 800);
-    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => null });
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: vi.fn() });
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-      if (this.classList.contains("card")) return rect(0, 0, 200, 100);
+      if (this.classList.contains("card")) { cardRectReads += 1; return rect(0, 0, 200, 100); }
       return rect(0, 0, 0, 0);
     });
   });
 
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
 
-  it("shows and positions an anchored card when its target is visible", () => {
+  it("positions a visible card relative to its target", () => {
     const { card, renderer } = renderAt(rect(100, 120, 50, 20));
 
     expect(card.style.visibility).toBe("");
@@ -31,59 +55,191 @@ describe("AnchoredCardRenderer target visibility", () => {
     renderer.destroy();
   });
 
-  it.each(["above", "below", "left", "right"] as const)("hides an anchored card when its target is completely %s the viewport", (position) => {
-    const positions = {
-      above: rect(100, -40, 50, 20),
-      below: rect(100, 800, 50, 20),
-      left: rect(-50, 100, 20, 20),
-      right: rect(1000, 100, 20, 20),
-    };
-    const { card, renderer } = renderAt(positions[position]);
-
-    expect(card.style.visibility).toBe("hidden");
-    expect(card.style.pointerEvents).toBe("none");
-    expect(card.style.left).toBe("");
-    expect(card.style.top).toBe("");
-    renderer.destroy();
-  });
-
-  it("shows and repositions the same card when its target returns to the viewport", () => {
-    let targetRect = rect(100, -40, 50, 20);
-    const { card, renderer } = renderAt(() => targetRect);
-
-    expect(card.style.visibility).toBe("hidden");
-    targetRect = rect(300, 250, 50, 20);
-    window.dispatchEvent(new Event("scroll"));
-
-    expect(card.style.visibility).toBe("");
-    expect(card.style.pointerEvents).toBe("");
-    expect(card.style.left).toBe("225px");
-    expect(card.style.top).toBe("278px");
-    renderer.destroy();
-  });
-
-  it("hides an anchored card when its target disconnects instead of pinning it to the viewport", () => {
-    const { target, card, renderer } = renderAt(rect(100, 120, 50, 20));
-
-    target.remove();
-    window.dispatchEvent(new Event("resize"));
-
-    expect(card.style.visibility).toBe("hidden");
-    expect(card.style.pointerEvents).toBe("none");
-    expect(card.style.left).toBe("25px");
-    expect(card.style.top).toBe("148px");
-    renderer.destroy();
-  });
-
-  it("hides an anchored Guide card when a navigation layer covers its target", () => {
+  it("stays mounted when host UI visually overlaps the target", () => {
     const navigation = document.createElement("nav");
     document.body.appendChild(navigation);
-    vi.spyOn(document, "elementFromPoint").mockReturnValue(navigation);
-
+    vi.mocked(document.elementFromPoint).mockReturnValue(navigation);
     const { card, renderer } = renderAt(rect(100, 120, 50, 20));
+
+    expect(card.style.visibility).toBe("");
+    expect(card.style.pointerEvents).toBe("");
+    expect(document.elementFromPoint).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it("continues upward with its target instead of sticking to the viewport edge", () => {
+    let targetRect = rect(100, 120, 50, 20);
+    const { card, renderer } = renderAt(() => targetRect);
+    targetRect = rect(100, 50, 50, 20);
+    window.dispatchEvent(new Event("scroll")); flushFrames();
+    expect(card.style.top).toBe("78px");
+
+    targetRect = rect(100, -10, 50, 20);
+    window.dispatchEvent(new Event("scroll")); flushFrames();
+    expect(card.style.top).toBe("18px");
+    expect(card.style.top).not.toBe("8px");
+    renderer.destroy();
+  });
+
+  it("remains visible after the target leaves while the natural card is still visible", () => {
+    const { card, renderer } = renderAt(rect(100, -30, 50, 20));
+
+    expect(card.style.top).toBe("-2px");
+    expect(card.style.visibility).toBe("");
+    expect(card.style.pointerEvents).toBe("");
+    renderer.destroy();
+  });
+
+  it("hides without recreating the card once the entire anchored pair is offscreen", () => {
+    let targetRect = rect(100, 120, 50, 20);
+    const { card, renderer } = renderAt(() => targetRect);
+    targetRect = rect(100, -150, 50, 20);
+    window.dispatchEvent(new Event("scroll")); flushFrames();
 
     expect(card.style.visibility).toBe("hidden");
     expect(card.style.pointerEvents).toBe("none");
+    expect(card.isConnected).toBe(true);
+    renderer.destroy();
+  });
+
+  it("keeps an automatically resolved placement stable during ordinary scrolling", () => {
+    let targetRect = rect(100, 100, 50, 20);
+    const { card, renderer } = renderAt(() => targetRect, { ...behavior, placement: "auto" });
+    expect(card.style.top).toBe("128px");
+    targetRect = rect(100, 700, 50, 20);
+    window.dispatchEvent(new Event("scroll")); flushFrames();
+
+    expect(card.style.top).toBe("728px");
+    renderer.destroy();
+  });
+
+  it("recomputes automatic placement after a viewport resize", () => {
+    let targetRect = rect(100, 100, 50, 20);
+    const { card, renderer } = renderAt(() => targetRect, { ...behavior, placement: "auto" });
+    targetRect = rect(100, 500, 50, 20);
+    window.dispatchEvent(new Event("scroll")); flushFrames();
+    expect(card.style.top).toBe("528px");
+
+    vi.stubGlobal("innerHeight", 550);
+    window.dispatchEvent(new Event("resize")); flushFrames();
+    expect(card.style.top).toBe("392px");
+    renderer.destroy();
+  });
+
+  it("coalesces many scroll events into one positioning frame", () => {
+    const targetRect = vi.fn(() => rect(100, 120, 50, 20));
+    const { renderer } = renderAt(targetRect);
+    expect(targetRect).toHaveBeenCalledTimes(1);
+    for (let index = 0; index < 10; index += 1) window.dispatchEvent(new Event("scroll"));
+    expect(frames.size).toBe(1);
+    flushFrames();
+
+    expect(targetRect).toHaveBeenCalledTimes(2);
+    renderer.destroy();
+  });
+
+  it("ignores scroll events from containers that cannot move the target", () => {
+    const targetRect = vi.fn(() => rect(100, 120, 50, 20));
+    const { target, renderer } = renderAt(targetRect);
+    const unrelatedScroller = document.createElement("div"); document.body.append(unrelatedScroller);
+    unrelatedScroller.dispatchEvent(new Event("scroll"));
+    expect(frames.size).toBe(0);
+
+    const targetScroller = document.createElement("div"); document.body.append(targetScroller); targetScroller.append(target);
+    targetScroller.dispatchEvent(new Event("scroll"));
+    expect(frames.size).toBe(1);
+    flushFrames();
+    expect(targetRect).toHaveBeenCalledTimes(2);
+    renderer.destroy();
+  });
+
+  it("reuses the observed card size during scrolling and remeasures only when required", () => {
+    let targetRect = rect(100, 120, 50, 20);
+    const { card, renderer } = renderAt(() => targetRect);
+    expect(cardRectReads).toBe(1);
+
+    targetRect = rect(100, 100, 50, 20);
+    window.dispatchEvent(new Event("scroll")); flushFrames();
+    targetRect = rect(100, 80, 50, 20);
+    window.dispatchEvent(new Event("scroll")); flushFrames();
+    expect(cardRectReads).toBe(1);
+
+    resizeObservers[0].fire(card); flushFrames();
+    expect(cardRectReads).toBe(2);
+    renderer.destroy();
+  });
+
+  it("disconnects observers, removes listeners, and cancels pending work on destroy", () => {
+    const targetRect = vi.fn(() => rect(100, 120, 50, 20));
+    const addListener = vi.spyOn(window, "addEventListener");
+    const removeListener = vi.spyOn(window, "removeEventListener");
+    const { renderer } = renderAt(targetRect);
+    window.dispatchEvent(new Event("scroll"));
+    expect(frames.size).toBe(1);
+    renderer.destroy();
+    window.dispatchEvent(new Event("scroll"));
+    window.dispatchEvent(new Event("resize"));
+    flushFrames();
+
+    expect(cancelAnimationFrame).toHaveBeenCalledTimes(1);
+    expect(targetRect).toHaveBeenCalledTimes(1);
+    expect(resizeObservers).toHaveLength(1);
+    expect(resizeObservers[0].disconnect).toHaveBeenCalledTimes(1);
+    expect(addListener).toHaveBeenCalledWith("scroll", expect.any(Function), { capture: true, passive: true });
+    expect(removeListener).toHaveBeenCalledWith("scroll", expect.any(Function), true);
+    expect(removeListener).toHaveBeenCalledWith("resize", expect.any(Function));
+  });
+
+  it("does no stale-element layout work after the target disconnects", () => {
+    const targetRect = vi.fn(() => rect(100, 120, 50, 20));
+    const { target, card, renderer } = renderAt(targetRect);
+    target.remove();
+    window.dispatchEvent(new Event("scroll")); flushFrames();
+
+    expect(targetRect).toHaveBeenCalledTimes(1);
+    expect(card.style.visibility).toBe("hidden");
+    expect(card.style.pointerEvents).toBe("none");
+    renderer.destroy();
+  });
+
+  it("uses targeted resize observation and creates no positioning MutationObserver", () => {
+    const mutationConstructor = vi.fn();
+    vi.stubGlobal("MutationObserver", mutationConstructor);
+    const { renderer } = renderAt(rect(100, 120, 50, 20));
+
+    expect(mutationConstructor).not.toHaveBeenCalled();
+    expect(resizeObservers).toHaveLength(1);
+    expect(resizeObservers[0].observe).toHaveBeenCalledTimes(2);
+    renderer.destroy();
+  });
+
+  it("coalesces busy-page mutations while waiting for a delayed target", async () => {
+    const query = vi.spyOn(document, "querySelectorAll");
+    const found = vi.fn();
+    const stop = waitForTarget({ primarySelector: "#delayed", fallbackSelectors: [], reliability: "reliable" }, found, vi.fn());
+    expect(query).toHaveBeenCalledTimes(1);
+
+    document.body.append(document.createElement("div")); await Promise.resolve();
+    document.body.append(document.createElement("div")); await Promise.resolve();
+    const target = document.createElement("button"); target.id = "delayed"; document.body.append(target); await Promise.resolve();
+
+    expect(frames.size).toBe(1);
+    expect(query).toHaveBeenCalledTimes(1);
+    flushFrames();
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(found).toHaveBeenCalledWith(target);
+    stop();
+  });
+
+  it("coalesces target and card ResizeObserver notifications into one update", () => {
+    const targetRect = vi.fn(() => rect(100, 120, 50, 20));
+    const { renderer } = renderAt(targetRect, { ...behavior, placement: "auto" });
+    resizeObservers[0].fire();
+    resizeObservers[0].fire();
+    expect(frames.size).toBe(1);
+    flushFrames();
+
+    expect(targetRect).toHaveBeenCalledTimes(2);
     renderer.destroy();
   });
 
@@ -106,15 +262,21 @@ describe("AnchoredCardRenderer target visibility", () => {
   });
 });
 
-function renderAt(targetBounds: DOMRect | (() => DOMRect)): { target: HTMLElement; card: HTMLElement; renderer: AnchoredCardRenderer } {
+function renderAt(targetBounds: DOMRect | (() => DOMRect), customBehavior: ExperienceBehavior = behavior): { target: HTMLElement; card: HTMLElement; renderer: AnchoredCardRenderer } {
   const host = document.createElement("div");
   const root = host.attachShadow({ mode: "open" });
   const target = document.createElement("button");
   target.getBoundingClientRect = typeof targetBounds === "function" ? targetBounds : () => targetBounds;
   document.body.append(target, host);
   const renderer = new AnchoredCardRenderer();
-  const card = renderer.render(root, target, content, design, behavior, { onDismiss: vi.fn(), onPrimary: vi.fn(), onSecondary: vi.fn() });
+  const card = renderer.render(root, target, content, design, customBehavior, { onDismiss: vi.fn(), onPrimary: vi.fn(), onSecondary: vi.fn() });
   return { target, card, renderer };
+}
+
+function flushFrames(): void {
+  const pending = [...frames.entries()];
+  frames.clear();
+  pending.forEach(([, callback]) => callback(0));
 }
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {

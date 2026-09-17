@@ -15,11 +15,20 @@ export function findTarget(target?: ExperienceTarget): Element | null {
 /** Resolves a selector that may be rendered after the experience manifest arrives. */
 export function waitForTarget(target: ExperienceTarget | undefined, onFound: (element: Element) => void, onUnavailable: () => void, timeoutMs = 5000): () => void {
   const immediate = findTarget(target); if (immediate) { onFound(immediate); return () => void 0; }
-  let stopped = false; let observer: MutationObserver | null = null; let timer = 0;
-  const stop = () => { if (stopped) return; stopped = true; observer?.disconnect(); clearTimeout(timer); };
+  let stopped = false; let observer: MutationObserver | null = null; let timer = 0; let frameId: number | null = null;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true; observer?.disconnect(); clearTimeout(timer);
+    if (frameId !== null) cancelAnimationFrame(frameId);
+    frameId = null;
+  };
   const check = () => { if (stopped) return; const element = findTarget(target); if (element) { stop(); onFound(element); } };
+  const scheduleCheck = () => {
+    if (stopped || frameId !== null) return;
+    frameId = requestAnimationFrame(() => { frameId = null; check(); });
+  };
   if (typeof MutationObserver === "undefined" || !document.documentElement) { timer = window.setTimeout(() => { stop(); onUnavailable(); }, timeoutMs); return stop; }
-  observer = new MutationObserver(check); observer.observe(document.documentElement, { childList: true, subtree: true }); timer = window.setTimeout(() => { if (!stopped) { stop(); onUnavailable(); } }, timeoutMs);
+  observer = new MutationObserver(scheduleCheck); observer.observe(document.documentElement, { childList: true, subtree: true }); timer = window.setTimeout(() => { if (!stopped) { stop(); onUnavailable(); } }, timeoutMs);
   return stop;
 }
 
@@ -64,55 +73,116 @@ function fitAnchoredBuilderEnvelope(card: HTMLElement): void {
 export class AnchoredCardRenderer {
   private cleanup: Array<() => void> = [];
   render(root: ShadowRoot, target: Element, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState, widgetType?: WidgetType): HTMLElement {
+    this.destroy();
     const card = buildCard(root, content, design, behavior, callbacks, builder, widgetType);
+    let frameId: number | null = null;
+    let destroyed = false;
+    let hidden = false;
+    let resolvedPlacement: ResolvedPlacement | null = null;
+    let cardSize: Size | null = null;
+    let measureCard = true;
+    let lastLeft: number | null = null;
+    let lastTop: number | null = null;
+    const setHidden = (next: boolean) => {
+      if (hidden === next) return;
+      hidden = next;
+      card.style.visibility = next ? "hidden" : "";
+      card.style.pointerEvents = next ? "none" : "";
+    };
     const update = () => {
-      const rect = target.getBoundingClientRect();
-      if (!isVisibleTarget(target, card, rect)) {
-        card.style.visibility = "hidden";
-        card.style.pointerEvents = "none";
+      if (destroyed) return;
+      if (!target.isConnected) {
+        setHidden(true);
         return;
       }
-      card.style.visibility = "";
-      card.style.pointerEvents = "";
-      position(card, rect, behavior);
+      const rect = target.getBoundingClientRect();
+      if (measureCard || !cardSize) {
+        const bounds = card.getBoundingClientRect();
+        cardSize = { width: bounds.width, height: bounds.height };
+        measureCard = false;
+      }
+      const bounds = cardSize;
+      if (!resolvedPlacement) resolvedPlacement = resolvePlacement(rect, bounds, behavior);
+      const coordinates = coordinatesFor(rect, bounds, behavior, resolvedPlacement);
+      const naturalCardRect = rectAt(coordinates.left, coordinates.top, bounds.width, bounds.height);
+      if (!intersectsViewport(rect) && !intersectsViewport(naturalCardRect)) { setHidden(true); return; }
+
+      setHidden(false);
+      const left = clampHorizontally(coordinates.left, bounds.width);
+      if (left !== lastLeft) { lastLeft = left; card.style.left = `${left}px`; }
+      if (coordinates.top !== lastTop) { lastTop = coordinates.top; card.style.top = `${coordinates.top}px`; }
     };
-    const onWindow = () => requestAnimationFrame(update);
-    window.addEventListener("scroll", onWindow, true); window.addEventListener("resize", onWindow);
-    this.cleanup.push(() => window.removeEventListener("scroll", onWindow, true), () => window.removeEventListener("resize", onWindow));
-    if (typeof ResizeObserver !== "undefined") { const observer = new ResizeObserver(update); observer.observe(target); observer.observe(card); this.cleanup.push(() => observer.disconnect()); }
-    if (typeof MutationObserver !== "undefined") { const observer = new MutationObserver(onWindow); observer.observe(document.body, { childList: true, subtree: true, attributes: true }); this.cleanup.push(() => observer.disconnect()); }
+    const schedule = (reconsiderPlacement = false, remeasureCard = false) => {
+      if (destroyed) return;
+      if (reconsiderPlacement && isAutomaticPlacement(behavior)) resolvedPlacement = null;
+      if (remeasureCard) measureCard = true;
+      if (frameId !== null) return;
+      frameId = requestAnimationFrame(() => { frameId = null; update(); });
+    };
+    const onScroll = (event: Event) => {
+      const scrollContainer = event.target;
+      if (target.isConnected && scrollContainer instanceof Element && !scrollContainer.contains(target)) return;
+      schedule();
+    };
+    const onResize = () => schedule(true, true);
+    window.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    window.addEventListener("resize", onResize);
+    this.cleanup.push(
+      () => window.removeEventListener("scroll", onScroll, true),
+      () => window.removeEventListener("resize", onResize),
+      () => { destroyed = true; if (frameId !== null) cancelAnimationFrame(frameId); frameId = null; },
+    );
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver((entries) => schedule(true, entries.some(entry => entry.target === card)));
+      observer.observe(target); observer.observe(card);
+      this.cleanup.push(() => observer.disconnect());
+    }
     update(); return card;
   }
   destroy(): void { this.cleanup.splice(0).forEach((fn) => fn()); }
 }
 
-function isVisibleTarget(target: Element, card: HTMLElement, rect: DOMRect): boolean {
-  if (!target.isConnected || rect.width <= 0 || rect.height <= 0 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) return false;
-  if (typeof document.elementFromPoint !== "function") return true;
+type ResolvedPlacement = Exclude<NonNullable<ExperienceBehavior["placement"]>, "auto">;
 
-  const left = Math.max(0, rect.left); const right = Math.min(window.innerWidth, rect.right);
-  const top = Math.max(0, rect.top); const bottom = Math.min(window.innerHeight, rect.bottom);
-  const root = card.getRootNode(); const cardHost = root instanceof ShadowRoot ? root.host : null;
-  for (const horizontal of [0.2, 0.5, 0.8]) for (const vertical of [0.2, 0.5, 0.8]) {
-    const hit = document.elementFromPoint(left + (right - left) * horizontal, top + (bottom - top) * vertical);
-    if (!hit || hit === target || target.contains(hit) || hit === cardHost) return true;
-  }
-  return false;
+interface Size { width: number; height: number }
+interface Coordinates { left: number; top: number }
+
+function isAutomaticPlacement(behavior: ExperienceBehavior): boolean {
+  return !behavior.placement || behavior.placement === "auto";
 }
 
-function position(card: HTMLElement, rect: DOMRect, behavior: ExperienceBehavior): void {
-  const gap = behavior.offset ?? 8; const bounds = card.getBoundingClientRect(); const margin = 8;
-  let placement = behavior.placement === "auto" || !behavior.placement ? "bottom" : behavior.placement;
-  if (placement === "bottom" && rect.bottom + gap + bounds.height > innerHeight) placement = "top";
-  if (placement === "top" && rect.top - gap - bounds.height < 0) placement = "bottom";
+function resolvePlacement(rect: DOMRect, bounds: Size, behavior: ExperienceBehavior): ResolvedPlacement {
+  if (!isAutomaticPlacement(behavior)) return behavior.placement as ResolvedPlacement;
+  const gap = behavior.offset ?? 8;
+  const spaceBelow = innerHeight - rect.bottom - gap;
+  const spaceAbove = rect.top - gap;
+  if (spaceBelow >= bounds.height) return "bottom";
+  if (spaceAbove >= bounds.height) return "top";
+  return spaceBelow >= spaceAbove ? "bottom" : "top";
+}
+
+function coordinatesFor(rect: DOMRect, bounds: Size, behavior: ExperienceBehavior, placement: ResolvedPlacement): Coordinates {
+  const gap = behavior.offset ?? 8;
   let left = rect.left + (rect.width - bounds.width) / 2; let top = rect.bottom + gap;
   if (placement === "top") top = rect.top - bounds.height - gap;
   if (placement === "left") { left = rect.left - bounds.width - gap; top = rect.top + (rect.height - bounds.height) / 2; }
   if (placement === "right") { left = rect.right + gap; top = rect.top + (rect.height - bounds.height) / 2; }
   if (behavior.alignment === "start" && (placement === "top" || placement === "bottom")) left = rect.left;
   if (behavior.alignment === "end" && (placement === "top" || placement === "bottom")) left = rect.right - bounds.width;
-  card.style.left = `${Math.max(margin, Math.min(left, innerWidth - bounds.width - margin))}px`;
-  card.style.top = `${Math.max(margin, Math.min(top, innerHeight - bounds.height - margin))}px`;
+  return { left, top };
+}
+
+function clampHorizontally(left: number, width: number): number {
+  const margin = 8;
+  return Math.max(margin, Math.min(left, innerWidth - width - margin));
+}
+
+function rectAt(left: number, top: number, width: number, height: number): DOMRect {
+  return { x: left, y: top, left, top, width, height, right: left + width, bottom: top + height, toJSON: () => ({}) } as DOMRect;
+}
+
+function intersectsViewport(rect: DOMRect): boolean {
+  return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
 }
 
 function escapeText(value: string): string { const span = document.createElement("span"); span.textContent = value; return span.innerHTML; }
