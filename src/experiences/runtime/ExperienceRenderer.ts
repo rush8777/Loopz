@@ -97,6 +97,7 @@ export class ExperienceRenderer {
       return true;
     }
     const mount = (target: Element) => {
+      ensureGuideTargetInView(target);
       const root = this.root(experience.id, { layer: definition.behavior?.layer }, target); const renderer = new AnchoredCardRenderer(); this.renderer = renderer;
       const behavior: ExperienceBehavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset };
       const card = renderer.render(root, target, step.content, stepDesign, behavior, stepCallbacks, step.builder, "anchored_card");
@@ -135,6 +136,20 @@ export class ExperienceRenderer {
 
   private clearSurface(): void { this.cleanupAdvance?.(); this.cleanupAdvance = null; this.cancelPendingTarget?.(); this.cancelPendingTarget = null; this.renderer?.destroy(); this.renderer = null; this.appliedLayer?.destroy(); this.appliedLayer = null; this.host?.remove(); this.host = null; }
   destroy(): void { this.clearSurface(); }
+}
+
+const GUIDE_TARGET_VIEWPORT_MARGIN = 48;
+
+function ensureGuideTargetInView(target: Element): void {
+  const rect = target.getBoundingClientRect();
+  const comfortablyVisible = rect.width > 0 && rect.height > 0
+    && rect.top >= GUIDE_TARGET_VIEWPORT_MARGIN
+    && rect.left >= GUIDE_TARGET_VIEWPORT_MARGIN
+    && rect.bottom <= window.innerHeight - GUIDE_TARGET_VIEWPORT_MARGIN
+    && rect.right <= window.innerWidth - GUIDE_TARGET_VIEWPORT_MARGIN;
+  if (comfortablyVisible || typeof target.scrollIntoView !== "function") return;
+  const prefersReducedMotion = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  target.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "center", inline: "nearest" });
 }
 
 const STYLES = `

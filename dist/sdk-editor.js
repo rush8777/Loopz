@@ -1105,6 +1105,7 @@ ${ISOLATION_CSS}`;
       }
       const mount = (target2) => {
         var _a2, _b, _c;
+        ensureGuideTargetInView(target2);
         const root = this.root(experience.id, { layer: (_a2 = definition.behavior) == null ? void 0 : _a2.layer }, target2);
         const renderer = new AnchoredCardRenderer();
         this.renderer = renderer;
@@ -1193,6 +1194,14 @@ ${ISOLATION_CSS}`;
     destroy() {
       this.clearSurface();
     }
+  }
+  const GUIDE_TARGET_VIEWPORT_MARGIN = 48;
+  function ensureGuideTargetInView(target) {
+    const rect = target.getBoundingClientRect();
+    const comfortablyVisible = rect.width > 0 && rect.height > 0 && rect.top >= GUIDE_TARGET_VIEWPORT_MARGIN && rect.left >= GUIDE_TARGET_VIEWPORT_MARGIN && rect.bottom <= window.innerHeight - GUIDE_TARGET_VIEWPORT_MARGIN && rect.right <= window.innerWidth - GUIDE_TARGET_VIEWPORT_MARGIN;
+    if (comfortablyVisible || typeof target.scrollIntoView !== "function") return;
+    const prefersReducedMotion = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "center", inline: "nearest" });
   }
   const STYLES = `
   :host{all:initial}.card{pointer-events:auto;position:fixed;box-sizing:border-box;width:320px;max-width:calc(100vw - 16px);padding:18px;background:var(--movecues-bg);color:var(--movecues-fg);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-shadow:0 12px 38px rgba(0,0,0,.22);border:1px solid rgba(0,0,0,.12)}
