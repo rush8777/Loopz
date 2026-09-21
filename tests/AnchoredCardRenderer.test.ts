@@ -47,11 +47,86 @@ describe("AnchoredCardRenderer", () => {
 
   it("positions a visible card relative to its target", () => {
     const { card, renderer } = renderAt(rect(100, 120, 50, 20));
+    const pointer = card.querySelector<HTMLElement>(".movecues-anchor-pointer");
 
     expect(card.style.visibility).toBe("");
     expect(card.style.pointerEvents).toBe("");
     expect(card.style.left).toBe("25px");
     expect(card.style.top).toBe("148px");
+    expect(pointer?.dataset.placement).toBe("bottom");
+    expect(pointer?.style.left).toBe("100px");
+    renderer.destroy();
+  });
+
+  it.each([
+    ["bottom", rect(400, 120, 50, 20), "100px", ""],
+    ["top", rect(400, 220, 50, 20), "100px", ""],
+    ["left", rect(400, 220, 50, 20), "", "50px"],
+    ["right", rect(400, 220, 50, 20), "", "50px"],
+  ] as const)("points toward the target for %s placement", (placement, targetRect, expectedLeft, expectedTop) => {
+    const { card, renderer } = renderAt(targetRect, { ...behavior, placement });
+    const pointer = card.querySelector<HTMLElement>(".movecues-anchor-pointer")!;
+
+    expect(pointer.dataset.placement).toBe(placement);
+    expect(pointer.style.left).toBe(expectedLeft);
+    expect(pointer.style.top).toBe(expectedTop);
+    renderer.destroy();
+  });
+
+  it.each([
+    ["left viewport edge", rect(0, 120, 20, 20), "8px", "16px"],
+    ["right viewport edge", rect(980, 120, 20, 20), "792px", "184px"],
+  ])("keeps a bottom pointer targeted after clamping at the %s", (_label, targetRect, expectedCardLeft, expectedPointerLeft) => {
+    const { card, renderer } = renderAt(targetRect);
+    const pointer = card.querySelector<HTMLElement>(".movecues-anchor-pointer")!;
+
+    expect(card.style.left).toBe(expectedCardLeft);
+    expect(pointer.style.left).toBe(expectedPointerLeft);
+    renderer.destroy();
+  });
+
+  it("clamps the pointer away from rounded card corners", () => {
+    const { card, renderer } = renderAt(rect(-5, 120, 20, 20));
+    const pointer = card.querySelector<HTMLElement>(".movecues-anchor-pointer")!;
+
+    expect(pointer.style.left).toBe("16px");
+    renderer.destroy();
+  });
+
+  it("does not render a pointer when it is disabled", () => {
+    const { card, renderer } = renderAt(rect(100, 120, 50, 20), { ...behavior, pointer: { enabled: false } });
+
+    expect(card.querySelector(".movecues-anchor-pointer")).toBeNull();
+    renderer.destroy();
+  });
+
+  it("uses a custom pointer size for its shape and edge padding", () => {
+    const { card, renderer } = renderAt(rect(0, 120, 20, 20), { ...behavior, pointer: { size: 24 } });
+    const pointer = card.querySelector<HTMLElement>(".movecues-anchor-pointer")!;
+
+    expect(pointer.style.getPropertyValue("--movecues-pointer-size")).toBe("24px");
+    expect(pointer.style.left).toBe("30px");
+    renderer.destroy();
+  });
+
+  it("uses the authored widget background for the pointer without placing it in builder content", () => {
+    vi.stubGlobal("getComputedStyle", vi.fn(() => ({ backgroundColor: "rgb(13, 19, 45)" })));
+    const { card, renderer } = renderBuilderAt(".movecues-widget{background:#0d132d}");
+    const pointer = card.querySelector<HTMLElement>(".movecues-anchor-pointer")!;
+
+    expect(pointer.style.color).toBe("rgb(13, 19, 45)");
+    expect(card.querySelector(".builder-content")?.querySelector(".movecues-anchor-pointer")).toBeNull();
+    expect(getComputedStyle).toHaveBeenCalledTimes(1);
+    renderer.destroy();
+  });
+
+  it("falls back to the theme when the authored widget background is transparent", () => {
+    vi.stubGlobal("getComputedStyle", vi.fn(() => ({ backgroundColor: "rgba(0, 0, 0, 0)" })));
+    const { card, renderer } = renderBuilderAt(".movecues-widget{background:transparent}");
+    const pointer = card.querySelector<HTMLElement>(".movecues-anchor-pointer")!;
+
+    expect(pointer.style.color).toBe("rgb(255, 255, 255)");
+    expect(getComputedStyle).toHaveBeenCalledTimes(1);
     renderer.destroy();
   });
 
@@ -270,6 +345,17 @@ function renderAt(targetBounds: DOMRect | (() => DOMRect), customBehavior: Exper
   document.body.append(target, host);
   const renderer = new AnchoredCardRenderer();
   const card = renderer.render(root, target, content, design, customBehavior, { onDismiss: vi.fn(), onPrimary: vi.fn(), onSecondary: vi.fn() });
+  return { target, card, renderer };
+}
+
+function renderBuilderAt(css: string): { target: HTMLElement; card: HTMLElement; renderer: AnchoredCardRenderer } {
+  const host = document.createElement("div");
+  const root = host.attachShadow({ mode: "open" });
+  const target = document.createElement("button");
+  target.getBoundingClientRect = () => rect(100, 120, 50, 20);
+  document.body.append(target, host);
+  const renderer = new AnchoredCardRenderer();
+  const card = renderer.render(root, target, content, design, behavior, { onDismiss: vi.fn(), onPrimary: vi.fn(), onSecondary: vi.fn() }, { version: 1, projectData: {}, html: '<section class="movecues-widget">Authored card</section>', css }, "anchored_card");
   return { target, card, renderer };
 }
 

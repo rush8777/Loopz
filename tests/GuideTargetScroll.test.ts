@@ -36,6 +36,20 @@ describe("Guide target auto-scroll", () => {
     renderer.destroy();
   });
 
+  it("renders anchored Guide pointer chrome with the step settings", () => {
+    targetAt("pointer", rect(100, 160, 120, 40));
+    const experience = guide("#pointer");
+    if ("steps" in experience.definition) experience.definition.steps[0].behavior.pointer = { enabled: true, size: 18 };
+    const renderer = new ExperienceRenderer();
+    renderer.render(experience, callbacks(), "anchored");
+    const host = document.querySelector<HTMLElement>("[data-movecues-experience]")!;
+    const pointer = host.shadowRoot?.querySelector<HTMLElement>(".movecues-anchor-pointer");
+
+    expect(pointer?.dataset.placement).toBe("bottom");
+    expect(pointer?.style.getPropertyValue("--movecues-pointer-size")).toBe("18px");
+    renderer.destroy();
+  });
+
   it("scrolls only after a delayed SPA target resolves", async () => {
     const renderer = new ExperienceRenderer();
     renderer.render(guide("#delayed"), callbacks(), "anchored");

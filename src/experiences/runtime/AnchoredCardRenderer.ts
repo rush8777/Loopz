@@ -75,6 +75,7 @@ export class AnchoredCardRenderer {
   render(root: ShadowRoot, target: Element, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState, widgetType?: WidgetType): HTMLElement {
     this.destroy();
     const card = buildCard(root, content, design, behavior, callbacks, builder, widgetType);
+    const pointer = behavior.pointer?.enabled === false ? null : buildPointer(card, design, behavior);
     let frameId: number | null = null;
     let destroyed = false;
     let hidden = false;
@@ -109,6 +110,7 @@ export class AnchoredCardRenderer {
 
       setHidden(false);
       const left = clampHorizontally(coordinates.left, bounds.width);
+      if (pointer) positionPointer(pointer, rect, bounds, left, coordinates.top, resolvedPlacement, behavior);
       if (left !== lastLeft) { lastLeft = left; card.style.left = `${left}px`; }
       if (coordinates.top !== lastTop) { lastTop = coordinates.top; card.style.top = `${coordinates.top}px`; }
     };
@@ -140,6 +142,54 @@ export class AnchoredCardRenderer {
     update(); return card;
   }
   destroy(): void { this.cleanup.splice(0).forEach((fn) => fn()); }
+}
+
+function buildPointer(card: HTMLElement, design: ExperienceDesign, behavior: ExperienceBehavior): HTMLElement {
+  const pointer = document.createElement("span");
+  const size = pointerSize(behavior);
+  pointer.className = "movecues-anchor-pointer";
+  pointer.setAttribute("aria-hidden", "true");
+  pointer.style.setProperty("--movecues-pointer-size", `${size}px`);
+  pointer.style.color = pointerColor(card, design);
+  pointer.innerHTML = '<svg viewBox="0 0 10 10" focusable="false" aria-hidden="true"><path d="M5 0 10 10H0Z" fill="currentColor"/></svg>';
+  card.prepend(pointer);
+  return pointer;
+}
+
+function pointerColor(card: HTMLElement, design: ExperienceDesign): string {
+  const widget = card.querySelector<HTMLElement>(".movecues-widget");
+  if (!widget) return design.theme.background;
+  const background = getComputedStyle(widget).backgroundColor.trim();
+  return isTransparent(background) ? design.theme.background : background;
+}
+
+function isTransparent(color: string): boolean {
+  return !color || color.toLowerCase() === "transparent" || /^rgba\([^)]*,\s*0(?:\.0+)?\s*\)$/i.test(color);
+}
+
+function positionPointer(pointer: HTMLElement, targetRect: DOMRect, cardSize: Size, finalLeft: number, finalTop: number, placement: ResolvedPlacement, behavior: ExperienceBehavior): void {
+  const size = pointerSize(behavior);
+  const edgePadding = Math.max(size + 6, 14);
+  pointer.dataset.placement = placement;
+  if (placement === "top" || placement === "bottom") {
+    const center = clamp(targetRect.left + targetRect.width / 2 - finalLeft, edgePadding, cardSize.width - edgePadding);
+    pointer.style.left = `${center}px`;
+    pointer.style.top = "";
+  } else {
+    const center = clamp(targetRect.top + targetRect.height / 2 - finalTop, edgePadding, cardSize.height - edgePadding);
+    pointer.style.top = `${center}px`;
+    pointer.style.left = "";
+  }
+}
+
+function pointerSize(behavior: ExperienceBehavior): number {
+  const requested = behavior.pointer?.size ?? 10;
+  return Number.isFinite(requested) ? clamp(Math.round(requested), 4, 30) : 10;
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  if (maximum < minimum) return maximum / 2;
+  return Math.max(minimum, Math.min(value, maximum));
 }
 
 type ResolvedPlacement = Exclude<NonNullable<ExperienceBehavior["placement"]>, "auto">;

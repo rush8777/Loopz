@@ -72,6 +72,10 @@ export interface ExperienceBehavior {
     placement?: "auto" | "top" | "right" | "bottom" | "left";
     alignment?: "start" | "center" | "end";
     offset?: number;
+    pointer?: {
+        enabled?: boolean;
+        size?: number;
+    };
     toastPosition?: "top-left" | "top-right" | "bottom-left" | "bottom-right";
     autoDismissMs?: number | null;
     cursorOffset?: {
@@ -151,7 +155,7 @@ export interface GuideStep {
     size?: ExperienceSize;
     advance?: GuideAdvance;
     target?: ExperienceTarget;
-    behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "dismissible">;
+    behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "pointer" | "dismissible">;
 }
 export declare function getGuideStepPattern(step: Pick<GuideStep, "pattern">): GuideStepPattern;
 export declare function guideStepRequiresTarget(step: Pick<GuideStep, "pattern">): boolean;
