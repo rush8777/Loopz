@@ -1,6 +1,6 @@
 import type { ExperienceBehavior, ExperienceContent, ExperienceDesign, ExperienceTarget, WidgetBuilderState, WidgetType } from "../types";
 import { mountBuilderContent } from "./BuilderContent";
-import { applyWidgetSizeEnvelope } from "./WidgetSizing";
+import { applyBuilderSizeContent, applyWidgetSizeEnvelope } from "./WidgetSizing";
 
 export interface RenderCallbacks { onDismiss: () => void; onPrimary: () => void; onSecondary: () => void; onBack?: () => void }
 
@@ -44,6 +44,7 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
   card.innerHTML = close;
   card.querySelector("[data-dismiss]")?.addEventListener("click", callbacks.onDismiss);
   const mountedBuilder = Boolean(builder && mountBuilderContent(root, card, builder, callbacks, widgetType === "survey"));
+  if (mountedBuilder && widgetType) applyBuilderSizeContent(card, widgetType, design);
   if (!mountedBuilder) {
     const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText(content.primaryAction.label)}</button>` : "";
     const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText(content.secondaryAction.label)}</button>` : "";

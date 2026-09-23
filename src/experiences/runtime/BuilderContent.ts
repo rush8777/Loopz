@@ -1,8 +1,6 @@
 import type { WidgetBuilderState } from "../types";
 import type { RenderCallbacks } from "./AnchoredCardRenderer";
-
-const ALLOWED_TAGS = new Set(["DIV", "SECTION", "H1", "H2", "H3", "H4", "P", "SPAN", "BR", "BUTTON", "IMG", "HR", "LABEL"]);
-const ALLOWED_ATTRIBUTES = new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "width", "height", "type", "placeholder", "maxlength", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type", "data-movecues-question-id", "data-movecues-question-type", "data-movecues-question-input", "data-movecues-option-id", "data-movecues-survey-action", "data-movecues-survey-controls", "data-movecues-survey-progress", "data-movecues-survey-progress-bar", "data-movecues-survey-step-id"]);
+import { BUILDER_ALLOWED_ATTRIBUTES, BUILDER_ALLOWED_TAGS, BUILDER_BLOCKED_TAGS, BUILDER_SURVEY_INPUT_TAGS, builderImageUrlIsSafe, builderInputTypeIsSafe, safeScopedBuilderCss } from "./BuilderContentContract";
 
 export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder: WidgetBuilderState, callbacks: RenderCallbacks, allowSurveyInputs = false): boolean {
   const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
@@ -36,25 +34,28 @@ export function sanitizeBuilderHtml(input: string, allowSurveyInputs = false): C
   const template = document.createElement("template");
   template.innerHTML = input;
   for (const element of Array.from(template.content.querySelectorAll("*"))) {
-    const allowedTag = ALLOWED_TAGS.has(element.tagName) || (allowSurveyInputs && (element.tagName === "INPUT" || element.tagName === "TEXTAREA"));
+    const allowedTag = BUILDER_ALLOWED_TAGS.has(element.tagName) || (allowSurveyInputs && BUILDER_SURVEY_INPUT_TAGS.has(element.tagName));
     if (!allowedTag) {
-      if (/^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO)$/i.test(element.tagName)) element.remove();
+      if (BUILDER_BLOCKED_TAGS.test(element.tagName)) element.remove();
       else element.replaceWith(...Array.from(element.childNodes));
       continue;
     }
     for (const attribute of Array.from(element.attributes)) {
       const name = attribute.name.toLowerCase();
-      if (!ALLOWED_ATTRIBUTES.has(name) || name.startsWith("on") || /javascript\s*:/i.test(attribute.value)) element.removeAttribute(attribute.name);
+      if (!BUILDER_ALLOWED_ATTRIBUTES.has(name) || name.startsWith("on") || /javascript\s*:/i.test(attribute.value)) element.removeAttribute(attribute.name);
     }
     const action = element.getAttribute("data-movecues-action-id");
     if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-movecues-action-id");
+    const surveyAction = element.getAttribute("data-movecues-survey-action");
+    if (surveyAction && surveyAction !== "back" && surveyAction !== "next" && surveyAction !== "submit") element.removeAttribute("data-movecues-survey-action");
     if (element.tagName === "IMG") {
       const source = element.getAttribute("src") ?? "";
-      if (source && !/^(https?:|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(source)) element.removeAttribute("src");
+      if (!builderImageUrlIsSafe(source)) element.removeAttribute("src");
     }
+    if (element.hasAttribute("src") && element.tagName !== "IMG") element.removeAttribute("src");
     if (element.tagName === "INPUT") {
       const type = (element.getAttribute("type") ?? "text").toLowerCase();
-      if (!["text", "radio", "checkbox", "number"].includes(type)) element.setAttribute("type", "text");
+      if (!builderInputTypeIsSafe(type)) element.setAttribute("type", "text");
     }
   }
   const root = template.content.querySelector(".movecues-widget");
@@ -67,14 +68,5 @@ export function sanitizeBuilderHtml(input: string, allowSurveyInputs = false): C
 }
 
 export function safeBuilderCss(input: string): string | null {
-  const css = input.replace(/\/\*[\s\S]*?\*\//g, "").trim();
-  if (/@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i.test(css)) return null;
-  const rule = /([^{}]+)\{/g;
-  let match: RegExpExecArray | null;
-  while ((match = rule.exec(css)) !== null) {
-    const prelude = match[1].trim();
-    if (!prelude || prelude.startsWith("@")) continue;
-    if (prelude.split(",").some((selector: string) => !selector.trim().includes(".movecues-widget"))) return null;
-  }
-  return css;
+  return safeScopedBuilderCss(input);
 }

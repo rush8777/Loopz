@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SurveyRenderer } from "../src/experiences/runtime/SurveyRenderer";
-import type { SurveyConfig, WidgetBuilderState } from "../src/experiences/types";
+import { ExperienceRenderer } from "../src/experiences/runtime/ExperienceRenderer";
+import type { DeliveredExperience, SurveyConfig, WidgetBuilderState } from "../src/experiences/types";
 
 function builder(html: string): WidgetBuilderState { return { version: 1, projectData: {}, html: `<section class="movecues-widget">${html}<div class="movecues-survey-validation"></div><footer><button data-movecues-survey-action="back">Back</button><button data-movecues-survey-action="next">Next</button><button data-movecues-survey-action="submit">Submit</button></footer></section>`, css: ".movecues-widget{padding:20px}.movecues-widget .is-selected{color:blue}" }; }
 
@@ -59,5 +60,15 @@ describe("SurveyRenderer", () => {
     const host = document.createElement("div"); const root = host.attachShadow({ mode: "open" }); root.appendChild(document.createElement("style")); document.body.appendChild(host);
     new SurveyRenderer().render(root, { heading: "Survey", body: "" }, { width: "md", theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } }, { dismissible: true, backdrop: true }, survey, { onDismiss: vi.fn(), onProgress: vi.fn(), onSubmit: vi.fn() });
     expect(root.querySelector<HTMLButtonElement>('[data-movecues-survey-action="back"]')?.hidden).toBe(true); expect(root.querySelector<HTMLButtonElement>('[data-movecues-survey-action="next"]')?.hidden).toBe(true); expect(root.querySelector<HTMLButtonElement>('[data-movecues-survey-action="submit"]')?.hidden).toBe(false);
+  });
+
+  it("lets authored selected-state CSS override the SDK functional default", () => {
+    const authored = builder('<div data-movecues-question-id="choice" data-movecues-question-type="single_choice"><button class="movecues-survey-option" data-movecues-option-id="a">A</button></div>');
+    authored.css += ".movecues-widget .movecues-survey-option.is-selected{background:rgb(1,2,3);border-color:rgb(4,5,6)}";
+    const experience: DeliveredExperience = { id: "survey_style", versionId: "version_1", kind: "widget", widgetType: "survey", priority: 1, definition: { content: { heading: "Survey", body: "" }, design: { width: "md", theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } }, behavior: { dismissible: true, backdrop: true }, survey: { showProgress: false, allowBack: false, submitLabel: "Send", steps: [{ id: "only", content: { heading: "Choose", body: "" }, questions: [{ id: "choice", type: "single_choice", label: "Choice", options: [{ id: "a", label: "A" }] }], builder: authored }] } } };
+    const renderer = new ExperienceRenderer(); renderer.render(experience, { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() });
+    const root = document.querySelector('[data-movecues-experience="survey_style"]')!.shadowRoot!; const option = root.querySelector<HTMLButtonElement>('[data-movecues-option-id="a"]')!; option.click();
+    expect(option.getAttribute("aria-pressed")).toBe("true"); expect(getComputedStyle(option).backgroundColor).toBe("rgb(1, 2, 3)"); expect(getComputedStyle(option).borderColor).toBe("rgb(4, 5, 6)");
+    const baseCss = root.firstElementChild?.textContent ?? ""; expect(baseCss).toContain(":where(.movecues-survey-option.is-selected)"); expect(baseCss).not.toMatch(/movecues-survey-option\.is-selected[^}]*!important/); renderer.destroy();
   });
 });

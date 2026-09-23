@@ -14,8 +14,29 @@
       return [...experiences].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))[0] ?? null;
     }
   }
-  const ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "H1", "H2", "H3", "H4", "P", "SPAN", "BR", "BUTTON", "IMG", "HR", "LABEL"]);
-  const ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "width", "height", "type", "placeholder", "maxlength", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type", "data-movecues-question-id", "data-movecues-question-type", "data-movecues-question-input", "data-movecues-option-id", "data-movecues-survey-action", "data-movecues-survey-controls", "data-movecues-survey-progress", "data-movecues-survey-progress-bar", "data-movecues-survey-step-id"]);
+  const BUILDER_ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "H1", "H2", "H3", "H4", "P", "SPAN", "BR", "BUTTON", "IMG", "HR", "LABEL", "UL", "LI"]);
+  const BUILDER_SURVEY_INPUT_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA"]);
+  const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "width", "height", "type", "placeholder", "maxlength", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type", "data-movecues-question-id", "data-movecues-question-type", "data-movecues-question-input", "data-movecues-option-id", "data-movecues-survey-action", "data-movecues-survey-controls", "data-movecues-survey-progress", "data-movecues-survey-progress-bar", "data-movecues-survey-step-id"]);
+  const BUILDER_BLOCKED_TAGS = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO|SOURCE)$/i;
+  const BUILDER_UNSAFE_CSS = /@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i;
+  function builderImageUrlIsSafe(value) {
+    return !value || /^(https?:|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(value);
+  }
+  function builderInputTypeIsSafe(value) {
+    return ["text", "radio", "checkbox", "number"].includes(value.toLowerCase());
+  }
+  function safeScopedBuilderCss(input) {
+    const css = input.replace(/\/\*[\s\S]*?\*\//g, "").trim();
+    if (BUILDER_UNSAFE_CSS.test(css)) return null;
+    const rule = /([^{}]+)\{/g;
+    let match;
+    while ((match = rule.exec(css)) !== null) {
+      const prelude = match[1].trim();
+      if (!prelude || prelude.startsWith("@")) continue;
+      if (prelude.split(",").some((selector) => !selector.trim().includes(".movecues-widget"))) return null;
+    }
+    return css;
+  }
   function mountBuilderContent(root, card, builder, callbacks, allowSurveyInputs = false) {
     const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
     const css = safeBuilderCss(builder.css);
@@ -47,25 +68,28 @@ ${ISOLATION_CSS}`;
     const template = document.createElement("template");
     template.innerHTML = input;
     for (const element of Array.from(template.content.querySelectorAll("*"))) {
-      const allowedTag = ALLOWED_TAGS.has(element.tagName) || allowSurveyInputs && (element.tagName === "INPUT" || element.tagName === "TEXTAREA");
+      const allowedTag = BUILDER_ALLOWED_TAGS.has(element.tagName) || allowSurveyInputs && BUILDER_SURVEY_INPUT_TAGS.has(element.tagName);
       if (!allowedTag) {
-        if (/^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO)$/i.test(element.tagName)) element.remove();
+        if (BUILDER_BLOCKED_TAGS.test(element.tagName)) element.remove();
         else element.replaceWith(...Array.from(element.childNodes));
         continue;
       }
       for (const attribute of Array.from(element.attributes)) {
         const name = attribute.name.toLowerCase();
-        if (!ALLOWED_ATTRIBUTES.has(name) || name.startsWith("on") || /javascript\s*:/i.test(attribute.value)) element.removeAttribute(attribute.name);
+        if (!BUILDER_ALLOWED_ATTRIBUTES.has(name) || name.startsWith("on") || /javascript\s*:/i.test(attribute.value)) element.removeAttribute(attribute.name);
       }
       const action = element.getAttribute("data-movecues-action-id");
       if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-movecues-action-id");
+      const surveyAction = element.getAttribute("data-movecues-survey-action");
+      if (surveyAction && surveyAction !== "back" && surveyAction !== "next" && surveyAction !== "submit") element.removeAttribute("data-movecues-survey-action");
       if (element.tagName === "IMG") {
         const source = element.getAttribute("src") ?? "";
-        if (source && !/^(https?:|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(source)) element.removeAttribute("src");
+        if (!builderImageUrlIsSafe(source)) element.removeAttribute("src");
       }
+      if (element.hasAttribute("src") && element.tagName !== "IMG") element.removeAttribute("src");
       if (element.tagName === "INPUT") {
         const type = (element.getAttribute("type") ?? "text").toLowerCase();
-        if (!["text", "radio", "checkbox", "number"].includes(type)) element.setAttribute("type", "text");
+        if (!builderInputTypeIsSafe(type)) element.setAttribute("type", "text");
       }
     }
     const root = template.content.querySelector(".movecues-widget");
@@ -77,16 +101,7 @@ ${ISOLATION_CSS}`;
     return Array.from(template.content.childNodes);
   }
   function safeBuilderCss(input) {
-    const css = input.replace(/\/\*[\s\S]*?\*\//g, "").trim();
-    if (/@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i.test(css)) return null;
-    const rule = /([^{}]+)\{/g;
-    let match;
-    while ((match = rule.exec(css)) !== null) {
-      const prelude = match[1].trim();
-      if (!prelude || prelude.startsWith("@")) continue;
-      if (prelude.split(",").some((selector) => !selector.trim().includes(".movecues-widget"))) return null;
-    }
-    return css;
+    return safeScopedBuilderCss(input);
   }
   const WIDGET_SIZE_CONSTRAINTS = {
     anchored_card: { width: { default: 320, min: 240, max: 480 }, height: { allowFixed: true, min: 120, max: 700 }, viewportGutter: 24 },
@@ -127,6 +142,21 @@ ${ISOLATION_CSS}`;
     card.style.height = size.height.mode === "fixed" ? `${size.height.value}px` : size.height.mode === "viewport" ? `calc(100vh - ${gutter}px)` : "auto";
     card.style.maxHeight = `calc(100vh - ${gutter}px)`;
     card.style.overflow = "visible";
+  }
+  function applyBuilderSizeContent(card, widgetType, design) {
+    const content = card.querySelector(".builder-content");
+    const widget = content == null ? void 0 : content.querySelector(":scope > .movecues-widget");
+    if (!content || !widget) return;
+    const size = normalizeWidgetSize(widgetType, design);
+    const fillsHeight = size.height.mode !== "auto";
+    content.style.width = "100%";
+    content.style.height = fillsHeight ? "100%" : "auto";
+    widget.style.setProperty("box-sizing", "border-box");
+    widget.style.setProperty("width", "100%", "important");
+    widget.style.setProperty("min-width", "0", "important");
+    widget.style.setProperty("max-width", "none", "important");
+    widget.style.setProperty("height", fillsHeight ? "100%" : "auto", "important");
+    widget.style.setProperty("max-height", fillsHeight ? "100%" : "none", "important");
   }
   function clamp$1(value, min, max) {
     return Math.min(max, Math.max(min, Number.isFinite(value) ? Math.round(value) : min));
@@ -206,6 +236,7 @@ ${ISOLATION_CSS}`;
     card.innerHTML = close;
     (_a = card.querySelector("[data-dismiss]")) == null ? void 0 : _a.addEventListener("click", callbacks.onDismiss);
     const mountedBuilder = Boolean(builder && mountBuilderContent(root, card, builder, callbacks, widgetType === "survey"));
+    if (mountedBuilder && widgetType) applyBuilderSizeContent(card, widgetType, design);
     if (!mountedBuilder) {
       const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText(content.primaryAction.label)}</button>` : "";
       const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText(content.secondaryAction.label)}</button>` : "";
@@ -1199,7 +1230,7 @@ ${ISOLATION_CSS}`;
   .slideout[data-position=top-left]{top:16px;left:16px}.slideout[data-position=top-right]{top:16px;right:16px}.slideout[data-position=bottom-left]{bottom:16px;left:16px}.slideout[data-position=bottom-right]{bottom:16px;right:16px}.slideout[data-position=center-left]{left:16px;top:50%;transform:translateY(-50%)}.slideout[data-position=center-right]{right:16px;top:50%;transform:translateY(-50%)}
   .banner{left:0;right:0;width:auto!important;max-width:none;border-radius:0!important;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner[data-position=top]{top:0}.banner[data-position=bottom]{bottom:0}.banner h2,.banner p{grid-column:1}.banner footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
   .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--movecues-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--movecues-hotspot);border-radius:50%;animation:movecues-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes movecues-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
-  .movecues-survey-question.has-error{outline:2px solid #fecaca;outline-offset:6px;border-radius:6px}.movecues-survey-validation{color:#b91c1c}.movecues-survey-option.is-selected{border-color:var(--movecues-primary)!important;background:color-mix(in srgb,var(--movecues-primary) 12%,white)!important}.movecues-survey-input{font:inherit}
+  .movecues-survey-question.has-error{outline:2px solid #fecaca;outline-offset:6px;border-radius:6px}.movecues-survey-validation{color:#b91c1c}:where(.movecues-survey-option.is-selected){border-color:var(--movecues-primary);background:color-mix(in srgb,var(--movecues-primary) 12%,white)}.movecues-survey-input{font:inherit}
 `;
   const ONCE_KEY = "__movecues_experiences_seen__";
   const SESSION_KEY = "__movecues_experiences_session_seen__";

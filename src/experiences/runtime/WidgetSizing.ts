@@ -51,4 +51,14 @@ export function applyWidgetSizeEnvelope(card: HTMLElement, widgetType: WidgetTyp
   card.style.overflow = "visible";
 }
 
+export function applyBuilderSizeContent(card: HTMLElement, widgetType: WidgetType, design: ExperienceDesign): void {
+  const content = card.querySelector<HTMLElement>(".builder-content"); const widget = content?.querySelector<HTMLElement>(":scope > .movecues-widget");
+  if (!content || !widget) return;
+  const size = normalizeWidgetSize(widgetType, design); const fillsHeight = size.height.mode !== "auto";
+  content.style.width = "100%"; content.style.height = fillsHeight ? "100%" : "auto";
+  widget.style.setProperty("box-sizing", "border-box");
+  widget.style.setProperty("width", "100%", "important"); widget.style.setProperty("min-width", "0", "important"); widget.style.setProperty("max-width", "none", "important");
+  widget.style.setProperty("height", fillsHeight ? "100%" : "auto", "important"); widget.style.setProperty("max-height", fillsHeight ? "100%" : "none", "important");
+}
+
 function clamp(value: number, min: number, max: number): number { return Math.min(max, Math.max(min, Number.isFinite(value) ? Math.round(value) : min)); }

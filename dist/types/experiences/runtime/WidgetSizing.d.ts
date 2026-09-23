@@ -17,4 +17,5 @@ interface WidgetSizeConstraint {
 export declare const WIDGET_SIZE_CONSTRAINTS: Record<WidgetType, WidgetSizeConstraint>;
 export declare function normalizeWidgetSize(widgetType: WidgetType, design: ExperienceDesign): ExperienceSize;
 export declare function applyWidgetSizeEnvelope(card: HTMLElement, widgetType: WidgetType, design: ExperienceDesign): void;
+export declare function applyBuilderSizeContent(card: HTMLElement, widgetType: WidgetType, design: ExperienceDesign): void;
 export {};
