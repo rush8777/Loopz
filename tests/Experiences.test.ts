@@ -44,8 +44,33 @@ describe("experience editor and runtime", () => {
     expect(renderer.render(withFallback, callbacks)).toBe(true); expect(document.querySelector("[data-movecues-experience]")).not.toBeNull(); window.dispatchEvent(new Event("resize")); renderer.destroy();
   });
 
-  it("mounts and safely destroys toast and cursor-follow lifecycles", () => {
-    for (const type of ["toast", "cursor_follow"] as const) { const renderer = new ExperienceRenderer(); expect(renderer.render(base(type), { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() })).toBe(true); if (type === "cursor_follow") window.dispatchEvent(new MouseEvent("pointermove", { clientX: 40, clientY: 50 })); renderer.destroy(); expect(document.querySelector("[data-movecues-experience]")).toBeNull(); }
+  it("mounts and safely destroys toast and cursor-follow lifecycles while cursor analytics is dormant", () => {
+    for (const type of ["toast", "cursor_follow"] as const) {
+      const renderer = new ExperienceRenderer();
+      expect(renderer.render(base(type), { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() })).toBe(true);
+      if (type === "cursor_follow") {
+        window.dispatchEvent(new MouseEvent("pointermove", { clientX: 40, clientY: 50 }));
+        const card = document.querySelector("[data-movecues-experience]")!.shadowRoot!.querySelector<HTMLElement>(".cursor")!;
+        expect(card.style.left).toBe("52px");
+        expect(card.style.top).toBe("62px");
+      }
+      renderer.destroy();
+      expect(document.querySelector("[data-movecues-experience]")).toBeNull();
+    }
+  });
+
+  it("advances a Guide from direct element hover without the global HoverCollector", () => {
+    vi.useFakeTimers();
+    const target = document.createElement("button"); target.id = "hover-target"; document.body.appendChild(target);
+    const guide: DeliveredExperience = { id: "guide_hover", versionId: "v1", kind: "guide", widgetType: null, priority: 1, definition: { design, steps: [
+      { id: "hover", content: { heading: "Hover", body: "Wait" }, advance: { type: "element_hover", durationMs: 400 }, target: { primarySelector: "#hover-target", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
+    ] } };
+    const advance = vi.fn(); const renderer = new ExperienceRenderer();
+    renderer.render(guide, { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn(), onGuideAdvance: advance }, "hover");
+    target.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(399); expect(advance).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1); expect(advance).toHaveBeenCalledOnce();
+    renderer.destroy(); vi.useRealTimers();
   });
 
   it("renders builder markup through every widget shell while preserving runtime behavior", () => {

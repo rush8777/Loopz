@@ -4,7 +4,17 @@
 <nav><a class="logo" href="index.html">lumina<span>.</span></a><div class="nav-links"><a href="features.html">Features</a><a class="active" href="dashboard.html">Dashboard</a><a href="integrations.html">Integrations</a><a href="pricing.html">Pricing</a></div><a class="btn" href="index.html">Back home</a></nav><main class="wrap"><div class="heading"><div><p class="muted">Workspace / Overview</p><h1>Good morning, Alex.</h1><p class="muted">Here is what happened across your product this week.</p></div><a class="btn" href="features.html">View features</a></div><section class="cards"><div class="card"><small>Active users</small><strong>24,892</strong><span class="up">↗ 18.4% this week</span></div><div class="card"><small>New sign-ups</small><strong>3,248</strong><span class="up">↗ 12.8% this week</span></div><div class="card"><small>Conversion rate</small><strong>12.6%</strong><span class="up">↗ 4.2% this week</span></div><div class="card"><small>Avg. session</small><strong>4m 32s</strong><span class="up">↗ 9.1% this week</span></div></section><section class="layout"><div class="panel"><h2>Weekly active users</h2><div class="bars"><i class="bar" style="height:42%"></i><i class="bar" style="height:58%"></i><i class="bar" style="height:48%"></i><i class="bar" style="height:72%"></i><i class="bar" style="height:65%"></i><i class="bar" style="height:88%"></i><i class="bar" style="height:100%"></i></div></div><div class="panel"><h2>Recent events</h2><div class="events"><div class="event"><b>Activated</b><span>2 min ago</span></div><div class="event"><b>user_signed_in</b><span>8 min ago</span></div><div class="event"><b>checkout_started</b><span>21 min ago</span></div><div class="event"><b>feature_viewed</b><span>34 min ago</span></div></div></div></section></main><footer>© 2026 Lumina Technologies</footer></body></html>
 <script>
 window.addEventListener("load", function () {
-    analytics.identify("demo_user_003", { role: "tester1", workspace: "demo" });
+    // analytics.identify("demo_user_001", { role: "tester1", workspace: "demo" });
     analytics.event("dashboard_viewed", { view: "overview", period: "weekly" });
+
+    const enableInvoicesButton = document.createElement("button");
+    enableInvoicesButton.type = "button";
+    enableInvoicesButton.className = "btn";
+    enableInvoicesButton.textContent = "Enable invoices";
+    enableInvoicesButton.style.cssText = "display:block;margin:0 auto 2rem;border:0;cursor:pointer";
+    enableInvoicesButton.addEventListener("click", function () {
+        analytics.event("enabled_invoice");
+    });
+    document.body.insertBefore(enableInvoicesButton, document.querySelector("footer"));
 });
 </script>

@@ -1,4 +1,5 @@
 import type { AnalyticsConfig, ResolvedAnalyticsConfig } from "../types/config";
+import { MVP1_POLICY } from "./mvpPolicy";
 
 export function resolveConfig(input: AnalyticsConfig): ResolvedAnalyticsConfig {
   if (!input || !input.siteId) {
@@ -11,16 +12,16 @@ export function resolveConfig(input: AnalyticsConfig): ResolvedAnalyticsConfig {
     experienceRuntimeBundleUrl: input.experienceRuntimeBundleUrl ?? "",
     editorRuntimeBundleUrl: input.editorRuntimeBundleUrl ?? "",
     heatmapSnapshotBundleUrl: input.heatmapSnapshotBundleUrl ?? "",
-    debug: input.debug ?? false,
+    debug: input.debug ?? true,
     sessionInactivityMs: input.sessionInactivityMs ?? 30 * 60 * 1000,
     respectDoNotTrack: input.respectDoNotTrack ?? false,
     autocapture: {
       click: input.autocapture?.click ?? true,
       scroll: input.autocapture?.scroll ?? true,
-      move: input.autocapture?.move ?? true,
+      move: MVP1_POLICY.move && (input.autocapture?.move ?? false),
       rageClick: input.autocapture?.rageClick ?? true,
-      hover: input.autocapture?.hover ?? true,
-      cursor: input.autocapture?.cursor ?? true,
+      hover: MVP1_POLICY.hover && (input.autocapture?.hover ?? false),
+      cursor: MVP1_POLICY.cursor && (input.autocapture?.cursor ?? false),
       elementCrawler: input.autocapture?.elementCrawler ?? true,
     },
     rageClick: {
@@ -53,8 +54,8 @@ export function resolveConfig(input: AnalyticsConfig): ResolvedAnalyticsConfig {
       retryBaseDelayMs: input.queue?.retryBaseDelayMs ?? 1000,
     },
     sessionReplay: {
-      // Recording must never start unless a site explicitly opts in.
-      enabled: input.sessionReplay?.enabled ?? false,
+      // MVP1 is release-locked off even when stale configuration opts in.
+      enabled: MVP1_POLICY.sessionReplay && (input.sessionReplay?.enabled ?? false),
       sampleMouseMovement: input.sessionReplay?.sampleMouseMovement ?? true,
       maskAllInputs: input.sessionReplay?.maskAllInputs ?? true,
       maskTextSelector: input.sessionReplay?.maskTextSelector,

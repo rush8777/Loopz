@@ -28,6 +28,8 @@ import type {
 import type { FunnelStep } from "../types/funnel";
 import { RouteObserver } from "../dom/RouteObserver";
 import { HeatmapManager } from "../heatmaps/HeatmapManager";
+import { MVP1_POLICY } from "./mvpPolicy";
+import { SessionActivityMonitor } from "./SessionActivityMonitor";
 import { loadEditorRuntime, loadExperienceRuntime } from "../experiences/loadRuntimes";
 import { clearEditorContinuation, readEditorContinuation } from "../experiences/editorContinuation";
 import type {
@@ -51,7 +53,8 @@ export class Analytics {
   private transport!: Transport;
   private batcher!: Batcher;
   private routeObserver = new RouteObserver();
-  private heatmaps!: HeatmapManager;
+  private heatmaps: HeatmapManager | null = null;
+  private activityMonitor: SessionActivityMonitor | null = null;
   private experiences: ExperienceLoaderRuntime | null = null;
   private editor: EditorControllerRuntime | null = null;
   private editorMode = false;
@@ -99,8 +102,11 @@ export class Analytics {
       this.log(msg, ...args)
     );
     this.engine = new AutoCaptureEngine(this.config);
-    this.heatmaps = new HeatmapManager(this.config.endpoint, this.config.siteId, this.config.heatmapSnapshotBundleUrl);
-    this.heatmaps.initialize();
+    this.activityMonitor = new SessionActivityMonitor(this.session);
+    if (MVP1_POLICY.heatmaps) {
+      this.heatmaps = new HeatmapManager(this.config.endpoint, this.config.siteId, this.config.heatmapSnapshotBundleUrl);
+      this.heatmaps.initialize();
+    }
 
     this.wireCollectorsToPipeline();
 
@@ -129,6 +135,7 @@ export class Analytics {
     if (!this.initialized || this.editorMode || this.running || !this.engine) return;
     this.running = true;
     this.engine.start();
+    this.activityMonitor?.start();
     this.batcher.start();
     this.log("autocapture started");
   }
@@ -137,6 +144,7 @@ export class Analytics {
     if (!this.running) return;
     this.running = false;
     this.engine.stop();
+    this.activityMonitor?.stop();
     this.batcher.stop();
     this.log("autocapture stopped");
   }
@@ -151,6 +159,8 @@ export class Analytics {
     this.queue?.clear();
     this.experiences?.destroy();
     this.experiences = null;
+    this.heatmaps = null;
+    this.activityMonitor = null;
     this.editor?.destroy();
     this.editor = null;
     this.editorMode = false;
@@ -385,7 +395,7 @@ export class Analytics {
       sessionId: this.session.getSessionId(),
       pageViewId: this.session.getPageViewId(),
       page: getPageContext(),
-      heatmap: this.heatmaps.context(),
+      ...(this.heatmaps ? { heatmap: this.heatmaps.context() } : {}),
       payload,
     };
     this.batcher.enqueue(event as AnalyticsEvent<AnyPayload>);

@@ -10,6 +10,7 @@ import { FunnelTracker } from "./FunnelTracker";
 import { ElementCrawler } from "./ElementCrawler";
 import { RRWebRecorder } from "../session/RRWebRecorder";
 import type { ResolvedAnalyticsConfig } from "../types/config";
+import { MVP1_POLICY } from "../core/mvpPolicy";
 
 /**
  * Owns registration, startup, and teardown of every autocapture collector.
@@ -65,15 +66,15 @@ export class AutoCaptureEngine {
     const ac = this.config.autocapture;
     if (ac.click) this.click.start();
     if (ac.scroll) this.scroll.start();
-    if (ac.move) this.move.start();
+    if (MVP1_POLICY.move && ac.move) this.move.start();
     // Rage click detection depends on raw click data, so it must run
     // whenever click capture is active.
     if (ac.rageClick && ac.click) this.rageClick.start();
-    if (ac.hover) this.hover.start();
-    if (ac.cursor) this.cursor.start();
+    if (MVP1_POLICY.hover && ac.hover) this.hover.start();
+    if (MVP1_POLICY.cursor && ac.cursor) this.cursor.start();
     // Fire-and-forget: replay may need to fetch its bundle first, and must
     // never block or delay the rest of autocapture from starting.
-    if (this.config.sessionReplay.enabled) void this.sessionReplay.start();
+    if (MVP1_POLICY.sessionReplay && this.config.sessionReplay.enabled) void this.sessionReplay.start();
   }
 
   /**

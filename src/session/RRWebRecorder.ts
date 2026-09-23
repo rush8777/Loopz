@@ -3,6 +3,7 @@ import { EventBus } from "../core/EventBus";
 import { generateId } from "../core/ids";
 import { loadSdkBundle, sdkBundleUrl } from "../core/sdkBundleLoader";
 import type { SessionReplayConfig } from "../types/config";
+import { MVP1_POLICY } from "../core/mvpPolicy";
 
 type RecordFn = typeof RecordFnType;
 
@@ -60,7 +61,7 @@ export class RRWebRecorder {
    */
   async start(): Promise<void> {
     if (this.running) return;
-    if (!this.config.enabled) return;
+    if (!MVP1_POLICY.sessionReplay || !this.config.enabled) return;
     if (typeof document === "undefined") return;
 
     const generation = ++this.generation;

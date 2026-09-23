@@ -860,6 +860,13 @@ function escapeAttribute(value) {
   if (typeof CSS !== "undefined" && typeof CSS.escape === "function") return CSS.escape(value);
   return value.replace(/["\\]/g, "\\$&");
 }
+const MVP1_POLICY = Object.freeze({
+  cursor: false,
+  hover: false,
+  move: false,
+  sessionReplay: false,
+  heatmaps: false
+});
 class RRWebRecorder {
   constructor(bus, config) {
     this.bus = bus;
@@ -883,7 +890,7 @@ class RRWebRecorder {
    */
   async start() {
     if (this.running) return;
-    if (!this.config.enabled) return;
+    if (!MVP1_POLICY.sessionReplay || !this.config.enabled) return;
     if (typeof document === "undefined") return;
     const generation = ++this.generation;
     const record = this.recordFn ?? await this.loadRecordFn();
@@ -1003,11 +1010,11 @@ class AutoCaptureEngine {
     const ac = this.config.autocapture;
     if (ac.click) this.click.start();
     if (ac.scroll) this.scroll.start();
-    if (ac.move) this.move.start();
+    if (MVP1_POLICY.move && ac.move) this.move.start();
     if (ac.rageClick && ac.click) this.rageClick.start();
-    if (ac.hover) this.hover.start();
-    if (ac.cursor) this.cursor.start();
-    if (this.config.sessionReplay.enabled) void this.sessionReplay.start();
+    if (MVP1_POLICY.hover && ac.hover) this.hover.start();
+    if (MVP1_POLICY.cursor && ac.cursor) this.cursor.start();
+    if (MVP1_POLICY.sessionReplay && this.config.sessionReplay.enabled) void this.sessionReplay.start();
   }
   /**
    * Starts structural Page/Element discovery for the initialized SDK.
@@ -1736,16 +1743,16 @@ function resolveConfig(input) {
     experienceRuntimeBundleUrl: input.experienceRuntimeBundleUrl ?? "",
     editorRuntimeBundleUrl: input.editorRuntimeBundleUrl ?? "",
     heatmapSnapshotBundleUrl: input.heatmapSnapshotBundleUrl ?? "",
-    debug: input.debug ?? false,
+    debug: input.debug ?? true,
     sessionInactivityMs: input.sessionInactivityMs ?? 30 * 60 * 1e3,
     respectDoNotTrack: input.respectDoNotTrack ?? false,
     autocapture: {
       click: ((_a = input.autocapture) == null ? void 0 : _a.click) ?? true,
       scroll: ((_b = input.autocapture) == null ? void 0 : _b.scroll) ?? true,
-      move: ((_c = input.autocapture) == null ? void 0 : _c.move) ?? true,
+      move: MVP1_POLICY.move && (((_c = input.autocapture) == null ? void 0 : _c.move) ?? false),
       rageClick: ((_d = input.autocapture) == null ? void 0 : _d.rageClick) ?? true,
-      hover: ((_e = input.autocapture) == null ? void 0 : _e.hover) ?? true,
-      cursor: ((_f = input.autocapture) == null ? void 0 : _f.cursor) ?? true,
+      hover: MVP1_POLICY.hover && (((_e = input.autocapture) == null ? void 0 : _e.hover) ?? false),
+      cursor: MVP1_POLICY.cursor && (((_f = input.autocapture) == null ? void 0 : _f.cursor) ?? false),
       elementCrawler: ((_g = input.autocapture) == null ? void 0 : _g.elementCrawler) ?? true
     },
     rageClick: {
@@ -1778,8 +1785,8 @@ function resolveConfig(input) {
       retryBaseDelayMs: ((_x = input.queue) == null ? void 0 : _x.retryBaseDelayMs) ?? 1e3
     },
     sessionReplay: {
-      // Recording must never start unless a site explicitly opts in.
-      enabled: ((_y = input.sessionReplay) == null ? void 0 : _y.enabled) ?? false,
+      // MVP1 is release-locked off even when stale configuration opts in.
+      enabled: MVP1_POLICY.sessionReplay && (((_y = input.sessionReplay) == null ? void 0 : _y.enabled) ?? false),
       sampleMouseMovement: ((_z = input.sessionReplay) == null ? void 0 : _z.sampleMouseMovement) ?? true,
       maskAllInputs: ((_A = input.sessionReplay) == null ? void 0 : _A.maskAllInputs) ?? true,
       maskTextSelector: (_B = input.sessionReplay) == null ? void 0 : _B.maskTextSelector,
@@ -1978,6 +1985,36 @@ class HeatmapManager {
 function capitalize$1(value) {
   return value ? value[0].toUpperCase() + value.slice(1) : value;
 }
+class SessionActivityMonitor {
+  constructor(session, throttleMs = 6e4) {
+    this.session = session;
+    this.throttleMs = throttleMs;
+    this.running = false;
+    this.lastTouchAt = 0;
+    this.onActivity = () => {
+      const now2 = Date.now();
+      if (now2 - this.lastTouchAt < this.throttleMs) return;
+      this.lastTouchAt = now2;
+      this.session.touch();
+    };
+  }
+  start() {
+    if (this.running || typeof window === "undefined") return;
+    this.running = true;
+    window.addEventListener("pointermove", this.onActivity, { passive: true });
+    window.addEventListener("pointerdown", this.onActivity, { passive: true });
+    window.addEventListener("scroll", this.onActivity, { passive: true });
+    window.addEventListener("keydown", this.onActivity);
+  }
+  stop() {
+    if (!this.running || typeof window === "undefined") return;
+    this.running = false;
+    window.removeEventListener("pointermove", this.onActivity);
+    window.removeEventListener("pointerdown", this.onActivity);
+    window.removeEventListener("scroll", this.onActivity);
+    window.removeEventListener("keydown", this.onActivity);
+  }
+}
 function loadExperienceRuntime(overrideUrl) {
   return loadSdkBundle(
     sdkBundleUrl("experiences", overrideUrl),
@@ -2033,6 +2070,8 @@ let Analytics$1 = class Analytics {
   constructor(runtimeProviders = {}) {
     this.runtimeProviders = runtimeProviders;
     this.routeObserver = new RouteObserver();
+    this.heatmaps = null;
+    this.activityMonitor = null;
     this.experiences = null;
     this.editor = null;
     this.editorMode = false;
@@ -2074,8 +2113,11 @@ let Analytics$1 = class Analytics {
       (msg, ...args) => this.log(msg, ...args)
     );
     this.engine = new AutoCaptureEngine(this.config);
-    this.heatmaps = new HeatmapManager(this.config.endpoint, this.config.siteId, this.config.heatmapSnapshotBundleUrl);
-    this.heatmaps.initialize();
+    this.activityMonitor = new SessionActivityMonitor(this.session);
+    if (MVP1_POLICY.heatmaps) {
+      this.heatmaps = new HeatmapManager(this.config.endpoint, this.config.siteId, this.config.heatmapSnapshotBundleUrl);
+      this.heatmaps.initialize();
+    }
     this.wireCollectorsToPipeline();
     this.initialized = true;
     this.log("initialized", { siteId: this.config.siteId });
@@ -2089,16 +2131,20 @@ let Analytics$1 = class Analytics {
     }
   }
   start() {
+    var _a;
     if (!this.initialized || this.editorMode || this.running || !this.engine) return;
     this.running = true;
     this.engine.start();
+    (_a = this.activityMonitor) == null ? void 0 : _a.start();
     this.batcher.start();
     this.log("autocapture started");
   }
   stop() {
+    var _a;
     if (!this.running) return;
     this.running = false;
     this.engine.stop();
+    (_a = this.activityMonitor) == null ? void 0 : _a.stop();
     this.batcher.stop();
     this.log("autocapture stopped");
   }
@@ -2113,6 +2159,8 @@ let Analytics$1 = class Analytics {
     (_b = this.queue) == null ? void 0 : _b.clear();
     (_c = this.experiences) == null ? void 0 : _c.destroy();
     this.experiences = null;
+    this.heatmaps = null;
+    this.activityMonitor = null;
     (_d = this.editor) == null ? void 0 : _d.destroy();
     this.editor = null;
     this.editorMode = false;
@@ -2306,7 +2354,7 @@ let Analytics$1 = class Analytics {
       sessionId: this.session.getSessionId(),
       pageViewId: this.session.getPageViewId(),
       page: getPageContext(),
-      heatmap: this.heatmaps.context(),
+      ...this.heatmaps ? { heatmap: this.heatmaps.context() } : {},
       payload
     };
     this.batcher.enqueue(event);
