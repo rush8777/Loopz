@@ -290,6 +290,14 @@ export class Analytics {
 
     this.unsubscribers.push(
       bus.on<ClickEventPayload>("click", (p) => {
+        // MVP1 retains interactive click analytics while avoiding a stored
+        // event for whitespace/background/dead-area clicks. This filter is
+        // intentionally downstream of ClickCollector: it must not affect
+        // click:raw, which RageClickDetector consumes locally.
+        if (MVP1_POLICY.interactiveClicksOnly && !p.interactive) {
+          this.log("non-interactive click ignored by MVP1 policy", p.element.selector);
+          return;
+        }
         this.enqueueEvent("click", p);
         this.log("click captured", p.element.selector);
       })

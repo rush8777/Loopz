@@ -13,6 +13,7 @@ import { ElementCrawler } from "../src/autocapture/ElementCrawler";
 import { RRWebRecorder } from "../src/session/RRWebRecorder";
 import { HeatmapManager } from "../src/heatmaps/HeatmapManager";
 import { EventBus } from "../src/core/EventBus";
+import { MVP1_POLICY } from "../src/core/mvpPolicy";
 
 describe("MVP1 SDK policy", () => {
   beforeEach(() => {
@@ -42,6 +43,9 @@ describe("MVP1 SDK policy", () => {
     });
     expect(staleOverride.autocapture).toMatchObject({ cursor: false, hover: false, move: false });
     expect(staleOverride.sessionReplay.enabled).toBe(false);
+    // Interactive-only click persistence is release-locked alongside the
+    // existing disabled high-volume capture modes.
+    expect(MVP1_POLICY.interactiveClicksOnly).toBe(true);
   });
 
   it("does not initialize heatmaps or replay and keeps core analytics/discovery operational", async () => {

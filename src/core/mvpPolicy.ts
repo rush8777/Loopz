@@ -8,6 +8,9 @@
  * aggregated selector hover metrics, and object storage for screenshots.
  */
 export const MVP1_POLICY = Object.freeze({
+  // Keep normal click analytics focused on intentional UI interactions.
+  // Raw, privacy-approved clicks still flow locally for rage detection.
+  interactiveClicksOnly: true,
   cursor: false,
   hover: false,
   move: false,
