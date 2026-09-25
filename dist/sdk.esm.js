@@ -2085,6 +2085,25 @@ function isEditorState(value) {
   const state = value;
   return typeof state.experienceId === "string" && !!state.experienceId && (state.selectedStepId === void 0 || typeof state.selectedStepId === "string") && (state.mode === "select" || state.mode === "navigate");
 }
+async function acknowledgePendingSdkVerification(apiBase, siteId) {
+  var _a;
+  if (!apiBase || !siteId || typeof fetch === "undefined") return;
+  try {
+    const configResponse = await fetch(
+      `${apiBase}/public/config/${encodeURIComponent(siteId)}?sdkVerification=${Date.now()}`,
+      { credentials: "omit", cache: "no-store" }
+    );
+    if (!configResponse.ok) return;
+    const config = await configResponse.json();
+    const verificationId = (_a = config.sdkVerification) == null ? void 0 : _a.id;
+    if (typeof verificationId !== "string" || !verificationId) return;
+    await fetch(
+      `${apiBase}/public/sites/${encodeURIComponent(siteId)}/sdk-verifications/${encodeURIComponent(verificationId)}/ack`,
+      { method: "POST", credentials: "omit", keepalive: true }
+    );
+  } catch {
+  }
+}
 let Analytics$1 = class Analytics {
   constructor(runtimeProviders = {}) {
     this.runtimeProviders = runtimeProviders;
@@ -2123,6 +2142,7 @@ let Analytics$1 = class Analytics {
       this.initialized = true;
       return;
     }
+    void acknowledgePendingSdkVerification(this.config.endpoint, this.config.siteId);
     this.session = new SessionManager(this.config.sessionInactivityMs);
     this.transport = new Transport(this.config.endpoint, this.config.siteId);
     this.queue = new EventQueue({ maxQueueSize: this.config.queue.maxQueueSize });

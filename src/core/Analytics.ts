@@ -38,6 +38,7 @@ import type {
   EditorControllerRuntime,
   ExperienceLoaderRuntime,
 } from "../experiences/runtimeInterfaces";
+import { acknowledgePendingSdkVerification } from "./SdkConnectionVerifier";
 
 /**
  * The core SDK instance. Owns configuration, session identity, the
@@ -95,6 +96,8 @@ export class Analytics {
       this.initialized = true;
       return;
     }
+
+    void acknowledgePendingSdkVerification(this.config.endpoint, this.config.siteId);
 
     this.session = new SessionManager(this.config.sessionInactivityMs);
     this.transport = new Transport(this.config.endpoint, this.config.siteId);

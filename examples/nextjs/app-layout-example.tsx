@@ -27,7 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             })(window, document, "script", "https://cdn.yourdomain.com/sdk.js");
 
             analytics.init({ siteId: "YOUR_SITE_ID" });
-            analytics.identify("demo_user_006", { framework: "nextjs", integration: "cdn" });
+            analytics.identify("demo_user_007", { framework: "nextjs", integration: "cdn" });
             analytics.event("app_started", { framework: "nextjs", integration: "cdn" });
             analytics.defineFunnel("demo_signup", [
               { event: "signup_started" },
