@@ -32,6 +32,7 @@ export class ExperienceRenderer {
 
   render(experience: DeliveredExperience, callbacks: ExperienceRendererCallbacks, guideStepId?: string): boolean {
     this.destroy();
+    if (experience.kind === "checklist") return false;
     if (isGuideDefinition(experience.definition)) return this.renderGuide(experience, experience.definition, callbacks, guideStepId);
     return this.renderWidget(experience, experience.definition, callbacks, guideStepId);
   }

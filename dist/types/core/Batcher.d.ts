@@ -16,6 +16,7 @@ export declare class Batcher {
     private timer;
     private retryCount;
     private flushing;
+    private flushPromise;
     private stopped;
     constructor(queue: EventQueue, transport: Transport, config: QueueConfig, log?: DebugLogger);
     start(): void;
@@ -23,6 +24,9 @@ export declare class Batcher {
     enqueue(event: AnalyticsEvent): void;
     private scheduleTimer;
     flush(): Promise<void>;
+    /** Flush every event queued before/during this call and wait for transport completion. */
+    flushAndWait(): Promise<void>;
+    private performFlush;
     /** Synchronous, unload-safe flush of everything currently queued. */
     flushSync(): void;
 }

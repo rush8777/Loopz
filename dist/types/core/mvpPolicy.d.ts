@@ -8,6 +8,7 @@
  * aggregated selector hover metrics, and object storage for screenshots.
  */
 export declare const MVP1_POLICY: Readonly<{
+    interactiveClicksOnly: true;
     cursor: false;
     hover: false;
     move: false;

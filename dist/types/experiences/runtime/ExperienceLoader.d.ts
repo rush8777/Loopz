@@ -12,10 +12,15 @@ export declare class ExperienceLoader {
     private queued;
     private justFinishedId;
     private destroyed;
+    private hasChecklistCandidates;
+    private checklist;
     constructor(apiBase: string, siteId: string, session: ExperienceSession, trackEvent?: ((name: string) => void) | undefined);
     evaluate(trigger?: string): Promise<void>;
     onRouteChange(): void;
     onCustomEvent(name: string): void;
+    refreshChecklist(): Promise<void>;
+    hasActiveChecklist(): boolean;
+    launchExperience(experienceId: string): Promise<void>;
     destroy(): void;
     private fetchExperiences;
     private show;
@@ -32,6 +37,7 @@ export declare class ExperienceLoader {
     private surveyStepIndex;
     private currentGuideStepMatchesPage;
     private pauseGuide;
+    private launch;
     private resumeGuide;
     private advanceForRoute;
     private currentGuideStep;

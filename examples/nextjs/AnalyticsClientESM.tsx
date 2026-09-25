@@ -23,7 +23,7 @@ export function AnalyticsClientESM({ siteId }: { siteId: string }) {
   useEffect(() => {
     const analytics = createAnalytics({ siteId });
     analyticsRef.current = analytics;
-    analytics.identify("demo_user_001", { framework: "nextjs", integration: "esm" });
+    analytics.identify("demo_user_006", { framework: "nextjs", integration: "esm" });
     analytics.event("app_started", { framework: "nextjs", integration: "esm" });
 
     return () => {

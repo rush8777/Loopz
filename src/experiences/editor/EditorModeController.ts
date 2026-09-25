@@ -96,6 +96,7 @@ export class EditorModeController {
     let draft: EditorDraft;
     try { draft = await bridge.load(); }
     catch { clearEditorContinuation(); return false; }
+    if (draft.experience.kind === "checklist") { clearEditorContinuation(); return false; }
 
     this.bridge = bridge;
     this.session = session;

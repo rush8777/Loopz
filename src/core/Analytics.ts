@@ -56,6 +56,7 @@ export class Analytics {
   private heatmaps: HeatmapManager | null = null;
   private activityMonitor: SessionActivityMonitor | null = null;
   private experiences: ExperienceLoaderRuntime | null = null;
+  private pendingExperienceLaunches: string[] = [];
   private editor: EditorControllerRuntime | null = null;
   private editorMode = false;
   private editorAttempted = false;
@@ -159,6 +160,7 @@ export class Analytics {
     this.queue?.clear();
     this.experiences?.destroy();
     this.experiences = null;
+    this.pendingExperienceLaunches = [];
     this.heatmaps = null;
     this.activityMonitor = null;
     this.editor?.destroy();
@@ -175,6 +177,7 @@ export class Analytics {
     this.enqueueEvent("custom", payload);
     this.engine.funnel.onCustomEvent(name);
     this.experiences?.onCustomEvent(name);
+    void this.refreshExperiencesAfterFlush();
     this.log(`event: ${name}`, properties);
   }
 
@@ -183,6 +186,7 @@ export class Analytics {
     this.session.identify(userId);
     const payload: IdentifyEventPayload = { userId, traits: attributes };
     this.enqueueEvent("identify", payload);
+    void this.refreshExperiencesAfterFlush();
     this.log(`identify: ${userId}`, attributes);
   }
 
@@ -197,6 +201,13 @@ export class Analytics {
   page(): void {
     if (!this.requireInit()) return;
     this.trackPageView();
+  }
+
+  /** Explicitly launch a published Guide, bypassing automatic targeting. */
+  launchExperience(experienceId: string): void {
+    if (!this.requireInit() || !experienceId) return;
+    if (this.experiences?.launchExperience) void this.experiences.launchExperience(experienceId);
+    else this.pendingExperienceLaunches.push(experienceId);
   }
 
   defineFunnel(name: string, steps: FunnelStep[]): void {
@@ -280,6 +291,8 @@ export class Analytics {
         (name) => this.event(name)
       );
       await this.experiences.evaluate();
+      for (const id of this.pendingExperienceLaunches.splice(0)) void this.experiences.launchExperience?.(id);
+      void this.refreshExperiencesAfterFlush();
     } catch {
       // Experience delivery is isolated from analytics and host application code.
     }
@@ -375,6 +388,7 @@ export class Analytics {
       this.engine.onRouteChange(location.pathname, true);
       this.trackPageView();
       this.experiences?.onRouteChange();
+      void this.refreshExperiencesAfterFlush();
     } else {
       this.engine.onRouteChange(location.pathname, false);
     }
@@ -392,6 +406,12 @@ export class Analytics {
       this.buildAndEnqueue<SessionStartEventPayload>("session_start", captureEnvironmentSnapshot());
     }
     this.buildAndEnqueue(type, payload);
+  }
+
+  private async refreshExperiencesAfterFlush(): Promise<void> {
+    if (!this.experiences || !this.batcher || !this.experiences.hasActiveChecklist?.()) return;
+    await this.batcher.flushAndWait();
+    await this.experiences?.refreshChecklist?.();
   }
 
   private buildAndEnqueue<T extends AnyPayload>(type: EventType, payload: T): void {

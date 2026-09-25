@@ -25,6 +25,7 @@ const PUBLIC_METHODS = [
   "reset",
   "page",
   "defineFunnel",
+  "launchExperience",
   "enableDebug",
   "disableDebug",
 ] as const;
@@ -65,6 +66,7 @@ export function installPublicAPI(globalNames: string[]): Analytics {
     reset: () => analytics.reset(),
     page: () => analytics.page(),
     defineFunnel: (...args) => analytics.defineFunnel(args[0] as string, args[1] as any),
+    launchExperience: (...args) => analytics.launchExperience(args[0] as string),
     enableDebug: () => analytics.enableDebug(),
     disableDebug: () => analytics.disableDebug(),
   };

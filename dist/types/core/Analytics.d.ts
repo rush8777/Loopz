@@ -19,6 +19,7 @@ export declare class Analytics {
     private heatmaps;
     private activityMonitor;
     private experiences;
+    private pendingExperienceLaunches;
     private editor;
     private editorMode;
     private editorAttempted;
@@ -37,6 +38,8 @@ export declare class Analytics {
     /** Clear the active identity and begin future activity as a new visitor. */
     reset(): void;
     page(): void;
+    /** Explicitly launch a published Guide, bypassing automatic targeting. */
+    launchExperience(experienceId: string): void;
     defineFunnel(name: string, steps: FunnelStep[]): void;
     enableDebug(): void;
     disableDebug(): void;
@@ -48,6 +51,7 @@ export declare class Analytics {
     private trackPageView;
     private onRouteChange;
     private enqueueEvent;
+    private refreshExperiencesAfterFlush;
     private buildAndEnqueue;
     /** Called by bootstrap on visibilitychange/pagehide for unload-safe delivery. */
     flushOnUnload(): void;

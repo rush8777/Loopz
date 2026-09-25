@@ -9,6 +9,9 @@ export interface ExperienceLoaderRuntime {
   evaluate(trigger?: string): Promise<void>;
   onRouteChange(): void;
   onCustomEvent(name: string): void;
+  refreshChecklist?(): Promise<void>;
+  hasActiveChecklist?(): boolean;
+  launchExperience?(experienceId: string): Promise<void>;
   destroy(): void;
 }
 

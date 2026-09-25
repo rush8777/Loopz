@@ -45,6 +45,7 @@ export function bootstrap(
     "identify",
     "page",
     "defineFunnel",
+    "launchExperience",
     "enableDebug",
     "disableDebug",
   ]) {

@@ -1,4 +1,4 @@
-export type ExperienceKind = "guide" | "widget";
+export type ExperienceKind = "guide" | "widget" | "checklist";
 export type WidgetType = "anchored_card" | "toast" | "cursor_follow" | "modal" | "slideout" | "hotspot" | "banner" | "survey";
 export interface ExperienceAction {
     label: string;
@@ -118,6 +118,8 @@ export interface ExperienceTargeting {
     } | {
         type: "custom_event";
         eventName: string;
+    } | {
+        type: "manual";
     };
     frequency: {
         mode: "once" | "once_per_session" | "every_time";
@@ -235,7 +237,72 @@ export interface RuntimeGuideDefinition {
         layer?: ExperienceLayer;
     };
 }
+export type ChecklistItemAction = {
+    type: "launch_guide";
+    experienceId: string;
+} | {
+    type: "navigate";
+    url: string;
+} | {
+    type: "open_url";
+    url: string;
+} | {
+    type: "none";
+};
+export type ChecklistItemCompletion = {
+    type: "segment";
+    segmentId: string;
+} | {
+    type: "guide_completed";
+    experienceId: string;
+} | {
+    type: "item_clicked";
+};
+export interface ChecklistItem {
+    id: string;
+    title: string;
+    description?: string;
+    action: ChecklistItemAction;
+    completion: ChecklistItemCompletion;
+}
+export interface RuntimeChecklistDefinition {
+    title: string;
+    description?: string;
+    items: ChecklistItem[];
+    behavior: {
+        position: "bottom-left" | "bottom-right";
+        order: "any" | "sequential";
+        dismissible: boolean;
+        initialState: "expanded" | "collapsed";
+        showRemainingCount: boolean;
+    };
+    completionMessage: {
+        title: string;
+        description?: string;
+        acknowledgeLabel: string;
+    };
+    builder: WidgetBuilderState;
+}
+export interface ChecklistProgress {
+    stateId: string;
+    collapsed: boolean;
+    dismissed: boolean;
+    complete: boolean;
+    completionAcknowledged: boolean;
+    completedItemIds: string[];
+    items: Array<{
+        id: string;
+        state: "completed" | "available" | "locked";
+    }>;
+}
 export type RuntimeDefinition = RuntimeWidgetDefinition | RuntimeGuideDefinition;
+export type ExperienceLaunchContext = {
+    source: "api";
+} | {
+    source: "checklist";
+    sourceExperienceId: string;
+    sourceItemId: string;
+};
 export interface DeliveredExperience {
     id: string;
     versionId: string;
@@ -245,6 +312,15 @@ export interface DeliveredExperience {
     interruptPolicy?: "queue" | "interrupt";
     impressionId?: string;
     definition: RuntimeDefinition;
+    launchContext?: ExperienceLaunchContext;
+}
+export interface DeliveredChecklist {
+    id: string;
+    versionId: string;
+    kind: "checklist";
+    priority: number;
+    definition: RuntimeChecklistDefinition;
+    progress: ChecklistProgress;
 }
 export type EditorDefinition = RuntimeDefinition & {
     targeting: ExperienceTargeting;
@@ -263,3 +339,4 @@ export interface EditorDraft {
     };
 }
 export declare function isGuideDefinition(value: RuntimeDefinition): value is RuntimeGuideDefinition;
+export declare function isChecklistDefinition(value: RuntimeDefinition | RuntimeChecklistDefinition): value is RuntimeChecklistDefinition;

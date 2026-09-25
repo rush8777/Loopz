@@ -863,6 +863,9 @@
     return value.replace(/["\\]/g, "\\$&");
   }
   const MVP1_POLICY = Object.freeze({
+    // Keep normal click analytics focused on intentional UI interactions.
+    // Raw, privacy-approved clicks still flow locally for rage detection.
+    interactiveClicksOnly: true,
     cursor: false,
     hover: false,
     move: false,
@@ -1578,6 +1581,7 @@
       this.timer = null;
       this.retryCount = 0;
       this.flushing = false;
+      this.flushPromise = null;
       this.stopped = false;
     }
     start() {
@@ -1603,11 +1607,26 @@
       }, this.config.maxWaitMs);
     }
     async flush() {
-      if (this.flushing || this.stopped) return;
+      if (this.flushPromise) return this.flushPromise;
+      if (this.stopped) return;
       if (this.queue.isEmpty()) {
         this.scheduleTimer();
         return;
       }
+      this.flushPromise = this.performFlush().finally(() => {
+        this.flushPromise = null;
+      });
+      return this.flushPromise;
+    }
+    /** Flush every event queued before/during this call and wait for transport completion. */
+    async flushAndWait() {
+      while (!this.stopped) {
+        if (this.flushPromise) await this.flushPromise;
+        else if (!this.queue.isEmpty()) await this.flush();
+        else return;
+      }
+    }
+    async performFlush() {
       this.flushing = true;
       const batch = this.queue.takeBatch(this.config.maxBatchSize);
       try {
@@ -2069,6 +2088,7 @@
       this.heatmaps = null;
       this.activityMonitor = null;
       this.experiences = null;
+      this.pendingExperienceLaunches = [];
       this.editor = null;
       this.editorMode = false;
       this.editorAttempted = false;
@@ -2155,6 +2175,7 @@
       (_b = this.queue) == null ? void 0 : _b.clear();
       (_c = this.experiences) == null ? void 0 : _c.destroy();
       this.experiences = null;
+      this.pendingExperienceLaunches = [];
       this.heatmaps = null;
       this.activityMonitor = null;
       (_d = this.editor) == null ? void 0 : _d.destroy();
@@ -2171,6 +2192,7 @@
       this.enqueueEvent("custom", payload);
       this.engine.funnel.onCustomEvent(name);
       (_a = this.experiences) == null ? void 0 : _a.onCustomEvent(name);
+      void this.refreshExperiencesAfterFlush();
       this.log(`event: ${name}`, properties);
     }
     identify(userId, attributes) {
@@ -2178,6 +2200,7 @@
       this.session.identify(userId);
       const payload = { userId, traits: attributes };
       this.enqueueEvent("identify", payload);
+      void this.refreshExperiencesAfterFlush();
       this.log(`identify: ${userId}`, attributes);
     }
     /** Clear the active identity and begin future activity as a new visitor. */
@@ -2190,6 +2213,13 @@
     page() {
       if (!this.requireInit()) return;
       this.trackPageView();
+    }
+    /** Explicitly launch a published Guide, bypassing automatic targeting. */
+    launchExperience(experienceId) {
+      var _a;
+      if (!this.requireInit() || !experienceId) return;
+      if ((_a = this.experiences) == null ? void 0 : _a.launchExperience) void this.experiences.launchExperience(experienceId);
+      else this.pendingExperienceLaunches.push(experienceId);
     }
     defineFunnel(name, steps) {
       if (!this.requireInit()) return;
@@ -2248,6 +2278,7 @@
       this.init(userConfig);
     }
     async initializeExperiences(generation) {
+      var _a, _b;
       try {
         const runtime = this.runtimeProviders.experiences ?? await loadExperienceRuntime(this.config.experienceRuntimeBundleUrl);
         if (!runtime || !this.initialized || this.editorMode || generation !== this.generation) return;
@@ -2258,6 +2289,8 @@
           (name) => this.event(name)
         );
         await this.experiences.evaluate();
+        for (const id of this.pendingExperienceLaunches.splice(0)) void ((_b = (_a = this.experiences).launchExperience) == null ? void 0 : _b.call(_a, id));
+        void this.refreshExperiencesAfterFlush();
       } catch {
       }
     }
@@ -2265,6 +2298,10 @@
       const bus = this.engine.bus;
       this.unsubscribers.push(
         bus.on("click", (p) => {
+          if (MVP1_POLICY.interactiveClicksOnly && !p.interactive) {
+            this.log("non-interactive click ignored by MVP1 policy", p.element.selector);
+            return;
+          }
           this.enqueueEvent("click", p);
           this.log("click captured", p.element.selector);
         })
@@ -2329,6 +2366,7 @@
         this.engine.onRouteChange(location.pathname, true);
         this.trackPageView();
         (_a = this.experiences) == null ? void 0 : _a.onRouteChange();
+        void this.refreshExperiencesAfterFlush();
       } else {
         this.engine.onRouteChange(location.pathname, false);
       }
@@ -2340,6 +2378,12 @@
         this.buildAndEnqueue("session_start", captureEnvironmentSnapshot());
       }
       this.buildAndEnqueue(type, payload);
+    }
+    async refreshExperiencesAfterFlush() {
+      var _a, _b, _c, _d;
+      if (!this.experiences || !this.batcher || !((_b = (_a = this.experiences).hasActiveChecklist) == null ? void 0 : _b.call(_a))) return;
+      await this.batcher.flushAndWait();
+      await ((_d = (_c = this.experiences) == null ? void 0 : _c.refreshChecklist) == null ? void 0 : _d.call(_c));
     }
     buildAndEnqueue(type, payload) {
       const event = {
@@ -2386,6 +2430,7 @@
     "reset",
     "page",
     "defineFunnel",
+    "launchExperience",
     "enableDebug",
     "disableDebug"
   ];
@@ -2406,6 +2451,7 @@
       reset: () => analytics2.reset(),
       page: () => analytics2.page(),
       defineFunnel: (...args) => analytics2.defineFunnel(args[0], args[1]),
+      launchExperience: (...args) => analytics2.launchExperience(args[0]),
       enableDebug: () => analytics2.enableDebug(),
       disableDebug: () => analytics2.disableDebug()
     };

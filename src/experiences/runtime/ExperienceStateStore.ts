@@ -8,6 +8,8 @@ export interface GuideProgress {
   currentStepId: string;
   status: "active" | "paused";
   impressionId?: string;
+  launchContext?: { source: "api" } | { source: "checklist"; sourceExperienceId: string; sourceItemId: string };
+  navigationAttempted?: boolean;
 }
 
 function read(storage: Storage, key: string): Set<string> {

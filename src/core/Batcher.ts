@@ -14,6 +14,7 @@ export class Batcher {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private retryCount = 0;
   private flushing = false;
+  private flushPromise: Promise<void> | null = null;
   private stopped = false;
 
   constructor(
@@ -50,11 +51,27 @@ export class Batcher {
   }
 
   async flush(): Promise<void> {
-    if (this.flushing || this.stopped) return;
+    if (this.flushPromise) return this.flushPromise;
+    if (this.stopped) return;
     if (this.queue.isEmpty()) {
       this.scheduleTimer();
       return;
     }
+
+    this.flushPromise = this.performFlush().finally(() => { this.flushPromise = null; });
+    return this.flushPromise;
+  }
+
+  /** Flush every event queued before/during this call and wait for transport completion. */
+  async flushAndWait(): Promise<void> {
+    while (!this.stopped) {
+      if (this.flushPromise) await this.flushPromise;
+      else if (!this.queue.isEmpty()) await this.flush();
+      else return;
+    }
+  }
+
+  private async performFlush(): Promise<void> {
 
     this.flushing = true;
     const batch = this.queue.takeBatch(this.config.maxBatchSize);
