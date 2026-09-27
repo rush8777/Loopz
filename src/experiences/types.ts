@@ -13,7 +13,7 @@ export interface PageRule { id: string; kind: "include" | "exclude"; operator: "
 export interface ExperienceTargeting { pageRules: PageRule[]; audience: { type: "all" } | { type: "segment"; segmentId: string } | { type: "segment_rules"; logic: "all" | "any"; conditions: Array<{ id: string; segmentId: string; operator: "matches" | "not_matches" }> }; trigger: { type: "page_load" } | { type: "custom_event"; eventName: string } | { type: "manual" }; frequency: { mode: "once" | "once_per_session" | "every_time"; cooldownHours?: number; maxImpressions?: number }; priority: number; interruptPolicy?: "queue" | "interrupt"; schedule?: { startsAt?: string; endsAt?: string }; allowedOrigins?: string[] }
 export type GuideAdvance = { type: "button" } | { type: "element_click" } | { type: "element_hover"; durationMs?: number } | { type: "custom_event"; eventName: string } | { type: "route"; pageRules: PageRule[] };
 export type GuideStepPattern = "anchored_card" | "modal";
-export interface GuideStep { id: string; pattern?: GuideStepPattern; content: ExperienceContent; builder?: WidgetBuilderState; size?: ExperienceSize; advance?: GuideAdvance; target?: ExperienceTarget; behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "pointer" | "dismissible"> }
+export interface GuideStep { id: string; pattern?: GuideStepPattern; content: ExperienceContent; builder?: WidgetBuilderState; size?: ExperienceSize; advance?: GuideAdvance; target?: ExperienceTarget; behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "pointer" | "dismissible" | "layer"> }
 export function getGuideStepPattern(step: Pick<GuideStep, "pattern">): GuideStepPattern { return step.pattern ?? "anchored_card"; }
 export function guideStepRequiresTarget(step: Pick<GuideStep, "pattern">): boolean { return getGuideStepPattern(step) === "anchored_card"; }
 export function guideStepSupportsTargetAdvance(step: Pick<GuideStep, "pattern">): boolean { return guideStepRequiresTarget(step); }
@@ -25,7 +25,7 @@ export type SurveyQuestion =
   | { id: string; type: "long_text"; label: string; required?: boolean; placeholder?: string; maxLength?: number }
   | { id: string; type: "rating"; label: string; required?: boolean; min: number; max: number }
   | { id: string; type: "nps"; label: string; required?: boolean };
-export interface SurveyStep { id: string; content: { heading: string; body: string }; questions: SurveyQuestion[]; builder?: WidgetBuilderState; size?: ExperienceSize }
+export interface SurveyStep { id: string; content: { heading: string; body: string }; questions: SurveyQuestion[]; builder?: WidgetBuilderState; size?: ExperienceSize; behavior?: { layer?: ExperienceLayer } }
 export interface SurveyConfig { steps: SurveyStep[]; showProgress: boolean; allowBack: boolean; submitLabel: string }
 export type SurveyAnswers = Record<string, string | string[] | number>;
 export interface RuntimeWidgetDefinition { content: ExperienceContent; design: ExperienceDesign; behavior: ExperienceBehavior; builder?: WidgetBuilderState; target?: ExperienceTarget; survey?: SurveyConfig }

@@ -40,8 +40,14 @@ export class ExperienceRenderer {
   private root(experienceId: string, behavior: Pick<ExperienceBehavior, "layer" | "zIndex">, targetElement?: Element | null): ShadowRoot {
     this.host = document.createElement("div"); this.host.dataset.movecuesExperience = experienceId; this.host.dataset.movecuesExperienceRoot = experienceId; this.host.style.cssText = "position:fixed;inset:0;pointer-events:none";
     const root = this.host.attachShadow({ mode: "open" }); const style = document.createElement("style"); style.textContent = STYLES; root.appendChild(style); document.documentElement.appendChild(this.host);
-    this.appliedLayer = this.layerManager.apply(this.host, { layer: behavior.layer, legacyZIndex: behavior.zIndex, targetElement });
+    this.applyLayer(behavior, targetElement);
     return root;
+  }
+
+  private applyLayer(behavior: Pick<ExperienceBehavior, "layer" | "zIndex">, targetElement?: Element | null): void {
+    if (!this.host) return;
+    this.appliedLayer?.destroy();
+    this.appliedLayer = this.layerManager.apply(this.host, { layer: behavior.layer, legacyZIndex: behavior.zIndex, targetElement });
   }
 
   private renderWidget(experience: DeliveredExperience, definition: RuntimeWidgetDefinition, callbacks: ExperienceRendererCallbacks, requestedStepId?: string): boolean {
@@ -59,8 +65,9 @@ export class ExperienceRenderer {
       const root = this.root(experience.id, definition.behavior); const renderer = new ModalRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
     } else if (experience.widgetType === "survey" && definition.survey) {
-      const root = this.root(experience.id, definition.behavior); const renderer = new SurveyRenderer(); this.renderer = renderer;
-      renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId, direction) => callbacks.onSurveyProgress?.(answers, stepId, direction), onSubmit: (answers, stepId) => callbacks.onSurveySubmit?.(answers, stepId) }, requestedStepId);
+      const selectedStep = definition.survey.steps.find(step => step.id === requestedStepId) ?? definition.survey.steps[0];
+      const root = this.root(experience.id, { ...definition.behavior, layer: selectedStep?.behavior?.layer ?? definition.behavior.layer }); const renderer = new SurveyRenderer(); this.renderer = renderer;
+      renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId, direction) => callbacks.onSurveyProgress?.(answers, stepId, direction), onSubmit: (answers, stepId) => callbacks.onSurveySubmit?.(answers, stepId), onStepChange: stepId => { const step = definition.survey!.steps.find(item => item.id === stepId); this.applyLayer({ ...definition.behavior, layer: step?.behavior?.layer ?? definition.behavior.layer }); } }, requestedStepId);
     } else if (experience.widgetType === "slideout") {
       const root = this.root(experience.id, definition.behavior); const renderer = new SlideoutRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
@@ -90,7 +97,7 @@ export class ExperienceRenderer {
       card.querySelector("footer")?.prepend(back);
     };
     if (getGuideStepPattern(step) === "modal") {
-      const root = this.root(experience.id, { layer: definition.behavior?.layer }); const renderer = new ModalRenderer(); this.renderer = renderer;
+      const root = this.root(experience.id, { layer: step.behavior.layer ?? definition.behavior?.layer }); const renderer = new ModalRenderer(); this.renderer = renderer;
       const behavior: ExperienceBehavior = { dismissible: step.behavior.dismissible ?? true };
       const card = renderer.render(root, step.content, stepDesign, behavior, stepCallbacks, step.builder);
       addBack(card);
@@ -99,7 +106,7 @@ export class ExperienceRenderer {
     }
     const mount = (target: Element) => {
       ensureGuideTargetInView(target);
-      const root = this.root(experience.id, { layer: definition.behavior?.layer }, target); const renderer = new AnchoredCardRenderer(); this.renderer = renderer;
+      const root = this.root(experience.id, { layer: step.behavior.layer ?? definition.behavior?.layer }, target); const renderer = new AnchoredCardRenderer(); this.renderer = renderer;
       const behavior: ExperienceBehavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset, pointer: step.behavior.pointer };
       const card = renderer.render(root, target, step.content, stepDesign, behavior, stepCallbacks, step.builder, "anchored_card");
       addBack(card);

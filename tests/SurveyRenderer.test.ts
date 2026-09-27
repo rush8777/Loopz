@@ -32,6 +32,18 @@ describe("SurveyRenderer", () => {
     expect(root.querySelector('[data-movecues-survey-action="back"]')).toBeNull(); expect(root.querySelector('[data-movecues-survey-action="submit"]')).toBeNull(); expect(root.querySelector<HTMLButtonElement>('[data-movecues-survey-action="next"]')?.hidden).toBe(true);
   });
 
+  it("updates the host layer when the active Survey step changes", async () => {
+    const survey: SurveyConfig = { showProgress: false, allowBack: true, submitLabel: "Send", steps: [
+      { id: "first", content: { heading: "First", body: "" }, questions: [], behavior: { layer: { mode: "custom", zIndex: 110 } }, builder: builder("") },
+      { id: "second", content: { heading: "Second", body: "" }, questions: [], behavior: { layer: { mode: "custom", zIndex: 220 } }, builder: builder("") },
+    ] };
+    const experience: DeliveredExperience = { id: "survey_layers", versionId: "v1", kind: "widget", widgetType: "survey", priority: 1, definition: { content: { heading: "Survey", body: "" }, design: { width: "md", theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } }, behavior: { dismissible: true, layer: { mode: "custom", zIndex: 50 } }, survey } };
+    const renderer = new ExperienceRenderer(); renderer.render(experience, { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn(), onSurveyProgress: vi.fn() });
+    const host = document.querySelector<HTMLElement>('[data-movecues-experience="survey_layers"]')!; expect(host.style.zIndex).toBe("110");
+    host.shadowRoot!.querySelector<HTMLButtonElement>('[data-movecues-survey-action="next"]')!.click();
+    await vi.waitFor(() => expect(host.style.zIndex).toBe("220")); renderer.destroy();
+  });
+
   it("uses every authored survey action, without inferring it from labels, classes, or order", () => {
     const authored = (actions: string) => ({ version: 1 as const, projectData: {}, html: `<section class="movecues-widget"><div class="movecues-survey-validation"></div>${actions}</section>`, css: ".movecues-widget{padding:20px}" });
     const buttons = '<button class="movecues-widget__button" data-movecues-survey-action="submit">Continue</button><button class="movecues-widget__button movecues-widget__button--secondary" data-movecues-survey-action="back">Anything</button><button data-movecues-survey-action="next">Forward A</button><button class="movecues-widget__button--secondary" data-movecues-survey-action="next">Forward B</button>';

@@ -505,12 +505,15 @@ export class EditorModeController {
 
   private currentLayer(): ExperienceLayer | undefined {
     if (!this.definition) return undefined;
-    return this.guide ? this.guide.behavior?.layer : (this.definition as RuntimeWidgetDefinition).behavior.layer;
+    if (this.guide) return this.guide.steps[this.stepIndex].behavior.layer ?? this.guide.behavior?.layer;
+    const widget = this.definition as RuntimeWidgetDefinition;
+    return this.survey ? this.survey.steps[this.stepIndex].behavior?.layer ?? widget.behavior.layer : widget.behavior.layer;
   }
 
   private setLayer(layer: ExperienceLayer): void {
     if (!this.definition) return;
-    if (this.guide) this.guide.behavior = { ...this.guide.behavior, layer };
+    if (this.guide) this.guide.steps[this.stepIndex].behavior.layer = layer;
+    else if (this.survey) { const step = this.survey.steps[this.stepIndex]; step.behavior = { ...step.behavior, layer }; }
     else (this.definition as RuntimeWidgetDefinition).behavior.layer = layer;
   }
 

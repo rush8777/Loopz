@@ -80,6 +80,24 @@ describe("live placement editor", () => {
     expect(JSON.parse(String(save[1]?.body)).definition.behavior.layer).toMatchObject({ mode: "relative", relation: "above", target: { label: "Checkout modal", targetContext: { pagePath: "/dashboard" } } });
   });
 
+  it("stores Guide layering policies on the selected step", async () => {
+    const fetchMock = editorFetch(guideDraft()); vi.stubGlobal("fetch", fetchMock);
+    controller = new EditorModeController("https://api.example.com"); expect(await controller.start("one-time-token")).toBe(true);
+    const mode = editorRoot().querySelector<HTMLSelectElement>("[data-layer-mode]")!;
+    mode.value = "auto"; mode.dispatchEvent(new Event("change", { bubbles: true }));
+    editorRoot().querySelector<HTMLButtonElement>('[data-step="1"]')!.click();
+    expect(mode.value).toBe("always_on_top");
+    mode.value = "custom"; mode.dispatchEvent(new Event("change", { bubbles: true }));
+    editorRoot().querySelector<HTMLButtonElement>('[data-step="0"]')!.click();
+    expect(mode.value).toBe("auto");
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
+    const save = [...fetchMock.mock.calls].reverse().find(([, init]) => init?.method === "PATCH")!;
+    const saved = JSON.parse(String(save[1]?.body)).definition;
+    expect(saved.behavior?.layer).toBeUndefined();
+    expect(saved.steps[0].behavior.layer).toEqual({ mode: "auto" });
+    expect(saved.steps[1].behavior.layer).toEqual({ mode: "custom", zIndex: 1000 });
+  });
+
   it("restores the selected Guide step ID and mode on full-page editor continuation without analytics collectors", async () => {
     const fetchMock = editorFetch(guideDraft()); vi.stubGlobal("fetch", fetchMock);
     controller = new EditorModeController("https://api.example.com");

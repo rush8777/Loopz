@@ -59,6 +59,17 @@ describe("experience editor and runtime", () => {
     }
   });
 
+  it("applies each Guide step's own layering policy with a legacy Guide fallback", () => {
+    const target = document.createElement("button"); target.id = "layer-target"; document.body.appendChild(target);
+    const guide: DeliveredExperience = { id: "guide_layers", versionId: "v1", kind: "guide", widgetType: null, priority: 1, definition: { design, behavior: { layer: { mode: "custom", zIndex: 99 } }, steps: [
+      { id: "one", content: { heading: "First", body: "One" }, target: { primarySelector: "#layer-target", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true, layer: { mode: "custom", zIndex: 101 } } },
+      { id: "two", content: { heading: "Second", body: "Two" }, target: { primarySelector: "#layer-target", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
+    ] } };
+    const renderer = new ExperienceRenderer(); const callbacks = { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() };
+    renderer.render(guide, callbacks, "one"); expect(document.querySelector<HTMLElement>("[data-movecues-experience]")?.style.zIndex).toBe("101");
+    renderer.render(guide, callbacks, "two"); expect(document.querySelector<HTMLElement>("[data-movecues-experience]")?.style.zIndex).toBe("99"); renderer.destroy();
+  });
+
   it("advances a Guide from direct element hover without the global HoverCollector", () => {
     vi.useFakeTimers();
     const target = document.createElement("button"); target.id = "hover-target"; document.body.appendChild(target);

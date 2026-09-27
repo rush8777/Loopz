@@ -5,6 +5,7 @@ export interface SurveyCallbacks {
   onDismiss: () => void;
   onProgress: (answers: SurveyAnswers, currentStepId: string, direction: "next" | "back") => Promise<void> | void;
   onSubmit: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
+  onStepChange?: (stepId: string) => void;
 }
 
 export class SurveyRenderer {
@@ -29,6 +30,7 @@ export class SurveyRenderer {
 
   private renderStep(): HTMLElement {
     const root = this.root!; const step = this.survey.steps[this.stepIndex];
+    this.callbacks.onStepChange?.(step.id);
     const baseStyle = root.firstElementChild;
     Array.from(root.children).forEach(element => { if (element !== baseStyle) element.remove(); });
     const content: ExperienceContent = { heading: step.content.heading || this.content.heading, body: step.content.body || this.content.body };
