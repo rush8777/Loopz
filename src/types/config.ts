@@ -96,7 +96,7 @@ export interface AnalyticsConfig {
     rageClick?: boolean;
     hover?: boolean;
     cursor?: boolean;
-    /** Scans the DOM for interactive elements on SDK initialization + route change, so Pages can catalog their elements without depending on behavioral capture. See ElementCrawler.ts. */
+    /** Element inventory capability retained for compatibility, but release-disabled for MVP1. See ElementCrawler.ts. */
     elementCrawler?: boolean;
   };
   rageClick?: Partial<RageClickConfig>;

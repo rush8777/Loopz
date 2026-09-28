@@ -118,8 +118,8 @@ export class Analytics {
     this.log("initialized", { siteId: this.config.siteId });
     this.engine.initializeElementDiscovery();
 
-    // Page/Element discovery belongs to the initialized SDK lifecycle,
-    // so route observation remains active when behavioral capture stops.
+    // Route observation belongs to the initialized SDK lifecycle and remains
+    // active for page views and Experiences independently of dormant discovery.
     this.unsubscribers.push(this.routeObserver.onChange(() => this.onRouteChange()));
     this.routeObserver.start();
 
@@ -370,6 +370,7 @@ export class Analytics {
 
     this.unsubscribers.push(
       bus.on<ElementsSeenPayload>("elements_seen", (p) => {
+        if (!MVP1_POLICY.elementCrawler) return;
         // Deliberately not enqueueEvent()/the batched queue - see
         // Transport.sendElements's doc comment. Best-effort, fire-and-
         // forget; a failed crawl upload just means the catalog is

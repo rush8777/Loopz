@@ -30,9 +30,9 @@ export class AutoCaptureEngine {
   readonly cursor: CursorCollector;
   readonly funnel: FunnelTracker;
   /**
-   * Not a behavioral start/stop collector like the others - a one-shot
-   * `.crawl()` triggered from SDK initialization and `onRouteChange()` (SPA
-   * navigation) rather than any continuous listener. See ElementCrawler.ts.
+   * Dormant in MVP1. When release-enabled, this is a one-shot `.crawl()`
+   * triggered from SDK initialization and `onRouteChange()` rather than a
+   * behavioral start/stop collector. See ElementCrawler.ts.
    */
   readonly elementCrawler: ElementCrawler;
   /**
@@ -82,7 +82,11 @@ export class AutoCaptureEngine {
    * This lifecycle is intentionally independent of behavioral start/stop.
    */
   initializeElementDiscovery(): void {
-    if (this.discoveryInitialized || !this.config.autocapture.elementCrawler) return;
+    if (
+      !MVP1_POLICY.elementCrawler ||
+      this.discoveryInitialized ||
+      !this.config.autocapture.elementCrawler
+    ) return;
     this.discoveryInitialized = true;
     this.scheduleInitialCrawl();
   }
@@ -93,11 +97,11 @@ export class AutoCaptureEngine {
     if (document.readyState === "loading") {
       this.pendingInitialCrawl = () => {
         this.pendingInitialCrawl = null;
-        if (this.discoveryInitialized) this.elementCrawler.crawl();
+        if (MVP1_POLICY.elementCrawler && this.discoveryInitialized) this.elementCrawler.crawl();
       };
       document.addEventListener("DOMContentLoaded", this.pendingInitialCrawl, { once: true });
     } else {
-      this.elementCrawler.crawl();
+      if (MVP1_POLICY.elementCrawler && this.discoveryInitialized) this.elementCrawler.crawl();
     }
   }
 
@@ -122,13 +126,13 @@ export class AutoCaptureEngine {
     this.sessionReplay.stop();
   }
 
-  /** Called on SPA route changes; discovery remains active even when behavioral capture is stopped. */
+  /** Handles SPA routes; dormant discovery can only run when the release policy enables it. */
   onRouteChange(path: string, behavioralCaptureActive = true): void {
     if (behavioralCaptureActive) {
       this.scroll.reset();
       this.funnel.onPageView(path);
     }
-    if (this.discoveryInitialized) this.elementCrawler.crawl();
+    if (MVP1_POLICY.elementCrawler && this.discoveryInitialized) this.elementCrawler.crawl();
   }
 
   isRunning(): boolean {

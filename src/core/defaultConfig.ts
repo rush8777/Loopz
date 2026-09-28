@@ -22,7 +22,9 @@ export function resolveConfig(input: AnalyticsConfig): ResolvedAnalyticsConfig {
       rageClick: input.autocapture?.rageClick ?? true,
       hover: MVP1_POLICY.hover && (input.autocapture?.hover ?? false),
       cursor: MVP1_POLICY.cursor && (input.autocapture?.cursor ?? false),
-      elementCrawler: input.autocapture?.elementCrawler ?? true,
+      elementCrawler:
+        MVP1_POLICY.elementCrawler &&
+        (input.autocapture?.elementCrawler ?? false),
     },
     rageClick: {
       minClicks: input.rageClick?.minClicks ?? 4,

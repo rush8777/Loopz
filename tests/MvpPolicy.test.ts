@@ -33,22 +33,23 @@ describe("MVP1 SDK policy", () => {
 
   it("forces high-volume collectors and replay off while retaining MVP1 defaults", () => {
     const defaults = resolveConfig({ siteId: "site_1" });
-    expect(defaults.autocapture).toMatchObject({ cursor: false, hover: false, move: false, click: true, scroll: true, rageClick: true, elementCrawler: true });
+    expect(defaults.autocapture).toMatchObject({ cursor: false, hover: false, move: false, click: true, scroll: true, rageClick: true, elementCrawler: false });
     expect(defaults.sessionReplay.enabled).toBe(false);
 
     const staleOverride = resolveConfig({
       siteId: "site_1",
-      autocapture: { cursor: true, hover: true, move: true },
+      autocapture: { cursor: true, hover: true, move: true, elementCrawler: true },
       sessionReplay: { enabled: true },
     });
-    expect(staleOverride.autocapture).toMatchObject({ cursor: false, hover: false, move: false });
+    expect(staleOverride.autocapture).toMatchObject({ cursor: false, hover: false, move: false, elementCrawler: false });
     expect(staleOverride.sessionReplay.enabled).toBe(false);
     // Interactive-only click persistence is release-locked alongside the
     // existing disabled high-volume capture modes.
     expect(MVP1_POLICY.interactiveClicksOnly).toBe(true);
+    expect(MVP1_POLICY.elementCrawler).toBe(false);
   });
 
-  it("does not initialize heatmaps or replay and keeps core analytics/discovery operational", async () => {
+  it("does not initialize release-disabled capabilities while keeping core analytics operational", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
     vi.stubGlobal("fetch", fetchMock);
     const cursor = vi.spyOn(CursorCollector.prototype, "start");
@@ -65,7 +66,7 @@ describe("MVP1 SDK policy", () => {
     analytics.init({
       siteId: "site_1",
       endpoint: "https://api.example.com",
-      autocapture: { cursor: true, hover: true, move: true },
+      autocapture: { cursor: true, hover: true, move: true, elementCrawler: true },
       sessionReplay: { enabled: true, bundleUrl: "https://cdn.example.com/sdk-replay.js" },
       heatmapSnapshotBundleUrl: "https://cdn.example.com/sdk-heatmap.js",
       experiences: { enabled: false },
@@ -82,9 +83,10 @@ describe("MVP1 SDK policy", () => {
     expect(click).toHaveBeenCalledOnce();
     expect(scroll).toHaveBeenCalledOnce();
     expect(rage).toHaveBeenCalledOnce();
-    expect(crawl).toHaveBeenCalledOnce();
+    expect(crawl).not.toHaveBeenCalled();
     expect(document.querySelector('script[src*="sdk-replay"],script[src*="sdk-heatmap"]')).toBeNull();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("heatmap"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/elements"))).toBe(false);
 
     const events = fetchMock.mock.calls
       .filter(([url]) => String(url).endsWith("/events"))
