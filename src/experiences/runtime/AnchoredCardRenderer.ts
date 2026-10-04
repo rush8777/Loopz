@@ -40,9 +40,6 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
   card.style.setProperty("--movecues-primary", design.theme.primary);
   card.dataset.width = design.width; card.dataset.radius = design.theme.borderRadius;
   if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
-  const close = behavior.dismissible ? `<button class="close" data-dismiss aria-label="Dismiss">×</button>` : "";
-  card.innerHTML = close;
-  card.querySelector("[data-dismiss]")?.addEventListener("click", callbacks.onDismiss);
   const mountedBuilder = Boolean(builder && mountBuilderContent(root, card, builder, callbacks, widgetType === "survey"));
   if (mountedBuilder && widgetType) applyBuilderSizeContent(card, widgetType, design);
   if (!mountedBuilder) {
@@ -52,9 +49,39 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
     card.querySelector("[data-primary]")?.addEventListener("click", callbacks.onPrimary);
     card.querySelector("[data-secondary]")?.addEventListener("click", callbacks.onSecondary);
   }
+  if (behavior.dismissible) mountRuntimeDismissControl(card, callbacks.onDismiss);
   root.appendChild(card);
+  if (mountedBuilder && widgetType) fitBuilderWidthEnvelope(card);
   if (mountedBuilder && widgetType === "anchored_card") fitAnchoredBuilderEnvelope(card);
   return card;
+}
+
+/**
+ * Runtime controls are deliberately kept outside the authored builder surface.
+ * The nested shadow root means saved CSS remains authoritative for saved
+ * content, while it cannot accidentally turn a dismiss control into part of an
+ * authored flex or grid layout.
+ */
+function mountRuntimeDismissControl(card: HTMLElement, onDismiss: () => void): void {
+  const chrome = document.createElement("div");
+  chrome.className = "movecues-runtime-chrome";
+  chrome.dataset.movecuesRuntimeChrome = "dismiss";
+  chrome.style.setProperty("position", "absolute", "important");
+  chrome.style.setProperty("inset", "0", "important");
+  chrome.style.setProperty("z-index", "2", "important");
+  chrome.style.setProperty("pointer-events", "none", "important");
+  const chromeRoot = chrome.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  style.textContent = `:host{all:initial;color:inherit}button{position:absolute;top:7px;right:8px;display:block;box-sizing:border-box;flex:none;margin:0;border:0;border-radius:7px;padding:3px 7px;background:transparent;color:inherit;font:20px/1 ui-sans-serif,system-ui,sans-serif;cursor:pointer;pointer-events:auto}`;
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "movecues-runtime-close";
+  close.dataset.dismiss = "";
+  close.setAttribute("aria-label", "Dismiss");
+  close.textContent = "×";
+  close.addEventListener("click", onDismiss);
+  chromeRoot.append(style, close);
+  card.appendChild(chrome);
 }
 
 /**
@@ -69,6 +96,20 @@ function fitAnchoredBuilderEnvelope(card: HTMLElement): void {
   const cardRect = card.getBoundingClientRect(); const widgetRect = widget.getBoundingClientRect();
   if (widgetRect.width > 0 && cardRect.width - widgetRect.width > 0.5) card.style.width = `${Math.ceil(widgetRect.width)}px`;
   if (widgetRect.height > 0 && cardRect.height - widgetRect.height > 0.5) card.style.height = `${Math.ceil(widgetRect.height)}px`;
+}
+
+/**
+ * The outer card is only a positioning envelope. Once saved CSS establishes
+ * the visual root width, collapse the shell to it so card positioning and
+ * runtime chrome exactly follow the authored widget.
+ */
+function fitBuilderWidthEnvelope(card: HTMLElement): void {
+  const widget = card.querySelector<HTMLElement>(".builder-content > .movecues-widget");
+  if (!widget) return;
+  const widgetRect = widget.getBoundingClientRect();
+  if (widgetRect.width <= 0) return;
+  card.style.width = `${Math.ceil(widgetRect.width)}px`;
+  card.style.minWidth = "0";
 }
 
 export class AnchoredCardRenderer {

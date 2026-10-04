@@ -866,6 +866,7 @@
     // Keep normal click analytics focused on intentional UI interactions.
     // Raw, privacy-approved clicks still flow locally for rage detection.
     interactiveClicksOnly: true,
+    elementCrawler: false,
     cursor: false,
     hover: false,
     move: false,
@@ -1026,7 +1027,7 @@
      * This lifecycle is intentionally independent of behavioral start/stop.
      */
     initializeElementDiscovery() {
-      if (this.discoveryInitialized || !this.config.autocapture.elementCrawler) return;
+      if (!MVP1_POLICY.elementCrawler || this.discoveryInitialized || !this.config.autocapture.elementCrawler) return;
       this.discoveryInitialized = true;
       this.scheduleInitialCrawl();
     }
@@ -1036,11 +1037,11 @@
       if (document.readyState === "loading") {
         this.pendingInitialCrawl = () => {
           this.pendingInitialCrawl = null;
-          if (this.discoveryInitialized) this.elementCrawler.crawl();
+          if (MVP1_POLICY.elementCrawler && this.discoveryInitialized) this.elementCrawler.crawl();
         };
         document.addEventListener("DOMContentLoaded", this.pendingInitialCrawl, { once: true });
       } else {
-        this.elementCrawler.crawl();
+        if (MVP1_POLICY.elementCrawler && this.discoveryInitialized) this.elementCrawler.crawl();
       }
     }
     /** Completely tears down discovery scheduling during Analytics.destroy(). */
@@ -1062,13 +1063,13 @@
       this.cursor.stop();
       this.sessionReplay.stop();
     }
-    /** Called on SPA route changes; discovery remains active even when behavioral capture is stopped. */
+    /** Handles SPA routes; dormant discovery can only run when the release policy enables it. */
     onRouteChange(path, behavioralCaptureActive = true) {
       if (behavioralCaptureActive) {
         this.scroll.reset();
         this.funnel.onPageView(path);
       }
-      if (this.discoveryInitialized) this.elementCrawler.crawl();
+      if (MVP1_POLICY.elementCrawler && this.discoveryInitialized) this.elementCrawler.crawl();
     }
     isRunning() {
       return this.started;
@@ -1774,7 +1775,7 @@
         rageClick: ((_d = input.autocapture) == null ? void 0 : _d.rageClick) ?? true,
         hover: MVP1_POLICY.hover && (((_e = input.autocapture) == null ? void 0 : _e.hover) ?? false),
         cursor: MVP1_POLICY.cursor && (((_f = input.autocapture) == null ? void 0 : _f.cursor) ?? false),
-        elementCrawler: ((_g = input.autocapture) == null ? void 0 : _g.elementCrawler) ?? true
+        elementCrawler: MVP1_POLICY.elementCrawler && (((_g = input.autocapture) == null ? void 0 : _g.elementCrawler) ?? false)
       },
       rageClick: {
         minClicks: ((_h = input.rageClick) == null ? void 0 : _h.minClicks) ?? 4,
@@ -2370,6 +2371,7 @@
       );
       this.unsubscribers.push(
         bus.on("elements_seen", (p) => {
+          if (!MVP1_POLICY.elementCrawler) return;
           void this.transport.sendElements(p.pagePath, p.elements);
           this.log(`elements crawled: ${p.elements.length}`);
         })

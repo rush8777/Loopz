@@ -94,6 +94,49 @@ describe("experience editor and runtime", () => {
     }
   });
 
+  it("keeps cursor-follow dismiss chrome out of saved flex content", () => {
+    const callbacks = { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() };
+    const experience = base("cursor_follow");
+    if (isGuide(experience)) throw new Error("Expected a widget experience");
+    const html = '<section class="movecues-widget movecues-widget--cursor_follow" data-movecues-widget-type="cursor_follow"><div class="movecues-widget__icon">✦</div><div class="movecues-widget__message"><h2 class="movecues-widget__heading">A helpful message</h2><p class="movecues-widget__body">Add a concise message.</p></div></section>';
+    const css = ".movecues-widget{display:flex;flex-direction:row}.movecues-widget--cursor_follow{align-items:center;gap:12px}.movecues-widget__message{min-width:0}";
+    experience.definition.builder = { version: 1, projectData: {}, html, css };
+
+    const renderer = new ExperienceRenderer();
+    renderer.render(experience, callbacks);
+    const root = document.querySelector("[data-movecues-experience]")!.shadowRoot!;
+    const card = root.querySelector<HTMLElement>(".card.cursor")!;
+    const widget = root.querySelector<HTMLElement>(".movecues-widget--cursor_follow")!;
+    const chrome = card.querySelector<HTMLElement>(":scope > .movecues-runtime-chrome")!;
+    const close = chrome.shadowRoot?.querySelector<HTMLButtonElement>("[data-dismiss]");
+
+    expect(Array.from(widget.children).map(child => child.className)).toEqual(["movecues-widget__icon", "movecues-widget__message"]);
+    expect(widget.querySelector(".movecues-runtime-close")).toBeNull();
+    expect(Array.from(card.children).map(child => child.className)).toEqual(["builder-content", "movecues-runtime-chrome"]);
+    expect(close).toBeTruthy();
+    expect(chrome.style.getPropertyValue("position")).toBe("absolute");
+    expect(chrome.style.getPropertyPriority("position")).toBe("important");
+    expect(chrome.shadowRoot?.querySelector("style")?.textContent).toContain("flex:none");
+    expect(root.querySelector("style[data-movecues-builder-style]")?.textContent).toContain(css);
+    expect(card.style.width).toBe("280px");
+    expect(card.style.height).toBe("auto");
+    expect(widget.style.getPropertyValue("width")).toBe("");
+    expect(widget.style.getPropertyValue("max-width")).toBe("100%");
+    expect(widget.style.getPropertyValue("height")).toBe("auto");
+
+    close!.click();
+    expect(callbacks.onDismiss).toHaveBeenCalledOnce();
+    expect(document.querySelector("[data-movecues-experience]")).toBeNull();
+
+    const nonDismissible = base("cursor_follow");
+    if (isGuide(nonDismissible)) throw new Error("Expected a widget experience");
+    nonDismissible.definition.behavior.dismissible = false;
+    nonDismissible.definition.builder = { version: 1, projectData: {}, html, css };
+    renderer.render(nonDismissible, callbacks);
+    expect(document.querySelector("[data-movecues-experience]")!.shadowRoot?.querySelector(".movecues-runtime-chrome")).toBeNull();
+    renderer.destroy();
+  });
+
   it("mounts canonical builder selectors without runtime visual overrides", () => {
     const host = document.createElement("div"); const root = host.attachShadow({ mode: "open" }); const card = document.createElement("div"); root.appendChild(card); const css = ".movecues-widget{background:#0d132d}.movecues-widget .movecues-widget__heading{color:#fff;font-size:32px}";
     expect(mountBuilderContent(root, card, { version: 1, projectData: {}, html: '<section class="movecues-widget"><h2 class="movecues-widget__heading">Hello<br>again</h2></section>', css }, { onPrimary: vi.fn(), onSecondary: vi.fn(), onDismiss: vi.fn() })).toBe(true); const installed = root.querySelector<HTMLStyleElement>("style[data-movecues-builder-style]")!.textContent; expect(installed).toContain(css); expect(installed).not.toContain("width:100%!important"); expect(installed).toContain("overflow:visible"); expect(installed).not.toContain("contain:layout style paint"); expect(root.querySelector<HTMLElement>(".builder-content")?.style.overflow).not.toBe("hidden"); expect(root.querySelector(".movecues-widget__heading")?.innerHTML).toBe("Hello<br>again");
@@ -218,7 +261,7 @@ describe("experience editor and runtime", () => {
       { id: "two", content: { heading: "Guide two", body: "Two" }, target: { primarySelector: "#interrupt-second", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
     ] } };
     const modal = base("modal"); modal.id = "modal_interrupt"; modal.priority = 80; modal.interruptPolicy = "interrupt";
-    const fetchMock = experienceFetch(trigger => trigger === "open_modal" ? [modal] : [guide]); vi.stubGlobal("fetch", fetchMock); const loader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await loader.evaluate(); document.querySelector("[data-movecues-experience]")!.shadowRoot!.querySelector<HTMLButtonElement>(".primary")!.click(); expect(activeExperienceText()).toContain("Guide two"); loader.onCustomEvent("open_modal"); await vi.waitFor(() => expect(activeExperienceText()).toContain("Hello")); expect(JSON.parse(sessionStorage.getItem("__movecues_active_guide__")!)).toMatchObject({ currentStepId: "two", status: "paused" }); document.querySelector("[data-movecues-experience]")!.shadowRoot!.querySelector<HTMLButtonElement>(".close")!.click(); await vi.waitFor(() => expect(activeExperienceText()).toContain("Guide two")); const guideShown = postedEvents(fetchMock).filter(event => event.experienceId === guide.id && event.event === "shown"); expect(guideShown).toHaveLength(1); loader.destroy();
+    const fetchMock = experienceFetch(trigger => trigger === "open_modal" ? [modal] : [guide]); vi.stubGlobal("fetch", fetchMock); const loader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await loader.evaluate(); document.querySelector("[data-movecues-experience]")!.shadowRoot!.querySelector<HTMLButtonElement>(".primary")!.click(); expect(activeExperienceText()).toContain("Guide two"); loader.onCustomEvent("open_modal"); await vi.waitFor(() => expect(activeExperienceText()).toContain("Hello")); expect(JSON.parse(sessionStorage.getItem("__movecues_active_guide__")!)).toMatchObject({ currentStepId: "two", status: "paused" }); document.querySelector("[data-movecues-experience]")!.shadowRoot!.querySelector<HTMLElement>(".movecues-runtime-chrome")!.shadowRoot!.querySelector<HTMLButtonElement>("[data-dismiss]")!.click(); await vi.waitFor(() => expect(activeExperienceText()).toContain("Guide two")); const guideShown = postedEvents(fetchMock).filter(event => event.experienceId === guide.id && event.event === "shown"); expect(guideShown).toHaveLength(1); loader.destroy();
   });
 
   it("waits for a delayed SPA target and cleans up on timeout or destroy", async () => {

@@ -152,9 +152,8 @@ ${ISOLATION_CSS}`;
     content.style.width = "100%";
     content.style.height = fillsHeight ? "100%" : "auto";
     widget.style.setProperty("box-sizing", "border-box");
-    widget.style.setProperty("width", "100%", "important");
     widget.style.setProperty("min-width", "0", "important");
-    widget.style.setProperty("max-width", "none", "important");
+    widget.style.setProperty("max-width", "100%", "important");
     widget.style.setProperty("height", fillsHeight ? "100%" : "auto", "important");
     widget.style.setProperty("max-height", fillsHeight ? "100%" : "none", "important");
   }
@@ -223,7 +222,7 @@ ${ISOLATION_CSS}`;
     return stop;
   }
   function buildCard(root, content, design, behavior, callbacks, builder, widgetType) {
-    var _a, _b, _c;
+    var _a, _b;
     const card = document.createElement("section");
     card.className = "card";
     card.style.setProperty("--movecues-bg", design.theme.background);
@@ -232,21 +231,41 @@ ${ISOLATION_CSS}`;
     card.dataset.width = design.width;
     card.dataset.radius = design.theme.borderRadius;
     if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
-    const close = behavior.dismissible ? `<button class="close" data-dismiss aria-label="Dismiss">×</button>` : "";
-    card.innerHTML = close;
-    (_a = card.querySelector("[data-dismiss]")) == null ? void 0 : _a.addEventListener("click", callbacks.onDismiss);
     const mountedBuilder = Boolean(builder && mountBuilderContent(root, card, builder, callbacks, widgetType === "survey"));
     if (mountedBuilder && widgetType) applyBuilderSizeContent(card, widgetType, design);
     if (!mountedBuilder) {
       const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText(content.primaryAction.label)}</button>` : "";
       const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText(content.secondaryAction.label)}</button>` : "";
       card.insertAdjacentHTML("beforeend", `<div class="legacy-content"><h2>${escapeText(content.heading)}</h2><p>${escapeText(content.body)}</p><footer>${secondary}${primary}</footer></div>`);
-      (_b = card.querySelector("[data-primary]")) == null ? void 0 : _b.addEventListener("click", callbacks.onPrimary);
-      (_c = card.querySelector("[data-secondary]")) == null ? void 0 : _c.addEventListener("click", callbacks.onSecondary);
+      (_a = card.querySelector("[data-primary]")) == null ? void 0 : _a.addEventListener("click", callbacks.onPrimary);
+      (_b = card.querySelector("[data-secondary]")) == null ? void 0 : _b.addEventListener("click", callbacks.onSecondary);
     }
+    if (behavior.dismissible) mountRuntimeDismissControl(card, callbacks.onDismiss);
     root.appendChild(card);
+    if (mountedBuilder && widgetType) fitBuilderWidthEnvelope(card);
     if (mountedBuilder && widgetType === "anchored_card") fitAnchoredBuilderEnvelope(card);
     return card;
+  }
+  function mountRuntimeDismissControl(card, onDismiss) {
+    const chrome = document.createElement("div");
+    chrome.className = "movecues-runtime-chrome";
+    chrome.dataset.movecuesRuntimeChrome = "dismiss";
+    chrome.style.setProperty("position", "absolute", "important");
+    chrome.style.setProperty("inset", "0", "important");
+    chrome.style.setProperty("z-index", "2", "important");
+    chrome.style.setProperty("pointer-events", "none", "important");
+    const chromeRoot = chrome.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = `:host{all:initial;color:inherit}button{position:absolute;top:7px;right:8px;display:block;box-sizing:border-box;flex:none;margin:0;border:0;border-radius:7px;padding:3px 7px;background:transparent;color:inherit;font:20px/1 ui-sans-serif,system-ui,sans-serif;cursor:pointer;pointer-events:auto}`;
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "movecues-runtime-close";
+    close.dataset.dismiss = "";
+    close.setAttribute("aria-label", "Dismiss");
+    close.textContent = "×";
+    close.addEventListener("click", onDismiss);
+    chromeRoot.append(style, close);
+    card.appendChild(chrome);
   }
   function fitAnchoredBuilderEnvelope(card) {
     const widget = card.querySelector(".builder-content > .movecues-widget");
@@ -255,6 +274,14 @@ ${ISOLATION_CSS}`;
     const widgetRect = widget.getBoundingClientRect();
     if (widgetRect.width > 0 && cardRect.width - widgetRect.width > 0.5) card.style.width = `${Math.ceil(widgetRect.width)}px`;
     if (widgetRect.height > 0 && cardRect.height - widgetRect.height > 0.5) card.style.height = `${Math.ceil(widgetRect.height)}px`;
+  }
+  function fitBuilderWidthEnvelope(card) {
+    const widget = card.querySelector(".builder-content > .movecues-widget");
+    if (!widget) return;
+    const widgetRect = widget.getBoundingClientRect();
+    if (widgetRect.width <= 0) return;
+    card.style.width = `${Math.ceil(widgetRect.width)}px`;
+    card.style.minWidth = "0";
   }
   class AnchoredCardRenderer {
     constructor() {
@@ -641,9 +668,10 @@ ${ISOLATION_CSS}`;
       return this.renderStep();
     }
     renderStep() {
-      var _a;
+      var _a, _b, _c;
       const root = this.root;
       const step = this.survey.steps[this.stepIndex];
+      (_b = (_a = this.callbacks).onStepChange) == null ? void 0 : _b.call(_a, step.id);
       const baseStyle = root.firstElementChild;
       Array.from(root.children).forEach((element) => {
         if (element !== baseStyle) element.remove();
@@ -653,7 +681,7 @@ ${ISOLATION_CSS}`;
       const card = this.modal.render(root, content, stepDesign, this.behavior, { onDismiss: this.callbacks.onDismiss, onPrimary: this.callbacks.onDismiss, onSecondary: this.callbacks.onDismiss }, step.builder, "survey");
       let surface = card.querySelector(".movecues-widget");
       if (!surface) {
-        (_a = card.querySelector(".legacy-content")) == null ? void 0 : _a.remove();
+        (_c = card.querySelector(".legacy-content")) == null ? void 0 : _c.remove();
         surface = document.createElement("section");
         surface.className = "movecues-widget movecues-widget--survey";
         card.appendChild(surface);
@@ -1013,10 +1041,17 @@ ${ISOLATION_CSS}`;
       style.textContent = STYLES;
       root.appendChild(style);
       document.documentElement.appendChild(this.host);
-      this.appliedLayer = this.layerManager.apply(this.host, { layer: behavior.layer, legacyZIndex: behavior.zIndex, targetElement });
+      this.applyLayer(behavior, targetElement);
       return root;
     }
+    applyLayer(behavior, targetElement) {
+      var _a;
+      if (!this.host) return;
+      (_a = this.appliedLayer) == null ? void 0 : _a.destroy();
+      this.appliedLayer = this.layerManager.apply(this.host, { layer: behavior.layer, legacyZIndex: behavior.zIndex, targetElement });
+    }
     renderWidget(experience, definition, callbacks, requestedStepId) {
+      var _a;
       if (experience.widgetType === "anchored_card" || experience.widgetType === "hotspot") {
         const mount = (target2) => {
           const root = this.root(experience.id, definition.behavior, target2);
@@ -1031,9 +1066,9 @@ ${ISOLATION_CSS}`;
           this.cancelPendingTarget = null;
           mount(element);
         }, () => {
-          var _a;
+          var _a2;
           this.cancelPendingTarget = null;
-          (_a = callbacks.onUnavailable) == null ? void 0 : _a.call(callbacks);
+          (_a2 = callbacks.onUnavailable) == null ? void 0 : _a2.call(callbacks);
         });
       } else if (experience.widgetType === "toast") {
         const root = this.root(experience.id, definition.behavior);
@@ -1051,15 +1086,20 @@ ${ISOLATION_CSS}`;
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else if (experience.widgetType === "survey" && definition.survey) {
-        const root = this.root(experience.id, definition.behavior);
+        const selectedStep = definition.survey.steps.find((step) => step.id === requestedStepId) ?? definition.survey.steps[0];
+        const root = this.root(experience.id, { ...definition.behavior, layer: ((_a = selectedStep == null ? void 0 : selectedStep.behavior) == null ? void 0 : _a.layer) ?? definition.behavior.layer });
         const renderer = new SurveyRenderer();
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId, direction) => {
-          var _a;
-          return (_a = callbacks.onSurveyProgress) == null ? void 0 : _a.call(callbacks, answers, stepId, direction);
+          var _a2;
+          return (_a2 = callbacks.onSurveyProgress) == null ? void 0 : _a2.call(callbacks, answers, stepId, direction);
         }, onSubmit: (answers, stepId) => {
-          var _a;
-          return (_a = callbacks.onSurveySubmit) == null ? void 0 : _a.call(callbacks, answers, stepId);
+          var _a2;
+          return (_a2 = callbacks.onSurveySubmit) == null ? void 0 : _a2.call(callbacks, answers, stepId);
+        }, onStepChange: (stepId) => {
+          var _a2;
+          const step = definition.survey.steps.find((item) => item.id === stepId);
+          this.applyLayer({ ...definition.behavior, layer: ((_a2 = step == null ? void 0 : step.behavior) == null ? void 0 : _a2.layer) ?? definition.behavior.layer });
         } }, requestedStepId);
       } else if (experience.widgetType === "slideout") {
         const root = this.root(experience.id, definition.behavior);
@@ -1110,7 +1150,7 @@ ${ISOLATION_CSS}`;
         (_a2 = card.querySelector("footer")) == null ? void 0 : _a2.prepend(back);
       };
       if (getGuideStepPattern(step) === "modal") {
-        const root = this.root(experience.id, { layer: (_a = definition.behavior) == null ? void 0 : _a.layer });
+        const root = this.root(experience.id, { layer: step.behavior.layer ?? ((_a = definition.behavior) == null ? void 0 : _a.layer) });
         const renderer = new ModalRenderer();
         this.renderer = renderer;
         const behavior = { dismissible: step.behavior.dismissible ?? true };
@@ -1122,7 +1162,7 @@ ${ISOLATION_CSS}`;
       const mount = (target2) => {
         var _a2, _b, _c;
         ensureGuideTargetInView(target2);
-        const root = this.root(experience.id, { layer: (_a2 = definition.behavior) == null ? void 0 : _a2.layer }, target2);
+        const root = this.root(experience.id, { layer: step.behavior.layer ?? ((_a2 = definition.behavior) == null ? void 0 : _a2.layer) }, target2);
         const renderer = new AnchoredCardRenderer();
         this.renderer = renderer;
         const behavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset, pointer: step.behavior.pointer };
@@ -1222,9 +1262,9 @@ ${ISOLATION_CSS}`;
   const STYLES = `
   :host{all:initial}.card{pointer-events:auto;position:fixed;box-sizing:border-box;width:320px;max-width:calc(100vw - 16px);padding:18px;background:var(--movecues-bg);color:var(--movecues-fg);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-shadow:0 12px 38px rgba(0,0,0,.22);border:1px solid rgba(0,0,0,.12)}
   .card[data-width=sm]{width:260px}.card[data-width=lg]{width:400px}.card[data-radius=sm]{border-radius:6px}.card[data-radius=md]{border-radius:12px}.card[data-radius=lg]{border-radius:20px}
-  .builder-card{padding:0;background:transparent;border:0;box-shadow:none}.builder-content{box-sizing:border-box;width:100%;max-width:100%;overflow:visible}.builder-card>.close{z-index:2}
+  .builder-card{padding:0;background:transparent;border:0;box-shadow:none}.builder-content{box-sizing:border-box;width:100%;max-width:100%;overflow:visible}
   .movecues-anchor-pointer{position:absolute;width:var(--movecues-pointer-size);height:var(--movecues-pointer-size);pointer-events:none;z-index:0}.movecues-anchor-pointer svg{display:block;width:100%;height:100%;overflow:visible}.movecues-anchor-pointer[data-placement=bottom]{top:calc(-1 * var(--movecues-pointer-size));transform:translateX(-50%)}.movecues-anchor-pointer[data-placement=top]{bottom:calc(-1 * var(--movecues-pointer-size));transform:translateX(-50%) rotate(180deg)}.movecues-anchor-pointer[data-placement=right]{left:calc(-1 * var(--movecues-pointer-size));transform:translateY(-50%) rotate(-90deg)}.movecues-anchor-pointer[data-placement=left]{right:calc(-1 * var(--movecues-pointer-size));transform:translateY(-50%) rotate(90deg)}.builder-content,.legacy-content{position:relative;z-index:1}
-  h2{font:600 17px/1.3 ui-sans-serif,system-ui,sans-serif;margin:0 24px 7px 0}p{margin:0;white-space:pre-wrap}footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}button{border:0;border-radius:7px;padding:8px 12px;font:600 13px ui-sans-serif,system-ui,sans-serif;cursor:pointer}.primary{background:var(--movecues-primary);color:#fff}.secondary{background:transparent;color:inherit}.close{position:absolute;right:8px;top:7px;padding:3px 7px;background:transparent;color:inherit;font-size:20px}
+  h2{font:600 17px/1.3 ui-sans-serif,system-ui,sans-serif;margin:0 24px 7px 0}p{margin:0;white-space:pre-wrap}footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}button{border:0;border-radius:7px;padding:8px 12px;font:600 13px ui-sans-serif,system-ui,sans-serif;cursor:pointer}.primary{background:var(--movecues-primary);color:#fff}.secondary{background:transparent;color:inherit}
   .toast{position:fixed!important}.toast[data-position=top-left]{top:16px;left:16px}.toast[data-position=top-right]{top:16px;right:16px}.toast[data-position=bottom-left]{bottom:16px;left:16px}.toast[data-position=bottom-right]{bottom:16px;right:16px}.cursor{will-change:left,top}@media(prefers-reduced-motion:reduce){.card{transition:none!important}}
   .backdrop{pointer-events:auto;position:fixed;inset:0;background:rgba(0,0,0,var(--movecues-backdrop-opacity,.45))}
   .modal{left:50%;top:50%;transform:translate(-50%,-50%)}.modal[data-layout=fullscreen],.modal[data-size-width=full]{inset:12px;width:auto!important;max-width:none!important;transform:none;display:flex;flex-direction:column;justify-content:center}.modal[data-layout=fullscreen] footer,.modal[data-size-width=full] footer{justify-content:center}

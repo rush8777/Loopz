@@ -14,7 +14,31 @@ describe("runtime builder sizing envelope", () => {
     const fixture = card(); const value = design(height); applyWidgetSizeEnvelope(fixture.card, "survey", value); applyBuilderSizeContent(fixture.card, "survey", value);
     expect(fixture.card.style.width).toBe("720px"); expect(fixture.card.style.height).toBe(envelopeHeight);
     expect(fixture.content.style.width).toBe("100%"); expect(fixture.content.style.height).toBe(innerHeight);
-    expect(fixture.widget.style.getPropertyValue("width")).toBe("100%"); expect(fixture.widget.style.getPropertyPriority("width")).toBe("important");
+    expect(fixture.widget.style.getPropertyValue("width")).toBe("320px"); expect(fixture.widget.style.getPropertyPriority("width")).toBe("");
+    expect(fixture.widget.style.getPropertyValue("max-width")).toBe("100%"); expect(fixture.widget.style.getPropertyPriority("max-width")).toBe("important");
     expect(fixture.widget.style.getPropertyValue("height")).toBe(innerHeight); expect(fixture.widget.style.getPropertyPriority("height")).toBe("important");
+  });
+
+  it("keeps an authored cursor-follow width instead of expanding it to the type default", () => {
+    const fixture = card(); const value = design({ mode: "auto" });
+    fixture.widget.style.width = "248px";
+    applyWidgetSizeEnvelope(fixture.card, "cursor_follow", value); applyBuilderSizeContent(fixture.card, "cursor_follow", value);
+
+    expect(fixture.card.style.width).toBe("360px");
+    expect(fixture.widget.style.getPropertyValue("width")).toBe("248px");
+    expect(fixture.widget.style.getPropertyPriority("width")).toBe("");
+    expect(fixture.widget.style.getPropertyValue("max-width")).toBe("100%");
+    expect(fixture.widget.style.getPropertyPriority("max-width")).toBe("important");
+  });
+
+  it.each(["anchored_card", "toast", "cursor_follow", "modal", "slideout", "hotspot", "banner", "survey"] as const)("keeps the authored %s width inside its runtime envelope", widgetType => {
+    const fixture = card(); const value = design({ mode: "auto" });
+    fixture.widget.style.width = "248px";
+    applyWidgetSizeEnvelope(fixture.card, widgetType, value); applyBuilderSizeContent(fixture.card, widgetType, value);
+
+    expect(fixture.widget.style.getPropertyValue("width")).toBe("248px");
+    expect(fixture.widget.style.getPropertyPriority("width")).toBe("");
+    expect(fixture.widget.style.getPropertyValue("max-width")).toBe("100%");
+    expect(fixture.widget.style.getPropertyPriority("max-width")).toBe("important");
   });
 });
