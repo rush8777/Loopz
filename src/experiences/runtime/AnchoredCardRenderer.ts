@@ -35,9 +35,9 @@ export function waitForTarget(target: ExperienceTarget | undefined, onFound: (el
 export function buildCard(root: ShadowRoot, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState, widgetType?: WidgetType): HTMLElement {
   const card = document.createElement("section");
   card.className = "card";
-  card.style.setProperty("--movecues-bg", design.theme.background);
-  card.style.setProperty("--movecues-fg", design.theme.foreground);
-  card.style.setProperty("--movecues-primary", design.theme.primary);
+  card.style.setProperty("--movcues-bg", design.theme.background);
+  card.style.setProperty("--movcues-fg", design.theme.foreground);
+  card.style.setProperty("--movcues-primary", design.theme.primary);
   card.dataset.width = design.width; card.dataset.radius = design.theme.borderRadius;
   if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
   const mountedBuilder = Boolean(builder && mountBuilderContent(root, card, builder, callbacks, widgetType === "survey"));
@@ -64,8 +64,8 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
  */
 function mountRuntimeDismissControl(card: HTMLElement, onDismiss: () => void): void {
   const chrome = document.createElement("div");
-  chrome.className = "movecues-runtime-chrome";
-  chrome.dataset.movecuesRuntimeChrome = "dismiss";
+  chrome.className = "movcues-runtime-chrome";
+  chrome.dataset.movcuesRuntimeChrome = "dismiss";
   chrome.style.setProperty("position", "absolute", "important");
   chrome.style.setProperty("inset", "0", "important");
   chrome.style.setProperty("z-index", "2", "important");
@@ -75,7 +75,7 @@ function mountRuntimeDismissControl(card: HTMLElement, onDismiss: () => void): v
   style.textContent = `:host{all:initial;color:inherit}button{position:absolute;top:7px;right:8px;display:block;box-sizing:border-box;flex:none;margin:0;border:0;border-radius:7px;padding:3px 7px;background:transparent;color:inherit;font:20px/1 ui-sans-serif,system-ui,sans-serif;cursor:pointer;pointer-events:auto}`;
   const close = document.createElement("button");
   close.type = "button";
-  close.className = "movecues-runtime-close";
+  close.className = "movcues-runtime-close";
   close.dataset.dismiss = "";
   close.setAttribute("aria-label", "Dismiss");
   close.textContent = "×";
@@ -91,7 +91,7 @@ function mountRuntimeDismissControl(card: HTMLElement, onDismiss: () => void): v
  * root before calculating target-relative coordinates.
  */
 function fitAnchoredBuilderEnvelope(card: HTMLElement): void {
-  const widget = card.querySelector<HTMLElement>(".builder-content > .movecues-widget");
+  const widget = card.querySelector<HTMLElement>(".builder-content > .movcues-widget");
   if (!widget) return;
   const cardRect = card.getBoundingClientRect(); const widgetRect = widget.getBoundingClientRect();
   if (widgetRect.width > 0 && cardRect.width - widgetRect.width > 0.5) card.style.width = `${Math.ceil(widgetRect.width)}px`;
@@ -104,7 +104,7 @@ function fitAnchoredBuilderEnvelope(card: HTMLElement): void {
  * runtime chrome exactly follow the authored widget.
  */
 function fitBuilderWidthEnvelope(card: HTMLElement): void {
-  const widget = card.querySelector<HTMLElement>(".builder-content > .movecues-widget");
+  const widget = card.querySelector<HTMLElement>(".builder-content > .movcues-widget");
   if (!widget) return;
   const widgetRect = widget.getBoundingClientRect();
   if (widgetRect.width <= 0) return;
@@ -189,9 +189,9 @@ export class AnchoredCardRenderer {
 function buildPointer(card: HTMLElement, design: ExperienceDesign, behavior: ExperienceBehavior): HTMLElement {
   const pointer = document.createElement("span");
   const size = pointerSize(behavior);
-  pointer.className = "movecues-anchor-pointer";
+  pointer.className = "movcues-anchor-pointer";
   pointer.setAttribute("aria-hidden", "true");
-  pointer.style.setProperty("--movecues-pointer-size", `${size}px`);
+  pointer.style.setProperty("--movcues-pointer-size", `${size}px`);
   pointer.style.color = pointerColor(card, design);
   pointer.innerHTML = '<svg viewBox="0 0 10 10" focusable="false" aria-hidden="true"><path d="M5 0 10 10H0Z" fill="currentColor"/></svg>';
   card.prepend(pointer);
@@ -199,7 +199,7 @@ function buildPointer(card: HTMLElement, design: ExperienceDesign, behavior: Exp
 }
 
 function pointerColor(card: HTMLElement, design: ExperienceDesign): string {
-  const widget = card.querySelector<HTMLElement>(".movecues-widget");
+  const widget = card.querySelector<HTMLElement>(".movcues-widget");
   if (!widget) return design.theme.background;
   const background = getComputedStyle(widget).backgroundColor.trim();
   return isTransparent(background) ? design.theme.background : background;

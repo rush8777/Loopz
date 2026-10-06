@@ -1,5 +1,5 @@
 {
-  "name": "movecues",
+  "name": "@movcues/sdk",
   "version": "0.1.0",
   "description": "Hotjar-style autocapture behavioral analytics SDK (Click Maps, Scroll Maps, Move Maps, Rage Clicks, Funnels)",
   "type": "module",
@@ -56,6 +56,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@movcues/sdk": "^0.1.0",
     "modern-screenshot": "^4.6.6",
     "rrweb": "^2.1.1"
   }

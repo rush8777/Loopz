@@ -19,6 +19,7 @@ export declare class ExperienceRenderer {
     private layerManager;
     render(experience: DeliveredExperience, callbacks: ExperienceRendererCallbacks, guideStepId?: string): boolean;
     private root;
+    private applyLayer;
     private renderWidget;
     private renderGuide;
     private listenForAdvance;

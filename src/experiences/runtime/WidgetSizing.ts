@@ -52,7 +52,7 @@ export function applyWidgetSizeEnvelope(card: HTMLElement, widgetType: WidgetTyp
 }
 
 export function applyBuilderSizeContent(card: HTMLElement, widgetType: WidgetType, design: ExperienceDesign): void {
-  const content = card.querySelector<HTMLElement>(".builder-content"); const widget = content?.querySelector<HTMLElement>(":scope > .movecues-widget");
+  const content = card.querySelector<HTMLElement>(".builder-content"); const widget = content?.querySelector<HTMLElement>(":scope > .movcues-widget");
   if (!content || !widget) return;
   const size = normalizeWidgetSize(widgetType, design); const fillsHeight = size.height.mode !== "auto";
   content.style.width = "100%"; content.style.height = fillsHeight ? "100%" : "auto";

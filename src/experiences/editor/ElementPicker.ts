@@ -38,7 +38,7 @@ export class ElementPicker {
 }
 
 function isMovcuesSurface(element: Element): boolean {
-  if (element.closest("[data-movecues-editor],[data-movecues-experience],[data-movecues-picker-overlay]")) return true;
+  if (element.closest("[data-movcues-editor],[data-movcues-experience],[data-movcues-picker-overlay]")) return true;
   const root = element.getRootNode();
   return root instanceof ShadowRoot && isMovcuesSurface(root.host);
 }

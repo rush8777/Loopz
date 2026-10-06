@@ -118,7 +118,7 @@ describe("ElementCrawler", () => {
   });
 
   it("caps the number of elements reported per crawl", () => {
-    const buttons = Array.from({ length: 600 }, (_, i) => `<button data-movecues-name="btn-${i}">${i}</button>`).join("");
+    const buttons = Array.from({ length: 600 }, (_, i) => `<button data-movcues-name="btn-${i}">${i}</button>`).join("");
     setBody(buttons);
     crawler.crawl();
 

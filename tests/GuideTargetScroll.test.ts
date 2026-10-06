@@ -42,22 +42,22 @@ describe("Guide target auto-scroll", () => {
     if ("steps" in experience.definition) experience.definition.steps[0].behavior.pointer = { enabled: true, size: 18 };
     const renderer = new ExperienceRenderer();
     renderer.render(experience, callbacks(), "anchored");
-    const host = document.querySelector<HTMLElement>("[data-movecues-experience]")!;
-    const pointer = host.shadowRoot?.querySelector<HTMLElement>(".movecues-anchor-pointer");
+    const host = document.querySelector<HTMLElement>("[data-movcues-experience]")!;
+    const pointer = host.shadowRoot?.querySelector<HTMLElement>(".movcues-anchor-pointer");
 
     expect(pointer?.dataset.placement).toBe("bottom");
-    expect(pointer?.style.getPropertyValue("--movecues-pointer-size")).toBe("18px");
+    expect(pointer?.style.getPropertyValue("--movcues-pointer-size")).toBe("18px");
     renderer.destroy();
   });
 
   it("scrolls only after a delayed SPA target resolves", async () => {
     const renderer = new ExperienceRenderer();
     renderer.render(guide("#delayed"), callbacks(), "anchored");
-    expect(document.querySelector("[data-movecues-experience]")).toBeNull();
+    expect(document.querySelector("[data-movcues-experience]")).toBeNull();
 
     const target = targetAt("delayed", rect(100, 1400, 120, 40));
     await vi.waitFor(() => expect(target.scrollIntoView).toHaveBeenCalledTimes(1));
-    expect(document.querySelector("[data-movecues-experience]")).not.toBeNull();
+    expect(document.querySelector("[data-movcues-experience]")).not.toBeNull();
     renderer.destroy();
   });
 
@@ -112,7 +112,7 @@ describe("Guide target auto-scroll", () => {
     await Promise.resolve();
 
     expect(target.scrollIntoView).not.toHaveBeenCalled();
-    expect(document.querySelector("[data-movecues-experience]")).toBeNull();
+    expect(document.querySelector("[data-movcues-experience]")).toBeNull();
   });
 });
 

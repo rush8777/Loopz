@@ -4,7 +4,7 @@
  * whichever fits your setup:
  *   - app-layout-example.tsx: zero npm dependency, loads from a CDN URL,
  *     works even if this package isn't in your package.json.
- *   - this file: `npm install movecues`, tree-shakeable,
+ *   - this file: `npm install @movcues/sdk`, tree-shakeable,
  *     typed, no CDN round trip.
  *
  * Must be a Client Component ("use client") since it touches window/
@@ -15,7 +15,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { createAnalytics, type Analytics } from "movecues";
+import { createAnalytics, type Analytics } from "movcues/sdk";
 
 export function AnalyticsClientESM({ siteId }: { siteId: string }) {
   const analyticsRef = useRef<Analytics | null>(null);

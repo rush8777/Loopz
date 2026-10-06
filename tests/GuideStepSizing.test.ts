@@ -21,7 +21,7 @@ describe("Guide step sizing", () => {
     const renderer = new ExperienceRenderer();
     renderer.render(experience, { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() });
 
-    const card = document.querySelector("[data-movecues-experience]")!.shadowRoot!.querySelector<HTMLElement>(".card")!;
+    const card = document.querySelector("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLElement>(".card")!;
     expect(card.style.width).toBe("280px");
     renderer.destroy();
   });

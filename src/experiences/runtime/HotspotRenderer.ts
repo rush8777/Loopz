@@ -11,7 +11,7 @@ export class HotspotRenderer {
     const beacon = document.createElement("button");
     beacon.className = "hotspot";
     beacon.dataset.style = behavior.hotspotStyle ?? "pulse";
-    beacon.style.setProperty("--movecues-hotspot", behavior.hotspotColor ?? design.theme.primary);
+    beacon.style.setProperty("--movcues-hotspot", behavior.hotspotColor ?? design.theme.primary);
     beacon.type = "button";
     beacon.setAttribute("aria-label", `Open ${content.heading}`);
     if (beacon.dataset.style === "question") beacon.textContent = "?";

@@ -3,7 +3,7 @@ import type { ExperienceDesign } from "../src/experiences/types";
 import { applyBuilderSizeContent, applyWidgetSizeEnvelope } from "../src/experiences/runtime/WidgetSizing";
 
 const design = (height: NonNullable<ExperienceDesign["size"]>["height"]): ExperienceDesign => ({ width: "md", size: { width: { mode: "fixed", value: 720 }, height }, theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } });
-function card(): { card: HTMLElement; content: HTMLElement; widget: HTMLElement } { const card = document.createElement("section"); const content = document.createElement("div"); const widget = document.createElement("section"); content.className = "builder-content"; widget.className = "movecues-widget"; widget.style.width = "320px"; widget.style.height = "220px"; content.appendChild(widget); card.appendChild(content); return { card, content, widget }; }
+function card(): { card: HTMLElement; content: HTMLElement; widget: HTMLElement } { const card = document.createElement("section"); const content = document.createElement("div"); const widget = document.createElement("section"); content.className = "builder-content"; widget.className = "movcues-widget"; widget.style.width = "320px"; widget.style.height = "220px"; content.appendChild(widget); card.appendChild(content); return { card, content, widget }; }
 
 describe("runtime builder sizing envelope", () => {
   it.each([

@@ -47,7 +47,7 @@ describe("live placement editor", () => {
     editorRoot().querySelector<HTMLButtonElement>('[data-mode="navigate"]')!.click();
     target.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 2, clientY: 2 }));
     expect(customerClicks).toBe(1);
-    expect(document.querySelector("[data-movecues-experience]")).toBeNull();
+    expect(document.querySelector("[data-movcues-experience]")).toBeNull();
   });
 
   it("temporarily passes customer interaction through while Shift is held and restores selection on release", async () => {
@@ -113,14 +113,14 @@ describe("live placement editor", () => {
     const analytics = new Analytics({ editor: { createController: apiBase => new EditorModeController(apiBase) } });
     analytics.init({ siteId: "site_1", endpoint: "https://api.example.com" });
 
-    await vi.waitFor(() => expect(document.querySelector("[data-movecues-editor]")).not.toBeNull());
+    await vi.waitFor(() => expect(document.querySelector("[data-movcues-editor]")).not.toBeNull());
     const internals = analytics as unknown as { editor: unknown; engine: unknown; session: unknown };
     expect(internals.editor).toBeTruthy();
     expect(internals.engine).toBeUndefined();
     expect(internals.session).toBeUndefined();
     expect(editorRoot().querySelector<HTMLButtonElement>('[data-step="1"]')?.dataset.stepStatus).toBe("current");
     expect(editorRoot().querySelector('[data-mode="navigate"]')?.classList.contains("active")).toBe(true);
-    expect(document.querySelector("[data-movecues-experience]")).toBeNull();
+    expect(document.querySelector("[data-movcues-experience]")).toBeNull();
     expect(String(fetchMock.mock.calls[fetchMock.mock.calls.length - 1]?.[0])).toContain("/experience-editor/ees_1/draft");
     analytics.destroy();
   });
@@ -146,7 +146,7 @@ describe("live placement editor", () => {
     const draft = guideDraft(); if (!("steps" in draft.version.definition)) throw new Error("Expected Guide"); draft.version.definition.steps[1] = { id: "two", pattern: "modal", content: { heading: "Modal step", body: "No target" }, advance: { type: "button" }, behavior: { dismissible: true } };
     vi.stubGlobal("fetch", editorFetch(draft)); controller = new EditorModeController("https://api.example.com"); expect(await controller.start("one-time-token")).toBe(true);
     editorRoot().querySelector<HTMLButtonElement>('[data-step="1"]')!.click();
-    expect(activePreviewText()).toContain("Modal step"); expect(document.querySelector("[data-movecues-experience]")?.shadowRoot?.querySelector(".modal")).not.toBeNull(); expect(editorRoot().querySelector<HTMLElement>('[data-for="target"]')?.hidden).toBe(true); expect(editorRoot().querySelector<HTMLElement>("[data-missing-selector]")?.hidden).toBe(true); expect(document.querySelector("[data-movecues-picker-overlay]")).toBeNull();
+    expect(activePreviewText()).toContain("Modal step"); expect(document.querySelector("[data-movcues-experience]")?.shadowRoot?.querySelector(".modal")).not.toBeNull(); expect(editorRoot().querySelector<HTMLElement>('[data-for="target"]')?.hidden).toBe(true); expect(editorRoot().querySelector<HTMLElement>("[data-missing-selector]")?.hidden).toBe(true); expect(document.querySelector("[data-movcues-picker-overlay]")).toBeNull();
   });
 
   it("reports a Guide target configured on another page without marking it missing", async () => {
@@ -179,7 +179,7 @@ describe("live placement editor", () => {
     const experience = widgetExperience("anchored_card", ".duplicate");
     const renderer = new ExperienceRenderer();
     expect(renderer.render(experience, { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() })).toBe(true);
-    expect(document.querySelector("[data-movecues-experience]")).toBeNull();
+    expect(document.querySelector("[data-movcues-experience]")).toBeNull();
     renderer.destroy();
   });
 });
@@ -208,5 +208,5 @@ function widgetExperience(widgetType: "anchored_card", selector: string) {
   return { id: "runtime_1", versionId: "v1", kind: "widget" as const, widgetType, priority: 1, definition: { content: { heading: "Anchored", body: "Preview" }, design, behavior: { dismissible: true }, target: { primarySelector: selector, fallbackSelectors: [], reliability: "moderate" as const } } };
 }
 
-function editorRoot(): ShadowRoot { return document.querySelector<HTMLElement>("[data-movecues-editor]")!.shadowRoot!; }
-function activePreviewText(): string { return document.querySelector<HTMLElement>("[data-movecues-experience]")?.shadowRoot?.textContent ?? ""; }
+function editorRoot(): ShadowRoot { return document.querySelector<HTMLElement>("[data-movcues-editor]")!.shadowRoot!; }
+function activePreviewText(): string { return document.querySelector<HTMLElement>("[data-movcues-experience]")?.shadowRoot?.textContent ?? ""; }

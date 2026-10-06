@@ -9,7 +9,7 @@
   function isGuideDefinition(value) {
     return "steps" in value;
   }
-  const EDITOR_CONTINUATION_KEY = "__movecues_experience_editor_session__";
+  const EDITOR_CONTINUATION_KEY = "__movcues_experience_editor_session__";
   function storeEditorContinuation(continuation) {
     try {
       sessionStorage.setItem(EDITOR_CONTINUATION_KEY, JSON.stringify(continuation));
@@ -78,7 +78,7 @@
   }
   const BUILDER_ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "HEADER", "H1", "H2", "H3", "H4", "P", "SPAN", "BR", "BUTTON", "IMG", "HR", "LABEL", "UL", "LI"]);
   const BUILDER_SURVEY_INPUT_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA"]);
-  const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "width", "height", "type", "placeholder", "maxlength", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type", "data-movecues-question-id", "data-movecues-question-type", "data-movecues-question-input", "data-movecues-option-id", "data-movecues-survey-action", "data-movecues-survey-controls", "data-movecues-survey-progress", "data-movecues-survey-progress-bar", "data-movecues-survey-step-id", "data-movecues-checklist-role", "data-movecues-checklist-item-id", "data-movecues-checklist-item-role", "data-movecues-checklist-view"]);
+  const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
   const BUILDER_BLOCKED_TAGS = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO|SOURCE)$/i;
   const BUILDER_UNSAFE_CSS = /@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i;
   function builderImageUrlIsSafe(value) {
@@ -95,7 +95,7 @@
     while ((match = rule.exec(css)) !== null) {
       const prelude = match[1].trim();
       if (!prelude || prelude.startsWith("@")) continue;
-      if (prelude.split(",").some((selector) => !selector.trim().includes(".movecues-widget"))) return null;
+      if (prelude.split(",").some((selector) => !selector.trim().includes(".movcues-widget"))) return null;
     }
     return css;
   }
@@ -103,29 +103,29 @@
     const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
     const css = safeBuilderCss(builder.css);
     if (!html || css === null) return false;
-    let style = root.querySelector("style[data-movecues-builder-style]");
+    let style = root.querySelector("style[data-movcues-builder-style]");
     if (!style) {
       style = document.createElement("style");
-      style.dataset.movecuesBuilderStyle = "";
+      style.dataset.movcuesBuilderStyle = "";
       root.appendChild(style);
     }
     style.textContent = `${css}
 ${ISOLATION_CSS}`;
     const content = document.createElement("div");
     content.className = "builder-content";
-    content.dataset.movecuesBuilderSurface = "";
+    content.dataset.movcuesBuilderSurface = "";
     content.append(...html);
     card.appendChild(content);
     card.classList.add("builder-card");
     card.addEventListener("click", (event) => {
-      const target = event.target instanceof Element ? event.target.closest("[data-movecues-action-id]") : null;
+      const target = event.target instanceof Element ? event.target.closest("[data-movcues-action-id]") : null;
       if (!target || !card.contains(target)) return;
-      if (target.dataset.movecuesActionId === "primary") callbacks.onPrimary();
-      if (target.dataset.movecuesActionId === "secondary") callbacks.onSecondary();
+      if (target.dataset.movcuesActionId === "primary") callbacks.onPrimary();
+      if (target.dataset.movcuesActionId === "secondary") callbacks.onSecondary();
     });
     return true;
   }
-  const ISOLATION_CSS = `[data-movecues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movecues-builder-surface]>.movecues-widget{position:relative!important;inset:auto!important}`;
+  const ISOLATION_CSS = `[data-movcues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movcues-builder-surface]>.movcues-widget{position:relative!important;inset:auto!important}`;
   function sanitizeBuilderHtml(input, allowSurveyInputs = false) {
     const template = document.createElement("template");
     template.innerHTML = input;
@@ -140,10 +140,10 @@ ${ISOLATION_CSS}`;
         const name = attribute.name.toLowerCase();
         if (!BUILDER_ALLOWED_ATTRIBUTES.has(name) || name.startsWith("on") || /javascript\s*:/i.test(attribute.value)) element.removeAttribute(attribute.name);
       }
-      const action = element.getAttribute("data-movecues-action-id");
-      if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-movecues-action-id");
-      const surveyAction = element.getAttribute("data-movecues-survey-action");
-      if (surveyAction && surveyAction !== "back" && surveyAction !== "next" && surveyAction !== "submit") element.removeAttribute("data-movecues-survey-action");
+      const action = element.getAttribute("data-movcues-action-id");
+      if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-movcues-action-id");
+      const surveyAction = element.getAttribute("data-movcues-survey-action");
+      if (surveyAction && surveyAction !== "back" && surveyAction !== "next" && surveyAction !== "submit") element.removeAttribute("data-movcues-survey-action");
       if (element.tagName === "IMG") {
         const source = element.getAttribute("src") ?? "";
         if (!builderImageUrlIsSafe(source)) element.removeAttribute("src");
@@ -154,10 +154,10 @@ ${ISOLATION_CSS}`;
         if (!builderInputTypeIsSafe(type)) element.setAttribute("type", "text");
       }
     }
-    const root = template.content.querySelector(".movecues-widget");
+    const root = template.content.querySelector(".movcues-widget");
     if (!root) return null;
     for (const slot of ["primary", "secondary"]) {
-      const actions = Array.from(template.content.querySelectorAll(`[data-movecues-action-id="${slot}"]`));
+      const actions = Array.from(template.content.querySelectorAll(`[data-movcues-action-id="${slot}"]`));
       actions.slice(1).forEach((action) => action.remove());
     }
     return Array.from(template.content.childNodes);
@@ -207,7 +207,7 @@ ${ISOLATION_CSS}`;
   }
   function applyBuilderSizeContent(card, widgetType, design) {
     const content = card.querySelector(".builder-content");
-    const widget = content == null ? void 0 : content.querySelector(":scope > .movecues-widget");
+    const widget = content == null ? void 0 : content.querySelector(":scope > .movcues-widget");
     if (!content || !widget) return;
     const size = normalizeWidgetSize(widgetType, design);
     const fillsHeight = size.height.mode !== "auto";
@@ -287,9 +287,9 @@ ${ISOLATION_CSS}`;
     var _a, _b;
     const card = document.createElement("section");
     card.className = "card";
-    card.style.setProperty("--movecues-bg", design.theme.background);
-    card.style.setProperty("--movecues-fg", design.theme.foreground);
-    card.style.setProperty("--movecues-primary", design.theme.primary);
+    card.style.setProperty("--movcues-bg", design.theme.background);
+    card.style.setProperty("--movcues-fg", design.theme.foreground);
+    card.style.setProperty("--movcues-primary", design.theme.primary);
     card.dataset.width = design.width;
     card.dataset.radius = design.theme.borderRadius;
     if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
@@ -310,8 +310,8 @@ ${ISOLATION_CSS}`;
   }
   function mountRuntimeDismissControl(card, onDismiss) {
     const chrome = document.createElement("div");
-    chrome.className = "movecues-runtime-chrome";
-    chrome.dataset.movecuesRuntimeChrome = "dismiss";
+    chrome.className = "movcues-runtime-chrome";
+    chrome.dataset.movcuesRuntimeChrome = "dismiss";
     chrome.style.setProperty("position", "absolute", "important");
     chrome.style.setProperty("inset", "0", "important");
     chrome.style.setProperty("z-index", "2", "important");
@@ -321,7 +321,7 @@ ${ISOLATION_CSS}`;
     style.textContent = `:host{all:initial;color:inherit}button{position:absolute;top:7px;right:8px;display:block;box-sizing:border-box;flex:none;margin:0;border:0;border-radius:7px;padding:3px 7px;background:transparent;color:inherit;font:20px/1 ui-sans-serif,system-ui,sans-serif;cursor:pointer;pointer-events:auto}`;
     const close = document.createElement("button");
     close.type = "button";
-    close.className = "movecues-runtime-close";
+    close.className = "movcues-runtime-close";
     close.dataset.dismiss = "";
     close.setAttribute("aria-label", "Dismiss");
     close.textContent = "×";
@@ -330,7 +330,7 @@ ${ISOLATION_CSS}`;
     card.appendChild(chrome);
   }
   function fitAnchoredBuilderEnvelope(card) {
-    const widget = card.querySelector(".builder-content > .movecues-widget");
+    const widget = card.querySelector(".builder-content > .movcues-widget");
     if (!widget) return;
     const cardRect = card.getBoundingClientRect();
     const widgetRect = widget.getBoundingClientRect();
@@ -338,7 +338,7 @@ ${ISOLATION_CSS}`;
     if (widgetRect.height > 0 && cardRect.height - widgetRect.height > 0.5) card.style.height = `${Math.ceil(widgetRect.height)}px`;
   }
   function fitBuilderWidthEnvelope(card) {
-    const widget = card.querySelector(".builder-content > .movecues-widget");
+    const widget = card.querySelector(".builder-content > .movcues-widget");
     if (!widget) return;
     const widgetRect = widget.getBoundingClientRect();
     if (widgetRect.width <= 0) return;
@@ -443,16 +443,16 @@ ${ISOLATION_CSS}`;
   function buildPointer(card, design, behavior) {
     const pointer = document.createElement("span");
     const size = pointerSize(behavior);
-    pointer.className = "movecues-anchor-pointer";
+    pointer.className = "movcues-anchor-pointer";
     pointer.setAttribute("aria-hidden", "true");
-    pointer.style.setProperty("--movecues-pointer-size", `${size}px`);
+    pointer.style.setProperty("--movcues-pointer-size", `${size}px`);
     pointer.style.color = pointerColor(card, design);
     pointer.innerHTML = '<svg viewBox="0 0 10 10" focusable="false" aria-hidden="true"><path d="M5 0 10 10H0Z" fill="currentColor"/></svg>';
     card.prepend(pointer);
     return pointer;
   }
   function pointerColor(card, design) {
-    const widget = card.querySelector(".movecues-widget");
+    const widget = card.querySelector(".movcues-widget");
     if (!widget) return design.theme.background;
     const background = getComputedStyle(widget).backgroundColor.trim();
     return isTransparent(background) ? design.theme.background : background;
@@ -583,7 +583,7 @@ ${ISOLATION_CSS}`;
       if (behavior.backdrop !== false) {
         const backdrop = document.createElement("div");
         backdrop.className = "backdrop";
-        backdrop.style.setProperty("--movecues-backdrop-opacity", String(behavior.backdropOpacity ?? 0.45));
+        backdrop.style.setProperty("--movcues-backdrop-opacity", String(behavior.backdropOpacity ?? 0.45));
         if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
         root.appendChild(backdrop);
       }
@@ -600,7 +600,7 @@ ${ISOLATION_CSS}`;
       if (behavior.backdrop) {
         const backdrop = document.createElement("div");
         backdrop.className = "backdrop";
-        backdrop.style.setProperty("--movecues-backdrop-opacity", String(behavior.backdropOpacity ?? 0.35));
+        backdrop.style.setProperty("--movcues-backdrop-opacity", String(behavior.backdropOpacity ?? 0.35));
         if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
         root.appendChild(backdrop);
       }
@@ -623,7 +623,7 @@ ${ISOLATION_CSS}`;
       const beacon = document.createElement("button");
       beacon.className = "hotspot";
       beacon.dataset.style = behavior.hotspotStyle ?? "pulse";
-      beacon.style.setProperty("--movecues-hotspot", behavior.hotspotColor ?? design.theme.primary);
+      beacon.style.setProperty("--movcues-hotspot", behavior.hotspotColor ?? design.theme.primary);
       beacon.type = "button";
       beacon.setAttribute("aria-label", `Open ${content.heading}`);
       if (beacon.dataset.style === "question") beacon.textContent = "?";
@@ -741,14 +741,14 @@ ${ISOLATION_CSS}`;
       const content = { heading: step.content.heading || this.content.heading, body: step.content.body || this.content.body };
       const stepDesign = step.size ? { ...this.design, size: step.size } : this.design;
       const card = this.modal.render(root, content, stepDesign, this.behavior, { onDismiss: this.callbacks.onDismiss, onPrimary: this.callbacks.onDismiss, onSecondary: this.callbacks.onDismiss }, step.builder, "survey");
-      let surface = card.querySelector(".movecues-widget");
+      let surface = card.querySelector(".movcues-widget");
       if (!surface) {
         (_c = card.querySelector(".legacy-content")) == null ? void 0 : _c.remove();
         surface = document.createElement("section");
-        surface.className = "movecues-widget movecues-widget--survey";
+        surface.className = "movcues-widget movcues-widget--survey";
         card.appendChild(surface);
       }
-      surface.dataset.movecuesSurveyStepId = step.id;
+      surface.dataset.movcuesSurveyStepId = step.id;
       this.syncQuestions(surface, step.questions);
       this.syncNavigation(surface);
       return card;
@@ -756,17 +756,17 @@ ${ISOLATION_CSS}`;
     syncQuestions(surface, questions) {
       var _a;
       const ids = new Set(questions.map((question) => question.id));
-      surface.querySelectorAll("[data-movecues-question-id]").forEach((node) => {
-        if (!ids.has(node.dataset.movecuesQuestionId ?? "")) node.remove();
+      surface.querySelectorAll("[data-movcues-question-id]").forEach((node) => {
+        if (!ids.has(node.dataset.movcuesQuestionId ?? "")) node.remove();
       });
-      let navigation = ((_a = surface.querySelector("[data-movecues-survey-action]")) == null ? void 0 : _a.parentElement) ?? null;
+      let navigation = ((_a = surface.querySelector("[data-movcues-survey-action]")) == null ? void 0 : _a.parentElement) ?? null;
       for (const question of questions) {
-        const matches = Array.from(surface.querySelectorAll(`[data-movecues-question-id="${cssEscape(question.id)}"]`));
+        const matches = Array.from(surface.querySelectorAll(`[data-movcues-question-id="${cssEscape(question.id)}"]`));
         matches.slice(1).forEach((node2) => node2.remove());
         const node = matches[0] ?? createQuestionNode(question);
         if (!matches[0]) surface.insertBefore(node, navigation);
-        node.dataset.movecuesQuestionType = question.type;
-        node.classList.add("movecues-survey-question", `movecues-survey-question--${question.type}`);
+        node.dataset.movcuesQuestionType = question.type;
+        node.classList.add("movcues-survey-question", `movcues-survey-question--${question.type}`);
         this.bindQuestion(node, question);
         navigation = navigation ?? node.nextElementSibling;
       }
@@ -776,15 +776,15 @@ ${ISOLATION_CSS}`;
       node.classList.remove("has-error");
       if (question.type === "single_choice" || question.type === "multiple_choice" || question.type === "rating" || question.type === "nps") {
         const allowed = question.type === "rating" ? range(question.min, question.max).map(String) : question.type === "nps" ? range(0, 10).map(String) : question.options.map((option) => option.id);
-        let controls = Array.from(node.querySelectorAll("[data-movecues-option-id]"));
+        let controls = Array.from(node.querySelectorAll("[data-movcues-option-id]"));
         if (!controls.length) {
           const holder = document.createElement("div");
-          holder.className = "movecues-survey-options";
+          holder.className = "movcues-survey-options";
           for (const value of allowed) {
             const button = document.createElement("button");
             button.type = "button";
-            button.className = "movecues-survey-option";
-            button.dataset.movecuesOptionId = value;
+            button.className = "movcues-survey-option";
+            button.dataset.movcuesOptionId = value;
             button.textContent = question.type === "single_choice" || question.type === "multiple_choice" ? ((_a = question.options.find((option) => option.id === value)) == null ? void 0 : _a.label) ?? value : value;
             holder.appendChild(button);
           }
@@ -792,7 +792,7 @@ ${ISOLATION_CSS}`;
           controls = Array.from(holder.children);
         }
         controls.forEach((control) => {
-          const optionId = control.dataset.movecuesOptionId;
+          const optionId = control.dataset.movcuesOptionId;
           control.setAttribute("role", "button");
           const update = () => {
             const answer = this.answers[question.id];
@@ -809,7 +809,7 @@ ${ISOLATION_CSS}`;
             } else this.answers[question.id] = question.type === "rating" || question.type === "nps" ? Number(optionId) : optionId;
             node.classList.remove("has-error");
             controls.forEach((item) => {
-              const value = item.dataset.movecuesOptionId;
+              const value = item.dataset.movcuesOptionId;
               const answer = this.answers[question.id];
               const selected = Array.isArray(answer) ? answer.includes(value) : String(answer) === value;
               item.classList.toggle("is-selected", selected);
@@ -819,11 +819,11 @@ ${ISOLATION_CSS}`;
         });
         return;
       }
-      let input = node.querySelector("[data-movecues-question-input]");
+      let input = node.querySelector("[data-movcues-question-input]");
       if (!input) {
         input = question.type === "long_text" ? document.createElement("textarea") : document.createElement("input");
-        input.dataset.movecuesQuestionInput = "";
-        input.className = "movecues-survey-input";
+        input.dataset.movcuesQuestionInput = "";
+        input.className = "movcues-survey-input";
         node.appendChild(input);
       }
       input.value = typeof this.answers[question.id] === "string" ? this.answers[question.id] : "";
@@ -837,11 +837,11 @@ ${ISOLATION_CSS}`;
     syncNavigation(surface) {
       const final = this.stepIndex === this.survey.steps.length - 1;
       const step = this.survey.steps[this.stepIndex];
-      const buttons = Array.from(surface.querySelectorAll("[data-movecues-survey-action]"));
-      const back = buttons.filter((button) => button.dataset.movecuesSurveyAction === "back");
-      const next = buttons.filter((button) => button.dataset.movecuesSurveyAction === "next");
-      const submit = buttons.filter((button) => button.dataset.movecuesSurveyAction === "submit");
-      const legacyControls = Boolean(surface.querySelector("[data-movecues-survey-controls]"));
+      const buttons = Array.from(surface.querySelectorAll("[data-movcues-survey-action]"));
+      const back = buttons.filter((button) => button.dataset.movcuesSurveyAction === "back");
+      const next = buttons.filter((button) => button.dataset.movcuesSurveyAction === "next");
+      const submit = buttons.filter((button) => button.dataset.movcuesSurveyAction === "submit");
+      const legacyControls = Boolean(surface.querySelector("[data-movcues-survey-controls]"));
       for (const button of back) {
         button.hidden = !this.survey.allowBack || this.stepIndex === 0;
         button.onclick = () => {
@@ -888,11 +888,11 @@ ${ISOLATION_CSS}`;
       });
     }
     syncProgress(surface) {
-      const progress = surface.querySelector("[data-movecues-survey-progress]");
+      const progress = surface.querySelector("[data-movcues-survey-progress]");
       if (progress) progress.hidden = !this.survey.showProgress;
-      const progressLabel = progress == null ? void 0 : progress.querySelector("span:not([data-movecues-survey-progress-bar])");
-      if (progressLabel && !progressLabel.querySelector("[data-movecues-survey-progress-bar]")) progressLabel.textContent = `Step ${this.stepIndex + 1} of ${this.survey.steps.length}`;
-      const bar = surface.querySelector("[data-movecues-survey-progress-bar]");
+      const progressLabel = progress == null ? void 0 : progress.querySelector("span:not([data-movcues-survey-progress-bar])");
+      if (progressLabel && !progressLabel.querySelector("[data-movcues-survey-progress-bar]")) progressLabel.textContent = `Step ${this.stepIndex + 1} of ${this.survey.steps.length}`;
+      const bar = surface.querySelector("[data-movcues-survey-progress-bar]");
       if (bar) bar.style.width = `${(this.stepIndex + 1) / this.survey.steps.length * 100}%`;
     }
     validateStep() {
@@ -907,7 +907,7 @@ ${ISOLATION_CSS}`;
         if (!stepValid) valid = false;
       }
       if (!valid && currentValid && this.root) {
-        const status = this.root.querySelector(".movecues-survey-validation");
+        const status = this.root.querySelector(".movcues-survey-validation");
         if (status) status.textContent = "Please go back and answer all required questions before submitting.";
       }
       return valid;
@@ -917,9 +917,9 @@ ${ISOLATION_CSS}`;
       if (show && this.root) {
         missing.forEach((question) => {
           var _a;
-          return (_a = this.root.querySelector(`[data-movecues-question-id="${cssEscape(question.id)}"]`)) == null ? void 0 : _a.classList.add("has-error");
+          return (_a = this.root.querySelector(`[data-movcues-question-id="${cssEscape(question.id)}"]`)) == null ? void 0 : _a.classList.add("has-error");
         });
-        const status = this.root.querySelector(".movecues-survey-validation");
+        const status = this.root.querySelector(".movcues-survey-validation");
         if (status) status.textContent = missing.length ? "Please answer the required questions before continuing." : "";
       }
       return missing.length === 0;
@@ -931,9 +931,9 @@ ${ISOLATION_CSS}`;
   }
   function createQuestionNode(question) {
     const node = document.createElement("div");
-    node.dataset.movecuesQuestionId = question.id;
+    node.dataset.movcuesQuestionId = question.id;
     const label = document.createElement("p");
-    label.className = "movecues-survey-question__label";
+    label.className = "movcues-survey-question__label";
     label.textContent = `${question.label}${question.required ? " *" : ""}`;
     node.appendChild(label);
     return node;
@@ -1032,8 +1032,8 @@ ${ISOLATION_CSS}`;
         const zIndex = String(resolution.zIndex);
         if (host.style.zIndex !== zIndex) host.style.zIndex = zIndex;
         if (resolution.fallback) {
-          if (host.dataset.movecuesLayerFallback !== resolution.fallback) host.dataset.movecuesLayerFallback = resolution.fallback;
-        } else if (host.dataset.movecuesLayerFallback) delete host.dataset.movecuesLayerFallback;
+          if (host.dataset.movcuesLayerFallback !== resolution.fallback) host.dataset.movcuesLayerFallback = resolution.fallback;
+        } else if (host.dataset.movcuesLayerFallback) delete host.dataset.movcuesLayerFallback;
         const dynamicLayer = ((_a = options.layer) == null ? void 0 : _a.mode) === "auto" || ((_b = options.layer) == null ? void 0 : _b.mode) === "relative";
         const watched = dynamicLayer ? ((_c = options.layer) == null ? void 0 : _c.mode) === "relative" ? this.findTarget(options.layer.target) : options.targetElement : null;
         if (watched && typeof MutationObserver !== "undefined") {
@@ -1095,8 +1095,8 @@ ${ISOLATION_CSS}`;
     }
     root(experienceId, behavior, targetElement) {
       this.host = document.createElement("div");
-      this.host.dataset.movecuesExperience = experienceId;
-      this.host.dataset.movecuesExperienceRoot = experienceId;
+      this.host.dataset.movcuesExperience = experienceId;
+      this.host.dataset.movcuesExperienceRoot = experienceId;
       this.host.style.cssText = "position:fixed;inset:0;pointer-events:none";
       const root = this.host.attachShadow({ mode: "open" });
       const style = document.createElement("style");
@@ -1322,18 +1322,18 @@ ${ISOLATION_CSS}`;
     target.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "center", inline: "nearest" });
   }
   const STYLES = `
-  :host{all:initial}.card{pointer-events:auto;position:fixed;box-sizing:border-box;width:320px;max-width:calc(100vw - 16px);padding:18px;background:var(--movecues-bg);color:var(--movecues-fg);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-shadow:0 12px 38px rgba(0,0,0,.22);border:1px solid rgba(0,0,0,.12)}
+  :host{all:initial}.card{pointer-events:auto;position:fixed;box-sizing:border-box;width:320px;max-width:calc(100vw - 16px);padding:18px;background:var(--movcues-bg);color:var(--movcues-fg);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-shadow:0 12px 38px rgba(0,0,0,.22);border:1px solid rgba(0,0,0,.12)}
   .card[data-width=sm]{width:260px}.card[data-width=lg]{width:400px}.card[data-radius=sm]{border-radius:6px}.card[data-radius=md]{border-radius:12px}.card[data-radius=lg]{border-radius:20px}
   .builder-card{padding:0;background:transparent;border:0;box-shadow:none}.builder-content{box-sizing:border-box;width:100%;max-width:100%;overflow:visible}
-  .movecues-anchor-pointer{position:absolute;width:var(--movecues-pointer-size);height:var(--movecues-pointer-size);pointer-events:none;z-index:0}.movecues-anchor-pointer svg{display:block;width:100%;height:100%;overflow:visible}.movecues-anchor-pointer[data-placement=bottom]{top:calc(-1 * var(--movecues-pointer-size));transform:translateX(-50%)}.movecues-anchor-pointer[data-placement=top]{bottom:calc(-1 * var(--movecues-pointer-size));transform:translateX(-50%) rotate(180deg)}.movecues-anchor-pointer[data-placement=right]{left:calc(-1 * var(--movecues-pointer-size));transform:translateY(-50%) rotate(-90deg)}.movecues-anchor-pointer[data-placement=left]{right:calc(-1 * var(--movecues-pointer-size));transform:translateY(-50%) rotate(90deg)}.builder-content,.legacy-content{position:relative;z-index:1}
-  h2{font:600 17px/1.3 ui-sans-serif,system-ui,sans-serif;margin:0 24px 7px 0}p{margin:0;white-space:pre-wrap}footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}button{border:0;border-radius:7px;padding:8px 12px;font:600 13px ui-sans-serif,system-ui,sans-serif;cursor:pointer}.primary{background:var(--movecues-primary);color:#fff}.secondary{background:transparent;color:inherit}
+  .movcues-anchor-pointer{position:absolute;width:var(--movcues-pointer-size);height:var(--movcues-pointer-size);pointer-events:none;z-index:0}.movcues-anchor-pointer svg{display:block;width:100%;height:100%;overflow:visible}.movcues-anchor-pointer[data-placement=bottom]{top:calc(-1 * var(--movcues-pointer-size));transform:translateX(-50%)}.movcues-anchor-pointer[data-placement=top]{bottom:calc(-1 * var(--movcues-pointer-size));transform:translateX(-50%) rotate(180deg)}.movcues-anchor-pointer[data-placement=right]{left:calc(-1 * var(--movcues-pointer-size));transform:translateY(-50%) rotate(-90deg)}.movcues-anchor-pointer[data-placement=left]{right:calc(-1 * var(--movcues-pointer-size));transform:translateY(-50%) rotate(90deg)}.builder-content,.legacy-content{position:relative;z-index:1}
+  h2{font:600 17px/1.3 ui-sans-serif,system-ui,sans-serif;margin:0 24px 7px 0}p{margin:0;white-space:pre-wrap}footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}button{border:0;border-radius:7px;padding:8px 12px;font:600 13px ui-sans-serif,system-ui,sans-serif;cursor:pointer}.primary{background:var(--movcues-primary);color:#fff}.secondary{background:transparent;color:inherit}
   .toast{position:fixed!important}.toast[data-position=top-left]{top:16px;left:16px}.toast[data-position=top-right]{top:16px;right:16px}.toast[data-position=bottom-left]{bottom:16px;left:16px}.toast[data-position=bottom-right]{bottom:16px;right:16px}.cursor{will-change:left,top}@media(prefers-reduced-motion:reduce){.card{transition:none!important}}
-  .backdrop{pointer-events:auto;position:fixed;inset:0;background:rgba(0,0,0,var(--movecues-backdrop-opacity,.45))}
+  .backdrop{pointer-events:auto;position:fixed;inset:0;background:rgba(0,0,0,var(--movcues-backdrop-opacity,.45))}
   .modal{left:50%;top:50%;transform:translate(-50%,-50%)}.modal[data-layout=fullscreen],.modal[data-size-width=full]{inset:12px;width:auto!important;max-width:none!important;transform:none;display:flex;flex-direction:column;justify-content:center}.modal[data-layout=fullscreen] footer,.modal[data-size-width=full] footer{justify-content:center}
   .slideout[data-position=top-left]{top:16px;left:16px}.slideout[data-position=top-right]{top:16px;right:16px}.slideout[data-position=bottom-left]{bottom:16px;left:16px}.slideout[data-position=bottom-right]{bottom:16px;right:16px}.slideout[data-position=center-left]{left:16px;top:50%;transform:translateY(-50%)}.slideout[data-position=center-right]{right:16px;top:50%;transform:translateY(-50%)}
   .banner{left:0;right:0;width:auto!important;max-width:none;border-radius:0!important;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner[data-position=top]{top:0}.banner[data-position=bottom]{bottom:0}.banner h2,.banner p{grid-column:1}.banner footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
-  .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--movecues-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--movecues-hotspot);border-radius:50%;animation:movecues-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes movecues-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
-  .movecues-survey-question.has-error{outline:2px solid #fecaca;outline-offset:6px;border-radius:6px}.movecues-survey-validation{color:#b91c1c}:where(.movecues-survey-option.is-selected){border-color:var(--movecues-primary);background:color-mix(in srgb,var(--movecues-primary) 12%,white)}.movecues-survey-input{font:inherit}
+  .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--movcues-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--movcues-hotspot);border-radius:50%;animation:movcues-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes movcues-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
+  .movcues-survey-question.has-error{outline:2px solid #fecaca;outline-offset:6px;border-radius:6px}.movcues-survey-validation{color:#b91c1c}:where(.movcues-survey-option.is-selected){border-color:var(--movcues-primary);background:color-mix(in srgb,var(--movcues-primary) 12%,white)}.movcues-survey-input{font:inherit}
 `;
   class EditorBridge {
     constructor(apiBase, sessionId, accessToken) {
@@ -1357,7 +1357,7 @@ ${ISOLATION_CSS}`;
   class HighlightOverlay {
     constructor() {
       this.element = document.createElement("div");
-      this.element.dataset.movecuesPickerOverlay = "";
+      this.element.dataset.movcuesPickerOverlay = "";
       this.element.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #2563eb;background:rgba(37,99,235,.12);display:none;box-sizing:border-box";
       document.documentElement.appendChild(this.element);
     }
@@ -1400,7 +1400,7 @@ ${ISOLATION_CSS}`;
     }
   }
   const MAX_LABEL_LENGTH = 60;
-  const OVERRIDE_ATTR = "data-movecues-name";
+  const OVERRIDE_ATTR = "data-movcues-name";
   const detector = new SensitiveElementDetector();
   function clean(text) {
     if (!text) return void 0;
@@ -1665,7 +1665,7 @@ ${ISOLATION_CSS}`;
     }
   }
   function isMovcuesSurface(element) {
-    if (element.closest("[data-movecues-editor],[data-movecues-experience],[data-movecues-picker-overlay]")) return true;
+    if (element.closest("[data-movcues-editor],[data-movcues-experience],[data-movcues-picker-overlay]")) return true;
     const root = element.getRootNode();
     return root instanceof ShadowRoot && isMovcuesSurface(root.host);
   }
@@ -1711,9 +1711,9 @@ ${ISOLATION_CSS}`;
         const session = await response.json();
         if (!validSession(session)) return false;
         const clean2 = new URL(location.href);
-        const requestedStep = Number(clean2.searchParams.get("movecues_editor_step") ?? "0");
-        clean2.searchParams.delete("movecues_editor_token");
-        clean2.searchParams.delete("movecues_editor_step");
+        const requestedStep = Number(clean2.searchParams.get("movcues_editor_step") ?? "0");
+        clean2.searchParams.delete("movcues_editor_token");
+        clean2.searchParams.delete("movcues_editor_step");
         history.replaceState(history.state, "", clean2.toString());
         return await this.activate(session, { requestedStep });
       } catch {
@@ -1771,7 +1771,7 @@ ${ISOLATION_CSS}`;
     mount() {
       if (!this.draft || !this.definition) return;
       this.host = document.createElement("div");
-      this.host.dataset.movecuesEditor = "";
+      this.host.dataset.movcuesEditor = "";
       this.root = this.host.attachShadow({ mode: "open" });
       this.root.innerHTML = `<style>${STYLE}</style>${this.panelMarkup(this.draft)}`;
       document.documentElement.appendChild(this.host);
@@ -2019,7 +2019,7 @@ ${ISOLATION_CSS}`;
       });
     }
     pickerIsSelecting() {
-      return !!document.querySelector("[data-movecues-picker-overlay]");
+      return !!document.querySelector("[data-movcues-picker-overlay]");
     }
     changed() {
       this.dirty = true;

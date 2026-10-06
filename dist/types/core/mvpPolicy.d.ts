@@ -9,6 +9,7 @@
  */
 export declare const MVP1_POLICY: Readonly<{
     interactiveClicksOnly: true;
+    elementCrawler: false;
     cursor: false;
     hover: false;
     move: false;

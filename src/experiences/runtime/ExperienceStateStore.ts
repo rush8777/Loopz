@@ -1,6 +1,6 @@
-const ONCE_KEY = "__movecues_experiences_seen__";
-const SESSION_KEY = "__movecues_experiences_session_seen__";
-const GUIDE_KEY = "__movecues_active_guide__";
+const ONCE_KEY = "__movcues_experiences_seen__";
+const SESSION_KEY = "__movcues_experiences_session_seen__";
+const GUIDE_KEY = "__movcues_active_guide__";
 
 export interface GuideProgress {
   experienceId: string;

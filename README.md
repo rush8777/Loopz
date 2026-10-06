@@ -32,11 +32,11 @@ If your app already goes through a bundler, `npm install` the package and
 `window` globals:
 
 ```bash
-npm install movecues
+npm install @movcues/sdk
 ```
 
 ```javascript
-import { createAnalytics } from "movecues";
+import { createAnalytics } from "@movcues/sdk";
 
 const analytics = createAnalytics({ siteId: "YOUR_SITE_ID" });
 analytics.event("app_started");

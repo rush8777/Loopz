@@ -66,9 +66,9 @@ export class EditorModeController {
       if (!validSession(session)) return false;
 
       const clean = new URL(location.href);
-      const requestedStep = Number(clean.searchParams.get("movecues_editor_step") ?? "0");
-      clean.searchParams.delete("movecues_editor_token");
-      clean.searchParams.delete("movecues_editor_step");
+      const requestedStep = Number(clean.searchParams.get("movcues_editor_step") ?? "0");
+      clean.searchParams.delete("movcues_editor_token");
+      clean.searchParams.delete("movcues_editor_step");
       history.replaceState(history.state, "", clean.toString());
       return await this.activate(session, { requestedStep });
     } catch {
@@ -120,7 +120,7 @@ export class EditorModeController {
   private mount(): void {
     if (!this.draft || !this.definition) return;
     this.host = document.createElement("div");
-    this.host.dataset.movecuesEditor = "";
+    this.host.dataset.movcuesEditor = "";
     this.root = this.host.attachShadow({ mode: "open" });
     this.root.innerHTML = `<style>${STYLE}</style>${this.panelMarkup(this.draft)}`;
     document.documentElement.appendChild(this.host);
@@ -303,7 +303,7 @@ export class EditorModeController {
   }
 
   private pickerIsSelecting(): boolean {
-    return !!document.querySelector("[data-movecues-picker-overlay]");
+    return !!document.querySelector("[data-movcues-picker-overlay]");
   }
 
   private changed(): void {

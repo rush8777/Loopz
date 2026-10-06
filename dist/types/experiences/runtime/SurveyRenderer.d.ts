@@ -3,6 +3,7 @@ export interface SurveyCallbacks {
     onDismiss: () => void;
     onProgress: (answers: SurveyAnswers, currentStepId: string, direction: "next" | "back") => Promise<void> | void;
     onSubmit: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
+    onStepChange?: (stepId: string) => void;
 }
 export declare class SurveyRenderer {
     private modal;

@@ -1,6 +1,6 @@
 import type { EditorAuthoringState, EditorContinuation, EditorSession } from "./runtimeInterfaces";
 
-export const EDITOR_CONTINUATION_KEY = "__movecues_experience_editor_session__";
+export const EDITOR_CONTINUATION_KEY = "__movcues_experience_editor_session__";
 
 export function readEditorContinuation(): EditorContinuation | null {
   try {

@@ -69,8 +69,8 @@ export class LayerManager {
       const zIndex = String(resolution.zIndex);
       if (host.style.zIndex !== zIndex) host.style.zIndex = zIndex;
       if (resolution.fallback) {
-        if (host.dataset.movecuesLayerFallback !== resolution.fallback) host.dataset.movecuesLayerFallback = resolution.fallback;
-      } else if (host.dataset.movecuesLayerFallback) delete host.dataset.movecuesLayerFallback;
+        if (host.dataset.movcuesLayerFallback !== resolution.fallback) host.dataset.movcuesLayerFallback = resolution.fallback;
+      } else if (host.dataset.movcuesLayerFallback) delete host.dataset.movcuesLayerFallback;
       const dynamicLayer = options.layer?.mode === "auto" || options.layer?.mode === "relative";
       const watched = dynamicLayer ? (options.layer?.mode === "relative" ? this.findTarget(options.layer.target) : options.targetElement) : null;
       if (watched && typeof MutationObserver !== "undefined") {

@@ -6,29 +6,29 @@ export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder
   const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
   const css = safeBuilderCss(builder.css);
   if (!html || css === null) return false;
-  let style = root.querySelector<HTMLStyleElement>("style[data-movecues-builder-style]");
-  if (!style) { style = document.createElement("style"); style.dataset.movecuesBuilderStyle = ""; root.appendChild(style); }
+  let style = root.querySelector<HTMLStyleElement>("style[data-movcues-builder-style]");
+  if (!style) { style = document.createElement("style"); style.dataset.movcuesBuilderStyle = ""; root.appendChild(style); }
   style.textContent = `${css}\n${ISOLATION_CSS}`;
   const content = document.createElement("div");
   content.className = "builder-content";
-  content.dataset.movecuesBuilderSurface = "";
+  content.dataset.movcuesBuilderSurface = "";
   content.append(...html);
   card.appendChild(content);
   card.classList.add("builder-card");
   card.addEventListener("click", event => {
-    const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movecues-action-id]") : null;
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movcues-action-id]") : null;
     if (!target || !card.contains(target)) return;
-    if (target.dataset.movecuesActionId === "primary") callbacks.onPrimary();
-    if (target.dataset.movecuesActionId === "secondary") callbacks.onSecondary();
+    if (target.dataset.movcuesActionId === "primary") callbacks.onPrimary();
+    if (target.dataset.movcuesActionId === "secondary") callbacks.onSecondary();
   });
   return true;
 }
 
 // Keep the builder surface scoped, but do not clip its visual overflow. The
-// authored widget owns internal scrolling (`.movecues-widget { overflow: … }`)
+// authored widget owns internal scrolling (`.movcues-widget { overflow: … }`)
 // while shadows, outlines, and corner decorations must be able to paint beyond
 // its layout box just as they do in the GrapesJS canvas.
-const ISOLATION_CSS = `[data-movecues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movecues-builder-surface]>.movecues-widget{position:relative!important;inset:auto!important}`;
+const ISOLATION_CSS = `[data-movcues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movcues-builder-surface]>.movcues-widget{position:relative!important;inset:auto!important}`;
 
 export function sanitizeBuilderHtml(input: string, allowSurveyInputs = false): ChildNode[] | null {
   const template = document.createElement("template");
@@ -44,10 +44,10 @@ export function sanitizeBuilderHtml(input: string, allowSurveyInputs = false): C
       const name = attribute.name.toLowerCase();
       if (!BUILDER_ALLOWED_ATTRIBUTES.has(name) || name.startsWith("on") || /javascript\s*:/i.test(attribute.value)) element.removeAttribute(attribute.name);
     }
-    const action = element.getAttribute("data-movecues-action-id");
-    if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-movecues-action-id");
-    const surveyAction = element.getAttribute("data-movecues-survey-action");
-    if (surveyAction && surveyAction !== "back" && surveyAction !== "next" && surveyAction !== "submit") element.removeAttribute("data-movecues-survey-action");
+    const action = element.getAttribute("data-movcues-action-id");
+    if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-movcues-action-id");
+    const surveyAction = element.getAttribute("data-movcues-survey-action");
+    if (surveyAction && surveyAction !== "back" && surveyAction !== "next" && surveyAction !== "submit") element.removeAttribute("data-movcues-survey-action");
     if (element.tagName === "IMG") {
       const source = element.getAttribute("src") ?? "";
       if (!builderImageUrlIsSafe(source)) element.removeAttribute("src");
@@ -58,10 +58,10 @@ export function sanitizeBuilderHtml(input: string, allowSurveyInputs = false): C
       if (!builderInputTypeIsSafe(type)) element.setAttribute("type", "text");
     }
   }
-  const root = template.content.querySelector(".movecues-widget");
+  const root = template.content.querySelector(".movcues-widget");
   if (!root) return null;
   for (const slot of ["primary", "secondary"]) {
-    const actions = Array.from(template.content.querySelectorAll(`[data-movecues-action-id="${slot}"]`));
+    const actions = Array.from(template.content.querySelectorAll(`[data-movcues-action-id="${slot}"]`));
     actions.slice(1).forEach(action => action.remove());
   }
   return Array.from(template.content.childNodes);

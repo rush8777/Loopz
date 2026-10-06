@@ -28,9 +28,9 @@ export declare class AutoCaptureEngine {
     readonly cursor: CursorCollector;
     readonly funnel: FunnelTracker;
     /**
-     * Not a behavioral start/stop collector like the others - a one-shot
-     * `.crawl()` triggered from SDK initialization and `onRouteChange()` (SPA
-     * navigation) rather than any continuous listener. See ElementCrawler.ts.
+     * Dormant in MVP1. When release-enabled, this is a one-shot `.crawl()`
+     * triggered from SDK initialization and `onRouteChange()` rather than a
+     * behavioral start/stop collector. See ElementCrawler.ts.
      */
     readonly elementCrawler: ElementCrawler;
     /**
@@ -55,7 +55,7 @@ export declare class AutoCaptureEngine {
     /** Completely tears down discovery scheduling during Analytics.destroy(). */
     destroyElementDiscovery(): void;
     stop(): void;
-    /** Called on SPA route changes; discovery remains active even when behavioral capture is stopped. */
+    /** Handles SPA routes; dormant discovery can only run when the release policy enables it. */
     onRouteChange(path: string, behavioralCaptureActive?: boolean): void;
     isRunning(): boolean;
 }

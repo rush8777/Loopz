@@ -10,7 +10,7 @@
  * plain HTML.
  */
 import { createContext, useContext, useEffect, useRef } from "react";
-import { createAnalytics, type Analytics, type AnalyticsConfig } from "movecues";
+import { createAnalytics, type Analytics, type AnalyticsConfig } from "movcues/sdk";
 
 const AnalyticsContext = createContext<Analytics | null>(null);
 

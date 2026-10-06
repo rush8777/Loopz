@@ -70,7 +70,7 @@ class PrivacyFilter {
   }
 }
 const MAX_LABEL_LENGTH = 60;
-const OVERRIDE_ATTR = "data-movecues-name";
+const OVERRIDE_ATTR = "data-movcues-name";
 const detector = new SensitiveElementDetector();
 function clean(text) {
   if (!text) return void 0;
@@ -864,6 +864,7 @@ const MVP1_POLICY = Object.freeze({
   // Keep normal click analytics focused on intentional UI interactions.
   // Raw, privacy-approved clicks still flow locally for rage detection.
   interactiveClicksOnly: true,
+  elementCrawler: false,
   cursor: false,
   hover: false,
   move: false,
@@ -1024,7 +1025,7 @@ class AutoCaptureEngine {
    * This lifecycle is intentionally independent of behavioral start/stop.
    */
   initializeElementDiscovery() {
-    if (this.discoveryInitialized || !this.config.autocapture.elementCrawler) return;
+    if (!MVP1_POLICY.elementCrawler || this.discoveryInitialized || !this.config.autocapture.elementCrawler) return;
     this.discoveryInitialized = true;
     this.scheduleInitialCrawl();
   }
@@ -1034,11 +1035,11 @@ class AutoCaptureEngine {
     if (document.readyState === "loading") {
       this.pendingInitialCrawl = () => {
         this.pendingInitialCrawl = null;
-        if (this.discoveryInitialized) this.elementCrawler.crawl();
+        if (MVP1_POLICY.elementCrawler && this.discoveryInitialized) this.elementCrawler.crawl();
       };
       document.addEventListener("DOMContentLoaded", this.pendingInitialCrawl, { once: true });
     } else {
-      this.elementCrawler.crawl();
+      if (MVP1_POLICY.elementCrawler && this.discoveryInitialized) this.elementCrawler.crawl();
     }
   }
   /** Completely tears down discovery scheduling during Analytics.destroy(). */
@@ -1060,13 +1061,13 @@ class AutoCaptureEngine {
     this.cursor.stop();
     this.sessionReplay.stop();
   }
-  /** Called on SPA route changes; discovery remains active even when behavioral capture is stopped. */
+  /** Handles SPA routes; dormant discovery can only run when the release policy enables it. */
   onRouteChange(path, behavioralCaptureActive = true) {
     if (behavioralCaptureActive) {
       this.scroll.reset();
       this.funnel.onPageView(path);
     }
-    if (this.discoveryInitialized) this.elementCrawler.crawl();
+    if (MVP1_POLICY.elementCrawler && this.discoveryInitialized) this.elementCrawler.crawl();
   }
   isRunning() {
     return this.started;
@@ -1772,7 +1773,7 @@ function resolveConfig(input) {
       rageClick: ((_d = input.autocapture) == null ? void 0 : _d.rageClick) ?? true,
       hover: MVP1_POLICY.hover && (((_e = input.autocapture) == null ? void 0 : _e.hover) ?? false),
       cursor: MVP1_POLICY.cursor && (((_f = input.autocapture) == null ? void 0 : _f.cursor) ?? false),
-      elementCrawler: ((_g = input.autocapture) == null ? void 0 : _g.elementCrawler) ?? true
+      elementCrawler: MVP1_POLICY.elementCrawler && (((_g = input.autocapture) == null ? void 0 : _g.elementCrawler) ?? false)
     },
     rageClick: {
       minClicks: ((_h = input.rageClick) == null ? void 0 : _h.minClicks) ?? 4,
@@ -1894,7 +1895,7 @@ class HeatmapManager {
   }
   initialize() {
     if (!this.apiBase || typeof fetch === "undefined") return;
-    const liveToken = new URL(location.href).searchParams.get("__movecues_heatmap_capture");
+    const liveToken = new URL(location.href).searchParams.get("__movcues_heatmap_capture");
     if (liveToken) {
       void this.enterLiveCapture(liveToken);
       return;
@@ -1941,7 +1942,7 @@ class HeatmapManager {
       if (!response.ok) return;
       const capture = await response.json();
       const cleanUrl = new URL(location.href);
-      cleanUrl.searchParams.delete("__movecues_heatmap_capture");
+      cleanUrl.searchParams.delete("__movcues_heatmap_capture");
       history.replaceState(history.state, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
       this.mountToolbar(token, capture);
     } catch {
@@ -1949,10 +1950,10 @@ class HeatmapManager {
   }
   mountToolbar(token, capture) {
     const host = document.createElement("div");
-    host.setAttribute("data-movecues-heatmap-toolbar", "");
+    host.setAttribute("data-movcues-heatmap-toolbar", "");
     const root = host.attachShadow({ mode: "closed" });
     const wrap = document.createElement("div");
-    wrap.innerHTML = `<style>:host{all:initial}.bar{position:fixed;z-index:2147483647;left:50%;bottom:24px;transform:translateX(-50%);display:flex;align-items:center;gap:18px;min-width:560px;padding:14px 16px;border-radius:12px;background:#111827;color:#fff;box-shadow:0 16px 50px #0007;font:13px/1.4 system-ui,sans-serif}.copy{flex:1}.title{font-weight:700}.sub{color:#cbd5e1;margin-top:2px}.actions{display:flex;gap:8px}button{border:0;border-radius:7px;padding:9px 14px;font:600 13px system-ui;cursor:pointer}.cancel{background:#374151;color:#fff}.capture{background:#7c3aed;color:#fff}.status{color:#d1fae5;font-weight:600}</style><div class="bar"><div class="copy"><div class="title">movecues · Heatmap capture</div><div class="sub"></div></div><div class="actions"><button class="cancel">Cancel</button><button class="capture">Capture</button></div></div>`;
+    wrap.innerHTML = `<style>:host{all:initial}.bar{position:fixed;z-index:2147483647;left:50%;bottom:24px;transform:translateX(-50%);display:flex;align-items:center;gap:18px;min-width:560px;padding:14px 16px;border-radius:12px;background:#111827;color:#fff;box-shadow:0 16px 50px #0007;font:13px/1.4 system-ui,sans-serif}.copy{flex:1}.title{font-weight:700}.sub{color:#cbd5e1;margin-top:2px}.actions{display:flex;gap:8px}button{border:0;border-radius:7px;padding:9px 14px;font:600 13px system-ui;cursor:pointer}.cancel{background:#374151;color:#fff}.capture{background:#7c3aed;color:#fff}.status{color:#d1fae5;font-weight:600}</style><div class="bar"><div class="copy"><div class="title">movcues · Heatmap capture</div><div class="sub"></div></div><div class="actions"><button class="cancel">Cancel</button><button class="capture">Capture</button></div></div>`;
     const sub = wrap.querySelector(".sub");
     sub.textContent = `${capture.pageName ?? "Page"} · ${capture.stateName ?? "Default"} · ${capitalize$1(capture.device ?? "desktop")} — Arrange this page exactly as you want it shown.`;
     wrap.querySelector(".cancel").addEventListener("click", () => host.remove());
@@ -1993,11 +1994,11 @@ class HeatmapManager {
     return this.cachedStateId;
   }
   loadCaptureFunction() {
-    if (window.__movecuesHeatmapCapture__) return Promise.resolve(window.__movecuesHeatmapCapture__);
+    if (window.__movcuesHeatmapCapture__) return Promise.resolve(window.__movcuesHeatmapCapture__);
     if (this.loadPromise) return this.loadPromise;
     const url = sdkBundleUrl("heatmap", this.bundleUrl);
     if (!url) return Promise.resolve(null);
-    this.loadPromise = loadSdkBundle(url, () => window.__movecuesHeatmapCapture__, "heatmap snapshot");
+    this.loadPromise = loadSdkBundle(url, () => window.__movcuesHeatmapCapture__, "heatmap snapshot");
     return this.loadPromise;
   }
 }
@@ -2048,7 +2049,7 @@ function loadEditorRuntime(overrideUrl) {
     "experience editor"
   );
 }
-const EDITOR_CONTINUATION_KEY = "__movecues_experience_editor_session__";
+const EDITOR_CONTINUATION_KEY = "__movcues_experience_editor_session__";
 function readEditorContinuation() {
   try {
     const value = JSON.parse(sessionStorage.getItem(EDITOR_CONTINUATION_KEY) ?? "null");
@@ -2129,7 +2130,7 @@ let Analytics$1 = class Analytics {
     this.config = resolveConfig(userConfig);
     this.debugEnabled = !!this.config.debug;
     const generation = ++this.generation;
-    const editorToken = new URL(location.href).searchParams.get("movecues_editor_token");
+    const editorToken = new URL(location.href).searchParams.get("movcues_editor_token");
     const editorContinuation = editorToken ? null : readEditorContinuation();
     if ((editorToken || editorContinuation) && !this.editorAttempted) {
       this.initialized = true;
@@ -2374,6 +2375,7 @@ let Analytics$1 = class Analytics {
     );
     this.unsubscribers.push(
       bus.on("elements_seen", (p) => {
+        if (!MVP1_POLICY.elementCrawler) return;
         void this.transport.sendElements(p.pagePath, p.elements);
         this.log(`elements crawled: ${p.elements.length}`);
       })
@@ -2455,7 +2457,7 @@ function isGuideDefinition(value) {
 }
 const BUILDER_ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "HEADER", "H1", "H2", "H3", "H4", "P", "SPAN", "BR", "BUTTON", "IMG", "HR", "LABEL", "UL", "LI"]);
 const BUILDER_SURVEY_INPUT_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA"]);
-const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "width", "height", "type", "placeholder", "maxlength", "data-movecues-action-id", "data-movecues-content", "data-movecues-widget-type", "data-movecues-question-id", "data-movecues-question-type", "data-movecues-question-input", "data-movecues-option-id", "data-movecues-survey-action", "data-movecues-survey-controls", "data-movecues-survey-progress", "data-movecues-survey-progress-bar", "data-movecues-survey-step-id", "data-movecues-checklist-role", "data-movecues-checklist-item-id", "data-movecues-checklist-item-role", "data-movecues-checklist-view"]);
+const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
 const BUILDER_BLOCKED_TAGS = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO|SOURCE)$/i;
 const BUILDER_UNSAFE_CSS = /@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i;
 function builderImageUrlIsSafe(value) {
@@ -2472,7 +2474,7 @@ function safeScopedBuilderCss(input) {
   while ((match = rule.exec(css)) !== null) {
     const prelude = match[1].trim();
     if (!prelude || prelude.startsWith("@")) continue;
-    if (prelude.split(",").some((selector) => !selector.trim().includes(".movecues-widget"))) return null;
+    if (prelude.split(",").some((selector) => !selector.trim().includes(".movcues-widget"))) return null;
   }
   return css;
 }
@@ -2480,29 +2482,29 @@ function mountBuilderContent(root, card, builder, callbacks, allowSurveyInputs =
   const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
   const css = safeBuilderCss(builder.css);
   if (!html || css === null) return false;
-  let style = root.querySelector("style[data-movecues-builder-style]");
+  let style = root.querySelector("style[data-movcues-builder-style]");
   if (!style) {
     style = document.createElement("style");
-    style.dataset.movecuesBuilderStyle = "";
+    style.dataset.movcuesBuilderStyle = "";
     root.appendChild(style);
   }
   style.textContent = `${css}
 ${ISOLATION_CSS}`;
   const content = document.createElement("div");
   content.className = "builder-content";
-  content.dataset.movecuesBuilderSurface = "";
+  content.dataset.movcuesBuilderSurface = "";
   content.append(...html);
   card.appendChild(content);
   card.classList.add("builder-card");
   card.addEventListener("click", (event) => {
-    const target = event.target instanceof Element ? event.target.closest("[data-movecues-action-id]") : null;
+    const target = event.target instanceof Element ? event.target.closest("[data-movcues-action-id]") : null;
     if (!target || !card.contains(target)) return;
-    if (target.dataset.movecuesActionId === "primary") callbacks.onPrimary();
-    if (target.dataset.movecuesActionId === "secondary") callbacks.onSecondary();
+    if (target.dataset.movcuesActionId === "primary") callbacks.onPrimary();
+    if (target.dataset.movcuesActionId === "secondary") callbacks.onSecondary();
   });
   return true;
 }
-const ISOLATION_CSS = `[data-movecues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movecues-builder-surface]>.movecues-widget{position:relative!important;inset:auto!important}`;
+const ISOLATION_CSS = `[data-movcues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movcues-builder-surface]>.movcues-widget{position:relative!important;inset:auto!important}`;
 function sanitizeBuilderHtml(input, allowSurveyInputs = false) {
   const template = document.createElement("template");
   template.innerHTML = input;
@@ -2517,10 +2519,10 @@ function sanitizeBuilderHtml(input, allowSurveyInputs = false) {
       const name = attribute.name.toLowerCase();
       if (!BUILDER_ALLOWED_ATTRIBUTES.has(name) || name.startsWith("on") || /javascript\s*:/i.test(attribute.value)) element.removeAttribute(attribute.name);
     }
-    const action = element.getAttribute("data-movecues-action-id");
-    if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-movecues-action-id");
-    const surveyAction = element.getAttribute("data-movecues-survey-action");
-    if (surveyAction && surveyAction !== "back" && surveyAction !== "next" && surveyAction !== "submit") element.removeAttribute("data-movecues-survey-action");
+    const action = element.getAttribute("data-movcues-action-id");
+    if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-movcues-action-id");
+    const surveyAction = element.getAttribute("data-movcues-survey-action");
+    if (surveyAction && surveyAction !== "back" && surveyAction !== "next" && surveyAction !== "submit") element.removeAttribute("data-movcues-survey-action");
     if (element.tagName === "IMG") {
       const source = element.getAttribute("src") ?? "";
       if (!builderImageUrlIsSafe(source)) element.removeAttribute("src");
@@ -2531,10 +2533,10 @@ function sanitizeBuilderHtml(input, allowSurveyInputs = false) {
       if (!builderInputTypeIsSafe(type)) element.setAttribute("type", "text");
     }
   }
-  const root = template.content.querySelector(".movecues-widget");
+  const root = template.content.querySelector(".movcues-widget");
   if (!root) return null;
   for (const slot of ["primary", "secondary"]) {
-    const actions = Array.from(template.content.querySelectorAll(`[data-movecues-action-id="${slot}"]`));
+    const actions = Array.from(template.content.querySelectorAll(`[data-movcues-action-id="${slot}"]`));
     actions.slice(1).forEach((action) => action.remove());
   }
   return Array.from(template.content.childNodes);
@@ -2584,16 +2586,15 @@ function applyWidgetSizeEnvelope(card, widgetType, design) {
 }
 function applyBuilderSizeContent(card, widgetType, design) {
   const content = card.querySelector(".builder-content");
-  const widget = content == null ? void 0 : content.querySelector(":scope > .movecues-widget");
+  const widget = content == null ? void 0 : content.querySelector(":scope > .movcues-widget");
   if (!content || !widget) return;
   const size = normalizeWidgetSize(widgetType, design);
   const fillsHeight = size.height.mode !== "auto";
   content.style.width = "100%";
   content.style.height = fillsHeight ? "100%" : "auto";
   widget.style.setProperty("box-sizing", "border-box");
-  widget.style.setProperty("width", "100%", "important");
   widget.style.setProperty("min-width", "0", "important");
-  widget.style.setProperty("max-width", "none", "important");
+  widget.style.setProperty("max-width", "100%", "important");
   widget.style.setProperty("height", fillsHeight ? "100%" : "auto", "important");
   widget.style.setProperty("max-height", fillsHeight ? "100%" : "none", "important");
 }
@@ -2662,38 +2663,66 @@ function waitForTarget(target, onFound, onUnavailable, timeoutMs = 5e3) {
   return stop;
 }
 function buildCard(root, content, design, behavior, callbacks, builder, widgetType) {
-  var _a, _b, _c;
+  var _a, _b;
   const card = document.createElement("section");
   card.className = "card";
-  card.style.setProperty("--movecues-bg", design.theme.background);
-  card.style.setProperty("--movecues-fg", design.theme.foreground);
-  card.style.setProperty("--movecues-primary", design.theme.primary);
+  card.style.setProperty("--movcues-bg", design.theme.background);
+  card.style.setProperty("--movcues-fg", design.theme.foreground);
+  card.style.setProperty("--movcues-primary", design.theme.primary);
   card.dataset.width = design.width;
   card.dataset.radius = design.theme.borderRadius;
   if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
-  const close = behavior.dismissible ? `<button class="close" data-dismiss aria-label="Dismiss">×</button>` : "";
-  card.innerHTML = close;
-  (_a = card.querySelector("[data-dismiss]")) == null ? void 0 : _a.addEventListener("click", callbacks.onDismiss);
   const mountedBuilder = Boolean(builder && mountBuilderContent(root, card, builder, callbacks, widgetType === "survey"));
   if (mountedBuilder && widgetType) applyBuilderSizeContent(card, widgetType, design);
   if (!mountedBuilder) {
     const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText$1(content.primaryAction.label)}</button>` : "";
     const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText$1(content.secondaryAction.label)}</button>` : "";
     card.insertAdjacentHTML("beforeend", `<div class="legacy-content"><h2>${escapeText$1(content.heading)}</h2><p>${escapeText$1(content.body)}</p><footer>${secondary}${primary}</footer></div>`);
-    (_b = card.querySelector("[data-primary]")) == null ? void 0 : _b.addEventListener("click", callbacks.onPrimary);
-    (_c = card.querySelector("[data-secondary]")) == null ? void 0 : _c.addEventListener("click", callbacks.onSecondary);
+    (_a = card.querySelector("[data-primary]")) == null ? void 0 : _a.addEventListener("click", callbacks.onPrimary);
+    (_b = card.querySelector("[data-secondary]")) == null ? void 0 : _b.addEventListener("click", callbacks.onSecondary);
   }
+  if (behavior.dismissible) mountRuntimeDismissControl(card, callbacks.onDismiss);
   root.appendChild(card);
+  if (mountedBuilder && widgetType) fitBuilderWidthEnvelope(card);
   if (mountedBuilder && widgetType === "anchored_card") fitAnchoredBuilderEnvelope(card);
   return card;
 }
+function mountRuntimeDismissControl(card, onDismiss) {
+  const chrome = document.createElement("div");
+  chrome.className = "movcues-runtime-chrome";
+  chrome.dataset.movcuesRuntimeChrome = "dismiss";
+  chrome.style.setProperty("position", "absolute", "important");
+  chrome.style.setProperty("inset", "0", "important");
+  chrome.style.setProperty("z-index", "2", "important");
+  chrome.style.setProperty("pointer-events", "none", "important");
+  const chromeRoot = chrome.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  style.textContent = `:host{all:initial;color:inherit}button{position:absolute;top:7px;right:8px;display:block;box-sizing:border-box;flex:none;margin:0;border:0;border-radius:7px;padding:3px 7px;background:transparent;color:inherit;font:20px/1 ui-sans-serif,system-ui,sans-serif;cursor:pointer;pointer-events:auto}`;
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "movcues-runtime-close";
+  close.dataset.dismiss = "";
+  close.setAttribute("aria-label", "Dismiss");
+  close.textContent = "×";
+  close.addEventListener("click", onDismiss);
+  chromeRoot.append(style, close);
+  card.appendChild(chrome);
+}
 function fitAnchoredBuilderEnvelope(card) {
-  const widget = card.querySelector(".builder-content > .movecues-widget");
+  const widget = card.querySelector(".builder-content > .movcues-widget");
   if (!widget) return;
   const cardRect = card.getBoundingClientRect();
   const widgetRect = widget.getBoundingClientRect();
   if (widgetRect.width > 0 && cardRect.width - widgetRect.width > 0.5) card.style.width = `${Math.ceil(widgetRect.width)}px`;
   if (widgetRect.height > 0 && cardRect.height - widgetRect.height > 0.5) card.style.height = `${Math.ceil(widgetRect.height)}px`;
+}
+function fitBuilderWidthEnvelope(card) {
+  const widget = card.querySelector(".builder-content > .movcues-widget");
+  if (!widget) return;
+  const widgetRect = widget.getBoundingClientRect();
+  if (widgetRect.width <= 0) return;
+  card.style.width = `${Math.ceil(widgetRect.width)}px`;
+  card.style.minWidth = "0";
 }
 class AnchoredCardRenderer {
   constructor() {
@@ -2793,16 +2822,16 @@ class AnchoredCardRenderer {
 function buildPointer(card, design, behavior) {
   const pointer = document.createElement("span");
   const size = pointerSize(behavior);
-  pointer.className = "movecues-anchor-pointer";
+  pointer.className = "movcues-anchor-pointer";
   pointer.setAttribute("aria-hidden", "true");
-  pointer.style.setProperty("--movecues-pointer-size", `${size}px`);
+  pointer.style.setProperty("--movcues-pointer-size", `${size}px`);
   pointer.style.color = pointerColor(card, design);
   pointer.innerHTML = '<svg viewBox="0 0 10 10" focusable="false" aria-hidden="true"><path d="M5 0 10 10H0Z" fill="currentColor"/></svg>';
   card.prepend(pointer);
   return pointer;
 }
 function pointerColor(card, design) {
-  const widget = card.querySelector(".movecues-widget");
+  const widget = card.querySelector(".movcues-widget");
   if (!widget) return design.theme.background;
   const background = getComputedStyle(widget).backgroundColor.trim();
   return isTransparent(background) ? design.theme.background : background;
@@ -2933,7 +2962,7 @@ class ModalRenderer {
     if (behavior.backdrop !== false) {
       const backdrop = document.createElement("div");
       backdrop.className = "backdrop";
-      backdrop.style.setProperty("--movecues-backdrop-opacity", String(behavior.backdropOpacity ?? 0.45));
+      backdrop.style.setProperty("--movcues-backdrop-opacity", String(behavior.backdropOpacity ?? 0.45));
       if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
       root.appendChild(backdrop);
     }
@@ -2950,7 +2979,7 @@ class SlideoutRenderer {
     if (behavior.backdrop) {
       const backdrop = document.createElement("div");
       backdrop.className = "backdrop";
-      backdrop.style.setProperty("--movecues-backdrop-opacity", String(behavior.backdropOpacity ?? 0.35));
+      backdrop.style.setProperty("--movcues-backdrop-opacity", String(behavior.backdropOpacity ?? 0.35));
       if (behavior.closeOnBackdrop && behavior.dismissible) backdrop.addEventListener("click", callbacks.onDismiss);
       root.appendChild(backdrop);
     }
@@ -2973,7 +3002,7 @@ class HotspotRenderer {
     const beacon = document.createElement("button");
     beacon.className = "hotspot";
     beacon.dataset.style = behavior.hotspotStyle ?? "pulse";
-    beacon.style.setProperty("--movecues-hotspot", behavior.hotspotColor ?? design.theme.primary);
+    beacon.style.setProperty("--movcues-hotspot", behavior.hotspotColor ?? design.theme.primary);
     beacon.type = "button";
     beacon.setAttribute("aria-label", `Open ${content.heading}`);
     if (beacon.dataset.style === "question") beacon.textContent = "?";
@@ -3080,9 +3109,10 @@ class SurveyRenderer {
     return this.renderStep();
   }
   renderStep() {
-    var _a;
+    var _a, _b, _c;
     const root = this.root;
     const step = this.survey.steps[this.stepIndex];
+    (_b = (_a = this.callbacks).onStepChange) == null ? void 0 : _b.call(_a, step.id);
     const baseStyle = root.firstElementChild;
     Array.from(root.children).forEach((element) => {
       if (element !== baseStyle) element.remove();
@@ -3090,14 +3120,14 @@ class SurveyRenderer {
     const content = { heading: step.content.heading || this.content.heading, body: step.content.body || this.content.body };
     const stepDesign = step.size ? { ...this.design, size: step.size } : this.design;
     const card = this.modal.render(root, content, stepDesign, this.behavior, { onDismiss: this.callbacks.onDismiss, onPrimary: this.callbacks.onDismiss, onSecondary: this.callbacks.onDismiss }, step.builder, "survey");
-    let surface = card.querySelector(".movecues-widget");
+    let surface = card.querySelector(".movcues-widget");
     if (!surface) {
-      (_a = card.querySelector(".legacy-content")) == null ? void 0 : _a.remove();
+      (_c = card.querySelector(".legacy-content")) == null ? void 0 : _c.remove();
       surface = document.createElement("section");
-      surface.className = "movecues-widget movecues-widget--survey";
+      surface.className = "movcues-widget movcues-widget--survey";
       card.appendChild(surface);
     }
-    surface.dataset.movecuesSurveyStepId = step.id;
+    surface.dataset.movcuesSurveyStepId = step.id;
     this.syncQuestions(surface, step.questions);
     this.syncNavigation(surface);
     return card;
@@ -3105,17 +3135,17 @@ class SurveyRenderer {
   syncQuestions(surface, questions) {
     var _a;
     const ids = new Set(questions.map((question) => question.id));
-    surface.querySelectorAll("[data-movecues-question-id]").forEach((node) => {
-      if (!ids.has(node.dataset.movecuesQuestionId ?? "")) node.remove();
+    surface.querySelectorAll("[data-movcues-question-id]").forEach((node) => {
+      if (!ids.has(node.dataset.movcuesQuestionId ?? "")) node.remove();
     });
-    let navigation = ((_a = surface.querySelector("[data-movecues-survey-action]")) == null ? void 0 : _a.parentElement) ?? null;
+    let navigation = ((_a = surface.querySelector("[data-movcues-survey-action]")) == null ? void 0 : _a.parentElement) ?? null;
     for (const question of questions) {
-      const matches = Array.from(surface.querySelectorAll(`[data-movecues-question-id="${cssEscape(question.id)}"]`));
+      const matches = Array.from(surface.querySelectorAll(`[data-movcues-question-id="${cssEscape(question.id)}"]`));
       matches.slice(1).forEach((node2) => node2.remove());
       const node = matches[0] ?? createQuestionNode(question);
       if (!matches[0]) surface.insertBefore(node, navigation);
-      node.dataset.movecuesQuestionType = question.type;
-      node.classList.add("movecues-survey-question", `movecues-survey-question--${question.type}`);
+      node.dataset.movcuesQuestionType = question.type;
+      node.classList.add("movcues-survey-question", `movcues-survey-question--${question.type}`);
       this.bindQuestion(node, question);
       navigation = navigation ?? node.nextElementSibling;
     }
@@ -3125,15 +3155,15 @@ class SurveyRenderer {
     node.classList.remove("has-error");
     if (question.type === "single_choice" || question.type === "multiple_choice" || question.type === "rating" || question.type === "nps") {
       const allowed = question.type === "rating" ? range(question.min, question.max).map(String) : question.type === "nps" ? range(0, 10).map(String) : question.options.map((option) => option.id);
-      let controls = Array.from(node.querySelectorAll("[data-movecues-option-id]"));
+      let controls = Array.from(node.querySelectorAll("[data-movcues-option-id]"));
       if (!controls.length) {
         const holder = document.createElement("div");
-        holder.className = "movecues-survey-options";
+        holder.className = "movcues-survey-options";
         for (const value of allowed) {
           const button = document.createElement("button");
           button.type = "button";
-          button.className = "movecues-survey-option";
-          button.dataset.movecuesOptionId = value;
+          button.className = "movcues-survey-option";
+          button.dataset.movcuesOptionId = value;
           button.textContent = question.type === "single_choice" || question.type === "multiple_choice" ? ((_a = question.options.find((option) => option.id === value)) == null ? void 0 : _a.label) ?? value : value;
           holder.appendChild(button);
         }
@@ -3141,7 +3171,7 @@ class SurveyRenderer {
         controls = Array.from(holder.children);
       }
       controls.forEach((control) => {
-        const optionId = control.dataset.movecuesOptionId;
+        const optionId = control.dataset.movcuesOptionId;
         control.setAttribute("role", "button");
         const update = () => {
           const answer = this.answers[question.id];
@@ -3158,7 +3188,7 @@ class SurveyRenderer {
           } else this.answers[question.id] = question.type === "rating" || question.type === "nps" ? Number(optionId) : optionId;
           node.classList.remove("has-error");
           controls.forEach((item) => {
-            const value = item.dataset.movecuesOptionId;
+            const value = item.dataset.movcuesOptionId;
             const answer = this.answers[question.id];
             const selected = Array.isArray(answer) ? answer.includes(value) : String(answer) === value;
             item.classList.toggle("is-selected", selected);
@@ -3168,11 +3198,11 @@ class SurveyRenderer {
       });
       return;
     }
-    let input = node.querySelector("[data-movecues-question-input]");
+    let input = node.querySelector("[data-movcues-question-input]");
     if (!input) {
       input = question.type === "long_text" ? document.createElement("textarea") : document.createElement("input");
-      input.dataset.movecuesQuestionInput = "";
-      input.className = "movecues-survey-input";
+      input.dataset.movcuesQuestionInput = "";
+      input.className = "movcues-survey-input";
       node.appendChild(input);
     }
     input.value = typeof this.answers[question.id] === "string" ? this.answers[question.id] : "";
@@ -3186,11 +3216,11 @@ class SurveyRenderer {
   syncNavigation(surface) {
     const final = this.stepIndex === this.survey.steps.length - 1;
     const step = this.survey.steps[this.stepIndex];
-    const buttons = Array.from(surface.querySelectorAll("[data-movecues-survey-action]"));
-    const back = buttons.filter((button) => button.dataset.movecuesSurveyAction === "back");
-    const next = buttons.filter((button) => button.dataset.movecuesSurveyAction === "next");
-    const submit = buttons.filter((button) => button.dataset.movecuesSurveyAction === "submit");
-    const legacyControls = Boolean(surface.querySelector("[data-movecues-survey-controls]"));
+    const buttons = Array.from(surface.querySelectorAll("[data-movcues-survey-action]"));
+    const back = buttons.filter((button) => button.dataset.movcuesSurveyAction === "back");
+    const next = buttons.filter((button) => button.dataset.movcuesSurveyAction === "next");
+    const submit = buttons.filter((button) => button.dataset.movcuesSurveyAction === "submit");
+    const legacyControls = Boolean(surface.querySelector("[data-movcues-survey-controls]"));
     for (const button of back) {
       button.hidden = !this.survey.allowBack || this.stepIndex === 0;
       button.onclick = () => {
@@ -3237,11 +3267,11 @@ class SurveyRenderer {
     });
   }
   syncProgress(surface) {
-    const progress = surface.querySelector("[data-movecues-survey-progress]");
+    const progress = surface.querySelector("[data-movcues-survey-progress]");
     if (progress) progress.hidden = !this.survey.showProgress;
-    const progressLabel = progress == null ? void 0 : progress.querySelector("span:not([data-movecues-survey-progress-bar])");
-    if (progressLabel && !progressLabel.querySelector("[data-movecues-survey-progress-bar]")) progressLabel.textContent = `Step ${this.stepIndex + 1} of ${this.survey.steps.length}`;
-    const bar = surface.querySelector("[data-movecues-survey-progress-bar]");
+    const progressLabel = progress == null ? void 0 : progress.querySelector("span:not([data-movcues-survey-progress-bar])");
+    if (progressLabel && !progressLabel.querySelector("[data-movcues-survey-progress-bar]")) progressLabel.textContent = `Step ${this.stepIndex + 1} of ${this.survey.steps.length}`;
+    const bar = surface.querySelector("[data-movcues-survey-progress-bar]");
     if (bar) bar.style.width = `${(this.stepIndex + 1) / this.survey.steps.length * 100}%`;
   }
   validateStep() {
@@ -3256,7 +3286,7 @@ class SurveyRenderer {
       if (!stepValid) valid = false;
     }
     if (!valid && currentValid && this.root) {
-      const status = this.root.querySelector(".movecues-survey-validation");
+      const status = this.root.querySelector(".movcues-survey-validation");
       if (status) status.textContent = "Please go back and answer all required questions before submitting.";
     }
     return valid;
@@ -3266,9 +3296,9 @@ class SurveyRenderer {
     if (show && this.root) {
       missing.forEach((question) => {
         var _a;
-        return (_a = this.root.querySelector(`[data-movecues-question-id="${cssEscape(question.id)}"]`)) == null ? void 0 : _a.classList.add("has-error");
+        return (_a = this.root.querySelector(`[data-movcues-question-id="${cssEscape(question.id)}"]`)) == null ? void 0 : _a.classList.add("has-error");
       });
-      const status = this.root.querySelector(".movecues-survey-validation");
+      const status = this.root.querySelector(".movcues-survey-validation");
       if (status) status.textContent = missing.length ? "Please answer the required questions before continuing." : "";
     }
     return missing.length === 0;
@@ -3280,9 +3310,9 @@ class SurveyRenderer {
 }
 function createQuestionNode(question) {
   const node = document.createElement("div");
-  node.dataset.movecuesQuestionId = question.id;
+  node.dataset.movcuesQuestionId = question.id;
   const label = document.createElement("p");
-  label.className = "movecues-survey-question__label";
+  label.className = "movcues-survey-question__label";
   label.textContent = `${question.label}${question.required ? " *" : ""}`;
   node.appendChild(label);
   return node;
@@ -3381,8 +3411,8 @@ class LayerManager {
       const zIndex = String(resolution.zIndex);
       if (host.style.zIndex !== zIndex) host.style.zIndex = zIndex;
       if (resolution.fallback) {
-        if (host.dataset.movecuesLayerFallback !== resolution.fallback) host.dataset.movecuesLayerFallback = resolution.fallback;
-      } else if (host.dataset.movecuesLayerFallback) delete host.dataset.movecuesLayerFallback;
+        if (host.dataset.movcuesLayerFallback !== resolution.fallback) host.dataset.movcuesLayerFallback = resolution.fallback;
+      } else if (host.dataset.movcuesLayerFallback) delete host.dataset.movcuesLayerFallback;
       const dynamicLayer = ((_a = options.layer) == null ? void 0 : _a.mode) === "auto" || ((_b = options.layer) == null ? void 0 : _b.mode) === "relative";
       const watched = dynamicLayer ? ((_c = options.layer) == null ? void 0 : _c.mode) === "relative" ? this.findTarget(options.layer.target) : options.targetElement : null;
       if (watched && typeof MutationObserver !== "undefined") {
@@ -3444,18 +3474,25 @@ class ExperienceRenderer {
   }
   root(experienceId, behavior, targetElement) {
     this.host = document.createElement("div");
-    this.host.dataset.movecuesExperience = experienceId;
-    this.host.dataset.movecuesExperienceRoot = experienceId;
+    this.host.dataset.movcuesExperience = experienceId;
+    this.host.dataset.movcuesExperienceRoot = experienceId;
     this.host.style.cssText = "position:fixed;inset:0;pointer-events:none";
     const root = this.host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
     style.textContent = STYLES;
     root.appendChild(style);
     document.documentElement.appendChild(this.host);
-    this.appliedLayer = this.layerManager.apply(this.host, { layer: behavior.layer, legacyZIndex: behavior.zIndex, targetElement });
+    this.applyLayer(behavior, targetElement);
     return root;
   }
+  applyLayer(behavior, targetElement) {
+    var _a;
+    if (!this.host) return;
+    (_a = this.appliedLayer) == null ? void 0 : _a.destroy();
+    this.appliedLayer = this.layerManager.apply(this.host, { layer: behavior.layer, legacyZIndex: behavior.zIndex, targetElement });
+  }
   renderWidget(experience, definition, callbacks, requestedStepId) {
+    var _a;
     if (experience.widgetType === "anchored_card" || experience.widgetType === "hotspot") {
       const mount = (target2) => {
         const root = this.root(experience.id, definition.behavior, target2);
@@ -3470,9 +3507,9 @@ class ExperienceRenderer {
         this.cancelPendingTarget = null;
         mount(element);
       }, () => {
-        var _a;
+        var _a2;
         this.cancelPendingTarget = null;
-        (_a = callbacks.onUnavailable) == null ? void 0 : _a.call(callbacks);
+        (_a2 = callbacks.onUnavailable) == null ? void 0 : _a2.call(callbacks);
       });
     } else if (experience.widgetType === "toast") {
       const root = this.root(experience.id, definition.behavior);
@@ -3490,15 +3527,20 @@ class ExperienceRenderer {
       this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
     } else if (experience.widgetType === "survey" && definition.survey) {
-      const root = this.root(experience.id, definition.behavior);
+      const selectedStep = definition.survey.steps.find((step) => step.id === requestedStepId) ?? definition.survey.steps[0];
+      const root = this.root(experience.id, { ...definition.behavior, layer: ((_a = selectedStep == null ? void 0 : selectedStep.behavior) == null ? void 0 : _a.layer) ?? definition.behavior.layer });
       const renderer = new SurveyRenderer();
       this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId, direction) => {
-        var _a;
-        return (_a = callbacks.onSurveyProgress) == null ? void 0 : _a.call(callbacks, answers, stepId, direction);
+        var _a2;
+        return (_a2 = callbacks.onSurveyProgress) == null ? void 0 : _a2.call(callbacks, answers, stepId, direction);
       }, onSubmit: (answers, stepId) => {
-        var _a;
-        return (_a = callbacks.onSurveySubmit) == null ? void 0 : _a.call(callbacks, answers, stepId);
+        var _a2;
+        return (_a2 = callbacks.onSurveySubmit) == null ? void 0 : _a2.call(callbacks, answers, stepId);
+      }, onStepChange: (stepId) => {
+        var _a2;
+        const step = definition.survey.steps.find((item) => item.id === stepId);
+        this.applyLayer({ ...definition.behavior, layer: ((_a2 = step == null ? void 0 : step.behavior) == null ? void 0 : _a2.layer) ?? definition.behavior.layer });
       } }, requestedStepId);
     } else if (experience.widgetType === "slideout") {
       const root = this.root(experience.id, definition.behavior);
@@ -3549,7 +3591,7 @@ class ExperienceRenderer {
       (_a2 = card.querySelector("footer")) == null ? void 0 : _a2.prepend(back);
     };
     if (getGuideStepPattern(step) === "modal") {
-      const root = this.root(experience.id, { layer: (_a = definition.behavior) == null ? void 0 : _a.layer });
+      const root = this.root(experience.id, { layer: step.behavior.layer ?? ((_a = definition.behavior) == null ? void 0 : _a.layer) });
       const renderer = new ModalRenderer();
       this.renderer = renderer;
       const behavior = { dismissible: step.behavior.dismissible ?? true };
@@ -3561,7 +3603,7 @@ class ExperienceRenderer {
     const mount = (target2) => {
       var _a2, _b, _c;
       ensureGuideTargetInView(target2);
-      const root = this.root(experience.id, { layer: (_a2 = definition.behavior) == null ? void 0 : _a2.layer }, target2);
+      const root = this.root(experience.id, { layer: step.behavior.layer ?? ((_a2 = definition.behavior) == null ? void 0 : _a2.layer) }, target2);
       const renderer = new AnchoredCardRenderer();
       this.renderer = renderer;
       const behavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset, pointer: step.behavior.pointer };
@@ -3659,18 +3701,18 @@ function ensureGuideTargetInView(target) {
   target.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "center", inline: "nearest" });
 }
 const STYLES = `
-  :host{all:initial}.card{pointer-events:auto;position:fixed;box-sizing:border-box;width:320px;max-width:calc(100vw - 16px);padding:18px;background:var(--movecues-bg);color:var(--movecues-fg);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-shadow:0 12px 38px rgba(0,0,0,.22);border:1px solid rgba(0,0,0,.12)}
+  :host{all:initial}.card{pointer-events:auto;position:fixed;box-sizing:border-box;width:320px;max-width:calc(100vw - 16px);padding:18px;background:var(--movcues-bg);color:var(--movcues-fg);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-shadow:0 12px 38px rgba(0,0,0,.22);border:1px solid rgba(0,0,0,.12)}
   .card[data-width=sm]{width:260px}.card[data-width=lg]{width:400px}.card[data-radius=sm]{border-radius:6px}.card[data-radius=md]{border-radius:12px}.card[data-radius=lg]{border-radius:20px}
-  .builder-card{padding:0;background:transparent;border:0;box-shadow:none}.builder-content{box-sizing:border-box;width:100%;max-width:100%;overflow:visible}.builder-card>.close{z-index:2}
-  .movecues-anchor-pointer{position:absolute;width:var(--movecues-pointer-size);height:var(--movecues-pointer-size);pointer-events:none;z-index:0}.movecues-anchor-pointer svg{display:block;width:100%;height:100%;overflow:visible}.movecues-anchor-pointer[data-placement=bottom]{top:calc(-1 * var(--movecues-pointer-size));transform:translateX(-50%)}.movecues-anchor-pointer[data-placement=top]{bottom:calc(-1 * var(--movecues-pointer-size));transform:translateX(-50%) rotate(180deg)}.movecues-anchor-pointer[data-placement=right]{left:calc(-1 * var(--movecues-pointer-size));transform:translateY(-50%) rotate(-90deg)}.movecues-anchor-pointer[data-placement=left]{right:calc(-1 * var(--movecues-pointer-size));transform:translateY(-50%) rotate(90deg)}.builder-content,.legacy-content{position:relative;z-index:1}
-  h2{font:600 17px/1.3 ui-sans-serif,system-ui,sans-serif;margin:0 24px 7px 0}p{margin:0;white-space:pre-wrap}footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}button{border:0;border-radius:7px;padding:8px 12px;font:600 13px ui-sans-serif,system-ui,sans-serif;cursor:pointer}.primary{background:var(--movecues-primary);color:#fff}.secondary{background:transparent;color:inherit}.close{position:absolute;right:8px;top:7px;padding:3px 7px;background:transparent;color:inherit;font-size:20px}
+  .builder-card{padding:0;background:transparent;border:0;box-shadow:none}.builder-content{box-sizing:border-box;width:100%;max-width:100%;overflow:visible}
+  .movcues-anchor-pointer{position:absolute;width:var(--movcues-pointer-size);height:var(--movcues-pointer-size);pointer-events:none;z-index:0}.movcues-anchor-pointer svg{display:block;width:100%;height:100%;overflow:visible}.movcues-anchor-pointer[data-placement=bottom]{top:calc(-1 * var(--movcues-pointer-size));transform:translateX(-50%)}.movcues-anchor-pointer[data-placement=top]{bottom:calc(-1 * var(--movcues-pointer-size));transform:translateX(-50%) rotate(180deg)}.movcues-anchor-pointer[data-placement=right]{left:calc(-1 * var(--movcues-pointer-size));transform:translateY(-50%) rotate(-90deg)}.movcues-anchor-pointer[data-placement=left]{right:calc(-1 * var(--movcues-pointer-size));transform:translateY(-50%) rotate(90deg)}.builder-content,.legacy-content{position:relative;z-index:1}
+  h2{font:600 17px/1.3 ui-sans-serif,system-ui,sans-serif;margin:0 24px 7px 0}p{margin:0;white-space:pre-wrap}footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}button{border:0;border-radius:7px;padding:8px 12px;font:600 13px ui-sans-serif,system-ui,sans-serif;cursor:pointer}.primary{background:var(--movcues-primary);color:#fff}.secondary{background:transparent;color:inherit}
   .toast{position:fixed!important}.toast[data-position=top-left]{top:16px;left:16px}.toast[data-position=top-right]{top:16px;right:16px}.toast[data-position=bottom-left]{bottom:16px;left:16px}.toast[data-position=bottom-right]{bottom:16px;right:16px}.cursor{will-change:left,top}@media(prefers-reduced-motion:reduce){.card{transition:none!important}}
-  .backdrop{pointer-events:auto;position:fixed;inset:0;background:rgba(0,0,0,var(--movecues-backdrop-opacity,.45))}
+  .backdrop{pointer-events:auto;position:fixed;inset:0;background:rgba(0,0,0,var(--movcues-backdrop-opacity,.45))}
   .modal{left:50%;top:50%;transform:translate(-50%,-50%)}.modal[data-layout=fullscreen],.modal[data-size-width=full]{inset:12px;width:auto!important;max-width:none!important;transform:none;display:flex;flex-direction:column;justify-content:center}.modal[data-layout=fullscreen] footer,.modal[data-size-width=full] footer{justify-content:center}
   .slideout[data-position=top-left]{top:16px;left:16px}.slideout[data-position=top-right]{top:16px;right:16px}.slideout[data-position=bottom-left]{bottom:16px;left:16px}.slideout[data-position=bottom-right]{bottom:16px;right:16px}.slideout[data-position=center-left]{left:16px;top:50%;transform:translateY(-50%)}.slideout[data-position=center-right]{right:16px;top:50%;transform:translateY(-50%)}
   .banner{left:0;right:0;width:auto!important;max-width:none;border-radius:0!important;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner[data-position=top]{top:0}.banner[data-position=bottom]{bottom:0}.banner h2,.banner p{grid-column:1}.banner footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
-  .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--movecues-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--movecues-hotspot);border-radius:50%;animation:movecues-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes movecues-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
-  .movecues-survey-question.has-error{outline:2px solid #fecaca;outline-offset:6px;border-radius:6px}.movecues-survey-validation{color:#b91c1c}:where(.movecues-survey-option.is-selected){border-color:var(--movecues-primary);background:color-mix(in srgb,var(--movecues-primary) 12%,white)}.movecues-survey-input{font:inherit}
+  .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--movcues-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--movcues-hotspot);border-radius:50%;animation:movcues-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes movcues-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
+  .movcues-survey-question.has-error{outline:2px solid #fecaca;outline-offset:6px;border-radius:6px}.movcues-survey-validation{color:#b91c1c}:where(.movcues-survey-option.is-selected){border-color:var(--movcues-primary);background:color-mix(in srgb,var(--movcues-primary) 12%,white)}.movcues-survey-input{font:inherit}
 `;
 class EditorBridge {
   constructor(apiBase, sessionId, accessToken) {
@@ -3694,7 +3736,7 @@ class EditorBridge {
 class HighlightOverlay {
   constructor() {
     this.element = document.createElement("div");
-    this.element.dataset.movecuesPickerOverlay = "";
+    this.element.dataset.movcuesPickerOverlay = "";
     this.element.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #2563eb;background:rgba(37,99,235,.12);display:none;box-sizing:border-box";
     document.documentElement.appendChild(this.element);
   }
@@ -3914,7 +3956,7 @@ class ElementPicker {
   }
 }
 function isMovcuesSurface(element) {
-  if (element.closest("[data-movecues-editor],[data-movecues-experience],[data-movecues-picker-overlay]")) return true;
+  if (element.closest("[data-movcues-editor],[data-movcues-experience],[data-movcues-picker-overlay]")) return true;
   const root = element.getRootNode();
   return root instanceof ShadowRoot && isMovcuesSurface(root.host);
 }
@@ -3960,9 +4002,9 @@ class EditorModeController {
       const session = await response.json();
       if (!validSession(session)) return false;
       const clean2 = new URL(location.href);
-      const requestedStep = Number(clean2.searchParams.get("movecues_editor_step") ?? "0");
-      clean2.searchParams.delete("movecues_editor_token");
-      clean2.searchParams.delete("movecues_editor_step");
+      const requestedStep = Number(clean2.searchParams.get("movcues_editor_step") ?? "0");
+      clean2.searchParams.delete("movcues_editor_token");
+      clean2.searchParams.delete("movcues_editor_step");
       history.replaceState(history.state, "", clean2.toString());
       return await this.activate(session, { requestedStep });
     } catch {
@@ -4020,7 +4062,7 @@ class EditorModeController {
   mount() {
     if (!this.draft || !this.definition) return;
     this.host = document.createElement("div");
-    this.host.dataset.movecuesEditor = "";
+    this.host.dataset.movcuesEditor = "";
     this.root = this.host.attachShadow({ mode: "open" });
     this.root.innerHTML = `<style>${STYLE}</style>${this.panelMarkup(this.draft)}`;
     document.documentElement.appendChild(this.host);
@@ -4268,7 +4310,7 @@ class EditorModeController {
     });
   }
   pickerIsSelecting() {
-    return !!document.querySelector("[data-movecues-picker-overlay]");
+    return !!document.querySelector("[data-movcues-picker-overlay]");
   }
   changed() {
     this.dirty = true;
@@ -4479,14 +4521,19 @@ class EditorModeController {
     return this.guide ? this.guide.steps[this.stepIndex].behavior : this.definition.behavior;
   }
   currentLayer() {
-    var _a;
+    var _a, _b;
     if (!this.definition) return void 0;
-    return this.guide ? (_a = this.guide.behavior) == null ? void 0 : _a.layer : this.definition.behavior.layer;
+    if (this.guide) return this.guide.steps[this.stepIndex].behavior.layer ?? ((_a = this.guide.behavior) == null ? void 0 : _a.layer);
+    const widget = this.definition;
+    return this.survey ? ((_b = this.survey.steps[this.stepIndex].behavior) == null ? void 0 : _b.layer) ?? widget.behavior.layer : widget.behavior.layer;
   }
   setLayer(layer) {
     if (!this.definition) return;
-    if (this.guide) this.guide.behavior = { ...this.guide.behavior, layer };
-    else this.definition.behavior.layer = layer;
+    if (this.guide) this.guide.steps[this.stepIndex].behavior.layer = layer;
+    else if (this.survey) {
+      const step = this.survey.steps[this.stepIndex];
+      step.behavior = { ...step.behavior, layer };
+    } else this.definition.behavior.layer = layer;
   }
   setTarget(target) {
     if (!this.definition) return;
@@ -4615,9 +4662,9 @@ class EligibilityEngine {
     return [...experiences].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))[0] ?? null;
   }
 }
-const ONCE_KEY = "__movecues_experiences_seen__";
-const SESSION_KEY = "__movecues_experiences_session_seen__";
-const GUIDE_KEY = "__movecues_active_guide__";
+const ONCE_KEY = "__movcues_experiences_seen__";
+const SESSION_KEY = "__movcues_experiences_session_seen__";
+const GUIDE_KEY = "__movcues_active_guide__";
 function read(storage, key) {
   try {
     return new Set(JSON.parse(storage.getItem(key) ?? "[]"));
@@ -4674,32 +4721,32 @@ class ChecklistRenderer {
     const css = safeBuilderCss(checklist.definition.builder.css);
     if (!nodes || css === null) return false;
     this.host = document.createElement("div");
-    this.host.dataset.movecuesChecklist = checklist.id;
+    this.host.dataset.movcuesChecklist = checklist.id;
     const side = checklist.definition.behavior.position === "bottom-left" ? "left:16px" : "right:16px";
     this.host.style.cssText = `position:fixed;bottom:16px;${side};z-index:${ALWAYS_ON_TOP_Z_INDEX};pointer-events:auto`;
     const root = this.host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
-    style.textContent = `:host{all:initial}.surface{position:relative;pointer-events:auto}.surface>.movecues-widget{position:relative!important;inset:auto!important}${css}`;
+    style.textContent = `:host{all:initial}.surface{position:relative;pointer-events:auto}.surface>.movcues-widget{position:relative!important;inset:auto!important}${css}`;
     root.appendChild(style);
     const surface = document.createElement("div");
     surface.className = "surface";
     surface.append(...nodes);
     root.appendChild(surface);
-    const authoredRoot = surface.querySelector('[data-movecues-checklist-role="root"]');
-    if (!authoredRoot || surface.querySelectorAll('[data-movecues-checklist-role="root"]').length !== 1) {
+    const authoredRoot = surface.querySelector('[data-movcues-checklist-role="root"]');
+    if (!authoredRoot || surface.querySelectorAll('[data-movcues-checklist-role="root"]').length !== 1) {
       this.destroy();
       return false;
     }
     const requiredRoles = ["title", "description", "progress", "items", "launcher-label", "remaining-count", "completion-title", "completion-description", "completion-acknowledge"];
     const requiredViews = ["expanded", "launcher", "completion"];
-    if (requiredRoles.some((role) => authoredRoot.querySelectorAll(`[data-movecues-checklist-role="${role}"]`).length !== 1) || requiredViews.some((view2) => authoredRoot.querySelectorAll(`[data-movecues-checklist-view="${view2}"]`).length !== 1)) {
+    if (requiredRoles.some((role) => authoredRoot.querySelectorAll(`[data-movcues-checklist-role="${role}"]`).length !== 1) || requiredViews.some((view2) => authoredRoot.querySelectorAll(`[data-movcues-checklist-view="${view2}"]`).length !== 1)) {
       this.destroy();
       return false;
     }
     const itemElements = /* @__PURE__ */ new Map();
-    for (const element of Array.from(authoredRoot.querySelectorAll("[data-movecues-checklist-item-id]"))) {
-      const id = element.dataset.movecuesChecklistItemId;
-      if (!id || itemElements.has(id) || element.querySelectorAll('[data-movecues-checklist-item-role="state"]').length !== 1 || element.querySelectorAll('[data-movecues-checklist-item-role="title"]').length !== 1 || element.querySelectorAll('[data-movecues-checklist-item-role="description"]').length !== 1) {
+    for (const element of Array.from(authoredRoot.querySelectorAll("[data-movcues-checklist-item-id]"))) {
+      const id = element.dataset.movcuesChecklistItemId;
+      if (!id || itemElements.has(id) || element.querySelectorAll('[data-movcues-checklist-item-role="state"]').length !== 1 || element.querySelectorAll('[data-movcues-checklist-item-role="title"]').length !== 1 || element.querySelectorAll('[data-movcues-checklist-item-role="description"]').length !== 1) {
         this.destroy();
         return false;
       }
@@ -4715,14 +4762,14 @@ class ChecklistRenderer {
     setText(authoredRoot, "completion-title", checklist.definition.completionMessage.title);
     setText(authoredRoot, "completion-description", checklist.definition.completionMessage.description ?? "");
     setText(authoredRoot, "completion-acknowledge", checklist.definition.completionMessage.acknowledgeLabel);
-    authoredRoot.querySelectorAll('[data-movecues-checklist-role="dismiss"]').forEach((element) => {
+    authoredRoot.querySelectorAll('[data-movcues-checklist-role="dismiss"]').forEach((element) => {
       element.hidden = !checklist.definition.behavior.dismissible;
     });
     const completed = new Set(checklist.progress.completedItemIds);
     const remaining = checklist.definition.items.length - completed.size;
     setText(authoredRoot, "progress", `${completed.size} of ${checklist.definition.items.length} complete`);
     setText(authoredRoot, "remaining-count", checklist.definition.behavior.showRemainingCount ? String(remaining) : "");
-    const container = authoredRoot.querySelector('[data-movecues-checklist-role="items"]');
+    const container = authoredRoot.querySelector('[data-movcues-checklist-role="items"]');
     if (!container) {
       this.destroy();
       return false;
@@ -4738,18 +4785,18 @@ class ChecklistRenderer {
       setText(element, "description", item.description ?? "", true);
     });
     const view = checklist.progress.complete ? "completion" : forceLauncher || checklist.progress.collapsed ? "launcher" : "expanded";
-    authoredRoot.querySelectorAll("[data-movecues-checklist-view]").forEach((element) => element.classList.toggle("is-active", element.dataset.movecuesChecklistView === view));
+    authoredRoot.querySelectorAll("[data-movcues-checklist-view]").forEach((element) => element.classList.toggle("is-active", element.dataset.movcuesChecklistView === view));
     authoredRoot.addEventListener("click", (event) => {
       var _a;
       const target = event.target instanceof Element ? event.target : null;
       if (!target) return;
-      const item = target.closest("[data-movecues-checklist-item-id]");
+      const item = target.closest("[data-movcues-checklist-item-id]");
       if (item && item.dataset.state !== "locked") {
-        callbacks.onItemClick(item.dataset.movecuesChecklistItemId);
+        callbacks.onItemClick(item.dataset.movcuesChecklistItemId);
         return;
       }
-      const role = (_a = target.closest("[data-movecues-checklist-role]")) == null ? void 0 : _a.dataset.movecuesChecklistRole;
-      if (role === "launcher-label" || target.closest('[data-movecues-checklist-view="launcher"]')) callbacks.onOpen();
+      const role = (_a = target.closest("[data-movcues-checklist-role]")) == null ? void 0 : _a.dataset.movcuesChecklistRole;
+      if (role === "launcher-label" || target.closest('[data-movcues-checklist-view="launcher"]')) callbacks.onOpen();
       else if (role === "collapse") callbacks.onCollapse();
       else if (role === "completion-acknowledge") callbacks.onAcknowledge();
       else if (role === "dismiss") callbacks.onDismiss();
@@ -4764,7 +4811,7 @@ class ChecklistRenderer {
   }
 }
 function setText(root, role, value, itemRole = false) {
-  const attribute = itemRole ? "data-movecues-checklist-item-role" : "data-movecues-checklist-role";
+  const attribute = itemRole ? "data-movcues-checklist-item-role" : "data-movcues-checklist-role";
   const element = root.querySelector(`[${attribute}="${role}"]`);
   if (element) element.textContent = value;
 }

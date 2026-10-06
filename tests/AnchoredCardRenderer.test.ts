@@ -47,7 +47,7 @@ describe("AnchoredCardRenderer", () => {
 
   it("positions a visible card relative to its target", () => {
     const { card, renderer } = renderAt(rect(100, 120, 50, 20));
-    const pointer = card.querySelector<HTMLElement>(".movecues-anchor-pointer");
+    const pointer = card.querySelector<HTMLElement>(".movcues-anchor-pointer");
 
     expect(card.style.visibility).toBe("");
     expect(card.style.pointerEvents).toBe("");
@@ -65,7 +65,7 @@ describe("AnchoredCardRenderer", () => {
     ["right", rect(400, 220, 50, 20), "", "50px"],
   ] as const)("points toward the target for %s placement", (placement, targetRect, expectedLeft, expectedTop) => {
     const { card, renderer } = renderAt(targetRect, { ...behavior, placement });
-    const pointer = card.querySelector<HTMLElement>(".movecues-anchor-pointer")!;
+    const pointer = card.querySelector<HTMLElement>(".movcues-anchor-pointer")!;
 
     expect(pointer.dataset.placement).toBe(placement);
     expect(pointer.style.left).toBe(expectedLeft);
@@ -78,7 +78,7 @@ describe("AnchoredCardRenderer", () => {
     ["right viewport edge", rect(980, 120, 20, 20), "792px", "184px"],
   ])("keeps a bottom pointer targeted after clamping at the %s", (_label, targetRect, expectedCardLeft, expectedPointerLeft) => {
     const { card, renderer } = renderAt(targetRect);
-    const pointer = card.querySelector<HTMLElement>(".movecues-anchor-pointer")!;
+    const pointer = card.querySelector<HTMLElement>(".movcues-anchor-pointer")!;
 
     expect(card.style.left).toBe(expectedCardLeft);
     expect(pointer.style.left).toBe(expectedPointerLeft);
@@ -87,7 +87,7 @@ describe("AnchoredCardRenderer", () => {
 
   it("clamps the pointer away from rounded card corners", () => {
     const { card, renderer } = renderAt(rect(-5, 120, 20, 20));
-    const pointer = card.querySelector<HTMLElement>(".movecues-anchor-pointer")!;
+    const pointer = card.querySelector<HTMLElement>(".movcues-anchor-pointer")!;
 
     expect(pointer.style.left).toBe("16px");
     renderer.destroy();
@@ -96,34 +96,34 @@ describe("AnchoredCardRenderer", () => {
   it("does not render a pointer when it is disabled", () => {
     const { card, renderer } = renderAt(rect(100, 120, 50, 20), { ...behavior, pointer: { enabled: false } });
 
-    expect(card.querySelector(".movecues-anchor-pointer")).toBeNull();
+    expect(card.querySelector(".movcues-anchor-pointer")).toBeNull();
     renderer.destroy();
   });
 
   it("uses a custom pointer size for its shape and edge padding", () => {
     const { card, renderer } = renderAt(rect(0, 120, 20, 20), { ...behavior, pointer: { size: 24 } });
-    const pointer = card.querySelector<HTMLElement>(".movecues-anchor-pointer")!;
+    const pointer = card.querySelector<HTMLElement>(".movcues-anchor-pointer")!;
 
-    expect(pointer.style.getPropertyValue("--movecues-pointer-size")).toBe("24px");
+    expect(pointer.style.getPropertyValue("--movcues-pointer-size")).toBe("24px");
     expect(pointer.style.left).toBe("30px");
     renderer.destroy();
   });
 
   it("uses the authored widget background for the pointer without placing it in builder content", () => {
     vi.stubGlobal("getComputedStyle", vi.fn(() => ({ backgroundColor: "rgb(13, 19, 45)" })));
-    const { card, renderer } = renderBuilderAt(".movecues-widget{background:#0d132d}");
-    const pointer = card.querySelector<HTMLElement>(".movecues-anchor-pointer")!;
+    const { card, renderer } = renderBuilderAt(".movcues-widget{background:#0d132d}");
+    const pointer = card.querySelector<HTMLElement>(".movcues-anchor-pointer")!;
 
     expect(pointer.style.color).toBe("rgb(13, 19, 45)");
-    expect(card.querySelector(".builder-content")?.querySelector(".movecues-anchor-pointer")).toBeNull();
+    expect(card.querySelector(".builder-content")?.querySelector(".movcues-anchor-pointer")).toBeNull();
     expect(getComputedStyle).toHaveBeenCalledTimes(1);
     renderer.destroy();
   });
 
   it("falls back to the theme when the authored widget background is transparent", () => {
     vi.stubGlobal("getComputedStyle", vi.fn(() => ({ backgroundColor: "rgba(0, 0, 0, 0)" })));
-    const { card, renderer } = renderBuilderAt(".movecues-widget{background:transparent}");
-    const pointer = card.querySelector<HTMLElement>(".movecues-anchor-pointer")!;
+    const { card, renderer } = renderBuilderAt(".movcues-widget{background:transparent}");
+    const pointer = card.querySelector<HTMLElement>(".movcues-anchor-pointer")!;
 
     expect(pointer.style.color).toBe("rgb(255, 255, 255)");
     expect(getComputedStyle).toHaveBeenCalledTimes(1);
@@ -321,14 +321,14 @@ describe("AnchoredCardRenderer", () => {
   it("collapses a stale oversized envelope to the authored anchored widget", () => {
     vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
       if (this.classList.contains("card")) return rect(0, 0, Number.parseFloat(this.style.width) || 600, Number.parseFloat(this.style.height) || 200);
-      if (this.classList.contains("movecues-widget")) return rect(0, 0, 400, 168);
+      if (this.classList.contains("movcues-widget")) return rect(0, 0, 400, 168);
       return rect(0, 0, 0, 0);
     });
     const host = document.createElement("div"); const root = host.attachShadow({ mode: "open" });
     const target = document.createElement("button"); target.getBoundingClientRect = () => rect(850, 300, 120, 40);
     document.body.append(target, host);
     const renderer = new AnchoredCardRenderer();
-    const card = renderer.render(root, target, content, { ...design, size: { width: { mode: "fixed", value: 480 }, height: { mode: "fixed", value: 300 } } }, { ...behavior, placement: "left" }, { onDismiss: vi.fn(), onPrimary: vi.fn(), onSecondary: vi.fn() }, { version: 1, projectData: {}, html: '<section class="movecues-widget">Authored card</section>', css: ".movecues-widget{width:400px;height:168px}" }, "anchored_card");
+    const card = renderer.render(root, target, content, { ...design, size: { width: { mode: "fixed", value: 480 }, height: { mode: "fixed", value: 300 } } }, { ...behavior, placement: "left" }, { onDismiss: vi.fn(), onPrimary: vi.fn(), onSecondary: vi.fn() }, { version: 1, projectData: {}, html: '<section class="movcues-widget">Authored card</section>', css: ".movcues-widget{width:400px;height:168px}" }, "anchored_card");
 
     expect(card.style.width).toBe("400px");
     expect(card.style.height).toBe("168px");
@@ -355,7 +355,7 @@ function renderBuilderAt(css: string): { target: HTMLElement; card: HTMLElement;
   target.getBoundingClientRect = () => rect(100, 120, 50, 20);
   document.body.append(target, host);
   const renderer = new AnchoredCardRenderer();
-  const card = renderer.render(root, target, content, design, behavior, { onDismiss: vi.fn(), onPrimary: vi.fn(), onSecondary: vi.fn() }, { version: 1, projectData: {}, html: '<section class="movecues-widget">Authored card</section>', css }, "anchored_card");
+  const card = renderer.render(root, target, content, design, behavior, { onDismiss: vi.fn(), onPrimary: vi.fn(), onSecondary: vi.fn() }, { version: 1, projectData: {}, html: '<section class="movcues-widget">Authored card</section>', css }, "anchored_card");
   return { target, card, renderer };
 }
 

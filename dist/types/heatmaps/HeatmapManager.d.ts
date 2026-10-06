@@ -25,6 +25,6 @@ export declare class HeatmapManager {
 }
 declare global {
     interface Window {
-        __movecuesHeatmapCapture__?: () => Promise<string>;
+        __movcuesHeatmapCapture__?: () => Promise<string>;
     }
 }
