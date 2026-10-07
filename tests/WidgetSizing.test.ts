@@ -8,7 +8,7 @@ function card(): { card: HTMLElement; content: HTMLElement; widget: HTMLElement 
 describe("runtime builder sizing envelope", () => {
   it.each([
     ["fixed", { mode: "fixed", value: 480 } as const, "480px", "100%"],
-    ["viewport", { mode: "viewport" } as const, "calc(100vh - 24px)", "100%"],
+    ["viewport", { mode: "viewport" } as const, "var(--movcues-usable-viewport-height)", "100%"],
     ["auto", { mode: "auto" } as const, "auto", "auto"],
   ])("matches the preview semantics for %s height", (_name, height, envelopeHeight, innerHeight) => {
     const fixture = card(); const value = design(height); applyWidgetSizeEnvelope(fixture.card, "survey", value); applyBuilderSizeContent(fixture.card, "survey", value);
@@ -17,6 +17,8 @@ describe("runtime builder sizing envelope", () => {
     expect(fixture.widget.style.getPropertyValue("width")).toBe("320px"); expect(fixture.widget.style.getPropertyPriority("width")).toBe("");
     expect(fixture.widget.style.getPropertyValue("max-width")).toBe("100%"); expect(fixture.widget.style.getPropertyPriority("max-width")).toBe("important");
     expect(fixture.widget.style.getPropertyValue("height")).toBe(innerHeight); expect(fixture.widget.style.getPropertyPriority("height")).toBe("important");
+    expect(fixture.widget.style.getPropertyValue("max-height")).toBe("var(--movcues-usable-viewport-height)");
+    expect(fixture.widget.style.getPropertyValue("overflow-y")).toBe("auto"); expect(fixture.widget.style.getPropertyPriority("overflow-y")).toBe("important");
   });
 
   it("keeps an authored cursor-follow width instead of expanding it to the type default", () => {
@@ -40,5 +42,23 @@ describe("runtime builder sizing envelope", () => {
     expect(fixture.widget.style.getPropertyPriority("width")).toBe("");
     expect(fixture.widget.style.getPropertyValue("max-width")).toBe("100%");
     expect(fixture.widget.style.getPropertyPriority("max-width")).toBe("important");
+  });
+
+  it.each([
+    ["modal", 960], ["survey", 960], ["toast", 520], ["slideout", 640],
+  ] as const)("caps a desktop-sized %s to the usable viewport without scaling it", (widgetType, maximum) => {
+    const fixture = card(); const value = design({ mode: "auto" });
+    applyWidgetSizeEnvelope(fixture.card, widgetType, value); applyBuilderSizeContent(fixture.card, widgetType, value);
+
+    expect(fixture.card.style.maxWidth).toBe(`min(${maximum}px, var(--movcues-usable-viewport-width))`);
+    expect(fixture.card.style.getPropertyValue("--movcues-viewport-gutter")).toBe("24px");
+    expect(fixture.widget.style.transform).toBe("");
+  });
+
+  it("keeps banners full width while applying the vertical safety envelope", () => {
+    const fixture = card(); const value = design({ mode: "auto" });
+    applyWidgetSizeEnvelope(fixture.card, "banner", value); applyBuilderSizeContent(fixture.card, "banner", value);
+    expect(fixture.card.style.width).toBe("100%"); expect(fixture.card.style.maxWidth).toBe("none");
+    expect(fixture.card.style.maxHeight).toBe("var(--movcues-usable-viewport-height)");
   });
 });

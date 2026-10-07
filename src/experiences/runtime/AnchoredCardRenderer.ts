@@ -106,8 +106,11 @@ function fitAnchoredBuilderEnvelope(card: HTMLElement): void {
 function fitBuilderWidthEnvelope(card: HTMLElement): void {
   const widget = card.querySelector<HTMLElement>(".builder-content > .movcues-widget");
   if (!widget) return;
-  const widgetRect = widget.getBoundingClientRect();
-  if (widgetRect.width <= 0) return;
+  const cardRect = card.getBoundingClientRect(); const widgetRect = widget.getBoundingClientRect();
+  // A viewport-capped widget and card have the same rendered width. In that
+  // case keep the authored/preferred card width so it can expand again after a
+  // rotation or desktop resize. Collapse only genuinely compact authored roots.
+  if (widgetRect.width <= 0 || cardRect.width - widgetRect.width <= 0.5) return;
   card.style.width = `${Math.ceil(widgetRect.width)}px`;
   card.style.minWidth = "0";
 }
@@ -152,9 +155,10 @@ export class AnchoredCardRenderer {
 
       setHidden(false);
       const left = clampHorizontally(coordinates.left, bounds.width);
-      if (pointer) positionPointer(pointer, rect, bounds, left, coordinates.top, resolvedPlacement, behavior);
+      const top = clampVertically(coordinates.top, bounds.height);
+      if (pointer) positionPointer(pointer, rect, bounds, left, top, resolvedPlacement, behavior);
       if (left !== lastLeft) { lastLeft = left; card.style.left = `${left}px`; }
-      if (coordinates.top !== lastTop) { lastTop = coordinates.top; card.style.top = `${coordinates.top}px`; }
+      if (top !== lastTop) { lastTop = top; card.style.top = `${top}px`; }
     };
     const schedule = (reconsiderPlacement = false, remeasureCard = false) => {
       if (destroyed) return;
@@ -171,9 +175,13 @@ export class AnchoredCardRenderer {
     const onResize = () => schedule(true, true);
     window.addEventListener("scroll", onScroll, { capture: true, passive: true });
     window.addEventListener("resize", onResize);
+    window.visualViewport?.addEventListener("resize", onResize);
+    window.visualViewport?.addEventListener("scroll", onResize);
     this.cleanup.push(
       () => window.removeEventListener("scroll", onScroll, true),
       () => window.removeEventListener("resize", onResize),
+      () => window.visualViewport?.removeEventListener("resize", onResize),
+      () => window.visualViewport?.removeEventListener("scroll", onResize),
       () => { destroyed = true; if (frameId !== null) cancelAnimationFrame(frameId); frameId = null; },
     );
     if (typeof ResizeObserver !== "undefined") {
@@ -246,8 +254,9 @@ function isAutomaticPlacement(behavior: ExperienceBehavior): boolean {
 function resolvePlacement(rect: DOMRect, bounds: Size, behavior: ExperienceBehavior): ResolvedPlacement {
   if (!isAutomaticPlacement(behavior)) return behavior.placement as ResolvedPlacement;
   const gap = behavior.offset ?? 8;
-  const spaceBelow = innerHeight - rect.bottom - gap;
-  const spaceAbove = rect.top - gap;
+  const viewport = visibleViewport();
+  const spaceBelow = viewport.bottom - rect.bottom - gap;
+  const spaceAbove = rect.top - viewport.top - gap;
   if (spaceBelow >= bounds.height) return "bottom";
   if (spaceAbove >= bounds.height) return "top";
   return spaceBelow >= spaceAbove ? "bottom" : "top";
@@ -266,7 +275,20 @@ function coordinatesFor(rect: DOMRect, bounds: Size, behavior: ExperienceBehavio
 
 function clampHorizontally(left: number, width: number): number {
   const margin = 8;
-  return Math.max(margin, Math.min(left, innerWidth - width - margin));
+  const viewport = visibleViewport();
+  return Math.max(viewport.left + margin, Math.min(left, viewport.right - width - margin));
+}
+
+function clampVertically(top: number, height: number): number {
+  const margin = 8;
+  const viewport = visibleViewport();
+  return Math.max(viewport.top + margin, Math.min(top, viewport.bottom - height - margin));
+}
+
+function visibleViewport(): { left: number; top: number; right: number; bottom: number } {
+  const viewport = window.visualViewport;
+  const left = viewport?.offsetLeft ?? 0; const top = viewport?.offsetTop ?? 0;
+  return { left, top, right: left + (viewport?.width ?? innerWidth), bottom: top + (viewport?.height ?? innerHeight) };
 }
 
 function rectAt(left: number, top: number, width: number, height: number): DOMRect {
@@ -274,7 +296,8 @@ function rectAt(left: number, top: number, width: number, height: number): DOMRe
 }
 
 function intersectsViewport(rect: DOMRect): boolean {
-  return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
+  const viewport = visibleViewport();
+  return rect.width > 0 && rect.height > 0 && rect.bottom > viewport.top && rect.right > viewport.left && rect.top < viewport.bottom && rect.left < viewport.right;
 }
 
 function escapeText(value: string): string { const span = document.createElement("span"); span.textContent = value; return span.innerHTML; }

@@ -35,16 +35,18 @@ export function normalizeWidgetSize(widgetType: WidgetType, design: ExperienceDe
 export function applyWidgetSizeEnvelope(card: HTMLElement, widgetType: WidgetType, design: ExperienceDesign): void {
   const constraint = WIDGET_SIZE_CONSTRAINTS[widgetType]; const size = normalizeWidgetSize(widgetType, design); const gutter = Math.max(24, constraint.viewportGutter);
   card.dataset.sizeWidth = size.width.mode; card.dataset.sizeHeight = size.height.mode;
+  card.style.setProperty("--movcues-viewport-gutter", `${constraint.viewportGutter}px`);
+  card.style.setProperty("--movcues-vertical-viewport-gutter", `${gutter}px`);
   if (size.width.mode === "full") {
-    card.style.width = widgetType === "banner" ? "100%" : `calc(100vw - ${gutter}px)`;
+    card.style.width = widgetType === "banner" ? "100%" : "var(--movcues-usable-viewport-width)";
     card.style.minWidth = "0"; card.style.maxWidth = "none";
   } else {
     card.style.width = `${size.width.value}px`;
-    card.style.minWidth = `min(${constraint.width.min}px, calc(100vw - ${gutter}px))`;
-    card.style.maxWidth = `min(${constraint.width.max}px, calc(100vw - ${gutter}px))`;
+    card.style.minWidth = `min(${constraint.width.min}px, var(--movcues-usable-viewport-width))`;
+    card.style.maxWidth = `min(${constraint.width.max}px, var(--movcues-usable-viewport-width))`;
   }
-  card.style.height = size.height.mode === "fixed" ? `${size.height.value}px` : size.height.mode === "viewport" ? `calc(100vh - ${gutter}px)` : "auto";
-  card.style.maxHeight = `calc(100vh - ${gutter}px)`;
+  card.style.height = size.height.mode === "fixed" ? `${size.height.value}px` : size.height.mode === "viewport" ? "var(--movcues-usable-viewport-height)" : "auto";
+  card.style.maxHeight = "var(--movcues-usable-viewport-height)";
   // Builder widgets manage their own internal overflow. Keeping this outer
   // placement card visible prevents it from cutting off authored shadows and
   // other deliberate visual overflow at the card's exact size boundary.
@@ -55,7 +57,7 @@ export function applyBuilderSizeContent(card: HTMLElement, widgetType: WidgetTyp
   const content = card.querySelector<HTMLElement>(".builder-content"); const widget = content?.querySelector<HTMLElement>(":scope > .movcues-widget");
   if (!content || !widget) return;
   const size = normalizeWidgetSize(widgetType, design); const fillsHeight = size.height.mode !== "auto";
-  content.style.width = "100%"; content.style.height = fillsHeight ? "100%" : "auto";
+  content.style.width = "100%"; content.style.height = fillsHeight ? "100%" : "auto"; content.style.maxHeight = "var(--movcues-usable-viewport-height)";
   widget.style.setProperty("box-sizing", "border-box");
   // Saved builder CSS owns the visual width for every widget type. The card
   // supplies only the bounded positioning envelope; forcing a child width of
@@ -63,7 +65,10 @@ export function applyBuilderSizeContent(card: HTMLElement, widgetType: WidgetTyp
   // generic runtime defaults. Keep content inside that envelope without
   // replacing an authored width.
   widget.style.setProperty("min-width", "0", "important"); widget.style.setProperty("max-width", "100%", "important");
-  widget.style.setProperty("height", fillsHeight ? "100%" : "auto", "important"); widget.style.setProperty("max-height", fillsHeight ? "100%" : "none", "important");
+  widget.style.setProperty("height", fillsHeight ? "100%" : "auto", "important");
+  widget.style.setProperty("max-height", "var(--movcues-usable-viewport-height)", "important");
+  widget.style.setProperty("overflow-y", "auto", "important");
+  widget.style.setProperty("overscroll-behavior", "contain", "important");
 }
 
 function clamp(value: number, min: number, max: number): number { return Math.min(max, Math.max(min, Number.isFinite(value) ? Math.round(value) : min)); }

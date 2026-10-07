@@ -159,7 +159,7 @@ describe("AnchoredCardRenderer", () => {
   it("remains visible after the target leaves while the natural card is still visible", () => {
     const { card, renderer } = renderAt(rect(100, -30, 50, 20));
 
-    expect(card.style.top).toBe("-2px");
+    expect(card.style.top).toBe("8px");
     expect(card.style.visibility).toBe("");
     expect(card.style.pointerEvents).toBe("");
     renderer.destroy();
@@ -184,7 +184,8 @@ describe("AnchoredCardRenderer", () => {
     targetRect = rect(100, 700, 50, 20);
     window.dispatchEvent(new Event("scroll")); flushFrames();
 
-    expect(card.style.top).toBe("728px");
+    expect(card.style.top).toBe("692px");
+    expect(card.querySelector<HTMLElement>(".movcues-anchor-pointer")?.dataset.placement).toBe("bottom");
     renderer.destroy();
   });
 
