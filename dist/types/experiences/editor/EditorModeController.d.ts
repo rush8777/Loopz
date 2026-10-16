@@ -26,7 +26,12 @@ export declare class EditorModeController {
     private stepIndex;
     private mode;
     private dirty;
+    private editGeneration;
+    private saveState;
+    private recoveryDraft;
+    private lifecycle;
     private previewRendered;
+    private previewGeneration;
     private currentPath;
     private persistBeforePageLeave;
     private protectUnsavedChanges;
@@ -48,6 +53,12 @@ export declare class EditorModeController {
     private startLayerPicker;
     private pickerIsSelecting;
     private changed;
+    private flushContent;
+    private showValidation;
+    private showSaveState;
+    private captureRecovery;
+    private exportRecovery;
+    private expireSession;
     private persist;
     private close;
     private renderPreview;
@@ -58,6 +69,8 @@ export declare class EditorModeController {
     private syncPanel;
     private renderConfigured;
     private updateDiagnostics;
+    private configureDiagnostics;
+    private fitPanel;
     private scheduleTargetRefresh;
     private onRouteChange;
     private currentTarget;

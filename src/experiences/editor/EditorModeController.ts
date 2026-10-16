@@ -52,10 +52,15 @@ export class EditorModeController {
   private stepIndex = 0;
   private mode: EditorMode = "design";
   private dirty = false;
+  private editGeneration = 0;
+  private saveState: "clean" | "dirty" | "saving" | "failed" | "conflict" | "expired" = "clean";
+  private recoveryDraft: string | null = null;
+  private lifecycle = 0;
   private previewRendered = false;
+  private previewGeneration = 0;
   private currentPath = "";
   private persistBeforePageLeave = () => this.updateContinuation();
-  private protectUnsavedChanges = (event: BeforeUnloadEvent) => { if (!this.dirty) return; event.preventDefault(); event.returnValue = ""; };
+  private protectUnsavedChanges = (event: BeforeUnloadEvent) => { if (!this.dirty && !this.saveInFlight && !this.contentEditor?.isComposing()) return; event.preventDefault(); event.returnValue = ""; };
 
   constructor(private apiBase: string) {}
 
@@ -119,8 +124,8 @@ export class EditorModeController {
     this.mode = restoredMode === "select" ? "target" : restoredMode === "design" || restoredMode === "target" || restoredMode === "navigate" || restoredMode === "preview" ? restoredMode : draft.experience.builderMode === "onsite" ? "design" : "target";
     this.updateContinuation();
     this.mount();
-    this.expiryTimer = window.setTimeout(() => this.destroy(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
-    this.validationTimer = window.setInterval(() => { void bridge.load().catch(() => this.destroy()); }, 15_000);
+    this.expiryTimer = window.setTimeout(() => this.expireSession(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
+    this.validationTimer = window.setInterval(() => { void bridge.load().catch(error => { if (this.bridge === bridge && error instanceof EditorSessionExpiredError) this.expireSession(); }); }, 15_000);
     return true;
   }
 
@@ -140,10 +145,11 @@ export class EditorModeController {
     this.routeObserver.start();
     window.addEventListener("pagehide", this.persistBeforePageLeave);
     window.addEventListener("beforeunload", this.protectUnsavedChanges);
-    if (typeof MutationObserver !== "undefined") {
-      this.mutationObserver = new MutationObserver(() => this.scheduleTargetRefresh());
-      this.mutationObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["id", "class", "data-testid", "data-test", "data-qa", "data-cy", "aria-label", "role", "name", "href", "hidden"] });
-    }
+    this.configureDiagnostics();
+    window.visualViewport?.addEventListener("resize", this.fitPanel);
+    window.visualViewport?.addEventListener("scroll", this.fitPanel);
+    window.addEventListener("resize", this.fitPanel);
+    this.fitPanel();
   }
 
   private panelMarkup(draft: EditorDraft): string {
@@ -157,14 +163,15 @@ export class EditorModeController {
       </header>
       <main>
         <div class="modebar"><button type="button" data-mode="design"${designDisabled}>Design</button><button type="button" data-mode="target">Target</button><button type="button" data-mode="navigate">Navigate</button><button type="button" data-mode="preview">Preview</button></div>
+        <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>Preview tests this step only. Links and external actions are disabled.</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         ${guideMarkup}
         <section class="section content-inspector" data-content-inspector hidden>
           <div class="content-heading"><div><div class="eyebrow">Content</div><strong data-component-label>Nothing selected</strong></div><button type="button" class="secondary-button compact" data-edit-component>Edit</button></div>
           <div class="formatbar" data-text-controls><button type="button" data-format="strong" aria-label="Bold"><b>B</b></button><button type="button" data-format="em" aria-label="Italic"><i>I</i></button><button type="button" data-format="u" aria-label="Underline"><u>U</u></button><button type="button" data-list="ul" aria-label="Bulleted list">• List</button><button type="button" data-list="ol" aria-label="Numbered list">1. List</button></div>
           <div class="format-row" data-text-controls><label>Align<select data-text-align><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label></div>
-          <div class="link-row" data-text-controls><input data-link-url type="url" placeholder="https://… or /path"><button type="button" class="secondary-button compact" data-apply-link>Link</button></div>
-          <div class="image-controls" data-image-controls hidden><label>Source URL<input data-image-src type="url"></label><label>Alt text<input data-image-alt type="text" maxlength="500"></label><button type="button" class="secondary-button" data-apply-image>Apply image</button></div>
+          <div class="link-row" data-text-controls><input data-link-url aria-label="Link URL" type="text" inputmode="url" placeholder="https://… or /path"><button type="button" class="secondary-button compact" data-apply-link>Link</button></div>
+          <div class="image-controls" data-image-controls hidden><label>Source URL<input data-image-src type="text" inputmode="url"></label><label>Alt text<input data-image-alt type="text" maxlength="500"></label><button type="button" class="secondary-button" data-apply-image>Apply image</button></div>
           <div class="history-row"><button type="button" class="secondary-button compact" data-undo disabled>Undo</button><button type="button" class="secondary-button compact" data-redo disabled>Redo</button></div>
         </section>
         <section class="section" data-for="target">
@@ -191,7 +198,8 @@ export class EditorModeController {
         <section class="section" data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
         <section class="section"><div class="eyebrow">Configured</div><dl data-configured></dl></section>
         <section class="section live"><div class="eyebrow">Live status</div><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></section>
-        <div class="save-recovery" data-save-recovery hidden><button type="button" class="secondary-button" data-retry-save>Retry save</button><button type="button" class="secondary-button" data-reload-draft hidden>Reload latest</button><span data-recovery-message>Local edits are preserved.</span></div><p class="hint" data-mode-hint></p>
+        <p class="hint status-error" role="alert" data-content-error hidden></p>
+        <div class="save-recovery" data-save-recovery hidden><button type="button" class="secondary-button" data-retry-save>Retry save</button><button type="button" class="secondary-button" data-reload-draft hidden>Reload latest</button><button type="button" class="secondary-button" data-export-draft>Copy / Export unsaved draft</button><button type="button" class="secondary-button" data-discard-draft>Discard and close</button><span data-recovery-message>Local edits are preserved.</span></div><p class="hint" data-mode-hint></p>
       </main>
     </aside>`;
   }
@@ -209,15 +217,25 @@ export class EditorModeController {
     root.querySelector<HTMLButtonElement>("[data-close]")?.addEventListener("click", () => void this.close());
     root.querySelector<HTMLButtonElement>("[data-return-dashboard]")?.addEventListener("click", () => { window.opener?.focus(); void this.close(); });
     root.querySelector<HTMLButtonElement>("[data-retry-save]")?.addEventListener("click", () => void this.persist());
-    root.querySelector<HTMLButtonElement>("[data-reload-draft]")?.addEventListener("click", () => window.location.reload());
+    root.querySelector<HTMLButtonElement>("[data-reload-draft]")?.addEventListener("click", () => { if (window.confirm("Reloading discards local edits. Copy / Export them first if you need them. Reload latest?")) { this.recoveryDraft = null; window.location.reload(); } });
+    root.querySelector<HTMLButtonElement>("[data-export-draft]")?.addEventListener("click", () => this.exportRecovery());
+    root.querySelector<HTMLButtonElement>("[data-discard-draft]")?.addEventListener("click", () => { if (window.confirm("Discard unsaved edits and close?")) { this.recoveryDraft = null; this.destroy(); } });
+    root.querySelector<HTMLButtonElement>("[data-reset-preview]")?.addEventListener("click", () => this.renderPreview());
     root.querySelector<HTMLButtonElement>("[data-edit-component]")?.addEventListener("click", () => this.contentEditor?.editSelected());
-    root.querySelectorAll<HTMLButtonElement>("[data-format]").forEach(button => button.addEventListener("pointerdown", event => { event.preventDefault(); this.contentEditor?.formatInline(button.dataset.format as "strong" | "em" | "u"); this.syncContentInspector(); }));
-    root.querySelectorAll<HTMLButtonElement>("[data-list]").forEach(button => button.addEventListener("pointerdown", event => { event.preventDefault(); this.contentEditor?.toggleList(button.dataset.list as "ul" | "ol"); this.syncContentInspector(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-format]").forEach(button => button.addEventListener("click", () => { this.contentEditor?.formatInline(button.dataset.format as "strong" | "em" | "u"); this.syncContentInspector(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-list]").forEach(button => button.addEventListener("click", () => { this.contentEditor?.toggleList(button.dataset.list as "ul" | "ol"); this.syncContentInspector(); }));
     root.querySelector<HTMLSelectElement>("[data-text-align]")?.addEventListener("change", event => { this.contentEditor?.setAlignment((event.currentTarget as HTMLSelectElement).value as "left" | "center" | "right"); this.syncContentInspector(); });
-    root.querySelector<HTMLButtonElement>("[data-apply-link]")?.addEventListener("pointerdown", event => { event.preventDefault(); const input = root.querySelector<HTMLInputElement>("[data-link-url]"); if (input && !this.contentEditor?.applyLink(input.value)) input.setCustomValidity("Use an HTTP(S), email, phone, relative, or hash URL."); else input?.setCustomValidity(""); this.syncContentInspector(); });
+    root.querySelector<HTMLButtonElement>("[data-apply-link]")?.addEventListener("click", () => { const input = root.querySelector<HTMLInputElement>("[data-link-url]"); if (input && !this.contentEditor?.applyLink(input.value)) { input.setCustomValidity("Select text in a heading or body and use an HTTP(S), email, phone, relative, or hash URL."); input.reportValidity(); } else input?.setCustomValidity(""); this.syncContentInspector(); });
     root.querySelector<HTMLButtonElement>("[data-apply-image]")?.addEventListener("click", () => { const source = root.querySelector<HTMLInputElement>("[data-image-src]"); const alt = root.querySelector<HTMLInputElement>("[data-image-alt]"); if (source && alt && !this.contentEditor?.updateImage(source.value, alt.value)) source.setCustomValidity("Use an HTTP(S), relative, or supported data image URL."); else source?.setCustomValidity(""); this.syncContentInspector(); });
     root.querySelector<HTMLButtonElement>("[data-undo]")?.addEventListener("click", () => { this.contentEditor?.undo(); this.syncContentInspector(); });
     root.querySelector<HTMLButtonElement>("[data-redo]")?.addEventListener("click", () => { this.contentEditor?.redo(); this.syncContentInspector(); });
+    root.addEventListener("pointerdown", () => this.contentEditor?.rememberSelection(), true);
+    root.addEventListener("focusin", () => this.contentEditor?.rememberSelection(), true);
+    root.addEventListener("keydown", rawEvent => {
+      const event = rawEvent as KeyboardEvent;
+      if (event.key === "Escape") { this.contentEditor?.editSelected(); event.preventDefault(); }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !(event.target instanceof HTMLInputElement)) { event.preventDefault(); event.shiftKey ? this.contentEditor?.redo() : this.contentEditor?.undo(); }
+    });
     this.bindDrag();
 
     this.onSelect("[data-alignment]", value => { this.currentBehavior().alignment = value as NonNullable<ExperienceBehavior["alignment"]>; });
@@ -279,6 +297,7 @@ export class EditorModeController {
   private switchStep(index: number): void {
     const steps = this.guide?.steps ?? this.survey?.steps;
     if (!steps || index < 0 || index >= steps.length || index === this.stepIndex) return;
+    if (!this.flushContent()) return;
     this.selectionGeneration++;
     this.picker.cancel();
     this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
@@ -292,17 +311,19 @@ export class EditorModeController {
   private setMode(mode: EditorMode): void {
     if (mode === "design" && this.draft?.experience.builderMode !== "onsite") return;
     if (this.mode === mode && (mode !== "target" || this.pickerIsSelecting())) return;
+    if (!this.flushContent()) return;
     this.selectionGeneration++;
     this.picker.cancel();
     this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
     if (this.dirty) void this.persist();
     this.mode = mode;
+    this.configureDiagnostics();
     this.updateContinuation();
     this.applyMode();
   }
 
   private applyMode(): void {
-    if (this.mode === "navigate") { this.preview.destroy(); this.previewRendered = false; this.syncPanel(); return; }
+    if (this.mode === "navigate") { this.previewGeneration++; this.preview.destroy(); this.previewRendered = false; this.syncPanel(); return; }
     this.renderPreview(); this.syncPanel(); if (this.mode === "target") this.startPicker();
   }
 
@@ -336,77 +357,148 @@ export class EditorModeController {
   }
 
   private changed(render = true): void {
-    this.dirty = true;
+    if (this.saveState === "expired") return;
+    this.dirty = true; this.editGeneration++;
     this.updateContinuation();
-    this.syncPanel();
+    if (render) this.syncPanel(); else this.syncContentInspector();
     if (render && this.mode !== "navigate") this.renderPreview();
-    this.setText("[data-save-state]", "Unsaved");
-    const recovery = this.root?.querySelector<HTMLElement>("[data-save-recovery]"); if (recovery) recovery.hidden = true;
+    if (this.saveState !== "conflict" && this.saveState !== "failed") this.saveState = this.saveInFlight ? "saving" : "dirty";
+    this.showSaveState();
     clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => void this.persist(), 350);
   }
 
+  private flushContent(): boolean {
+    if (this.contentEditor && !this.contentEditor.flush()) {
+      this.setText("[data-save-state]", "Finish composing text before continuing"); return false;
+    }
+    const errors = this.contentEditor?.getValidation() ?? [];
+    this.showValidation(errors); return !errors.length;
+  }
+
+  private showValidation(errors: string[]): void {
+    const element = this.root?.querySelector<HTMLElement>("[data-content-error]");
+    if (element) { element.hidden = !errors.length; element.textContent = errors.join(" "); }
+  }
+
+  private showSaveState(): void {
+    const labels = { clean: "Draft saved", dirty: "Unsaved", saving: "Saving…", failed: "Save failed", conflict: "Conflict · reload required", expired: "Session expired · export unsaved edits" };
+    this.setText("[data-save-state]", labels[this.saveState]);
+    const recovering = ["failed", "conflict", "expired"].includes(this.saveState);
+    const recovery = this.root?.querySelector<HTMLElement>("[data-save-recovery]"); if (recovery) recovery.hidden = !recovering;
+    const retry = this.root?.querySelector<HTMLButtonElement>("[data-retry-save]"); if (retry) retry.hidden = this.saveState !== "failed";
+    const reload = this.root?.querySelector<HTMLButtonElement>("[data-reload-draft]"); if (reload) reload.hidden = !["conflict", "expired"].includes(this.saveState);
+    this.setText("[data-recovery-message]", "Local edits remain in memory in this tab. Export before reloading or leaving.");
+  }
+
+  private captureRecovery(): void {
+    if (!this.definition || (!this.dirty && !this.contentEditor?.isComposing())) return;
+    // Contains only authored data, never the session or access token. No website storage.
+    const definition = JSON.parse(JSON.stringify(this.definition)) as EditorDefinition;
+    const snapshot = this.contentEditor?.snapshot();
+    if (snapshot) {
+      const part = isGuideDefinition(definition) ? definition.steps[this.stepIndex] : definition;
+      part.builder = snapshot.builder; part.content = snapshot.content;
+    }
+    this.recoveryDraft = JSON.stringify({ experienceId: this.draft?.experience.id, revision: this.draft?.version.revision, definition }, null, 2);
+  }
+
+  private exportRecovery(): void {
+    this.contentEditor?.flush();
+    if (this.saveState !== "expired" || !this.recoveryDraft) this.captureRecovery();
+    if (!this.recoveryDraft) return;
+    let output = this.root?.querySelector<HTMLTextAreaElement>("[data-recovery-export]");
+    if (!output && this.root) { output = document.createElement("textarea"); output.dataset.recoveryExport = ""; output.setAttribute("aria-label", "Unsaved draft JSON; copy and save before leaving"); output.readOnly = true; this.root.querySelector("main")?.append(output); }
+    if (output) { output.value = this.recoveryDraft; output.focus(); output.select(); }
+  }
+
+  private expireSession(): void {
+    if (this.saveState === "expired") return;
+    this.contentEditor?.flush(); this.captureRecovery();
+    this.dirty = this.dirty || !!this.contentEditor?.isComposing();
+    this.saveState = "expired"; this.lifecycle++;
+    clearTimeout(this.saveTimer); clearTimeout(this.expiryTimer); clearInterval(this.validationTimer);
+    this.contentEditor?.destroy(); this.contentEditor = null;
+    this.previewGeneration++; this.preview.destroy(); this.previewRendered = false; this.picker.cancel();
+    this.mutationObserver?.disconnect(); this.routeUnsubscribe?.(); this.routeObserver.stop();
+    this.bridge = null; this.session = null; clearEditorContinuation();
+    this.root?.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>("button,input,select").forEach(control => { if (!control.matches("[data-export-draft],[data-discard-draft],[data-reload-draft],[data-minimize],[data-close]")) control.disabled = true; });
+    this.showSaveState();
+  }
+
   private async persist(): Promise<boolean> {
-    clearTimeout(this.saveTimer);
-    this.saveTimer = 0;
+    clearTimeout(this.saveTimer); this.saveTimer = 0;
+    if (!this.flushContent()) return false;
+    if (this.saveState === "conflict" || this.saveState === "expired") return false;
     if (this.saveInFlight) {
       const saved = await this.saveInFlight;
       return saved && this.dirty ? this.persist() : saved;
     }
     if (!this.dirty || !this.bridge || !this.definition) return true;
-    this.dirty = false;
-    this.setText("[data-save-state]", "Saving…");
-    const bridge = this.bridge; const definition = this.definition; const revision = this.draft?.version.revision ?? 1;
+    const bridge = this.bridge; const generation = this.editGeneration; const lifecycle = this.lifecycle;
+    const definition = JSON.parse(JSON.stringify(this.definition)) as EditorDefinition;
+    const revision = this.draft?.version.revision ?? 1;
+    this.saveState = "saving"; this.showSaveState();
     const request = bridge.save(definition, revision).then(version => {
+      if (lifecycle !== this.lifecycle) return false;
       if (this.draft) this.draft.version.revision = version.revision;
-      this.setText("[data-save-state]", this.dirty ? "Saving…" : "Draft saved");
-      const recovery = this.root?.querySelector<HTMLElement>("[data-save-recovery]"); if (recovery) recovery.hidden = true;
-      return true;
+      this.dirty = this.editGeneration !== generation;
+      this.saveState = this.dirty ? "dirty" : "clean";
+      if (!this.dirty) { this.recoveryDraft = null; this.root?.querySelector("[data-recovery-export]")?.remove(); }
+      this.showSaveState(); return true;
     }).catch(error => {
-      if (error instanceof EditorSessionExpiredError) {
-        this.setText("[data-save-state]", "Session expired");
-        this.teardown(true);
-        return false;
-      }
-      this.dirty = true;
-      const conflict = error instanceof DraftConflictError;
-      this.setText("[data-save-state]", conflict ? "Conflict · reload required" : "Save failed");
-      const recovery = this.root?.querySelector<HTMLElement>("[data-save-recovery]"); if (recovery) recovery.hidden = false;
-      const retry = this.root?.querySelector<HTMLButtonElement>("[data-retry-save]"); if (retry) retry.hidden = conflict;
-      const reload = this.root?.querySelector<HTMLButtonElement>("[data-reload-draft]"); if (reload) reload.hidden = !conflict;
-      this.setText("[data-recovery-message]", conflict ? "Local edits are preserved until you reload the latest draft." : "Local edits are preserved.");
+      if (lifecycle !== this.lifecycle) return false;
+      this.dirty = true; this.captureRecovery();
+      if (error instanceof EditorSessionExpiredError) { this.expireSession(); return false; }
+      this.saveState = error instanceof DraftConflictError ? "conflict" : "failed";
+      this.showSaveState();
+      this.setText("[data-recovery-message]", `${error instanceof Error ? error.message : "Request failed"}. Local edits remain in this tab; retry or export.`);
       return false;
     });
     this.saveInFlight = request;
     const saved = await request;
     if (this.saveInFlight === request) this.saveInFlight = null;
-    if (saved && this.dirty && !this.saveTimer) this.saveTimer = window.setTimeout(() => void this.persist(), 350);
+    if (saved && this.dirty) return this.persist();
     return saved;
   }
 
   private async close(): Promise<void> {
-    if (this.dirty && !await this.persist()) return;
+    if (!this.flushContent()) return;
+    if ((this.dirty || this.saveInFlight) && !await this.persist()) return;
     this.destroy();
   }
 
   private renderPreview(): void {
-    if (!this.definition || !this.draft || this.mode === "navigate") return;
+    if (!this.definition || !this.draft || this.mode === "navigate" || this.saveState === "expired") return;
+    if (!this.flushContent()) return;
+    const generation = ++this.previewGeneration;
     this.previewRendered = false;
     this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
     const definition = this.guide ? { ...this.definition, steps: [this.guide.steps[this.stepIndex]] } as EditorDefinition : this.definition;
+    // Editor-only behavior overrides; production renderers and definitions stay unchanged.
+    const rendered = JSON.parse(JSON.stringify(definition)) as EditorDefinition;
+    if (this.mode !== "preview") {
+      if (isGuideDefinition(rendered)) rendered.steps.forEach(step => { step.behavior.dismissible = false; });
+      else { rendered.behavior = { ...rendered.behavior, autoDismissMs: null, dismissible: false, closeOnBackdrop: false }; }
+    }
     const selectedStepId = this.survey?.steps[this.stepIndex]?.id;
     this.preview.render({
       id: this.draft.experience.id,
       versionId: this.draft.version.id,
       kind: this.draft.experience.kind,
-      widgetType: this.draft.experience.widgetType,
+      // Freeze cursor-follow cards using the stationary toast shell only while authoring.
+      widgetType: this.mode !== "preview" && this.draft.experience.widgetType === "cursor_follow" ? "toast" : this.draft.experience.widgetType,
       priority: 0,
-      definition,
+      definition: rendered,
     }, {
-      onVisible: () => { this.previewRendered = true; if (this.mode === "design") this.attachContentEditor(); this.updateDiagnostics(); },
-      onDismiss: () => window.setTimeout(() => this.renderPreview(), 0),
+      onVisible: () => {
+        if (generation !== this.previewGeneration || this.saveState === "expired" || !this.root) return;
+        const host = Array.from(document.querySelectorAll<HTMLElement>("[data-movcues-experience]")).find(element => element.dataset.movcuesExperience === this.draft?.experience.id);
+        host?.shadowRoot?.addEventListener("click", event => { if ((event.target as Element)?.closest?.("a")) { event.preventDefault(); event.stopImmediatePropagation(); } }, true);
+        this.previewRendered = true; if (this.mode === "design") this.attachContentEditor(); this.updateDiagnostics(); },
+      onDismiss: () => { this.previewRendered = false; this.updateDiagnostics(); },
       onAction: () => void 0,
-      onComplete: () => window.setTimeout(() => this.renderPreview(), 0),
+      onComplete: () => { this.previewRendered = false; this.updateDiagnostics(); },
       onUnavailable: () => { this.previewRendered = false; this.updateDiagnostics(); },
     }, selectedStepId);
     this.updateDiagnostics();
@@ -419,8 +511,10 @@ export class EditorModeController {
     );
     const builder = this.currentBuilder(); const content = this.currentContent();
     if (!host?.shadowRoot || !builder || !content) return;
+    this.contentEditor?.destroy();
     this.contentEditor = new OnsiteContentEditor(host.shadowRoot, builder, content, {
       onChange: () => this.changed(false),
+      onValidation: errors => this.showValidation(errors),
       onSelectionChange: selection => { this.componentSelection = selection; this.syncContentInspector(); },
     });
     this.contentEditor.start();
@@ -447,6 +541,8 @@ export class EditorModeController {
     this.root.querySelectorAll<HTMLElement>("[data-text-controls]").forEach(element => { element.hidden = selection.kind === "image"; });
     const imageControls = this.root.querySelector<HTMLElement>("[data-image-controls]"); if (imageControls) imageControls.hidden = selection.kind !== "image";
     const edit = this.root.querySelector<HTMLButtonElement>("[data-edit-component]"); if (edit) edit.hidden = selection.kind === "image";
+    this.root.querySelectorAll<HTMLButtonElement>("[data-list]").forEach(button => { button.disabled = selection.kind !== "text" || selection.label !== "body"; });
+    const link = this.root.querySelector<HTMLButtonElement>("[data-apply-link]"); if (link) link.disabled = selection.kind !== "text";
     if (selection.kind === "image") { this.setValue("[data-image-src]", selection.src ?? ""); this.setValue("[data-image-alt]", selection.alt ?? ""); }
     const undo = this.root.querySelector<HTMLButtonElement>("[data-undo]"); if (undo) undo.disabled = !this.contentEditor?.canUndo();
     const redo = this.root.querySelector<HTMLButtonElement>("[data-redo]"); if (redo) redo.disabled = !this.contentEditor?.canRedo();
@@ -454,6 +550,8 @@ export class EditorModeController {
 
   private syncPanel(): void {
     if (!this.root || !this.definition || !this.draft) return;
+    const reset = this.root.querySelector<HTMLElement>("[data-reset-preview]"); if (reset) reset.hidden = this.mode !== "preview";
+    const limit = this.root.querySelector<HTMLElement>("[data-preview-limit]"); if (limit) limit.hidden = this.mode !== "preview";
     const behavior = this.currentBehavior();
     const widgetType = this.draft.experience.widgetType;
     const guidePattern = this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : null;
@@ -498,7 +596,7 @@ export class EditorModeController {
     this.renderConfigured(this.definition.targeting);
     this.updateDiagnostics();
     this.syncContentInspector();
-    this.setText("[data-mode-hint]", this.mode === "design" ? "Click a component to select · Double-click text to edit" : this.mode === "target" ? this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "This experience does not need a page target" : this.mode === "navigate" ? "Customer app interaction is enabled" : "End-user preview · analytics and actions are disabled");
+    this.setText("[data-mode-hint]", this.mode === "design" && this.draft.experience.widgetType === "cursor_follow" ? "Stationary authoring view · Preview tests cursor-follow movement" : this.mode === "design" && this.isTargetedType() && !this.currentTarget() ? "Select a page target in Target mode before editing this anchored card" : this.mode === "design" ? "Click a component to select · Double-click text to edit" : this.mode === "target" ? this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "This experience does not need a page target" : this.mode === "navigate" ? "Customer app interaction is enabled" : "End-user preview · analytics and actions are disabled");
   }
 
   private renderConfigured(targeting: ExperienceTargeting): void {
@@ -552,6 +650,25 @@ export class EditorModeController {
       const icon = button.querySelector("[data-step-icon]"); if (icon) icon.textContent = index === this.stepIndex ? "●" : "✓";
     });
   }
+
+  private configureDiagnostics(): void {
+    this.mutationObserver?.disconnect(); this.mutationObserver = null;
+    if (this.mode !== "target" || typeof MutationObserver === "undefined") return;
+    this.mutationObserver = new MutationObserver(() => this.scheduleTargetRefresh());
+    this.mutationObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["id", "class", "data-testid", "hidden"] });
+  }
+
+  private fitPanel = (): void => {
+    const aside = this.root?.querySelector<HTMLElement>("aside"); if (!aside) return;
+    const viewport = window.visualViewport;
+    const width = viewport?.width ?? innerWidth; const height = viewport?.height ?? innerHeight;
+    const x = viewport?.offsetLeft ?? 0; const y = viewport?.offsetTop ?? 0;
+    aside.style.maxWidth = `${Math.max(0, width - 8)}px`; aside.style.maxHeight = `${Math.max(48, height - 8)}px`;
+    const main = this.root?.querySelector<HTMLElement>("main"); if (main) main.style.maxHeight = `${Math.max(0, height - 74)}px`;
+    const rect = aside.getBoundingClientRect();
+    if (aside.style.left) aside.style.left = `${Math.max(x + 4, Math.min(x + width - rect.width - 4, rect.left))}px`;
+    aside.style.top = `${Math.max(y + 4, Math.min(y + height - 48, rect.top || y + 4))}px`;
+  };
 
   private scheduleTargetRefresh(): void {
     clearTimeout(this.targetRefreshTimer);
@@ -610,7 +727,7 @@ export class EditorModeController {
   }
 
   private updateContinuation(): void {
-    if (!this.session || !this.draft) return;
+    if (!this.session || !this.draft || this.saveState === "expired") return;
     storeEditorContinuation({
       session: this.session,
       editorState: {
@@ -633,6 +750,7 @@ export class EditorModeController {
   destroy(): void { this.teardown(true); }
 
   private teardown(clearContinuation: boolean): void {
+    this.lifecycle++;
     clearTimeout(this.expiryTimer);
     clearInterval(this.validationTimer);
     clearTimeout(this.saveTimer);
@@ -642,13 +760,18 @@ export class EditorModeController {
     this.routeObserver.stop();
     window.removeEventListener("pagehide", this.persistBeforePageLeave);
     window.removeEventListener("beforeunload", this.protectUnsavedChanges);
+    window.removeEventListener("resize", this.fitPanel);
+    window.visualViewport?.removeEventListener("resize", this.fitPanel);
+    window.visualViewport?.removeEventListener("scroll", this.fitPanel);
     this.mutationObserver?.disconnect(); this.mutationObserver = null;
     this.dragCleanup?.(); this.dragCleanup = null;
-    this.preview.destroy();
+    this.contentEditor?.flush();
+    this.previewGeneration++; this.preview.destroy();
     this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
     this.picker.cancel();
     this.host?.remove();
     this.host = null; this.root = null; this.bridge = null; this.session = null; this.draft = null; this.definition = null; this.guide = null; this.survey = null;
+    this.saveState = "clean"; this.editGeneration = 0; this.recoveryDraft = null;
     this.dirty = false; this.previewRendered = false; this.saveInFlight = null;
     if (clearContinuation) clearEditorContinuation();
   }
@@ -680,5 +803,5 @@ function formatAdvance(advance?: GuideAdvance): string {
 function escapeText(value: string): string { const span = document.createElement("span"); span.textContent = value; return span.innerHTML; }
 
 const STYLE = `
-:host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:min(312px,calc(100vw - 8px));max-height:calc(100dvh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100dvh - 82px);overflow:auto}.minimized{width:min(260px,calc(100vw - 8px))}.minimized main{display:none}.modebar{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button,.formatbar button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{min-width:0;padding:7px 3px}.modebar button:disabled{cursor:not-allowed;opacity:.42}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-flow{display:flex;align-items:center;overflow:auto}.step{flex:none;padding:4px 6px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.arrow{color:#cbd5e1;font-size:10px}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.secondary-button.compact{padding:5px 7px}.content-heading,.history-row,.link-row,.save-recovery{display:flex;align-items:center;justify-content:space-between;gap:6px}.content-heading>div{min-width:0}.formatbar{display:flex;flex-wrap:wrap;gap:4px}.formatbar button{padding:5px 7px}.link-row input{min-width:0}.history-row{justify-content:flex-start}.save-recovery{padding:8px 12px;border-bottom:1px solid #fee2e2;background:#fff7ed;color:#9a3412;font-size:11px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}[hidden]{display:none!important}@media(max-width:420px){aside{right:4px;top:4px;max-height:calc(100dvh - 8px)}main{max-height:calc(100dvh - 66px)}header{padding:9px}.section{padding:8px 10px}.modebar{padding:6px}.modebar button{font-size:10px}}
+:host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:min(312px,calc(100vw - 8px));max-height:calc(100dvh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100dvh - 82px);overflow:auto}.minimized{width:min(260px,calc(100vw - 8px))}.minimized main{display:none}.modebar{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button,.formatbar button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{min-width:0;padding:7px 3px}.modebar button:disabled{cursor:not-allowed;opacity:.42}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-flow{display:flex;align-items:center;overflow:auto}.step{flex:none;padding:4px 6px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.arrow{color:#cbd5e1;font-size:10px}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.secondary-button.compact{padding:5px 7px}.content-heading,.history-row,.link-row,.save-recovery{display:flex;align-items:center;justify-content:space-between;gap:6px}.content-heading>div{min-width:0}.formatbar{display:flex;flex-wrap:wrap;gap:4px}.formatbar button{padding:5px 7px}.link-row input{min-width:0}.history-row{justify-content:flex-start}.save-recovery{flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid #fee2e2;background:#fff7ed;color:#9a3412;font-size:11px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #2563eb;outline-offset:2px}textarea[data-recovery-export]{box-sizing:border-box;width:100%;height:180px;font:11px monospace}[hidden]{display:none!important}@media(max-width:420px){aside{right:4px;top:4px;max-height:calc(100dvh - 8px)}main{max-height:calc(100dvh - 66px)}header{padding:9px}.section{padding:8px 10px}.modebar{padding:6px}.modebar button{font-size:10px}}
 `;

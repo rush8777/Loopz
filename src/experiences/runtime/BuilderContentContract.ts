@@ -5,8 +5,8 @@ export const BUILDER_ALLOWED_ATTRIBUTES = new Set(["class", "id", "title", "role
 export const BUILDER_BLOCKED_TAGS = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO|SOURCE)$/i;
 export const BUILDER_UNSAFE_CSS = /@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i;
 
-export function builderImageUrlIsSafe(value: string): boolean { return !value || /^(https?:|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(value); }
-export function builderLinkUrlIsSafe(value: string): boolean { return /^(https?:\/\/|mailto:|tel:|\/|#|\?|\.\.?\/)/i.test(value.trim()); }
+export function builderImageUrlIsSafe(value: string): boolean { return !value || (!/[\u0000-\u0020\u007f]/.test(value) && /^(https?:\/\/|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(value)); }
+export function builderLinkUrlIsSafe(value: string): boolean { return !/[\u0000-\u001f\u007f]/.test(value) && /^(https?:\/\/|mailto:|tel:|\/|#|\?|\.\.?\/)/i.test(value.trim()); }
 export function builderInputTypeIsSafe(value: string): boolean { return ["text", "radio", "checkbox", "number"].includes(value.toLowerCase()); }
 export function safeScopedBuilderCss(input: string): string | null {
   const css = input.replace(/\/\*[\s\S]*?\*\//g, "").trim();

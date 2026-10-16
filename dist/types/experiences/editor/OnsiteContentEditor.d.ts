@@ -9,8 +9,10 @@ export interface OnsiteComponentSelection {
 }
 interface Callbacks {
     onChange(): void;
+    onValidation?(errors: string[]): void;
     onSelectionChange(selection: OnsiteComponentSelection | null): void;
 }
+export declare function componentPlainText(element: Element): string;
 /** Delegated direct-content editing scoped to one rendered experience surface.
  * It never observes or scans the customer document and never serializes its UI. */
 export declare class OnsiteContentEditor {
@@ -27,6 +29,12 @@ export declare class OnsiteContentEditor {
     private composing;
     private savedRange;
     private history;
+    private transactionTimer;
+    private pending;
+    private errors;
+    private fieldErrors;
+    private deferredFinish;
+    private tabStops;
     private historyIndex;
     constructor(root: ShadowRoot, builder: WidgetBuilderState, content: ExperienceContent, callbacks: Callbacks);
     start(): boolean;
@@ -42,26 +50,45 @@ export declare class OnsiteContentEditor {
     redo(): boolean;
     canUndo(): boolean;
     canRedo(): boolean;
+    private makeFocusable;
+    private onFocus;
     private onPointerOver;
     private onPointerOut;
     private onClick;
     private onDoubleClick;
+    private onOutsidePointer;
     private onInput;
     private onCompositionStart;
     private onCompositionEnd;
+    private onBeforeInput;
+    private onDrop;
     private onKeyDown;
     private onPaste;
     private componentFrom;
     private selectionKind;
     private emitSelection;
+    private isEditing;
+    isComposing(): boolean;
     private finishEditing;
     private getSelection;
-    private rememberSelection;
+    rememberSelection: () => void;
     private restoreSelection;
     private wrapSelection;
     private serialize;
     private syncStructuredContent;
+    snapshot(): {
+        builder: WidgetBuilderState;
+        content: ExperienceContent;
+    };
+    getValidation(): string[];
+    /** Flush DOM into the draft before saving or replacing a rendered step. */
+    flush(): boolean;
     private commit;
+    private sanitizeActive;
+    private beforeOperation;
+    private selectionOffsets;
+    private selectionState;
+    private restoreOffsets;
     private pushHistory;
     private moveHistory;
     private componentKey;

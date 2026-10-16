@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Analytics } from "../src/core/Analytics";
 import { EDITOR_CONTINUATION_KEY } from "../src/experiences/editorContinuation";
 import { EditorModeController } from "../src/experiences/editor/EditorModeController";
+import { OnsiteContentEditor } from "../src/experiences/editor/OnsiteContentEditor";
 import { ElementPicker } from "../src/experiences/editor/ElementPicker";
 import { TargetSelectorGenerator } from "../src/experiences/editor/TargetSelectorGenerator";
 import { ExperienceRenderer } from "../src/experiences/runtime/ExperienceRenderer";
@@ -209,7 +210,7 @@ describe("live placement editor", () => {
     expect(editorRoot().querySelector<HTMLButtonElement>("[data-retry-save]")?.hidden).toBe(true);
   });
 
-  it("tears down authoring when a save reports a revoked editor session", async () => {
+  it("revokes authoring but retains a token-free export when the session expires", async () => {
     const draft = onsiteDraft();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).endsWith("/exchange")) return { ok: true, json: async () => ({ sessionId: "ees_1", accessToken: "access", expiresAt: new Date(Date.now() + 60_000).toISOString() }) };
@@ -223,7 +224,11 @@ describe("live placement editor", () => {
     heading.textContent = "Save after revoke";
     heading.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
 
-    await vi.waitFor(() => expect(document.querySelector("[data-movcues-editor]")).toBeNull());
+    await vi.waitFor(() => expect(editorRoot().querySelector("[data-save-state]")?.textContent).toContain("Session expired"));
+    expect(document.querySelector("[data-movcues-experience]")).toBeNull();
+    editorRoot().querySelector<HTMLButtonElement>("[data-export-draft]")!.click();
+    const exported = editorRoot().querySelector<HTMLTextAreaElement>("[data-recovery-export]")!.value;
+    expect(exported).toContain("Save after revoke"); expect(exported).not.toMatch(/accessToken|one-time-token/);
   });
 
   it("rejects an ambiguous semantic selector and generates unique parent context", () => {
@@ -246,6 +251,91 @@ describe("live placement editor", () => {
     expect(document.querySelector("[data-movcues-experience]")).toBeNull();
     renderer.destroy();
   });
+  it("waits for a pending save and a subsequent edit before closing, without duplicate writes", async () => {
+    const draft = onsiteDraft(); const pending: Array<(value: unknown) => void> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/exchange")) return { ok: true, json: async () => ({ sessionId: "ees_1", accessToken: "access", expiresAt: new Date(Date.now() + 60_000).toISOString() }) };
+      if (init?.method === "PATCH") return new Promise(resolve => pending.push(resolve));
+      return { ok: true, json: async () => structuredClone(draft) };
+    });
+    vi.stubGlobal("fetch", fetchMock); controller = new EditorModeController("https://api.example.com"); await controller.start("token");
+    const heading = document.querySelector("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLElement>("h2")!;
+    heading.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); heading.textContent = "First change"; heading.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    heading.textContent = "Second change"; heading.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    editorRoot().querySelector<HTMLButtonElement>("[data-close]")!.click(); editorRoot().querySelector<HTMLButtonElement>("[data-close]")!.click();
+    expect(document.querySelector("[data-movcues-editor]")).not.toBeNull();
+    pending[0]({ ok: true, json: async () => ({ version: { ...draft.version, revision: 2 } }) });
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    const calls = fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH");
+    expect(JSON.parse(String(calls[1][1]?.body))).toMatchObject({ revision: 2, definition: { content: { heading: "Second change" } } });
+    pending[1]({ ok: true, json: async () => ({ version: { ...draft.version, revision: 3 } }) });
+    await vi.waitFor(() => expect(document.querySelector("[data-movcues-editor]")).toBeNull()); expect(pending).toHaveLength(2);
+  });
+  it("preserves edits on failed close, supports retry and freezes Design toast timers", async () => {
+    const draft = onsiteDraft(); draft.experience.widgetType = "toast";
+    if (!("behavior" in draft.version.definition)) throw new Error("widget expected");
+    draft.version.definition.behavior.autoDismissMs = 500;
+    let failed = true; const base = editorFetch(draft);
+    const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH" && failed) throw new Error("offline"); return base(input, init);
+    }); vi.stubGlobal("fetch", mock); controller = new EditorModeController("https://api.example.com"); await controller.start("token");
+    const heading = document.querySelector("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLElement>("h2")!;
+    heading.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); heading.textContent = "Offline edit"; heading.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    editorRoot().querySelector<HTMLButtonElement>("[data-close]")!.click();
+    await vi.waitFor(() => expect(editorRoot().querySelector("[data-save-state]")?.textContent).toBe("Save failed"));
+    expect(document.querySelector("[data-movcues-experience]")).not.toBeNull();
+    failed = false; editorRoot().querySelector<HTMLButtonElement>("[data-retry-save]")!.click();
+    await vi.waitFor(() => expect(editorRoot().querySelector("[data-save-state]")?.textContent).toBe("Draft saved"));
+  });
+  it("dismisses Preview once and renders again only after explicit Reset Preview", async () => {
+    vi.stubGlobal("fetch", editorFetch(onsiteDraft())); controller = new EditorModeController("https://api.example.com"); await controller.start("token");
+    editorRoot().querySelector<HTMLButtonElement>('[data-mode="preview"]')!.click();
+    const root = document.querySelector("[data-movcues-experience]")!.shadowRoot!;
+    root.querySelector("[data-movcues-runtime-chrome]")!.shadowRoot!.querySelector<HTMLButtonElement>("[data-dismiss]")!.click();
+    expect(document.querySelector("[data-movcues-experience]")).toBeNull();
+    editorRoot().querySelector<HTMLButtonElement>("[data-reset-preview]")!.click(); expect(document.querySelector("[data-movcues-experience]")).not.toBeNull();
+  });
+
+  it("flushes each Guide step and mode while a previous PATCH is delayed", async () => {
+    const draft = guideDraft(); draft.experience.builderMode = "onsite";
+    if (!("steps" in draft.version.definition)) throw new Error("Guide expected");
+    draft.version.definition.steps.forEach(step => { step.pattern = "modal"; step.builder = { version: 1, projectData: {}, css: ".movcues-widget{}", html: `<section class="movcues-widget"><h2 data-movcues-content="heading">${step.content.heading}</h2><p data-movcues-content="body">${step.content.body}</p></section>` }; });
+    let release!: (value: unknown) => void; const base = editorFetch(draft); let writes = 0;
+    const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => { if (init?.method === "PATCH" && writes++ === 0) return new Promise(resolve => { release = resolve; }); return base(input, init); });
+    vi.stubGlobal("fetch", mock); controller = new EditorModeController("https://api.example.com"); await controller.start("token");
+    let heading = document.querySelector("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLElement>("h2")!;
+    heading.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); heading.textContent = "Step one edit"; heading.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    await vi.waitFor(() => expect(writes).toBe(1));
+    editorRoot().querySelector<HTMLButtonElement>('[data-step="1"]')!.click();
+    heading = document.querySelector("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLElement>("h2")!;
+    heading.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); heading.textContent = "Step two edit"; heading.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    editorRoot().querySelector<HTMLButtonElement>('[data-mode="navigate"]')!.click();
+    release({ ok: true, json: async () => ({ version: { ...draft.version, revision: 2 } }) });
+    await vi.waitFor(() => expect(writes).toBe(2));
+    const calls = mock.mock.calls.filter(([,init]) => init?.method === "PATCH"); const saved = JSON.parse(String(calls[1][1]?.body));
+    expect(saved).toMatchObject({ revision: 2, definition: { steps: [{ content: { heading: "Step one edit" } }, { content: { heading: "Step two edit" } }] } });
+    expect(saved.definition.steps[0].builder.html).toContain("Step one edit"); expect(saved.definition.steps[1].builder.html).toContain("Step two edit");
+  });
+  it("does not observe the customer document during Design and keeps cursor-follow authoring stationary", async () => {
+    const draft = onsiteDraft(); draft.experience.widgetType = "cursor_follow";
+    const observe = vi.spyOn(MutationObserver.prototype, "observe");
+    vi.stubGlobal("fetch", editorFetch(draft)); controller = new EditorModeController("https://api.example.com"); await controller.start("token");
+    expect(observe.mock.calls.some(([node]) => node === document.documentElement)).toBe(false);
+    const card = document.querySelector("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLElement>(".toast")!;
+    expect(card).not.toBeNull(); const position = card.style.cssText;
+    window.dispatchEvent(new MouseEvent("pointermove", { clientX: 100, clientY: 200 })); expect(card.style.cssText).toBe(position);
+  });
+
+  it("activates link formatting through click after keyboard focus, without pointerdown", async () => {
+    vi.stubGlobal("fetch", editorFetch(onsiteDraft())); controller = new EditorModeController("https://api.example.com"); await controller.start("token");
+    const heading = document.querySelector("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLElement>("h2")!; heading.focus();
+    const apply = vi.spyOn(OnsiteContentEditor.prototype, "applyLink").mockReturnValue(true);
+    const url = editorRoot().querySelector<HTMLInputElement>("[data-link-url]")!; url.value = "/docs";
+    const button = editorRoot().querySelector<HTMLButtonElement>("[data-apply-link]")!; button.focus(); button.click();
+    expect(apply).toHaveBeenCalledTimes(1); expect(apply).toHaveBeenCalledWith("/docs");
+  });
+
 });
 
 function editorFetch(draft: EditorDraft) {

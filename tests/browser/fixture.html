@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><title>On-site authoring regression fixture</title>
+<style>body{margin:0;font:16px system-ui;min-height:2500px}nav{position:sticky;top:0;background:#fff;z-index:100;height:50px}#authoring{display:block;margin:30px;max-width:300px}button{min-height:30px}</style>
+<nav>Sticky application header</nav><button id="anchor">Page target</button><div id="authoring"></div>
+<div data-movcues-editor data-fixture-toolbar><button id="bold">Bold</button><input id="url" aria-label="Link URL" value="/docs"><button id="link">Link</button><button id="undo">Undo</button><button id="redo">Redo</button>
+</div><script type="module">
+import { OnsiteContentEditor } from '/src/experiences/editor/OnsiteContentEditor.ts';
+import { EditorModeController } from '/src/experiences/editor/EditorModeController.ts';
+const starter = '<section class="movcues-widget"><h2 data-movcues-content="heading">Welcome home</h2><div data-movcues-content="body">First line<br>Second line</div><img src="/image.png" alt="Image"><button data-movcues-action-id="primary">Continue</button></section>';
+const root = document.querySelector('#authoring').attachShadow({ mode:'open' });
+root.innerHTML = `<style>[contenteditable]{outline:1px solid blue}img{width:30px;height:30px}</style><div data-movcues-builder-surface>${starter}</div>`;
+const builder = {version:1,html:starter,css:'.movcues-widget{}',projectData:{}};
+const content = {heading:'Welcome home',body:'First line\nSecond line',primaryAction:{label:'Continue',type:'dismiss'}};
+const editor = new OnsiteContentEditor(root,builder,content,{onChange(){},onSelectionChange(){}});editor.start();
+document.querySelector('#bold').onclick=()=>editor.formatInline('strong');
+document.querySelector('#link').onclick=()=>editor.applyLink(document.querySelector('#url').value);
+document.querySelector('#undo').onclick=()=>editor.undo();document.querySelector('#redo').onclick=()=>editor.redo();
+window.fixture={editor,builder,content,root,Controller:EditorModeController};
+</script>

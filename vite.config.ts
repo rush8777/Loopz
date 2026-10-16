@@ -70,6 +70,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     test: {
+      include: ["tests/**/*.test.ts"],
       environment: "jsdom",
       globals: true,
     },

@@ -45,9 +45,11 @@
   "scripts": {
     "build": "vite build && vite build --mode minify && vite build --mode experiences && vite build --mode experiences-minify && vite build --mode editor && vite build --mode editor-minify && vite build --mode replay && vite build --mode replay-minify && vite build --mode heatmap && vite build --mode heatmap-minify && vite build --mode v1 && vite build --mode module && tsc -p tsconfig.build.json",
     "test": "vitest run",
-    "dev": "vite"
+    "dev": "vite",
+    "test:browser": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "jsdom": "^24.1.1",
     "terser": "^5.31.6",
     "typescript": "^5.5.4",

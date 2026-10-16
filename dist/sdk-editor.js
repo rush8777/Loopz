@@ -82,10 +82,10 @@
   const BUILDER_BLOCKED_TAGS = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO|SOURCE)$/i;
   const BUILDER_UNSAFE_CSS = /@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i;
   function builderImageUrlIsSafe(value) {
-    return !value || /^(https?:|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(value);
+    return !value || !/[\u0000-\u0020\u007f]/.test(value) && /^(https?:\/\/|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(value);
   }
   function builderLinkUrlIsSafe(value) {
-    return /^(https?:\/\/|mailto:|tel:|\/|#|\?|\.\.?\/)/i.test(value.trim());
+    return !/[\u0000-\u001f\u007f]/.test(value) && /^(https?:\/\/|mailto:|tel:|\/|#|\?|\.\.?\/)/i.test(value.trim());
   }
   function builderInputTypeIsSafe(value) {
     return ["text", "radio", "checkbox", "number"].includes(value.toLowerCase());
@@ -1360,7 +1360,8 @@ ${ISOLATION_CSS}`;
     }
     async load() {
       const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { headers: this.headers(), credentials: "omit" });
-      if (!response.ok) throw new Error("Editor session expired");
+      if ([401, 403, 404, 410].includes(response.status)) throw new EditorSessionExpiredError();
+      if (!response.ok) throw new Error("Draft could not be loaded");
       return response.json();
     }
     async save(definition, revision) {
@@ -1368,8 +1369,8 @@ ${ISOLATION_CSS}`;
       if (!response.ok) {
         const body2 = await response.json().catch(() => null);
         if (response.status === 409 && (body2 == null ? void 0 : body2.error) === "draft_conflict") throw new DraftConflictError(body2.currentRevision);
-        if (response.status === 401 || response.status === 403 || response.status === 404 || response.status === 410) throw new EditorSessionExpiredError();
-        throw new Error("Draft could not be saved");
+        if (response.status === 401 || response.status === 404 || response.status === 410 || response.status === 403 && (body2 == null ? void 0 : body2.error) === "invalid_editor_access") throw new EditorSessionExpiredError();
+        throw new Error((body2 == null ? void 0 : body2.error) ? `Draft could not be saved: ${body2.error}` : "Draft could not be saved");
       }
       const body = await response.json();
       return body.version;
@@ -1702,6 +1703,28 @@ ${ISOLATION_CSS}`;
     return root instanceof ShadowRoot && isMovcuesSurface(root.host);
   }
   const SELECTABLE = "[data-movcues-content],[data-movcues-action-id],img";
+  const MAX_HISTORY_BYTES = 2e6;
+  function componentPlainText(element) {
+    const readChildren = (parent) => {
+      let result = "";
+      for (const node of Array.from(parent.childNodes)) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          result += node.textContent ?? "";
+          continue;
+        }
+        if (node instanceof Element && node.tagName === "BR") {
+          result += "\n";
+          continue;
+        }
+        const block = node instanceof Element && /^(LI|P|DIV|UL|OL)$/.test(node.tagName);
+        if (block && result && !result.endsWith("\n")) result += "\n";
+        result += readChildren(node);
+        if (block && !result.endsWith("\n")) result += "\n";
+      }
+      return result;
+    };
+    return readChildren(element).trim();
+  }
   const ALIGNMENT_CLASSES = ["movcues-align-left", "movcues-align-center", "movcues-align-right"];
   class OnsiteContentEditor {
     constructor(root, builder, content, callbacks) {
@@ -1715,7 +1738,22 @@ ${ISOLATION_CSS}`;
       this.composing = false;
       this.savedRange = null;
       this.history = [];
+      this.transactionTimer = 0;
+      this.pending = false;
+      this.errors = [];
+      this.fieldErrors = /* @__PURE__ */ new Map();
+      this.deferredFinish = false;
+      this.tabStops = /* @__PURE__ */ new Map();
       this.historyIndex = -1;
+      this.onFocus = (event) => {
+        const component = this.componentFrom(event);
+        if (!component || component === this.selected || this.composing) return;
+        this.finishEditing(true);
+        this.selected = component;
+        this.savedRange = null;
+        this.renderOutline();
+        this.emitSelection();
+      };
       this.onPointerOver = (event) => {
         const component = this.componentFrom(event);
         if (!component || component === this.hovered) return;
@@ -1731,41 +1769,96 @@ ${ISOLATION_CSS}`;
       };
       this.onClick = (event) => {
         const component = this.componentFrom(event);
-        if (!component) return;
+        if (!component) {
+          this.finishEditing(true);
+          return;
+        }
+        if (component === this.selected && this.isEditing()) {
+          if (event.target.closest("a")) event.preventDefault();
+          event.stopImmediatePropagation();
+          return;
+        }
         event.preventDefault();
         event.stopImmediatePropagation();
+        if (this.composing) return;
         this.finishEditing(true);
         this.selected = component;
+        this.savedRange = null;
         this.renderOutline();
         this.emitSelection();
       };
       this.onDoubleClick = (event) => {
         const component = this.componentFrom(event);
-        if (!component) return;
-        event.preventDefault();
+        if (!component || this.composing) return;
         event.stopImmediatePropagation();
+        if (component === this.selected && this.isEditing()) return;
+        this.finishEditing(true);
         this.selected = component;
         this.editSelected();
+      };
+      this.onOutsidePointer = (event) => {
+        const path = event.composedPath();
+        if (path.includes(this.root.host) || path.some((node) => node instanceof HTMLElement && node.hasAttribute("data-movcues-editor"))) return;
+        this.finishEditing(true);
       };
       this.onInput = (event) => {
         var _a;
         if (!((_a = this.selected) == null ? void 0 : _a.contains(event.target)) || this.composing) return;
+        this.sanitizeActive();
         this.rememberSelection();
-        this.commit();
+        this.commit(true);
       };
       this.onCompositionStart = () => {
+        this.beforeOperation();
         this.composing = true;
       };
       this.onCompositionEnd = () => {
         this.composing = false;
+        this.sanitizeActive();
         this.rememberSelection();
         this.commit();
+        if (this.deferredFinish) {
+          this.deferredFinish = false;
+          this.finishEditing(true);
+        }
+      };
+      this.onBeforeInput = (event) => {
+        const input = event;
+        if (/^(insertFromDrop|insertFromPaste|insertHTML)$/.test(input.inputType)) event.preventDefault();
+        const formatting = { formatBold: "strong", formatItalic: "em", formatUnderline: "u" };
+        if (input.inputType in formatting) {
+          event.preventDefault();
+          this.rememberSelection();
+          this.formatInline(formatting[input.inputType]);
+        }
+      };
+      this.onDrop = (event) => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
       };
       this.onKeyDown = (event) => {
         const keyEvent = event;
+        if (this.composing || keyEvent.isComposing || keyEvent.keyCode === 229) return;
+        if ((keyEvent.ctrlKey || keyEvent.metaKey) && keyEvent.key.toLowerCase() === "a" && this.isEditing() && this.selected) {
+          keyEvent.preventDefault();
+          const range2 = document.createRange();
+          range2.selectNodeContents(this.selected);
+          const selection = this.getSelection();
+          selection == null ? void 0 : selection.removeAllRanges();
+          selection == null ? void 0 : selection.addRange(range2);
+          this.savedRange = range2.cloneRange();
+          return;
+        }
+        if ((keyEvent.key === "Enter" || keyEvent.key === " ") && this.selected && !this.isEditing() && this.selectionKind(this.selected) !== "image") {
+          keyEvent.preventDefault();
+          this.editSelected();
+          return;
+        }
         if (keyEvent.key === "Escape") {
           keyEvent.preventDefault();
+          const component = this.selected;
           this.deselect();
+          component == null ? void 0 : component.focus({ preventScroll: true });
           return;
         }
         if ((keyEvent.ctrlKey || keyEvent.metaKey) && keyEvent.key.toLowerCase() === "z") {
@@ -1785,14 +1878,16 @@ ${ISOLATION_CSS}`;
       };
       this.onPaste = (event) => {
         var _a, _b;
-        if (!((_a = this.selected) == null ? void 0 : _a.isContentEditable)) return;
+        if (!this.isEditing() || this.composing) return;
         const paste = event;
-        const text = (_b = paste.clipboardData) == null ? void 0 : _b.getData("text/plain");
+        const text = (_a = paste.clipboardData) == null ? void 0 : _a.getData("text/plain");
         if (text === void 0) return;
         paste.preventDefault();
         const selection = this.getSelection();
         if (!(selection == null ? void 0 : selection.rangeCount)) return;
         const range2 = selection.getRangeAt(0);
+        if (!((_b = this.selected) == null ? void 0 : _b.contains(range2.commonAncestorContainer))) return;
+        this.beforeOperation();
         range2.deleteContents();
         const node = document.createTextNode(text);
         range2.insertNode(node);
@@ -1823,6 +1918,8 @@ ${ISOLATION_CSS}`;
     start() {
       if (!this.surface) return false;
       this.root.append(this.style, this.outline);
+      this.makeFocusable();
+      this.root.addEventListener("focusin", this.onFocus, true);
       this.root.addEventListener("pointerover", this.onPointerOver, true);
       this.root.addEventListener("pointerout", this.onPointerOut, true);
       this.root.addEventListener("click", this.onClick, true);
@@ -1834,14 +1931,35 @@ ${ISOLATION_CSS}`;
       this.root.addEventListener("keyup", this.rememberSelection, true);
       this.root.addEventListener("mouseup", this.rememberSelection, true);
       this.root.addEventListener("paste", this.onPaste, true);
+      this.root.addEventListener("drop", this.onDrop, true);
+      this.root.addEventListener("beforeinput", this.onBeforeInput, true);
+      this.root.addEventListener("touchend", this.rememberSelection, true);
+      document.addEventListener("pointerdown", this.onOutsidePointer, true);
       window.addEventListener("scroll", this.scheduleOutline, true);
       window.addEventListener("resize", this.scheduleOutline);
       this.pushHistory();
       return true;
     }
     destroy() {
+      var _a, _b;
       cancelAnimationFrame(this.frame);
+      this.flush();
+      clearTimeout(this.transactionTimer);
       this.finishEditing(false);
+      (_a = this.selected) == null ? void 0 : _a.removeAttribute("contenteditable");
+      (_b = this.selected) == null ? void 0 : _b.removeAttribute("spellcheck");
+      this.composing = false;
+      this.selected = null;
+      this.hovered = null;
+      this.savedRange = null;
+      this.history = [];
+      this.historyIndex = -1;
+      this.root.removeEventListener("focusin", this.onFocus, true);
+      for (const [element, original] of this.tabStops) {
+        if (original === null) element.removeAttribute("tabindex");
+        else element.setAttribute("tabindex", original);
+      }
+      this.tabStops.clear();
       this.root.removeEventListener("pointerover", this.onPointerOver, true);
       this.root.removeEventListener("pointerout", this.onPointerOut, true);
       this.root.removeEventListener("click", this.onClick, true);
@@ -1853,6 +1971,10 @@ ${ISOLATION_CSS}`;
       this.root.removeEventListener("keyup", this.rememberSelection, true);
       this.root.removeEventListener("mouseup", this.rememberSelection, true);
       this.root.removeEventListener("paste", this.onPaste, true);
+      this.root.removeEventListener("drop", this.onDrop, true);
+      this.root.removeEventListener("beforeinput", this.onBeforeInput, true);
+      this.root.removeEventListener("touchend", this.rememberSelection, true);
+      document.removeEventListener("pointerdown", this.onOutsidePointer, true);
       window.removeEventListener("scroll", this.scheduleOutline, true);
       window.removeEventListener("resize", this.scheduleOutline);
       this.outline.remove();
@@ -1861,12 +1983,22 @@ ${ISOLATION_CSS}`;
     }
     editSelected() {
       if (!this.selected || this.selectionKind(this.selected) === "image") return;
-      this.selected.contentEditable = "true";
+      if (this.isEditing()) {
+        this.selected.focus({ preventScroll: true });
+        return;
+      }
+      this.selected.setAttribute("contenteditable", "true");
       this.selected.setAttribute("spellcheck", "true");
       this.selected.focus({ preventScroll: true });
+      const current = this.history[this.historyIndex];
+      if (current) Object.assign(current, this.selectionState());
       this.emitSelection();
     }
     deselect() {
+      if (this.composing) {
+        this.deferredFinish = true;
+        return;
+      }
       this.finishEditing(true);
       this.selected = null;
       this.savedRange = null;
@@ -1877,11 +2009,13 @@ ${ISOLATION_CSS}`;
       this.wrapSelection(tag);
     }
     applyLink(url) {
-      var _a;
-      if (!builderLinkUrlIsSafe(url) || !this.restoreSelection()) return false;
+      var _a, _b, _c, _d;
+      if (this.composing || !this.selected || this.selectionKind(this.selected) !== "text" || !builderLinkUrlIsSafe(url) || !this.restoreSelection()) return false;
       const selection = this.getSelection();
       const range2 = (selection == null ? void 0 : selection.rangeCount) ? selection.getRangeAt(0) : null;
       if (!range2 || range2.collapsed || !((_a = this.selected) == null ? void 0 : _a.contains(range2.commonAncestorContainer))) return false;
+      if (((_b = this.selected) == null ? void 0 : _b.closest("a")) || ((_c = range2.startContainer.parentElement) == null ? void 0 : _c.closest("a")) || ((_d = range2.endContainer.parentElement) == null ? void 0 : _d.closest("a")) || range2.cloneContents().querySelector("a")) return false;
+      this.beforeOperation();
       const anchor = document.createElement("a");
       anchor.href = url;
       if (/^https?:\/\//i.test(url)) {
@@ -1898,38 +2032,69 @@ ${ISOLATION_CSS}`;
       return true;
     }
     setAlignment(alignment) {
-      if (!this.selected || this.selectionKind(this.selected) === "image") return;
+      if (this.composing || !this.selected || this.selectionKind(this.selected) !== "text") return;
+      this.beforeOperation();
       this.selected.classList.remove(...ALIGNMENT_CLASSES);
       this.selected.classList.add(`movcues-align-${alignment}`);
       this.commit();
     }
     toggleList(kind) {
-      if (!this.selected || this.selectionKind(this.selected) === "image") return;
+      if (this.composing || !this.selected || this.selected.getAttribute("data-movcues-content") !== "body") return;
+      this.beforeOperation();
       let component = this.selected;
       if (component.tagName === "P") {
         const replacement = document.createElement("div");
         for (const attribute of Array.from(component.attributes)) replacement.setAttribute(attribute.name, attribute.value);
-        replacement.innerHTML = component.innerHTML;
+        replacement.append(...Array.from(component.childNodes));
+        this.tabStops.delete(component);
+        replacement.removeAttribute("tabindex");
         component.replaceWith(replacement);
         component = replacement;
         this.selected = replacement;
+        this.makeFocusable();
       }
-      const list = document.createElement(kind);
-      const lines = (component.innerText || component.textContent || "").split(/\n+/).map((value) => value.trim()).filter(Boolean);
-      for (const line of lines.length ? lines : [""]) {
-        const item = document.createElement("li");
-        item.textContent = line;
-        list.appendChild(item);
+      const existing = component.querySelector("ul,ol");
+      if (existing) {
+        if (existing.tagName.toLowerCase() !== kind) {
+          const list = document.createElement(kind);
+          list.append(...Array.from(existing.childNodes));
+          existing.replaceWith(list);
+        } else {
+          const fragment = document.createDocumentFragment();
+          Array.from(existing.children).forEach((item, i) => {
+            if (i) fragment.append(document.createElement("br"));
+            fragment.append(...Array.from(item.childNodes));
+          });
+          existing.replaceWith(fragment);
+        }
+      } else {
+        const list = document.createElement(kind);
+        let item = document.createElement("li");
+        list.append(item);
+        for (const node of Array.from(component.childNodes)) {
+          if (node instanceof Element && node.tagName === "BR") {
+            item = document.createElement("li");
+            list.append(item);
+          } else if (node instanceof Element && /^(P|DIV)$/.test(node.tagName)) {
+            if (item.childNodes.length) {
+              item = document.createElement("li");
+              list.append(item);
+            }
+            item.append(...Array.from(node.childNodes));
+          } else item.append(node);
+        }
+        component.replaceChildren(list);
       }
-      component.replaceChildren(list);
+      this.savedRange = null;
       this.commit();
       component.focus({ preventScroll: true });
     }
     updateImage(src, alt) {
-      if (!this.selected || this.selected.tagName !== "IMG" || !builderImageUrlIsSafe(src)) return false;
+      if (!this.selected || this.selected.tagName !== "IMG" || !builderImageUrlIsSafe(src) || alt.length > 500) return false;
+      this.beforeOperation();
       if (src) this.selected.setAttribute("src", src);
       else this.selected.removeAttribute("src");
-      this.selected.setAttribute("alt", alt.slice(0, 500));
+      this.selected.setAttribute("alt", alt);
       this.commit();
       this.emitSelection();
       return true;
@@ -1941,10 +2106,17 @@ ${ISOLATION_CSS}`;
       return this.moveHistory(1);
     }
     canUndo() {
-      return this.historyIndex > 0;
+      return this.pending || this.historyIndex > 0;
     }
     canRedo() {
-      return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1;
+      return !this.pending && this.historyIndex >= 0 && this.historyIndex < this.history.length - 1;
+    }
+    makeFocusable() {
+      var _a;
+      (_a = this.surface) == null ? void 0 : _a.querySelectorAll(SELECTABLE).forEach((element) => {
+        if (!this.tabStops.has(element)) this.tabStops.set(element, element.getAttribute("tabindex"));
+        element.setAttribute("tabindex", "0");
+      });
     }
     componentFrom(event) {
       if (!this.surface) return null;
@@ -1959,14 +2131,25 @@ ${ISOLATION_CSS}`;
     emitSelection() {
       if (!this.selected) return this.callbacks.onSelectionChange(null);
       const kind = this.selectionKind(this.selected);
-      this.callbacks.onSelectionChange({ kind, label: kind === "image" ? "Image" : this.selected.getAttribute("data-movcues-content") ?? `${this.selected.getAttribute("data-movcues-action-id") ?? "button"} button`, editing: this.selected.isContentEditable, ...kind === "image" ? { src: this.selected.getAttribute("src") ?? "", alt: this.selected.getAttribute("alt") ?? "" } : {} });
+      this.callbacks.onSelectionChange({ kind, label: kind === "image" ? "Image" : this.selected.getAttribute("data-movcues-content") ?? `${this.selected.getAttribute("data-movcues-action-id") ?? "button"} button`, editing: this.isEditing(), ...kind === "image" ? { src: this.selected.getAttribute("src") ?? "", alt: this.selected.getAttribute("alt") ?? "" } : {} });
+    }
+    isEditing() {
+      var _a;
+      return ((_a = this.selected) == null ? void 0 : _a.getAttribute("contenteditable")) === "true";
+    }
+    isComposing() {
+      return this.composing;
     }
     finishEditing(commit) {
-      var _a;
-      if (!((_a = this.selected) == null ? void 0 : _a.isContentEditable)) return;
-      this.selected.removeAttribute("contenteditable");
-      this.selected.removeAttribute("spellcheck");
-      if (commit) this.commit();
+      var _a, _b;
+      if (this.composing) {
+        this.deferredFinish = true;
+        return;
+      }
+      if (!this.isEditing()) return;
+      if (commit) this.flush();
+      (_a = this.selected) == null ? void 0 : _a.removeAttribute("contenteditable");
+      (_b = this.selected) == null ? void 0 : _b.removeAttribute("spellcheck");
       this.emitSelection();
     }
     getSelection() {
@@ -1974,7 +2157,12 @@ ${ISOLATION_CSS}`;
       return ((_b = (_a = this.root).getSelection) == null ? void 0 : _b.call(_a)) ?? window.getSelection();
     }
     restoreSelection() {
-      if (!this.savedRange) return false;
+      var _a;
+      if (!this.savedRange || !((_a = this.selected) == null ? void 0 : _a.contains(this.savedRange.commonAncestorContainer))) {
+        this.savedRange = null;
+        return false;
+      }
+      this.selected.focus({ preventScroll: true });
       const selection = this.getSelection();
       selection == null ? void 0 : selection.removeAllRanges();
       selection == null ? void 0 : selection.addRange(this.savedRange);
@@ -1982,10 +2170,12 @@ ${ISOLATION_CSS}`;
     }
     wrapSelection(tag) {
       var _a;
-      if (!this.restoreSelection()) return;
+      if (this.composing || !this.restoreSelection()) return;
       const selection = this.getSelection();
       const range2 = (selection == null ? void 0 : selection.rangeCount) ? selection.getRangeAt(0) : null;
       if (!range2 || range2.collapsed || !((_a = this.selected) == null ? void 0 : _a.contains(range2.commonAncestorContainer))) return;
+      if (range2.cloneContents().querySelector("ul,ol,li,div,p,button,img")) return;
+      this.beforeOperation();
       const wrapper = document.createElement(tag);
       wrapper.append(range2.extractContents());
       range2.insertNode(wrapper);
@@ -1998,50 +2188,175 @@ ${ISOLATION_CSS}`;
     serialize() {
       if (!this.surface) return this.builder.html;
       const clone = this.surface.cloneNode(true);
-      clone.querySelectorAll("[contenteditable],[spellcheck]").forEach((element) => {
+      clone.querySelectorAll("[contenteditable],[spellcheck],[tabindex]").forEach((element) => {
         element.removeAttribute("contenteditable");
         element.removeAttribute("spellcheck");
+        element.removeAttribute("tabindex");
       });
       return clone.innerHTML;
     }
-    syncStructuredContent() {
-      var _a, _b, _c, _d, _e, _f, _g, _h;
+    syncStructuredContent(only) {
+      var _a, _b;
       if (!this.surface) return;
-      const heading = (_b = (_a = this.surface.querySelector('[data-movcues-content="heading"]')) == null ? void 0 : _a.textContent) == null ? void 0 : _b.trim();
-      const body = (_d = (_c = this.surface.querySelector('[data-movcues-content="body"]')) == null ? void 0 : _c.textContent) == null ? void 0 : _d.trim();
-      const primary = (_f = (_e = this.surface.querySelector('[data-movcues-action-id="primary"]')) == null ? void 0 : _e.textContent) == null ? void 0 : _f.trim();
-      const secondary = (_h = (_g = this.surface.querySelector('[data-movcues-action-id="secondary"]')) == null ? void 0 : _g.textContent) == null ? void 0 : _h.trim();
-      if (heading) this.content.heading = heading.slice(0, 160);
-      if (body) this.content.body = body.slice(0, 2e3);
-      if (primary && this.content.primaryAction) this.content.primaryAction.label = primary.slice(0, 80);
-      if (secondary && this.content.secondaryAction) this.content.secondaryAction.label = secondary.slice(0, 80);
+      if (!only) this.fieldErrors.clear();
+      for (const [marker, limit] of [["heading", 160], ["body", 2e3], ["primary", 80], ["secondary", 80]]) {
+        if (only && (only.getAttribute("data-movcues-content") ?? only.getAttribute("data-movcues-action-id")) !== marker) continue;
+        const element = only ?? this.surface.querySelector(`[data-movcues-content="${marker}"],[data-movcues-action-id="${marker}"]`);
+        if (!element) continue;
+        const errors = [];
+        const value = componentPlainText(element);
+        if (marker === "heading" || marker === "body") this.content[marker] = value;
+        else {
+          const action = marker === "primary" ? this.content.primaryAction : this.content.secondaryAction;
+          if (action) action.label = value;
+        }
+        if (!value) errors.push(`${marker}: enter text before saving.`);
+        if (value.length > limit) errors.push(`${marker}: use at most ${limit} characters (${value.length} entered).`);
+        this.fieldErrors.set(marker, errors);
+      }
+      this.errors = Array.from(this.fieldErrors.values()).flat();
+      (_b = (_a = this.callbacks).onValidation) == null ? void 0 : _b.call(_a, this.errors);
     }
-    commit() {
+    snapshot() {
+      var _a;
+      const content = JSON.parse(JSON.stringify(this.content));
+      for (const marker of ["heading", "body", "primary", "secondary"]) {
+        const element = (_a = this.surface) == null ? void 0 : _a.querySelector(`[data-movcues-content="${marker}"],[data-movcues-action-id="${marker}"]`);
+        if (!element) continue;
+        const text = componentPlainText(element);
+        if (marker === "heading" || marker === "body") content[marker] = text;
+        else {
+          const action = marker === "primary" ? content.primaryAction : content.secondaryAction;
+          if (action) action.label = text;
+        }
+      }
+      return { builder: { ...this.builder, html: this.serialize() }, content };
+    }
+    getValidation() {
       this.syncStructuredContent();
-      this.builder.html = this.serialize();
-      this.builder.projectData = { ...this.builder.projectData, movcues: { authoringSurface: "onsite", schemaVersion: 1 } };
-      this.pushHistory();
+      return [...this.errors];
+    }
+    /** Flush DOM into the draft before saving or replacing a rendered step. */
+    flush() {
+      if (this.composing) return false;
+      clearTimeout(this.transactionTimer);
+      this.transactionTimer = 0;
+      if (this.pending) {
+        this.pending = false;
+        this.syncStructuredContent();
+        this.builder.html = this.serialize();
+        this.builder.projectData = { ...this.builder.projectData, movcues: { authoringSurface: "onsite", schemaVersion: 1 } };
+        this.pushHistory();
+        this.emitSelection();
+      }
+      return true;
+    }
+    commit(typing = false) {
+      this.pending = true;
+      this.syncStructuredContent(typing ? this.selected : void 0);
+      if (typing) {
+        clearTimeout(this.transactionTimer);
+        this.transactionTimer = window.setTimeout(() => this.flush(), 300);
+      } else this.flush();
       this.callbacks.onChange();
-      this.renderOutline();
-      this.emitSelection();
+      this.scheduleOutline();
+    }
+    sanitizeActive() {
+      if (!this.selected || !this.selected.childElementCount) return;
+      const wrapper = document.createElement("section");
+      wrapper.className = "movcues-widget";
+      wrapper.innerHTML = this.selected.innerHTML;
+      const nodes = sanitizeBuilderHtml(wrapper.outerHTML);
+      const safe = nodes == null ? void 0 : nodes.find((node) => node instanceof HTMLElement);
+      if (!safe) return;
+      if (this.selectionKind(this.selected) === "button") {
+        safe.querySelectorAll("ul,ol,li,div,p,button,a,img").forEach((node) => node.replaceWith(document.createTextNode(node.textContent ?? "")));
+      }
+      safe.querySelectorAll("[data-movcues-content],[data-movcues-action-id]").forEach((node) => {
+        node.removeAttribute("data-movcues-content");
+        node.removeAttribute("data-movcues-action-id");
+      });
+      if (safe.innerHTML !== this.selected.innerHTML) {
+        const caret = this.selectionOffsets();
+        this.selected.innerHTML = safe.innerHTML;
+        this.savedRange = null;
+        this.restoreOffsets(caret.start, caret.end);
+      }
+    }
+    beforeOperation() {
+      this.flush();
+      const current = this.history[this.historyIndex];
+      if (current) Object.assign(current, this.selectionState());
+    }
+    selectionOffsets() {
+      const selection = this.getSelection();
+      if (!this.selected || !(selection == null ? void 0 : selection.rangeCount) || !this.selected.contains(selection.getRangeAt(0).commonAncestorContainer)) return { start: 0, end: 0 };
+      const range2 = selection.getRangeAt(0);
+      const prefix = range2.cloneRange();
+      prefix.selectNodeContents(this.selected);
+      prefix.setEnd(range2.startContainer, range2.startOffset);
+      return { start: prefix.toString().length, end: prefix.toString().length + range2.toString().length };
+    }
+    selectionState() {
+      return { key: this.componentKey(this.selected), editing: this.isEditing(), ...this.selectionOffsets() };
+    }
+    restoreOffsets(start, end) {
+      if (!this.selected) return;
+      const walker = document.createTreeWalker(this.selected, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      let node;
+      while (node = walker.nextNode()) nodes.push(node);
+      if (!nodes.length) {
+        this.selected.append(document.createTextNode(""));
+        nodes.push(this.selected.firstChild);
+      }
+      const locate = (offset) => {
+        for (const text of nodes) {
+          if (offset <= text.length) return [text, offset];
+          offset -= text.length;
+        }
+        const last = nodes[nodes.length - 1];
+        return [last, last.length];
+      };
+      const range2 = document.createRange();
+      range2.setStart(...locate(start));
+      range2.setEnd(...locate(end));
+      const selection = this.getSelection();
+      selection == null ? void 0 : selection.removeAllRanges();
+      selection == null ? void 0 : selection.addRange(range2);
+      this.savedRange = range2.cloneRange();
     }
     pushHistory() {
-      const html = this.serialize();
-      if (this.history[this.historyIndex] === html) return;
+      var _a;
+      const html = this.builder.html;
+      if (((_a = this.history[this.historyIndex]) == null ? void 0 : _a.html) === html) return;
+      const content = JSON.parse(JSON.stringify(this.content));
       this.history.splice(this.historyIndex + 1);
-      this.history.push(html);
-      if (this.history.length > 50) this.history.shift();
+      this.history.push({ html, content, ...this.selectionState(), bytes: (html.length + JSON.stringify(content).length) * 2 });
+      while (this.history.length > 1 && (this.history.length > 50 || this.history.reduce((n, entry) => n + entry.bytes, 0) > MAX_HISTORY_BYTES)) this.history.shift();
       this.historyIndex = this.history.length - 1;
     }
     moveHistory(delta) {
+      if (this.composing) return false;
+      this.flush();
       const next = this.historyIndex + delta;
       if (!this.surface || next < 0 || next >= this.history.length) return false;
-      const key = this.componentKey(this.selected);
+      const state = this.history[next];
       this.historyIndex = next;
-      this.surface.innerHTML = this.history[next];
-      this.builder.html = this.history[next];
+      this.savedRange = null;
+      this.hovered = null;
+      this.surface.innerHTML = state.html;
+      this.tabStops.clear();
+      this.makeFocusable();
+      this.builder.html = state.html;
+      for (const key of Object.keys(this.content)) delete this.content[key];
+      Object.assign(this.content, JSON.parse(JSON.stringify(state.content)));
+      this.selected = this.findByKey(state.key);
+      if (state.editing && this.selected) {
+        this.editSelected();
+        this.restoreOffsets(state.start, state.end);
+      }
       this.syncStructuredContent();
-      this.selected = this.findByKey(key);
       this.renderOutline();
       this.emitSelection();
       this.callbacks.onChange();
@@ -2057,7 +2372,7 @@ ${ISOLATION_CSS}`;
       if (!key || !this.surface) return null;
       const [tag, marker] = key.split(":");
       if (tag === "IMG") return this.surface.querySelectorAll("img")[Number(marker)] ?? null;
-      return this.surface.querySelector(`[data-movcues-content="${CSS.escape(marker)}"],[data-movcues-action-id="${CSS.escape(marker)}"]`);
+      return Array.from(this.surface.querySelectorAll(SELECTABLE)).find((element) => (element.getAttribute("data-movcues-content") ?? element.getAttribute("data-movcues-action-id")) === marker) ?? null;
     }
     renderOutline() {
       const component = this.selected ?? this.hovered;
@@ -2099,13 +2414,36 @@ ${ISOLATION_CSS}`;
       this.stepIndex = 0;
       this.mode = "design";
       this.dirty = false;
+      this.editGeneration = 0;
+      this.saveState = "clean";
+      this.recoveryDraft = null;
+      this.lifecycle = 0;
       this.previewRendered = false;
+      this.previewGeneration = 0;
       this.currentPath = "";
       this.persistBeforePageLeave = () => this.updateContinuation();
       this.protectUnsavedChanges = (event) => {
-        if (!this.dirty) return;
+        var _a;
+        if (!this.dirty && !this.saveInFlight && !((_a = this.contentEditor) == null ? void 0 : _a.isComposing())) return;
         event.preventDefault();
         event.returnValue = "";
+      };
+      this.fitPanel = () => {
+        var _a, _b;
+        const aside = (_a = this.root) == null ? void 0 : _a.querySelector("aside");
+        if (!aside) return;
+        const viewport = window.visualViewport;
+        const width = (viewport == null ? void 0 : viewport.width) ?? innerWidth;
+        const height = (viewport == null ? void 0 : viewport.height) ?? innerHeight;
+        const x = (viewport == null ? void 0 : viewport.offsetLeft) ?? 0;
+        const y = (viewport == null ? void 0 : viewport.offsetTop) ?? 0;
+        aside.style.maxWidth = `${Math.max(0, width - 8)}px`;
+        aside.style.maxHeight = `${Math.max(48, height - 8)}px`;
+        const main = (_b = this.root) == null ? void 0 : _b.querySelector("main");
+        if (main) main.style.maxHeight = `${Math.max(0, height - 74)}px`;
+        const rect = aside.getBoundingClientRect();
+        if (aside.style.left) aside.style.left = `${Math.max(x + 4, Math.min(x + width - rect.width - 4, rect.left))}px`;
+        aside.style.top = `${Math.max(y + 4, Math.min(y + height - 48, rect.top || y + 4))}px`;
       };
     }
     async start(rawToken) {
@@ -2172,13 +2510,16 @@ ${ISOLATION_CSS}`;
       this.mode = restoredMode === "select" ? "target" : restoredMode === "design" || restoredMode === "target" || restoredMode === "navigate" || restoredMode === "preview" ? restoredMode : draft.experience.builderMode === "onsite" ? "design" : "target";
       this.updateContinuation();
       this.mount();
-      this.expiryTimer = window.setTimeout(() => this.destroy(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
+      this.expiryTimer = window.setTimeout(() => this.expireSession(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
       this.validationTimer = window.setInterval(() => {
-        void bridge.load().catch(() => this.destroy());
+        void bridge.load().catch((error) => {
+          if (this.bridge === bridge && error instanceof EditorSessionExpiredError) this.expireSession();
+        });
       }, 15e3);
       return true;
     }
     mount() {
+      var _a, _b;
       if (!this.draft || !this.definition) return;
       this.host = document.createElement("div");
       this.host.dataset.movcuesEditor = "";
@@ -2192,10 +2533,11 @@ ${ISOLATION_CSS}`;
       this.routeObserver.start();
       window.addEventListener("pagehide", this.persistBeforePageLeave);
       window.addEventListener("beforeunload", this.protectUnsavedChanges);
-      if (typeof MutationObserver !== "undefined") {
-        this.mutationObserver = new MutationObserver(() => this.scheduleTargetRefresh());
-        this.mutationObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["id", "class", "data-testid", "data-test", "data-qa", "data-cy", "aria-label", "role", "name", "href", "hidden"] });
-      }
+      this.configureDiagnostics();
+      (_a = window.visualViewport) == null ? void 0 : _a.addEventListener("resize", this.fitPanel);
+      (_b = window.visualViewport) == null ? void 0 : _b.addEventListener("scroll", this.fitPanel);
+      window.addEventListener("resize", this.fitPanel);
+      this.fitPanel();
     }
     panelMarkup(draft) {
       var _a, _b;
@@ -2209,14 +2551,15 @@ ${ISOLATION_CSS}`;
       </header>
       <main>
         <div class="modebar"><button type="button" data-mode="design"${designDisabled}>Design</button><button type="button" data-mode="target">Target</button><button type="button" data-mode="navigate">Navigate</button><button type="button" data-mode="preview">Preview</button></div>
+        <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>Preview tests this step only. Links and external actions are disabled.</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         ${guideMarkup}
         <section class="section content-inspector" data-content-inspector hidden>
           <div class="content-heading"><div><div class="eyebrow">Content</div><strong data-component-label>Nothing selected</strong></div><button type="button" class="secondary-button compact" data-edit-component>Edit</button></div>
           <div class="formatbar" data-text-controls><button type="button" data-format="strong" aria-label="Bold"><b>B</b></button><button type="button" data-format="em" aria-label="Italic"><i>I</i></button><button type="button" data-format="u" aria-label="Underline"><u>U</u></button><button type="button" data-list="ul" aria-label="Bulleted list">• List</button><button type="button" data-list="ol" aria-label="Numbered list">1. List</button></div>
           <div class="format-row" data-text-controls><label>Align<select data-text-align><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label></div>
-          <div class="link-row" data-text-controls><input data-link-url type="url" placeholder="https://… or /path"><button type="button" class="secondary-button compact" data-apply-link>Link</button></div>
-          <div class="image-controls" data-image-controls hidden><label>Source URL<input data-image-src type="url"></label><label>Alt text<input data-image-alt type="text" maxlength="500"></label><button type="button" class="secondary-button" data-apply-image>Apply image</button></div>
+          <div class="link-row" data-text-controls><input data-link-url aria-label="Link URL" type="text" inputmode="url" placeholder="https://… or /path"><button type="button" class="secondary-button compact" data-apply-link>Link</button></div>
+          <div class="image-controls" data-image-controls hidden><label>Source URL<input data-image-src type="text" inputmode="url"></label><label>Alt text<input data-image-alt type="text" maxlength="500"></label><button type="button" class="secondary-button" data-apply-image>Apply image</button></div>
           <div class="history-row"><button type="button" class="secondary-button compact" data-undo disabled>Undo</button><button type="button" class="secondary-button compact" data-redo disabled>Redo</button></div>
         </section>
         <section class="section" data-for="target">
@@ -2243,12 +2586,13 @@ ${ISOLATION_CSS}`;
         <section class="section" data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
         <section class="section"><div class="eyebrow">Configured</div><dl data-configured></dl></section>
         <section class="section live"><div class="eyebrow">Live status</div><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></section>
-        <div class="save-recovery" data-save-recovery hidden><button type="button" class="secondary-button" data-retry-save>Retry save</button><button type="button" class="secondary-button" data-reload-draft hidden>Reload latest</button><span data-recovery-message>Local edits are preserved.</span></div><p class="hint" data-mode-hint></p>
+        <p class="hint status-error" role="alert" data-content-error hidden></p>
+        <div class="save-recovery" data-save-recovery hidden><button type="button" class="secondary-button" data-retry-save>Retry save</button><button type="button" class="secondary-button" data-reload-draft hidden>Reload latest</button><button type="button" class="secondary-button" data-export-draft>Copy / Export unsaved draft</button><button type="button" class="secondary-button" data-discard-draft>Discard and close</button><span data-recovery-message>Local edits are preserved.</span></div><p class="hint" data-mode-hint></p>
       </main>
     </aside>`;
     }
     bindPanel() {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o;
       const root = this.root;
       root.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this.setMode(button.dataset.mode)));
       root.querySelectorAll("[data-pick]").forEach((button) => button.addEventListener("click", () => {
@@ -2270,37 +2614,49 @@ ${ISOLATION_CSS}`;
         void this.close();
       });
       (_e = root.querySelector("[data-retry-save]")) == null ? void 0 : _e.addEventListener("click", () => void this.persist());
-      (_f = root.querySelector("[data-reload-draft]")) == null ? void 0 : _f.addEventListener("click", () => window.location.reload());
-      (_g = root.querySelector("[data-edit-component]")) == null ? void 0 : _g.addEventListener("click", () => {
+      (_f = root.querySelector("[data-reload-draft]")) == null ? void 0 : _f.addEventListener("click", () => {
+        if (window.confirm("Reloading discards local edits. Copy / Export them first if you need them. Reload latest?")) {
+          this.recoveryDraft = null;
+          window.location.reload();
+        }
+      });
+      (_g = root.querySelector("[data-export-draft]")) == null ? void 0 : _g.addEventListener("click", () => this.exportRecovery());
+      (_h = root.querySelector("[data-discard-draft]")) == null ? void 0 : _h.addEventListener("click", () => {
+        if (window.confirm("Discard unsaved edits and close?")) {
+          this.recoveryDraft = null;
+          this.destroy();
+        }
+      });
+      (_i = root.querySelector("[data-reset-preview]")) == null ? void 0 : _i.addEventListener("click", () => this.renderPreview());
+      (_j = root.querySelector("[data-edit-component]")) == null ? void 0 : _j.addEventListener("click", () => {
         var _a2;
         return (_a2 = this.contentEditor) == null ? void 0 : _a2.editSelected();
       });
-      root.querySelectorAll("[data-format]").forEach((button) => button.addEventListener("pointerdown", (event) => {
+      root.querySelectorAll("[data-format]").forEach((button) => button.addEventListener("click", () => {
         var _a2;
-        event.preventDefault();
         (_a2 = this.contentEditor) == null ? void 0 : _a2.formatInline(button.dataset.format);
         this.syncContentInspector();
       }));
-      root.querySelectorAll("[data-list]").forEach((button) => button.addEventListener("pointerdown", (event) => {
+      root.querySelectorAll("[data-list]").forEach((button) => button.addEventListener("click", () => {
         var _a2;
-        event.preventDefault();
         (_a2 = this.contentEditor) == null ? void 0 : _a2.toggleList(button.dataset.list);
         this.syncContentInspector();
       }));
-      (_h = root.querySelector("[data-text-align]")) == null ? void 0 : _h.addEventListener("change", (event) => {
+      (_k = root.querySelector("[data-text-align]")) == null ? void 0 : _k.addEventListener("change", (event) => {
         var _a2;
         (_a2 = this.contentEditor) == null ? void 0 : _a2.setAlignment(event.currentTarget.value);
         this.syncContentInspector();
       });
-      (_i = root.querySelector("[data-apply-link]")) == null ? void 0 : _i.addEventListener("pointerdown", (event) => {
+      (_l = root.querySelector("[data-apply-link]")) == null ? void 0 : _l.addEventListener("click", () => {
         var _a2;
-        event.preventDefault();
         const input = root.querySelector("[data-link-url]");
-        if (input && !((_a2 = this.contentEditor) == null ? void 0 : _a2.applyLink(input.value))) input.setCustomValidity("Use an HTTP(S), email, phone, relative, or hash URL.");
-        else input == null ? void 0 : input.setCustomValidity("");
+        if (input && !((_a2 = this.contentEditor) == null ? void 0 : _a2.applyLink(input.value))) {
+          input.setCustomValidity("Select text in a heading or body and use an HTTP(S), email, phone, relative, or hash URL.");
+          input.reportValidity();
+        } else input == null ? void 0 : input.setCustomValidity("");
         this.syncContentInspector();
       });
-      (_j = root.querySelector("[data-apply-image]")) == null ? void 0 : _j.addEventListener("click", () => {
+      (_m = root.querySelector("[data-apply-image]")) == null ? void 0 : _m.addEventListener("click", () => {
         var _a2;
         const source = root.querySelector("[data-image-src]");
         const alt = root.querySelector("[data-image-alt]");
@@ -2308,15 +2664,35 @@ ${ISOLATION_CSS}`;
         else source == null ? void 0 : source.setCustomValidity("");
         this.syncContentInspector();
       });
-      (_k = root.querySelector("[data-undo]")) == null ? void 0 : _k.addEventListener("click", () => {
+      (_n = root.querySelector("[data-undo]")) == null ? void 0 : _n.addEventListener("click", () => {
         var _a2;
         (_a2 = this.contentEditor) == null ? void 0 : _a2.undo();
         this.syncContentInspector();
       });
-      (_l = root.querySelector("[data-redo]")) == null ? void 0 : _l.addEventListener("click", () => {
+      (_o = root.querySelector("[data-redo]")) == null ? void 0 : _o.addEventListener("click", () => {
         var _a2;
         (_a2 = this.contentEditor) == null ? void 0 : _a2.redo();
         this.syncContentInspector();
+      });
+      root.addEventListener("pointerdown", () => {
+        var _a2;
+        return (_a2 = this.contentEditor) == null ? void 0 : _a2.rememberSelection();
+      }, true);
+      root.addEventListener("focusin", () => {
+        var _a2;
+        return (_a2 = this.contentEditor) == null ? void 0 : _a2.rememberSelection();
+      }, true);
+      root.addEventListener("keydown", (rawEvent) => {
+        var _a2, _b2, _c2;
+        const event = rawEvent;
+        if (event.key === "Escape") {
+          (_a2 = this.contentEditor) == null ? void 0 : _a2.editSelected();
+          event.preventDefault();
+        }
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !(event.target instanceof HTMLInputElement)) {
+          event.preventDefault();
+          event.shiftKey ? (_b2 = this.contentEditor) == null ? void 0 : _b2.redo() : (_c2 = this.contentEditor) == null ? void 0 : _c2.undo();
+        }
       });
       this.bindDrag();
       this.onSelect("[data-alignment]", (value) => {
@@ -2439,6 +2815,7 @@ ${ISOLATION_CSS}`;
       var _a, _b, _c;
       const steps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
       if (!steps || index < 0 || index >= steps.length || index === this.stepIndex) return;
+      if (!this.flushContent()) return;
       this.selectionGeneration++;
       this.picker.cancel();
       (_c = this.contentEditor) == null ? void 0 : _c.destroy();
@@ -2454,6 +2831,7 @@ ${ISOLATION_CSS}`;
       var _a, _b;
       if (mode === "design" && ((_a = this.draft) == null ? void 0 : _a.experience.builderMode) !== "onsite") return;
       if (this.mode === mode && (mode !== "target" || this.pickerIsSelecting())) return;
+      if (!this.flushContent()) return;
       this.selectionGeneration++;
       this.picker.cancel();
       (_b = this.contentEditor) == null ? void 0 : _b.destroy();
@@ -2461,11 +2839,13 @@ ${ISOLATION_CSS}`;
       this.componentSelection = null;
       if (this.dirty) void this.persist();
       this.mode = mode;
+      this.configureDiagnostics();
       this.updateContinuation();
       this.applyMode();
     }
     applyMode() {
       if (this.mode === "navigate") {
+        this.previewGeneration++;
         this.preview.destroy();
         this.previewRendered = false;
         this.syncPanel();
@@ -2502,92 +2882,218 @@ ${ISOLATION_CSS}`;
       return !!document.querySelector("[data-movcues-picker-overlay]");
     }
     changed(render = true) {
-      var _a;
+      if (this.saveState === "expired") return;
       this.dirty = true;
+      this.editGeneration++;
       this.updateContinuation();
-      this.syncPanel();
+      if (render) this.syncPanel();
+      else this.syncContentInspector();
       if (render && this.mode !== "navigate") this.renderPreview();
-      this.setText("[data-save-state]", "Unsaved");
-      const recovery = (_a = this.root) == null ? void 0 : _a.querySelector("[data-save-recovery]");
-      if (recovery) recovery.hidden = true;
+      if (this.saveState !== "conflict" && this.saveState !== "failed") this.saveState = this.saveInFlight ? "saving" : "dirty";
+      this.showSaveState();
       clearTimeout(this.saveTimer);
       this.saveTimer = window.setTimeout(() => void this.persist(), 350);
+    }
+    flushContent() {
+      var _a;
+      if (this.contentEditor && !this.contentEditor.flush()) {
+        this.setText("[data-save-state]", "Finish composing text before continuing");
+        return false;
+      }
+      const errors = ((_a = this.contentEditor) == null ? void 0 : _a.getValidation()) ?? [];
+      this.showValidation(errors);
+      return !errors.length;
+    }
+    showValidation(errors) {
+      var _a;
+      const element = (_a = this.root) == null ? void 0 : _a.querySelector("[data-content-error]");
+      if (element) {
+        element.hidden = !errors.length;
+        element.textContent = errors.join(" ");
+      }
+    }
+    showSaveState() {
+      var _a, _b, _c;
+      const labels = { clean: "Draft saved", dirty: "Unsaved", saving: "Saving…", failed: "Save failed", conflict: "Conflict · reload required", expired: "Session expired · export unsaved edits" };
+      this.setText("[data-save-state]", labels[this.saveState]);
+      const recovering = ["failed", "conflict", "expired"].includes(this.saveState);
+      const recovery = (_a = this.root) == null ? void 0 : _a.querySelector("[data-save-recovery]");
+      if (recovery) recovery.hidden = !recovering;
+      const retry = (_b = this.root) == null ? void 0 : _b.querySelector("[data-retry-save]");
+      if (retry) retry.hidden = this.saveState !== "failed";
+      const reload = (_c = this.root) == null ? void 0 : _c.querySelector("[data-reload-draft]");
+      if (reload) reload.hidden = !["conflict", "expired"].includes(this.saveState);
+      this.setText("[data-recovery-message]", "Local edits remain in memory in this tab. Export before reloading or leaving.");
+    }
+    captureRecovery() {
+      var _a, _b, _c, _d;
+      if (!this.definition || !this.dirty && !((_a = this.contentEditor) == null ? void 0 : _a.isComposing())) return;
+      const definition = JSON.parse(JSON.stringify(this.definition));
+      const snapshot = (_b = this.contentEditor) == null ? void 0 : _b.snapshot();
+      if (snapshot) {
+        const part = isGuideDefinition(definition) ? definition.steps[this.stepIndex] : definition;
+        part.builder = snapshot.builder;
+        part.content = snapshot.content;
+      }
+      this.recoveryDraft = JSON.stringify({ experienceId: (_c = this.draft) == null ? void 0 : _c.experience.id, revision: (_d = this.draft) == null ? void 0 : _d.version.revision, definition }, null, 2);
+    }
+    exportRecovery() {
+      var _a, _b, _c;
+      (_a = this.contentEditor) == null ? void 0 : _a.flush();
+      if (this.saveState !== "expired" || !this.recoveryDraft) this.captureRecovery();
+      if (!this.recoveryDraft) return;
+      let output = (_b = this.root) == null ? void 0 : _b.querySelector("[data-recovery-export]");
+      if (!output && this.root) {
+        output = document.createElement("textarea");
+        output.dataset.recoveryExport = "";
+        output.setAttribute("aria-label", "Unsaved draft JSON; copy and save before leaving");
+        output.readOnly = true;
+        (_c = this.root.querySelector("main")) == null ? void 0 : _c.append(output);
+      }
+      if (output) {
+        output.value = this.recoveryDraft;
+        output.focus();
+        output.select();
+      }
+    }
+    expireSession() {
+      var _a, _b, _c, _d, _e, _f;
+      if (this.saveState === "expired") return;
+      (_a = this.contentEditor) == null ? void 0 : _a.flush();
+      this.captureRecovery();
+      this.dirty = this.dirty || !!((_b = this.contentEditor) == null ? void 0 : _b.isComposing());
+      this.saveState = "expired";
+      this.lifecycle++;
+      clearTimeout(this.saveTimer);
+      clearTimeout(this.expiryTimer);
+      clearInterval(this.validationTimer);
+      (_c = this.contentEditor) == null ? void 0 : _c.destroy();
+      this.contentEditor = null;
+      this.previewGeneration++;
+      this.preview.destroy();
+      this.previewRendered = false;
+      this.picker.cancel();
+      (_d = this.mutationObserver) == null ? void 0 : _d.disconnect();
+      (_e = this.routeUnsubscribe) == null ? void 0 : _e.call(this);
+      this.routeObserver.stop();
+      this.bridge = null;
+      this.session = null;
+      clearEditorContinuation();
+      (_f = this.root) == null ? void 0 : _f.querySelectorAll("button,input,select").forEach((control) => {
+        if (!control.matches("[data-export-draft],[data-discard-draft],[data-reload-draft],[data-minimize],[data-close]")) control.disabled = true;
+      });
+      this.showSaveState();
     }
     async persist() {
       var _a;
       clearTimeout(this.saveTimer);
       this.saveTimer = 0;
+      if (!this.flushContent()) return false;
+      if (this.saveState === "conflict" || this.saveState === "expired") return false;
       if (this.saveInFlight) {
         const saved2 = await this.saveInFlight;
         return saved2 && this.dirty ? this.persist() : saved2;
       }
       if (!this.dirty || !this.bridge || !this.definition) return true;
-      this.dirty = false;
-      this.setText("[data-save-state]", "Saving…");
       const bridge = this.bridge;
-      const definition = this.definition;
+      const generation = this.editGeneration;
+      const lifecycle = this.lifecycle;
+      const definition = JSON.parse(JSON.stringify(this.definition));
       const revision = ((_a = this.draft) == null ? void 0 : _a.version.revision) ?? 1;
+      this.saveState = "saving";
+      this.showSaveState();
       const request = bridge.save(definition, revision).then((version) => {
-        var _a2;
+        var _a2, _b;
+        if (lifecycle !== this.lifecycle) return false;
         if (this.draft) this.draft.version.revision = version.revision;
-        this.setText("[data-save-state]", this.dirty ? "Saving…" : "Draft saved");
-        const recovery = (_a2 = this.root) == null ? void 0 : _a2.querySelector("[data-save-recovery]");
-        if (recovery) recovery.hidden = true;
+        this.dirty = this.editGeneration !== generation;
+        this.saveState = this.dirty ? "dirty" : "clean";
+        if (!this.dirty) {
+          this.recoveryDraft = null;
+          (_b = (_a2 = this.root) == null ? void 0 : _a2.querySelector("[data-recovery-export]")) == null ? void 0 : _b.remove();
+        }
+        this.showSaveState();
         return true;
       }).catch((error) => {
-        var _a2, _b, _c;
+        if (lifecycle !== this.lifecycle) return false;
+        this.dirty = true;
+        this.captureRecovery();
         if (error instanceof EditorSessionExpiredError) {
-          this.setText("[data-save-state]", "Session expired");
-          this.teardown(true);
+          this.expireSession();
           return false;
         }
-        this.dirty = true;
-        const conflict = error instanceof DraftConflictError;
-        this.setText("[data-save-state]", conflict ? "Conflict · reload required" : "Save failed");
-        const recovery = (_a2 = this.root) == null ? void 0 : _a2.querySelector("[data-save-recovery]");
-        if (recovery) recovery.hidden = false;
-        const retry = (_b = this.root) == null ? void 0 : _b.querySelector("[data-retry-save]");
-        if (retry) retry.hidden = conflict;
-        const reload = (_c = this.root) == null ? void 0 : _c.querySelector("[data-reload-draft]");
-        if (reload) reload.hidden = !conflict;
-        this.setText("[data-recovery-message]", conflict ? "Local edits are preserved until you reload the latest draft." : "Local edits are preserved.");
+        this.saveState = error instanceof DraftConflictError ? "conflict" : "failed";
+        this.showSaveState();
+        this.setText("[data-recovery-message]", `${error instanceof Error ? error.message : "Request failed"}. Local edits remain in this tab; retry or export.`);
         return false;
       });
       this.saveInFlight = request;
       const saved = await request;
       if (this.saveInFlight === request) this.saveInFlight = null;
-      if (saved && this.dirty && !this.saveTimer) this.saveTimer = window.setTimeout(() => void this.persist(), 350);
+      if (saved && this.dirty) return this.persist();
       return saved;
     }
     async close() {
-      if (this.dirty && !await this.persist()) return;
+      if (!this.flushContent()) return;
+      if ((this.dirty || this.saveInFlight) && !await this.persist()) return;
       this.destroy();
     }
     renderPreview() {
       var _a, _b, _c;
-      if (!this.definition || !this.draft || this.mode === "navigate") return;
+      if (!this.definition || !this.draft || this.mode === "navigate" || this.saveState === "expired") return;
+      if (!this.flushContent()) return;
+      const generation = ++this.previewGeneration;
       this.previewRendered = false;
       (_a = this.contentEditor) == null ? void 0 : _a.destroy();
       this.contentEditor = null;
       this.componentSelection = null;
       const definition = this.guide ? { ...this.definition, steps: [this.guide.steps[this.stepIndex]] } : this.definition;
+      const rendered = JSON.parse(JSON.stringify(definition));
+      if (this.mode !== "preview") {
+        if (isGuideDefinition(rendered)) rendered.steps.forEach((step) => {
+          step.behavior.dismissible = false;
+        });
+        else {
+          rendered.behavior = { ...rendered.behavior, autoDismissMs: null, dismissible: false, closeOnBackdrop: false };
+        }
+      }
       const selectedStepId = (_c = (_b = this.survey) == null ? void 0 : _b.steps[this.stepIndex]) == null ? void 0 : _c.id;
       this.preview.render({
         id: this.draft.experience.id,
         versionId: this.draft.version.id,
         kind: this.draft.experience.kind,
-        widgetType: this.draft.experience.widgetType,
+        // Freeze cursor-follow cards using the stationary toast shell only while authoring.
+        widgetType: this.mode !== "preview" && this.draft.experience.widgetType === "cursor_follow" ? "toast" : this.draft.experience.widgetType,
         priority: 0,
-        definition
+        definition: rendered
       }, {
         onVisible: () => {
+          var _a2;
+          if (generation !== this.previewGeneration || this.saveState === "expired" || !this.root) return;
+          const host = Array.from(document.querySelectorAll("[data-movcues-experience]")).find((element) => {
+            var _a3;
+            return element.dataset.movcuesExperience === ((_a3 = this.draft) == null ? void 0 : _a3.experience.id);
+          });
+          (_a2 = host == null ? void 0 : host.shadowRoot) == null ? void 0 : _a2.addEventListener("click", (event) => {
+            var _a3, _b2;
+            if ((_b2 = (_a3 = event.target) == null ? void 0 : _a3.closest) == null ? void 0 : _b2.call(_a3, "a")) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+            }
+          }, true);
           this.previewRendered = true;
           if (this.mode === "design") this.attachContentEditor();
           this.updateDiagnostics();
         },
-        onDismiss: () => window.setTimeout(() => this.renderPreview(), 0),
+        onDismiss: () => {
+          this.previewRendered = false;
+          this.updateDiagnostics();
+        },
         onAction: () => void 0,
-        onComplete: () => window.setTimeout(() => this.renderPreview(), 0),
+        onComplete: () => {
+          this.previewRendered = false;
+          this.updateDiagnostics();
+        },
         onUnavailable: () => {
           this.previewRendered = false;
           this.updateDiagnostics();
@@ -2596,7 +3102,7 @@ ${ISOLATION_CSS}`;
       this.updateDiagnostics();
     }
     attachContentEditor() {
-      var _a;
+      var _a, _b;
       if (((_a = this.draft) == null ? void 0 : _a.experience.builderMode) !== "onsite" || this.mode !== "design") return;
       const host = Array.from(document.querySelectorAll("[data-movcues-experience]")).find(
         (element) => element.dataset.movcuesExperience === this.draft.experience.id
@@ -2604,8 +3110,10 @@ ${ISOLATION_CSS}`;
       const builder = this.currentBuilder();
       const content = this.currentContent();
       if (!(host == null ? void 0 : host.shadowRoot) || !builder || !content) return;
+      (_b = this.contentEditor) == null ? void 0 : _b.destroy();
       this.contentEditor = new OnsiteContentEditor(host.shadowRoot, builder, content, {
         onChange: () => this.changed(false),
+        onValidation: (errors) => this.showValidation(errors),
         onSelectionChange: (selection) => {
           this.componentSelection = selection;
           this.syncContentInspector();
@@ -2643,6 +3151,11 @@ ${ISOLATION_CSS}`;
       if (imageControls) imageControls.hidden = selection.kind !== "image";
       const edit = this.root.querySelector("[data-edit-component]");
       if (edit) edit.hidden = selection.kind === "image";
+      this.root.querySelectorAll("[data-list]").forEach((button) => {
+        button.disabled = selection.kind !== "text" || selection.label !== "body";
+      });
+      const link = this.root.querySelector("[data-apply-link]");
+      if (link) link.disabled = selection.kind !== "text";
       if (selection.kind === "image") {
         this.setValue("[data-image-src]", selection.src ?? "");
         this.setValue("[data-image-alt]", selection.alt ?? "");
@@ -2655,6 +3168,10 @@ ${ISOLATION_CSS}`;
     syncPanel() {
       var _a, _b;
       if (!this.root || !this.definition || !this.draft) return;
+      const reset = this.root.querySelector("[data-reset-preview]");
+      if (reset) reset.hidden = this.mode !== "preview";
+      const limit = this.root.querySelector("[data-preview-limit]");
+      if (limit) limit.hidden = this.mode !== "preview";
       const behavior = this.currentBehavior();
       const widgetType = this.draft.experience.widgetType;
       const guidePattern = this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : null;
@@ -2704,7 +3221,7 @@ ${ISOLATION_CSS}`;
       this.renderConfigured(this.definition.targeting);
       this.updateDiagnostics();
       this.syncContentInspector();
-      this.setText("[data-mode-hint]", this.mode === "design" ? "Click a component to select · Double-click text to edit" : this.mode === "target" ? this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "This experience does not need a page target" : this.mode === "navigate" ? "Customer app interaction is enabled" : "End-user preview · analytics and actions are disabled");
+      this.setText("[data-mode-hint]", this.mode === "design" && this.draft.experience.widgetType === "cursor_follow" ? "Stationary authoring view · Preview tests cursor-follow movement" : this.mode === "design" && this.isTargetedType() && !this.currentTarget() ? "Select a page target in Target mode before editing this anchored card" : this.mode === "design" ? "Click a component to select · Double-click text to edit" : this.mode === "target" ? this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "This experience does not need a page target" : this.mode === "navigate" ? "Customer app interaction is enabled" : "End-user preview · analytics and actions are disabled");
     }
     renderConfigured(targeting) {
       var _a;
@@ -2759,6 +3276,14 @@ ${ISOLATION_CSS}`;
         const icon = button.querySelector("[data-step-icon]");
         if (icon) icon.textContent = index === this.stepIndex ? "●" : "✓";
       });
+    }
+    configureDiagnostics() {
+      var _a;
+      (_a = this.mutationObserver) == null ? void 0 : _a.disconnect();
+      this.mutationObserver = null;
+      if (this.mode !== "target" || typeof MutationObserver === "undefined") return;
+      this.mutationObserver = new MutationObserver(() => this.scheduleTargetRefresh());
+      this.mutationObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["id", "class", "data-testid", "hidden"] });
     }
     scheduleTargetRefresh() {
       clearTimeout(this.targetRefreshTimer);
@@ -2824,7 +3349,7 @@ ${ISOLATION_CSS}`;
     }
     updateContinuation() {
       var _a, _b, _c, _d;
-      if (!this.session || !this.draft) return;
+      if (!this.session || !this.draft || this.saveState === "expired") return;
       storeEditorContinuation({
         session: this.session,
         editorState: {
@@ -2858,7 +3383,8 @@ ${ISOLATION_CSS}`;
       this.teardown(true);
     }
     teardown(clearContinuation) {
-      var _a, _b, _c, _d, _e;
+      var _a, _b, _c, _d, _e, _f, _g, _h;
+      this.lifecycle++;
       clearTimeout(this.expiryTimer);
       clearInterval(this.validationTimer);
       clearTimeout(this.saveTimer);
@@ -2869,16 +3395,21 @@ ${ISOLATION_CSS}`;
       this.routeObserver.stop();
       window.removeEventListener("pagehide", this.persistBeforePageLeave);
       window.removeEventListener("beforeunload", this.protectUnsavedChanges);
-      (_b = this.mutationObserver) == null ? void 0 : _b.disconnect();
+      window.removeEventListener("resize", this.fitPanel);
+      (_b = window.visualViewport) == null ? void 0 : _b.removeEventListener("resize", this.fitPanel);
+      (_c = window.visualViewport) == null ? void 0 : _c.removeEventListener("scroll", this.fitPanel);
+      (_d = this.mutationObserver) == null ? void 0 : _d.disconnect();
       this.mutationObserver = null;
-      (_c = this.dragCleanup) == null ? void 0 : _c.call(this);
+      (_e = this.dragCleanup) == null ? void 0 : _e.call(this);
       this.dragCleanup = null;
+      (_f = this.contentEditor) == null ? void 0 : _f.flush();
+      this.previewGeneration++;
       this.preview.destroy();
-      (_d = this.contentEditor) == null ? void 0 : _d.destroy();
+      (_g = this.contentEditor) == null ? void 0 : _g.destroy();
       this.contentEditor = null;
       this.componentSelection = null;
       this.picker.cancel();
-      (_e = this.host) == null ? void 0 : _e.remove();
+      (_h = this.host) == null ? void 0 : _h.remove();
       this.host = null;
       this.root = null;
       this.bridge = null;
@@ -2887,6 +3418,9 @@ ${ISOLATION_CSS}`;
       this.definition = null;
       this.guide = null;
       this.survey = null;
+      this.saveState = "clean";
+      this.editGeneration = 0;
+      this.recoveryDraft = null;
       this.dirty = false;
       this.previewRendered = false;
       this.saveInFlight = null;
@@ -2937,7 +3471,7 @@ ${ISOLATION_CSS}`;
     return span.innerHTML;
   }
   const STYLE = `
-:host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:min(312px,calc(100vw - 8px));max-height:calc(100dvh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100dvh - 82px);overflow:auto}.minimized{width:min(260px,calc(100vw - 8px))}.minimized main{display:none}.modebar{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button,.formatbar button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{min-width:0;padding:7px 3px}.modebar button:disabled{cursor:not-allowed;opacity:.42}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-flow{display:flex;align-items:center;overflow:auto}.step{flex:none;padding:4px 6px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.arrow{color:#cbd5e1;font-size:10px}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.secondary-button.compact{padding:5px 7px}.content-heading,.history-row,.link-row,.save-recovery{display:flex;align-items:center;justify-content:space-between;gap:6px}.content-heading>div{min-width:0}.formatbar{display:flex;flex-wrap:wrap;gap:4px}.formatbar button{padding:5px 7px}.link-row input{min-width:0}.history-row{justify-content:flex-start}.save-recovery{padding:8px 12px;border-bottom:1px solid #fee2e2;background:#fff7ed;color:#9a3412;font-size:11px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}[hidden]{display:none!important}@media(max-width:420px){aside{right:4px;top:4px;max-height:calc(100dvh - 8px)}main{max-height:calc(100dvh - 66px)}header{padding:9px}.section{padding:8px 10px}.modebar{padding:6px}.modebar button{font-size:10px}}
+:host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:min(312px,calc(100vw - 8px));max-height:calc(100dvh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100dvh - 82px);overflow:auto}.minimized{width:min(260px,calc(100vw - 8px))}.minimized main{display:none}.modebar{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button,.formatbar button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{min-width:0;padding:7px 3px}.modebar button:disabled{cursor:not-allowed;opacity:.42}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-flow{display:flex;align-items:center;overflow:auto}.step{flex:none;padding:4px 6px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.arrow{color:#cbd5e1;font-size:10px}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.secondary-button.compact{padding:5px 7px}.content-heading,.history-row,.link-row,.save-recovery{display:flex;align-items:center;justify-content:space-between;gap:6px}.content-heading>div{min-width:0}.formatbar{display:flex;flex-wrap:wrap;gap:4px}.formatbar button{padding:5px 7px}.link-row input{min-width:0}.history-row{justify-content:flex-start}.save-recovery{flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid #fee2e2;background:#fff7ed;color:#9a3412;font-size:11px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #2563eb;outline-offset:2px}textarea[data-recovery-export]{box-sizing:border-box;width:100%;height:180px;font:11px monospace}[hidden]{display:none!important}@media(max-width:420px){aside{right:4px;top:4px;max-height:calc(100dvh - 8px)}main{max-height:calc(100dvh - 66px)}header{padding:9px}.section{padding:8px 10px}.modebar{padding:6px}.modebar button{font-size:10px}}
 `;
   const runtime = {
     createController: (apiBase) => new EditorModeController(apiBase)
