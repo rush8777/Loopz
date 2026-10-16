@@ -24,7 +24,7 @@ export interface EditorSession {
 export interface EditorAuthoringState {
   experienceId: string;
   selectedStepId?: string;
-  mode: "select" | "navigate";
+  mode: "design" | "target" | "navigate" | "preview" | "select"; // select is a read-only legacy continuation value
 }
 
 export interface EditorContinuation {
@@ -54,6 +54,7 @@ export interface EditorRuntime {
 export interface AnalyticsRuntimeProviders {
   experiences?: ExperienceRuntime;
   editor?: EditorRuntime;
+  loadEditor?: () => Promise<EditorRuntime>;
 }
 
 declare global {

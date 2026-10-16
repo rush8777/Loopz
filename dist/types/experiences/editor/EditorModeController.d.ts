@@ -5,6 +5,8 @@ export declare class EditorModeController {
     private root;
     private picker;
     private preview;
+    private contentEditor;
+    private componentSelection;
     private routeObserver;
     private routeUnsubscribe;
     private mutationObserver;
@@ -27,6 +29,7 @@ export declare class EditorModeController {
     private previewRendered;
     private currentPath;
     private persistBeforePageLeave;
+    private protectUnsavedChanges;
     constructor(apiBase: string);
     start(rawToken: string): Promise<boolean>;
     resume(continuation: EditorContinuation): Promise<boolean>;
@@ -40,6 +43,7 @@ export declare class EditorModeController {
     private onCheck;
     private switchStep;
     private setMode;
+    private applyMode;
     private startPicker;
     private startLayerPicker;
     private pickerIsSelecting;
@@ -47,6 +51,10 @@ export declare class EditorModeController {
     private persist;
     private close;
     private renderPreview;
+    private attachContentEditor;
+    private currentBuilder;
+    private currentContent;
+    private syncContentInspector;
     private syncPanel;
     private renderConfigured;
     private updateDiagnostics;

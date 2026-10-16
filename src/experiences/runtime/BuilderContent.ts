@@ -1,6 +1,6 @@
 import type { WidgetBuilderState } from "../types";
 import type { RenderCallbacks } from "./AnchoredCardRenderer";
-import { BUILDER_ALLOWED_ATTRIBUTES, BUILDER_ALLOWED_TAGS, BUILDER_BLOCKED_TAGS, BUILDER_SURVEY_INPUT_TAGS, builderImageUrlIsSafe, builderInputTypeIsSafe, safeScopedBuilderCss } from "./BuilderContentContract";
+import { BUILDER_ALLOWED_ATTRIBUTES, BUILDER_ALLOWED_TAGS, BUILDER_BLOCKED_TAGS, BUILDER_SURVEY_INPUT_TAGS, builderImageUrlIsSafe, builderInputTypeIsSafe, builderLinkUrlIsSafe, safeScopedBuilderCss } from "./BuilderContentContract";
 
 export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder: WidgetBuilderState, callbacks: RenderCallbacks, allowSurveyInputs = false): boolean {
   const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
@@ -53,6 +53,15 @@ export function sanitizeBuilderHtml(input: string, allowSurveyInputs = false): C
       if (!builderImageUrlIsSafe(source)) element.removeAttribute("src");
     }
     if (element.hasAttribute("src") && element.tagName !== "IMG") element.removeAttribute("src");
+    if (element.tagName === "A") {
+      const href = element.getAttribute("href") ?? "";
+      if (!builderLinkUrlIsSafe(href)) element.removeAttribute("href");
+      const target = element.getAttribute("target");
+      if (target && target !== "_blank" && target !== "_self") element.removeAttribute("target");
+      if (target === "_blank") element.setAttribute("rel", "noopener noreferrer");
+    } else {
+      element.removeAttribute("href"); element.removeAttribute("target"); element.removeAttribute("rel");
+    }
     if (element.tagName === "INPUT") {
       const type = (element.getAttribute("type") ?? "text").toLowerCase();
       if (!builderInputTypeIsSafe(type)) element.setAttribute("type", "text");

@@ -2080,7 +2080,7 @@
   function isEditorState(value) {
     if (!value || typeof value !== "object") return false;
     const state = value;
-    return typeof state.experienceId === "string" && !!state.experienceId && (state.selectedStepId === void 0 || typeof state.selectedStepId === "string") && (state.mode === "select" || state.mode === "navigate");
+    return typeof state.experienceId === "string" && !!state.experienceId && (state.selectedStepId === void 0 || typeof state.selectedStepId === "string") && (state.mode === "select" || state.mode === "design" || state.mode === "target" || state.mode === "navigate" || state.mode === "preview");
   }
   const TRANSPARENT = /* @__PURE__ */ new Set(["transparent", "rgba(0, 0, 0, 0)", "rgba(0,0,0,0)"]);
   function visible(element) {
@@ -2400,7 +2400,7 @@
     }
     async initializeEditor(editorToken, continuation, userConfig, generation) {
       try {
-        const runtime = this.runtimeProviders.editor ?? await loadEditorRuntime(this.config.editorRuntimeBundleUrl);
+        const runtime = this.runtimeProviders.editor ?? (this.runtimeProviders.loadEditor ? await this.runtimeProviders.loadEditor() : await loadEditorRuntime(this.config.editorRuntimeBundleUrl));
         if (!this.initialized || generation !== this.generation) return;
         if (!runtime) {
           this.fallbackFromEditor(userConfig, generation);

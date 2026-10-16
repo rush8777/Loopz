@@ -21,7 +21,7 @@ export interface EditorSession {
 export interface EditorAuthoringState {
     experienceId: string;
     selectedStepId?: string;
-    mode: "select" | "navigate";
+    mode: "design" | "target" | "navigate" | "preview" | "select";
 }
 export interface EditorContinuation {
     session: EditorSession;
@@ -41,6 +41,7 @@ export interface EditorRuntime {
 export interface AnalyticsRuntimeProviders {
     experiences?: ExperienceRuntime;
     editor?: EditorRuntime;
+    loadEditor?: () => Promise<EditorRuntime>;
 }
 declare global {
     interface Window {

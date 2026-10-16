@@ -1,5 +1,6 @@
 export type ExperienceKind = "guide" | "widget" | "checklist";
 export type WidgetType = "anchored_card" | "toast" | "cursor_follow" | "modal" | "slideout" | "hotspot" | "banner" | "survey";
+export type BuilderMode = "grapesjs" | "onsite";
 export interface ExperienceAction {
     label: string;
     type: "dismiss" | "next_step" | "open_url" | "track_event";
@@ -336,10 +337,12 @@ export interface EditorDraft {
         name: string;
         kind: ExperienceKind;
         widgetType: WidgetType | null;
+        builderMode: BuilderMode;
     };
     version: {
         id: string;
         versionNumber: number;
+        revision: number;
         definition: EditorDefinition;
     };
 }

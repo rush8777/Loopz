@@ -76,13 +76,16 @@
       }, 0);
     }
   }
-  const BUILDER_ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "HEADER", "H1", "H2", "H3", "H4", "P", "SPAN", "BR", "BUTTON", "IMG", "HR", "LABEL", "UL", "LI"]);
+  const BUILDER_ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "HEADER", "H1", "H2", "H3", "H4", "P", "SPAN", "BR", "BUTTON", "IMG", "HR", "LABEL", "STRONG", "EM", "U", "A", "UL", "OL", "LI"]);
   const BUILDER_SURVEY_INPUT_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA"]);
-  const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
+  const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "href", "target", "rel", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
   const BUILDER_BLOCKED_TAGS = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO|SOURCE)$/i;
   const BUILDER_UNSAFE_CSS = /@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i;
   function builderImageUrlIsSafe(value) {
     return !value || /^(https?:|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(value);
+  }
+  function builderLinkUrlIsSafe(value) {
+    return /^(https?:\/\/|mailto:|tel:|\/|#|\?|\.\.?\/)/i.test(value.trim());
   }
   function builderInputTypeIsSafe(value) {
     return ["text", "radio", "checkbox", "number"].includes(value.toLowerCase());
@@ -149,6 +152,17 @@ ${ISOLATION_CSS}`;
         if (!builderImageUrlIsSafe(source)) element.removeAttribute("src");
       }
       if (element.hasAttribute("src") && element.tagName !== "IMG") element.removeAttribute("src");
+      if (element.tagName === "A") {
+        const href = element.getAttribute("href") ?? "";
+        if (!builderLinkUrlIsSafe(href)) element.removeAttribute("href");
+        const target = element.getAttribute("target");
+        if (target && target !== "_blank" && target !== "_self") element.removeAttribute("target");
+        if (target === "_blank") element.setAttribute("rel", "noopener noreferrer");
+      } else {
+        element.removeAttribute("href");
+        element.removeAttribute("target");
+        element.removeAttribute("rel");
+      }
       if (element.tagName === "INPUT") {
         const type = (element.getAttribute("type") ?? "text").toLowerCase();
         if (!builderInputTypeIsSafe(type)) element.setAttribute("type", "text");
@@ -1349,9 +1363,27 @@ ${ISOLATION_CSS}`;
       if (!response.ok) throw new Error("Editor session expired");
       return response.json();
     }
-    async save(definition) {
-      const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { method: "PATCH", headers: this.headers(), credentials: "omit", body: JSON.stringify({ definition }) });
-      if (!response.ok) throw new Error("Draft could not be saved");
+    async save(definition, revision) {
+      const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { method: "PATCH", headers: this.headers(), credentials: "omit", body: JSON.stringify({ definition, revision }) });
+      if (!response.ok) {
+        const body2 = await response.json().catch(() => null);
+        if (response.status === 409 && (body2 == null ? void 0 : body2.error) === "draft_conflict") throw new DraftConflictError(body2.currentRevision);
+        if (response.status === 401 || response.status === 403 || response.status === 404 || response.status === 410) throw new EditorSessionExpiredError();
+        throw new Error("Draft could not be saved");
+      }
+      const body = await response.json();
+      return body.version;
+    }
+  }
+  class DraftConflictError extends Error {
+    constructor(currentRevision) {
+      super("Draft changed in another editor");
+      this.currentRevision = currentRevision;
+    }
+  }
+  class EditorSessionExpiredError extends Error {
+    constructor() {
+      super("Editor session expired");
     }
   }
   class HighlightOverlay {
@@ -1669,6 +1701,376 @@ ${ISOLATION_CSS}`;
     const root = element.getRootNode();
     return root instanceof ShadowRoot && isMovcuesSurface(root.host);
   }
+  const SELECTABLE = "[data-movcues-content],[data-movcues-action-id],img";
+  const ALIGNMENT_CLASSES = ["movcues-align-left", "movcues-align-center", "movcues-align-right"];
+  class OnsiteContentEditor {
+    constructor(root, builder, content, callbacks) {
+      this.root = root;
+      this.builder = builder;
+      this.content = content;
+      this.callbacks = callbacks;
+      this.selected = null;
+      this.hovered = null;
+      this.frame = 0;
+      this.composing = false;
+      this.savedRange = null;
+      this.history = [];
+      this.historyIndex = -1;
+      this.onPointerOver = (event) => {
+        const component = this.componentFrom(event);
+        if (!component || component === this.hovered) return;
+        this.hovered = component;
+        this.renderOutline();
+      };
+      this.onPointerOut = (event) => {
+        var _a;
+        const related = event.relatedTarget;
+        if (related instanceof Node && ((_a = this.hovered) == null ? void 0 : _a.contains(related))) return;
+        this.hovered = null;
+        this.renderOutline();
+      };
+      this.onClick = (event) => {
+        const component = this.componentFrom(event);
+        if (!component) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this.finishEditing(true);
+        this.selected = component;
+        this.renderOutline();
+        this.emitSelection();
+      };
+      this.onDoubleClick = (event) => {
+        const component = this.componentFrom(event);
+        if (!component) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this.selected = component;
+        this.editSelected();
+      };
+      this.onInput = (event) => {
+        var _a;
+        if (!((_a = this.selected) == null ? void 0 : _a.contains(event.target)) || this.composing) return;
+        this.rememberSelection();
+        this.commit();
+      };
+      this.onCompositionStart = () => {
+        this.composing = true;
+      };
+      this.onCompositionEnd = () => {
+        this.composing = false;
+        this.rememberSelection();
+        this.commit();
+      };
+      this.onKeyDown = (event) => {
+        const keyEvent = event;
+        if (keyEvent.key === "Escape") {
+          keyEvent.preventDefault();
+          this.deselect();
+          return;
+        }
+        if ((keyEvent.ctrlKey || keyEvent.metaKey) && keyEvent.key.toLowerCase() === "z") {
+          keyEvent.preventDefault();
+          keyEvent.shiftKey ? this.redo() : this.undo();
+          return;
+        }
+        if ((keyEvent.ctrlKey || keyEvent.metaKey) && keyEvent.key.toLowerCase() === "y") {
+          keyEvent.preventDefault();
+          this.redo();
+          return;
+        }
+        if (keyEvent.key === "Enter" && this.selected && (this.selected.matches("[data-movcues-content=heading]") || this.selected.matches("[data-movcues-action-id]"))) {
+          keyEvent.preventDefault();
+          this.finishEditing(true);
+        }
+      };
+      this.onPaste = (event) => {
+        var _a, _b;
+        if (!((_a = this.selected) == null ? void 0 : _a.isContentEditable)) return;
+        const paste = event;
+        const text = (_b = paste.clipboardData) == null ? void 0 : _b.getData("text/plain");
+        if (text === void 0) return;
+        paste.preventDefault();
+        const selection = this.getSelection();
+        if (!(selection == null ? void 0 : selection.rangeCount)) return;
+        const range2 = selection.getRangeAt(0);
+        range2.deleteContents();
+        const node = document.createTextNode(text);
+        range2.insertNode(node);
+        range2.setStartAfter(node);
+        range2.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range2);
+        this.savedRange = range2.cloneRange();
+        this.commit();
+      };
+      this.rememberSelection = () => {
+        var _a;
+        const selection = this.getSelection();
+        if ((selection == null ? void 0 : selection.rangeCount) && ((_a = this.selected) == null ? void 0 : _a.contains(selection.getRangeAt(0).commonAncestorContainer))) this.savedRange = selection.getRangeAt(0).cloneRange();
+      };
+      this.scheduleOutline = () => {
+        cancelAnimationFrame(this.frame);
+        this.frame = requestAnimationFrame(() => this.renderOutline());
+      };
+      this.surface = root.querySelector("[data-movcues-builder-surface]");
+      this.style = document.createElement("style");
+      this.style.dataset.movcuesAuthoringStyle = "";
+      this.style.textContent = `[data-movcues-authoring-outline]{position:fixed;z-index:2147483646;pointer-events:none;border:1.5px solid #2563eb;border-radius:5px;box-shadow:0 0 0 2px rgba(37,99,235,.12);transition:none}[data-movcues-authoring-outline][data-hover]{border-style:dashed;opacity:.72}`;
+      this.outline = document.createElement("div");
+      this.outline.dataset.movcuesAuthoringOutline = "";
+      this.outline.hidden = true;
+    }
+    start() {
+      if (!this.surface) return false;
+      this.root.append(this.style, this.outline);
+      this.root.addEventListener("pointerover", this.onPointerOver, true);
+      this.root.addEventListener("pointerout", this.onPointerOut, true);
+      this.root.addEventListener("click", this.onClick, true);
+      this.root.addEventListener("dblclick", this.onDoubleClick, true);
+      this.root.addEventListener("input", this.onInput, true);
+      this.root.addEventListener("compositionstart", this.onCompositionStart, true);
+      this.root.addEventListener("compositionend", this.onCompositionEnd, true);
+      this.root.addEventListener("keydown", this.onKeyDown, true);
+      this.root.addEventListener("keyup", this.rememberSelection, true);
+      this.root.addEventListener("mouseup", this.rememberSelection, true);
+      this.root.addEventListener("paste", this.onPaste, true);
+      window.addEventListener("scroll", this.scheduleOutline, true);
+      window.addEventListener("resize", this.scheduleOutline);
+      this.pushHistory();
+      return true;
+    }
+    destroy() {
+      cancelAnimationFrame(this.frame);
+      this.finishEditing(false);
+      this.root.removeEventListener("pointerover", this.onPointerOver, true);
+      this.root.removeEventListener("pointerout", this.onPointerOut, true);
+      this.root.removeEventListener("click", this.onClick, true);
+      this.root.removeEventListener("dblclick", this.onDoubleClick, true);
+      this.root.removeEventListener("input", this.onInput, true);
+      this.root.removeEventListener("compositionstart", this.onCompositionStart, true);
+      this.root.removeEventListener("compositionend", this.onCompositionEnd, true);
+      this.root.removeEventListener("keydown", this.onKeyDown, true);
+      this.root.removeEventListener("keyup", this.rememberSelection, true);
+      this.root.removeEventListener("mouseup", this.rememberSelection, true);
+      this.root.removeEventListener("paste", this.onPaste, true);
+      window.removeEventListener("scroll", this.scheduleOutline, true);
+      window.removeEventListener("resize", this.scheduleOutline);
+      this.outline.remove();
+      this.style.remove();
+      this.callbacks.onSelectionChange(null);
+    }
+    editSelected() {
+      if (!this.selected || this.selectionKind(this.selected) === "image") return;
+      this.selected.contentEditable = "true";
+      this.selected.setAttribute("spellcheck", "true");
+      this.selected.focus({ preventScroll: true });
+      this.emitSelection();
+    }
+    deselect() {
+      this.finishEditing(true);
+      this.selected = null;
+      this.savedRange = null;
+      this.renderOutline();
+      this.callbacks.onSelectionChange(null);
+    }
+    formatInline(tag) {
+      this.wrapSelection(tag);
+    }
+    applyLink(url) {
+      var _a;
+      if (!builderLinkUrlIsSafe(url) || !this.restoreSelection()) return false;
+      const selection = this.getSelection();
+      const range2 = (selection == null ? void 0 : selection.rangeCount) ? selection.getRangeAt(0) : null;
+      if (!range2 || range2.collapsed || !((_a = this.selected) == null ? void 0 : _a.contains(range2.commonAncestorContainer))) return false;
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      if (/^https?:\/\//i.test(url)) {
+        anchor.target = "_blank";
+        anchor.rel = "noopener noreferrer";
+      }
+      anchor.append(range2.extractContents());
+      range2.insertNode(anchor);
+      selection == null ? void 0 : selection.removeAllRanges();
+      range2.selectNodeContents(anchor);
+      selection == null ? void 0 : selection.addRange(range2);
+      this.savedRange = range2.cloneRange();
+      this.commit();
+      return true;
+    }
+    setAlignment(alignment) {
+      if (!this.selected || this.selectionKind(this.selected) === "image") return;
+      this.selected.classList.remove(...ALIGNMENT_CLASSES);
+      this.selected.classList.add(`movcues-align-${alignment}`);
+      this.commit();
+    }
+    toggleList(kind) {
+      if (!this.selected || this.selectionKind(this.selected) === "image") return;
+      let component = this.selected;
+      if (component.tagName === "P") {
+        const replacement = document.createElement("div");
+        for (const attribute of Array.from(component.attributes)) replacement.setAttribute(attribute.name, attribute.value);
+        replacement.innerHTML = component.innerHTML;
+        component.replaceWith(replacement);
+        component = replacement;
+        this.selected = replacement;
+      }
+      const list = document.createElement(kind);
+      const lines = (component.innerText || component.textContent || "").split(/\n+/).map((value) => value.trim()).filter(Boolean);
+      for (const line of lines.length ? lines : [""]) {
+        const item = document.createElement("li");
+        item.textContent = line;
+        list.appendChild(item);
+      }
+      component.replaceChildren(list);
+      this.commit();
+      component.focus({ preventScroll: true });
+    }
+    updateImage(src, alt) {
+      if (!this.selected || this.selected.tagName !== "IMG" || !builderImageUrlIsSafe(src)) return false;
+      if (src) this.selected.setAttribute("src", src);
+      else this.selected.removeAttribute("src");
+      this.selected.setAttribute("alt", alt.slice(0, 500));
+      this.commit();
+      this.emitSelection();
+      return true;
+    }
+    undo() {
+      return this.moveHistory(-1);
+    }
+    redo() {
+      return this.moveHistory(1);
+    }
+    canUndo() {
+      return this.historyIndex > 0;
+    }
+    canRedo() {
+      return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1;
+    }
+    componentFrom(event) {
+      if (!this.surface) return null;
+      const target = event.target;
+      if (!(target instanceof Element)) return null;
+      const component = target.closest(SELECTABLE);
+      return component && this.surface.contains(component) ? component : null;
+    }
+    selectionKind(component) {
+      return component.tagName === "IMG" ? "image" : component.hasAttribute("data-movcues-action-id") ? "button" : "text";
+    }
+    emitSelection() {
+      if (!this.selected) return this.callbacks.onSelectionChange(null);
+      const kind = this.selectionKind(this.selected);
+      this.callbacks.onSelectionChange({ kind, label: kind === "image" ? "Image" : this.selected.getAttribute("data-movcues-content") ?? `${this.selected.getAttribute("data-movcues-action-id") ?? "button"} button`, editing: this.selected.isContentEditable, ...kind === "image" ? { src: this.selected.getAttribute("src") ?? "", alt: this.selected.getAttribute("alt") ?? "" } : {} });
+    }
+    finishEditing(commit) {
+      var _a;
+      if (!((_a = this.selected) == null ? void 0 : _a.isContentEditable)) return;
+      this.selected.removeAttribute("contenteditable");
+      this.selected.removeAttribute("spellcheck");
+      if (commit) this.commit();
+      this.emitSelection();
+    }
+    getSelection() {
+      var _a, _b;
+      return ((_b = (_a = this.root).getSelection) == null ? void 0 : _b.call(_a)) ?? window.getSelection();
+    }
+    restoreSelection() {
+      if (!this.savedRange) return false;
+      const selection = this.getSelection();
+      selection == null ? void 0 : selection.removeAllRanges();
+      selection == null ? void 0 : selection.addRange(this.savedRange);
+      return true;
+    }
+    wrapSelection(tag) {
+      var _a;
+      if (!this.restoreSelection()) return;
+      const selection = this.getSelection();
+      const range2 = (selection == null ? void 0 : selection.rangeCount) ? selection.getRangeAt(0) : null;
+      if (!range2 || range2.collapsed || !((_a = this.selected) == null ? void 0 : _a.contains(range2.commonAncestorContainer))) return;
+      const wrapper = document.createElement(tag);
+      wrapper.append(range2.extractContents());
+      range2.insertNode(wrapper);
+      range2.selectNodeContents(wrapper);
+      selection == null ? void 0 : selection.removeAllRanges();
+      selection == null ? void 0 : selection.addRange(range2);
+      this.savedRange = range2.cloneRange();
+      this.commit();
+    }
+    serialize() {
+      if (!this.surface) return this.builder.html;
+      const clone = this.surface.cloneNode(true);
+      clone.querySelectorAll("[contenteditable],[spellcheck]").forEach((element) => {
+        element.removeAttribute("contenteditable");
+        element.removeAttribute("spellcheck");
+      });
+      return clone.innerHTML;
+    }
+    syncStructuredContent() {
+      var _a, _b, _c, _d, _e, _f, _g, _h;
+      if (!this.surface) return;
+      const heading = (_b = (_a = this.surface.querySelector('[data-movcues-content="heading"]')) == null ? void 0 : _a.textContent) == null ? void 0 : _b.trim();
+      const body = (_d = (_c = this.surface.querySelector('[data-movcues-content="body"]')) == null ? void 0 : _c.textContent) == null ? void 0 : _d.trim();
+      const primary = (_f = (_e = this.surface.querySelector('[data-movcues-action-id="primary"]')) == null ? void 0 : _e.textContent) == null ? void 0 : _f.trim();
+      const secondary = (_h = (_g = this.surface.querySelector('[data-movcues-action-id="secondary"]')) == null ? void 0 : _g.textContent) == null ? void 0 : _h.trim();
+      if (heading) this.content.heading = heading.slice(0, 160);
+      if (body) this.content.body = body.slice(0, 2e3);
+      if (primary && this.content.primaryAction) this.content.primaryAction.label = primary.slice(0, 80);
+      if (secondary && this.content.secondaryAction) this.content.secondaryAction.label = secondary.slice(0, 80);
+    }
+    commit() {
+      this.syncStructuredContent();
+      this.builder.html = this.serialize();
+      this.builder.projectData = { ...this.builder.projectData, movcues: { authoringSurface: "onsite", schemaVersion: 1 } };
+      this.pushHistory();
+      this.callbacks.onChange();
+      this.renderOutline();
+      this.emitSelection();
+    }
+    pushHistory() {
+      const html = this.serialize();
+      if (this.history[this.historyIndex] === html) return;
+      this.history.splice(this.historyIndex + 1);
+      this.history.push(html);
+      if (this.history.length > 50) this.history.shift();
+      this.historyIndex = this.history.length - 1;
+    }
+    moveHistory(delta) {
+      const next = this.historyIndex + delta;
+      if (!this.surface || next < 0 || next >= this.history.length) return false;
+      const key = this.componentKey(this.selected);
+      this.historyIndex = next;
+      this.surface.innerHTML = this.history[next];
+      this.builder.html = this.history[next];
+      this.syncStructuredContent();
+      this.selected = this.findByKey(key);
+      this.renderOutline();
+      this.emitSelection();
+      this.callbacks.onChange();
+      return true;
+    }
+    componentKey(component) {
+      if (!component || !this.surface) return null;
+      const marker = component.getAttribute("data-movcues-content") ?? component.getAttribute("data-movcues-action-id");
+      if (marker) return `${component.tagName}:${marker}`;
+      return component.tagName === "IMG" ? `IMG:${Array.from(this.surface.querySelectorAll("img")).indexOf(component)}` : null;
+    }
+    findByKey(key) {
+      if (!key || !this.surface) return null;
+      const [tag, marker] = key.split(":");
+      if (tag === "IMG") return this.surface.querySelectorAll("img")[Number(marker)] ?? null;
+      return this.surface.querySelector(`[data-movcues-content="${CSS.escape(marker)}"],[data-movcues-action-id="${CSS.escape(marker)}"]`);
+    }
+    renderOutline() {
+      const component = this.selected ?? this.hovered;
+      if (!(component == null ? void 0 : component.isConnected)) {
+        this.outline.hidden = true;
+        return;
+      }
+      const rect = component.getBoundingClientRect();
+      this.outline.hidden = false;
+      this.outline.toggleAttribute("data-hover", !this.selected);
+      Object.assign(this.outline.style, { left: `${rect.left - 2}px`, top: `${rect.top - 2}px`, width: `${rect.width + 4}px`, height: `${rect.height + 4}px` });
+    }
+  }
   class EditorModeController {
     constructor(apiBase) {
       this.apiBase = apiBase;
@@ -1676,6 +2078,8 @@ ${ISOLATION_CSS}`;
       this.root = null;
       this.picker = new ElementPicker();
       this.preview = new ExperienceRenderer();
+      this.contentEditor = null;
+      this.componentSelection = null;
       this.routeObserver = new RouteObserver();
       this.routeUnsubscribe = null;
       this.mutationObserver = null;
@@ -1693,11 +2097,16 @@ ${ISOLATION_CSS}`;
       this.guide = null;
       this.survey = null;
       this.stepIndex = 0;
-      this.mode = "select";
+      this.mode = "design";
       this.dirty = false;
       this.previewRendered = false;
       this.currentPath = "";
       this.persistBeforePageLeave = () => this.updateContinuation();
+      this.protectUnsavedChanges = (event) => {
+        if (!this.dirty) return;
+        event.preventDefault();
+        event.returnValue = "";
+      };
     }
     async start(rawToken) {
       try {
@@ -1759,7 +2168,8 @@ ${ISOLATION_CSS}`;
       const restoredIndex = selectableSteps && (restored == null ? void 0 : restored.selectedStepId) ? selectableSteps.findIndex((step) => step.id === restored.selectedStepId) : -1;
       this.stepIndex = selectableSteps ? restoredIndex >= 0 ? restoredIndex : clampStep(options.requestedStep ?? 0, selectableSteps.length) : 0;
       this.currentPath = currentPagePath();
-      this.mode = (restored == null ? void 0 : restored.mode) ?? "select";
+      const restoredMode = restored == null ? void 0 : restored.mode;
+      this.mode = restoredMode === "select" ? "target" : restoredMode === "design" || restoredMode === "target" || restoredMode === "navigate" || restoredMode === "preview" ? restoredMode : draft.experience.builderMode === "onsite" ? "design" : "target";
       this.updateContinuation();
       this.mount();
       this.expiryTimer = window.setTimeout(() => this.destroy(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
@@ -1777,13 +2187,11 @@ ${ISOLATION_CSS}`;
       document.documentElement.appendChild(this.host);
       this.bindPanel();
       this.syncPanel();
-      if (this.mode === "select") {
-        this.renderPreview();
-        this.startPicker();
-      }
+      this.applyMode();
       this.routeUnsubscribe = this.routeObserver.onChange(() => this.onRouteChange());
       this.routeObserver.start();
       window.addEventListener("pagehide", this.persistBeforePageLeave);
+      window.addEventListener("beforeunload", this.protectUnsavedChanges);
       if (typeof MutationObserver !== "undefined") {
         this.mutationObserver = new MutationObserver(() => this.scheduleTargetRefresh());
         this.mutationObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["id", "class", "data-testid", "data-test", "data-qa", "data-cy", "aria-label", "role", "name", "href", "hidden"] });
@@ -1793,15 +2201,24 @@ ${ISOLATION_CSS}`;
       var _a, _b;
       const selectableSteps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
       const guideMarkup = selectableSteps ? `<section class="section" data-guide><div class="eyebrow">${this.guide ? "Guide" : "Survey"}</div><div class="step-flow">${selectableSteps.map((_, index) => `<button class="step" type="button" data-step="${index}" aria-label="Open step ${index + 1}">${index + 1} <span data-step-icon>○</span></button>`).join('<span class="arrow">→</span>')}</div><div class="muted" data-step-label></div></section>` : "";
+      const designDisabled = draft.experience.builderMode !== "onsite" ? ' disabled title="Content is edited in the GrapesJS Dashboard Builder"' : "";
       return `<aside>
       <header data-drag-handle>
         <div class="header-copy"><strong>Movcues Live Editor</strong><span>${escapeText(draft.experience.name)}</span><small><i></i> Connected · <span data-save-state>Draft saved</span></small></div>
-        <div class="header-actions"><button type="button" data-minimize aria-label="Minimize editor">—</button><button type="button" data-close aria-label="Close editor">×</button></div>
+        <div class="header-actions"><button type="button" data-return-dashboard aria-label="Return to dashboard">↗</button><button type="button" data-minimize aria-label="Minimize editor">—</button><button type="button" data-close aria-label="Close editor">×</button></div>
       </header>
       <main>
-        <div class="modebar"><button type="button" data-mode="select">Select</button><button type="button" data-mode="navigate">Navigate</button></div>
+        <div class="modebar"><button type="button" data-mode="design"${designDisabled}>Design</button><button type="button" data-mode="target">Target</button><button type="button" data-mode="navigate">Navigate</button><button type="button" data-mode="preview">Preview</button></div>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         ${guideMarkup}
+        <section class="section content-inspector" data-content-inspector hidden>
+          <div class="content-heading"><div><div class="eyebrow">Content</div><strong data-component-label>Nothing selected</strong></div><button type="button" class="secondary-button compact" data-edit-component>Edit</button></div>
+          <div class="formatbar" data-text-controls><button type="button" data-format="strong" aria-label="Bold"><b>B</b></button><button type="button" data-format="em" aria-label="Italic"><i>I</i></button><button type="button" data-format="u" aria-label="Underline"><u>U</u></button><button type="button" data-list="ul" aria-label="Bulleted list">• List</button><button type="button" data-list="ol" aria-label="Numbered list">1. List</button></div>
+          <div class="format-row" data-text-controls><label>Align<select data-text-align><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label></div>
+          <div class="link-row" data-text-controls><input data-link-url type="url" placeholder="https://… or /path"><button type="button" class="secondary-button compact" data-apply-link>Link</button></div>
+          <div class="image-controls" data-image-controls hidden><label>Source URL<input data-image-src type="url"></label><label>Alt text<input data-image-alt type="text" maxlength="500"></label><button type="button" class="secondary-button" data-apply-image>Apply image</button></div>
+          <div class="history-row"><button type="button" class="secondary-button compact" data-undo disabled>Undo</button><button type="button" class="secondary-button compact" data-redo disabled>Redo</button></div>
+        </section>
         <section class="section" data-for="target">
           <div class="eyebrow">Target</div><strong class="truncate" data-target-label>Not selected</strong><div class="reliability" data-reliability></div>
           <button class="secondary-button" type="button" data-pick>Reselect target</button>
@@ -1826,16 +2243,16 @@ ${ISOLATION_CSS}`;
         <section class="section" data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
         <section class="section"><div class="eyebrow">Configured</div><dl data-configured></dl></section>
         <section class="section live"><div class="eyebrow">Live status</div><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></section>
-        <p class="hint" data-mode-hint></p>
+        <div class="save-recovery" data-save-recovery hidden><button type="button" class="secondary-button" data-retry-save>Retry save</button><button type="button" class="secondary-button" data-reload-draft hidden>Reload latest</button><span data-recovery-message>Local edits are preserved.</span></div><p class="hint" data-mode-hint></p>
       </main>
     </aside>`;
     }
     bindPanel() {
-      var _a, _b, _c;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
       const root = this.root;
       root.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this.setMode(button.dataset.mode)));
       root.querySelectorAll("[data-pick]").forEach((button) => button.addEventListener("click", () => {
-        if (this.mode === "navigate") this.setMode("select");
+        if (this.mode !== "target") this.setMode("target");
         else this.startPicker();
       }));
       (_a = root.querySelector("[data-pick-layer]")) == null ? void 0 : _a.addEventListener("click", () => this.startLayerPicker());
@@ -1847,6 +2264,60 @@ ${ISOLATION_CSS}`;
         button.textContent = aside.classList.contains("minimized") ? "+" : "—";
       });
       (_c = root.querySelector("[data-close]")) == null ? void 0 : _c.addEventListener("click", () => void this.close());
+      (_d = root.querySelector("[data-return-dashboard]")) == null ? void 0 : _d.addEventListener("click", () => {
+        var _a2;
+        (_a2 = window.opener) == null ? void 0 : _a2.focus();
+        void this.close();
+      });
+      (_e = root.querySelector("[data-retry-save]")) == null ? void 0 : _e.addEventListener("click", () => void this.persist());
+      (_f = root.querySelector("[data-reload-draft]")) == null ? void 0 : _f.addEventListener("click", () => window.location.reload());
+      (_g = root.querySelector("[data-edit-component]")) == null ? void 0 : _g.addEventListener("click", () => {
+        var _a2;
+        return (_a2 = this.contentEditor) == null ? void 0 : _a2.editSelected();
+      });
+      root.querySelectorAll("[data-format]").forEach((button) => button.addEventListener("pointerdown", (event) => {
+        var _a2;
+        event.preventDefault();
+        (_a2 = this.contentEditor) == null ? void 0 : _a2.formatInline(button.dataset.format);
+        this.syncContentInspector();
+      }));
+      root.querySelectorAll("[data-list]").forEach((button) => button.addEventListener("pointerdown", (event) => {
+        var _a2;
+        event.preventDefault();
+        (_a2 = this.contentEditor) == null ? void 0 : _a2.toggleList(button.dataset.list);
+        this.syncContentInspector();
+      }));
+      (_h = root.querySelector("[data-text-align]")) == null ? void 0 : _h.addEventListener("change", (event) => {
+        var _a2;
+        (_a2 = this.contentEditor) == null ? void 0 : _a2.setAlignment(event.currentTarget.value);
+        this.syncContentInspector();
+      });
+      (_i = root.querySelector("[data-apply-link]")) == null ? void 0 : _i.addEventListener("pointerdown", (event) => {
+        var _a2;
+        event.preventDefault();
+        const input = root.querySelector("[data-link-url]");
+        if (input && !((_a2 = this.contentEditor) == null ? void 0 : _a2.applyLink(input.value))) input.setCustomValidity("Use an HTTP(S), email, phone, relative, or hash URL.");
+        else input == null ? void 0 : input.setCustomValidity("");
+        this.syncContentInspector();
+      });
+      (_j = root.querySelector("[data-apply-image]")) == null ? void 0 : _j.addEventListener("click", () => {
+        var _a2;
+        const source = root.querySelector("[data-image-src]");
+        const alt = root.querySelector("[data-image-alt]");
+        if (source && alt && !((_a2 = this.contentEditor) == null ? void 0 : _a2.updateImage(source.value, alt.value))) source.setCustomValidity("Use an HTTP(S), relative, or supported data image URL.");
+        else source == null ? void 0 : source.setCustomValidity("");
+        this.syncContentInspector();
+      });
+      (_k = root.querySelector("[data-undo]")) == null ? void 0 : _k.addEventListener("click", () => {
+        var _a2;
+        (_a2 = this.contentEditor) == null ? void 0 : _a2.undo();
+        this.syncContentInspector();
+      });
+      (_l = root.querySelector("[data-redo]")) == null ? void 0 : _l.addEventListener("click", () => {
+        var _a2;
+        (_a2 = this.contentEditor) == null ? void 0 : _a2.redo();
+        this.syncContentInspector();
+      });
       this.bindDrag();
       this.onSelect("[data-alignment]", (value) => {
         this.currentBehavior().alignment = value;
@@ -1965,38 +2436,47 @@ ${ISOLATION_CSS}`;
       });
     }
     switchStep(index) {
-      var _a, _b;
+      var _a, _b, _c;
       const steps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
       if (!steps || index < 0 || index >= steps.length || index === this.stepIndex) return;
       this.selectionGeneration++;
       this.picker.cancel();
+      (_c = this.contentEditor) == null ? void 0 : _c.destroy();
+      this.contentEditor = null;
+      this.componentSelection = null;
+      if (this.dirty) void this.persist();
       this.stepIndex = index;
       this.updateContinuation();
       this.syncPanel();
-      if (this.mode === "select") {
-        this.renderPreview();
-        this.startPicker();
-      }
+      this.applyMode();
     }
     setMode(mode) {
-      if (this.mode === mode && (mode !== "select" || this.pickerIsSelecting())) return;
+      var _a, _b;
+      if (mode === "design" && ((_a = this.draft) == null ? void 0 : _a.experience.builderMode) !== "onsite") return;
+      if (this.mode === mode && (mode !== "target" || this.pickerIsSelecting())) return;
       this.selectionGeneration++;
       this.picker.cancel();
+      (_b = this.contentEditor) == null ? void 0 : _b.destroy();
+      this.contentEditor = null;
+      this.componentSelection = null;
+      if (this.dirty) void this.persist();
       this.mode = mode;
       this.updateContinuation();
-      if (mode === "navigate") {
+      this.applyMode();
+    }
+    applyMode() {
+      if (this.mode === "navigate") {
         this.preview.destroy();
         this.previewRendered = false;
         this.syncPanel();
-        if (!this.dirty) this.setText("[data-save-state]", "Draft saved");
         return;
       }
       this.renderPreview();
       this.syncPanel();
-      this.startPicker();
+      if (this.mode === "target") this.startPicker();
     }
     startPicker() {
-      if (!this.isTargetedType() || this.mode !== "select") return;
+      if (!this.isTargetedType() || this.mode !== "target") return;
       const generation = ++this.selectionGeneration;
       this.setText("[data-mode-hint]", "Select an element · Hold Shift to interact temporarily");
       void this.picker.pick().then((target) => {
@@ -2007,7 +2487,7 @@ ${ISOLATION_CSS}`;
       });
     }
     startLayerPicker() {
-      if (this.mode === "navigate") this.mode = "select";
+      if (this.mode === "navigate" || this.mode === "preview") this.mode = "target";
       const generation = ++this.selectionGeneration;
       this.picker.cancel();
       this.setText("[data-mode-hint]", "Select the page element this experience should appear above or below");
@@ -2021,16 +2501,20 @@ ${ISOLATION_CSS}`;
     pickerIsSelecting() {
       return !!document.querySelector("[data-movcues-picker-overlay]");
     }
-    changed() {
+    changed(render = true) {
+      var _a;
       this.dirty = true;
       this.updateContinuation();
       this.syncPanel();
-      if (this.mode === "select") this.renderPreview();
-      this.setText("[data-save-state]", "Saving…");
+      if (render && this.mode !== "navigate") this.renderPreview();
+      this.setText("[data-save-state]", "Unsaved");
+      const recovery = (_a = this.root) == null ? void 0 : _a.querySelector("[data-save-recovery]");
+      if (recovery) recovery.hidden = true;
       clearTimeout(this.saveTimer);
       this.saveTimer = window.setTimeout(() => void this.persist(), 350);
     }
     async persist() {
+      var _a;
       clearTimeout(this.saveTimer);
       this.saveTimer = 0;
       if (this.saveInFlight) {
@@ -2039,14 +2523,34 @@ ${ISOLATION_CSS}`;
       }
       if (!this.dirty || !this.bridge || !this.definition) return true;
       this.dirty = false;
+      this.setText("[data-save-state]", "Saving…");
       const bridge = this.bridge;
       const definition = this.definition;
-      const request = bridge.save(definition).then(() => {
+      const revision = ((_a = this.draft) == null ? void 0 : _a.version.revision) ?? 1;
+      const request = bridge.save(definition, revision).then((version) => {
+        var _a2;
+        if (this.draft) this.draft.version.revision = version.revision;
         this.setText("[data-save-state]", this.dirty ? "Saving…" : "Draft saved");
+        const recovery = (_a2 = this.root) == null ? void 0 : _a2.querySelector("[data-save-recovery]");
+        if (recovery) recovery.hidden = true;
         return true;
-      }).catch(() => {
-        this.setText("[data-save-state]", "Session expired");
-        this.destroy();
+      }).catch((error) => {
+        var _a2, _b, _c;
+        if (error instanceof EditorSessionExpiredError) {
+          this.setText("[data-save-state]", "Session expired");
+          this.teardown(true);
+          return false;
+        }
+        this.dirty = true;
+        const conflict = error instanceof DraftConflictError;
+        this.setText("[data-save-state]", conflict ? "Conflict · reload required" : "Save failed");
+        const recovery = (_a2 = this.root) == null ? void 0 : _a2.querySelector("[data-save-recovery]");
+        if (recovery) recovery.hidden = false;
+        const retry = (_b = this.root) == null ? void 0 : _b.querySelector("[data-retry-save]");
+        if (retry) retry.hidden = conflict;
+        const reload = (_c = this.root) == null ? void 0 : _c.querySelector("[data-reload-draft]");
+        if (reload) reload.hidden = !conflict;
+        this.setText("[data-recovery-message]", conflict ? "Local edits are preserved until you reload the latest draft." : "Local edits are preserved.");
         return false;
       });
       this.saveInFlight = request;
@@ -2060,11 +2564,14 @@ ${ISOLATION_CSS}`;
       this.destroy();
     }
     renderPreview() {
-      var _a, _b;
+      var _a, _b, _c;
       if (!this.definition || !this.draft || this.mode === "navigate") return;
       this.previewRendered = false;
+      (_a = this.contentEditor) == null ? void 0 : _a.destroy();
+      this.contentEditor = null;
+      this.componentSelection = null;
       const definition = this.guide ? { ...this.definition, steps: [this.guide.steps[this.stepIndex]] } : this.definition;
-      const selectedStepId = (_b = (_a = this.survey) == null ? void 0 : _a.steps[this.stepIndex]) == null ? void 0 : _b.id;
+      const selectedStepId = (_c = (_b = this.survey) == null ? void 0 : _b.steps[this.stepIndex]) == null ? void 0 : _c.id;
       this.preview.render({
         id: this.draft.experience.id,
         versionId: this.draft.version.id,
@@ -2075,6 +2582,7 @@ ${ISOLATION_CSS}`;
       }, {
         onVisible: () => {
           this.previewRendered = true;
+          if (this.mode === "design") this.attachContentEditor();
           this.updateDiagnostics();
         },
         onDismiss: () => window.setTimeout(() => this.renderPreview(), 0),
@@ -2086,6 +2594,63 @@ ${ISOLATION_CSS}`;
         }
       }, selectedStepId);
       this.updateDiagnostics();
+    }
+    attachContentEditor() {
+      var _a;
+      if (((_a = this.draft) == null ? void 0 : _a.experience.builderMode) !== "onsite" || this.mode !== "design") return;
+      const host = Array.from(document.querySelectorAll("[data-movcues-experience]")).find(
+        (element) => element.dataset.movcuesExperience === this.draft.experience.id
+      );
+      const builder = this.currentBuilder();
+      const content = this.currentContent();
+      if (!(host == null ? void 0 : host.shadowRoot) || !builder || !content) return;
+      this.contentEditor = new OnsiteContentEditor(host.shadowRoot, builder, content, {
+        onChange: () => this.changed(false),
+        onSelectionChange: (selection) => {
+          this.componentSelection = selection;
+          this.syncContentInspector();
+        }
+      });
+      this.contentEditor.start();
+    }
+    currentBuilder() {
+      var _a, _b;
+      if (!this.definition) return void 0;
+      if (this.guide) return (_a = this.guide.steps[this.stepIndex]) == null ? void 0 : _a.builder;
+      if (this.survey) return (_b = this.survey.steps[this.stepIndex]) == null ? void 0 : _b.builder;
+      return this.definition.builder;
+    }
+    currentContent() {
+      var _a, _b;
+      if (!this.definition) return void 0;
+      if (this.guide) return (_a = this.guide.steps[this.stepIndex]) == null ? void 0 : _a.content;
+      if (this.survey) return (_b = this.survey.steps[this.stepIndex]) == null ? void 0 : _b.content;
+      return this.definition.content;
+    }
+    syncContentInspector() {
+      var _a, _b;
+      if (!this.root) return;
+      const selection = this.componentSelection;
+      const inspector = this.root.querySelector("[data-content-inspector]");
+      if (!inspector) return;
+      inspector.hidden = this.mode !== "design" || !selection;
+      if (!selection) return;
+      this.setText("[data-component-label]", `${capitalize(selection.label)}${selection.editing ? " · Editing" : ""}`);
+      this.root.querySelectorAll("[data-text-controls]").forEach((element) => {
+        element.hidden = selection.kind === "image";
+      });
+      const imageControls = this.root.querySelector("[data-image-controls]");
+      if (imageControls) imageControls.hidden = selection.kind !== "image";
+      const edit = this.root.querySelector("[data-edit-component]");
+      if (edit) edit.hidden = selection.kind === "image";
+      if (selection.kind === "image") {
+        this.setValue("[data-image-src]", selection.src ?? "");
+        this.setValue("[data-image-alt]", selection.alt ?? "");
+      }
+      const undo = this.root.querySelector("[data-undo]");
+      if (undo) undo.disabled = !((_a = this.contentEditor) == null ? void 0 : _a.canUndo());
+      const redo = this.root.querySelector("[data-redo]");
+      if (redo) redo.disabled = !((_b = this.contentEditor) == null ? void 0 : _b.canRedo());
     }
     syncPanel() {
       var _a, _b;
@@ -2138,7 +2703,8 @@ ${ISOLATION_CSS}`;
       if (this.survey) this.setText("[data-step-label]", `Step ${this.stepIndex + 1} of ${this.survey.steps.length}`);
       this.renderConfigured(this.definition.targeting);
       this.updateDiagnostics();
-      this.setText("[data-mode-hint]", this.mode === "navigate" ? "Customer app interaction is enabled" : this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "Live placement preview");
+      this.syncContentInspector();
+      this.setText("[data-mode-hint]", this.mode === "design" ? "Click a component to select · Double-click text to edit" : this.mode === "target" ? this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "This experience does not need a page target" : this.mode === "navigate" ? "Customer app interaction is enabled" : "End-user preview · analytics and actions are disabled");
     }
     renderConfigured(targeting) {
       var _a;
@@ -2209,7 +2775,10 @@ ${ISOLATION_CSS}`;
       if (notice) notice.hidden = false;
       this.setText("[data-route-change]", `${previous} → ${next}`);
       this.updateDiagnostics();
-      if (this.mode === "select") this.renderPreview();
+      if (this.mode !== "navigate") {
+        this.renderPreview();
+        if (this.mode === "target") this.startPicker();
+      }
     }
     currentTarget() {
       if (!this.definition) return void 0;
@@ -2289,7 +2858,7 @@ ${ISOLATION_CSS}`;
       this.teardown(true);
     }
     teardown(clearContinuation) {
-      var _a, _b, _c, _d;
+      var _a, _b, _c, _d, _e;
       clearTimeout(this.expiryTimer);
       clearInterval(this.validationTimer);
       clearTimeout(this.saveTimer);
@@ -2299,13 +2868,17 @@ ${ISOLATION_CSS}`;
       this.routeUnsubscribe = null;
       this.routeObserver.stop();
       window.removeEventListener("pagehide", this.persistBeforePageLeave);
+      window.removeEventListener("beforeunload", this.protectUnsavedChanges);
       (_b = this.mutationObserver) == null ? void 0 : _b.disconnect();
       this.mutationObserver = null;
       (_c = this.dragCleanup) == null ? void 0 : _c.call(this);
       this.dragCleanup = null;
       this.preview.destroy();
+      (_d = this.contentEditor) == null ? void 0 : _d.destroy();
+      this.contentEditor = null;
+      this.componentSelection = null;
       this.picker.cancel();
-      (_d = this.host) == null ? void 0 : _d.remove();
+      (_e = this.host) == null ? void 0 : _e.remove();
       this.host = null;
       this.root = null;
       this.bridge = null;
@@ -2364,7 +2937,7 @@ ${ISOLATION_CSS}`;
     return span.innerHTML;
   }
   const STYLE = `
-:host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:312px;max-height:calc(100vh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100vh - 82px);overflow:auto}.minimized{width:260px}.minimized main{display:none}.modebar{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{padding:7px}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-flow{display:flex;align-items:center;overflow:auto}.step{flex:none;padding:4px 6px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.arrow{color:#cbd5e1;font-size:10px}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}[hidden]{display:none!important}
+:host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:min(312px,calc(100vw - 8px));max-height:calc(100dvh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100dvh - 82px);overflow:auto}.minimized{width:min(260px,calc(100vw - 8px))}.minimized main{display:none}.modebar{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button,.formatbar button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{min-width:0;padding:7px 3px}.modebar button:disabled{cursor:not-allowed;opacity:.42}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-flow{display:flex;align-items:center;overflow:auto}.step{flex:none;padding:4px 6px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.arrow{color:#cbd5e1;font-size:10px}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.secondary-button.compact{padding:5px 7px}.content-heading,.history-row,.link-row,.save-recovery{display:flex;align-items:center;justify-content:space-between;gap:6px}.content-heading>div{min-width:0}.formatbar{display:flex;flex-wrap:wrap;gap:4px}.formatbar button{padding:5px 7px}.link-row input{min-width:0}.history-row{justify-content:flex-start}.save-recovery{padding:8px 12px;border-bottom:1px solid #fee2e2;background:#fff7ed;color:#9a3412;font-size:11px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}[hidden]{display:none!important}@media(max-width:420px){aside{right:4px;top:4px;max-height:calc(100dvh - 8px)}main{max-height:calc(100dvh - 66px)}header{padding:9px}.section{padding:8px 10px}.modebar{padding:6px}.modebar button{font-size:10px}}
 `;
   const runtime = {
     createController: (apiBase) => new EditorModeController(apiBase)

@@ -1,5 +1,6 @@
 export type ExperienceKind = "guide" | "widget" | "checklist";
 export type WidgetType = "anchored_card" | "toast" | "cursor_follow" | "modal" | "slideout" | "hotspot" | "banner" | "survey";
+export type BuilderMode = "grapesjs" | "onsite";
 export interface ExperienceAction { label: string; type: "dismiss" | "next_step" | "open_url" | "track_event"; url?: string; eventName?: string }
 export interface ExperienceContent { heading: string; body: string; primaryAction?: ExperienceAction; secondaryAction?: { label: string; type: "dismiss" } }
 export interface ExperienceTarget { primarySelector: string; fallbackSelectors: string[]; label?: string; role?: string; tagName?: string; reliability: "reliable" | "moderate" | "fragile"; targetContext?: { pagePath: string } }
@@ -41,6 +42,6 @@ export type ExperienceLaunchContext = { source: "api" } | { source: "checklist";
 export interface DeliveredExperience { id: string; versionId: string; kind: ExperienceKind; widgetType: WidgetType | null; priority: number; interruptPolicy?: "queue" | "interrupt"; impressionId?: string; definition: RuntimeDefinition; launchContext?: ExperienceLaunchContext }
 export interface DeliveredChecklist { id: string; versionId: string; kind: "checklist"; priority: number; definition: RuntimeChecklistDefinition; progress: ChecklistProgress }
 export type EditorDefinition = RuntimeDefinition & { targeting: ExperienceTargeting };
-export interface EditorDraft { experience: { id: string; name: string; kind: ExperienceKind; widgetType: WidgetType | null }; version: { id: string; versionNumber: number; definition: EditorDefinition } }
+export interface EditorDraft { experience: { id: string; name: string; kind: ExperienceKind; widgetType: WidgetType | null; builderMode: BuilderMode }; version: { id: string; versionNumber: number; revision: number; definition: EditorDefinition } }
 export function isGuideDefinition(value: RuntimeDefinition): value is RuntimeGuideDefinition { return "steps" in value; }
 export function isChecklistDefinition(value: RuntimeDefinition | RuntimeChecklistDefinition): value is RuntimeChecklistDefinition { return "items" in value; }

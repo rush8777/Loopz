@@ -90,8 +90,8 @@ describe("live placement editor", () => {
     mode.value = "custom"; mode.dispatchEvent(new Event("change", { bubbles: true }));
     editorRoot().querySelector<HTMLButtonElement>('[data-step="0"]')!.click();
     expect(mode.value).toBe("auto");
-    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
-    const save = [...fetchMock.mock.calls].reverse().find(([, init]) => init?.method === "PATCH")!;
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH" && JSON.parse(String(init.body)).definition.steps[1].behavior.layer?.mode === "custom")).toBe(true));
+    const save = [...fetchMock.mock.calls].reverse().find(([, init]) => init?.method === "PATCH" && JSON.parse(String(init.body)).definition.steps[1].behavior.layer?.mode === "custom")!;
     const saved = JSON.parse(String(save[1]?.body)).definition;
     expect(saved.behavior?.layer).toBeUndefined();
     expect(saved.steps[0].behavior.layer).toEqual({ mode: "auto" });
@@ -162,6 +162,70 @@ describe("live placement editor", () => {
     expect(editorRoot().querySelector<HTMLElement>("[data-missing-selector]")?.hidden).toBe(true);
   });
 
+  it("edits an on-site draft directly without remounting the rendered experience", async () => {
+    const fetchMock = editorFetch(onsiteDraft());
+    vi.stubGlobal("fetch", fetchMock);
+    controller = new EditorModeController("https://api.example.com");
+    expect(await controller.start("one-time-token")).toBe(true);
+
+    expect(
+      Array.from(editorRoot().querySelectorAll<HTMLButtonElement>("[data-mode]")).map(
+        button => button.textContent,
+      ),
+    ).toEqual(["Design", "Target", "Navigate", "Preview"]);
+    expect(editorRoot().querySelector('[data-mode="design"]')?.classList.contains("active")).toBe(true);
+    const previewHost = document.querySelector<HTMLElement>('[data-movcues-experience="exp_onsite"]')!;
+    const heading = previewHost.shadowRoot!.querySelector<HTMLElement>('[data-movcues-content="heading"]')!;
+    heading.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, composed: true }));
+    heading.textContent = "Edited in context";
+    heading.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
+
+    expect(document.querySelector('[data-movcues-experience="exp_onsite"]')).toBe(previewHost);
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
+    const save = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
+    expect(JSON.parse(String(save[1]?.body))).toMatchObject({ revision: 1, definition: { content: { heading: "Edited in context" }, builder: { html: expect.stringContaining("Edited in context") } } });
+  });
+
+  it("preserves local text and offers reload recovery after a revision conflict", async () => {
+    const draft = onsiteDraft();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/exchange")) return { ok: true, json: async () => ({ sessionId: "ees_1", accessToken: "access", expiresAt: new Date(Date.now() + 60_000).toISOString() }) };
+      if (init?.method === "PATCH") return { ok: false, status: 409, json: async () => ({ error: "draft_conflict", currentRevision: 2 }) };
+      return { ok: true, json: async () => draft };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    controller = new EditorModeController("https://api.example.com");
+    expect(await controller.start("one-time-token")).toBe(true);
+    const previewHost = document.querySelector<HTMLElement>('[data-movcues-experience="exp_onsite"]')!;
+    const heading = previewHost.shadowRoot!.querySelector<HTMLElement>('[data-movcues-content="heading"]')!;
+    heading.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, composed: true }));
+    heading.textContent = "Unsaved local copy";
+    heading.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
+
+    await vi.waitFor(() => expect(editorRoot().querySelector("[data-save-state]")?.textContent).toContain("Conflict"));
+    expect(heading.textContent).toBe("Unsaved local copy");
+    expect(editorRoot().querySelector<HTMLButtonElement>("[data-reload-draft]")?.hidden).toBe(false);
+    expect(editorRoot().querySelector<HTMLButtonElement>("[data-retry-save]")?.hidden).toBe(true);
+  });
+
+  it("tears down authoring when a save reports a revoked editor session", async () => {
+    const draft = onsiteDraft();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/exchange")) return { ok: true, json: async () => ({ sessionId: "ees_1", accessToken: "access", expiresAt: new Date(Date.now() + 60_000).toISOString() }) };
+      if (init?.method === "PATCH") return { ok: false, status: 401, json: async () => ({ error: "editor_session_revoked" }) };
+      return { ok: true, json: async () => draft };
+    }));
+    controller = new EditorModeController("https://api.example.com");
+    expect(await controller.start("one-time-token")).toBe(true);
+    const heading = document.querySelector<HTMLElement>('[data-movcues-experience="exp_onsite"]')!.shadowRoot!.querySelector<HTMLElement>('[data-movcues-content="heading"]')!;
+    heading.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, composed: true }));
+    heading.textContent = "Save after revoke";
+    heading.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
+
+    await vi.waitFor(() => expect(document.querySelector("[data-movcues-editor]")).toBeNull());
+  });
+
   it("rejects an ambiguous semantic selector and generates unique parent context", () => {
     document.body.innerHTML = '<aside data-testid="sidebar"><a href="#home">Home</a></aside><nav><a href="#home">Home</a></nav>';
     const selected = document.querySelector("aside a")!;
@@ -185,23 +249,52 @@ describe("live placement editor", () => {
 });
 
 function editorFetch(draft: EditorDraft) {
+  let revision = draft.version.revision;
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith("/exchange")) return { ok: true, json: async () => ({ sessionId: "ees_1", accessToken: "access", expiresAt: new Date(Date.now() + 60_000).toISOString() }) };
-    if (init?.method === "PATCH") return { ok: true, json: async () => ({}) };
+    if (init?.method === "PATCH") {
+      const body = JSON.parse(String(init.body)) as { definition: EditorDraft["version"]["definition"] };
+      revision += 1;
+      return { ok: true, json: async () => ({ version: { ...draft.version, definition: body.definition, revision } }) };
+    }
     return { ok: true, json: async () => draft };
   });
 }
 
 function widgetDraft(widgetType: "anchored_card" | "toast", selector?: string): EditorDraft {
-  return { experience: { id: "exp_1", name: "Placement draft", kind: "widget", widgetType }, version: { id: "v1", versionNumber: 1, definition: { content: { heading: "Widget", body: "Preview" }, design, behavior: { dismissible: true, placement: "bottom" }, target: selector ? { primarySelector: selector, fallbackSelectors: [], label: "Checkout", reliability: "reliable" } : undefined, targeting } } };
+  return { experience: { id: "exp_1", name: "Placement draft", kind: "widget", widgetType, builderMode: "grapesjs" }, version: { id: "v1", versionNumber: 1, revision: 1, definition: { content: { heading: "Widget", body: "Preview" }, design, behavior: { dismissible: true, placement: "bottom" }, target: selector ? { primarySelector: selector, fallbackSelectors: [], label: "Checkout", reliability: "reliable" } : undefined, targeting } } };
 }
 
 function guideDraft(): EditorDraft {
-  return { experience: { id: "guide_1", name: "Onboarding guide", kind: "guide", widgetType: null }, version: { id: "v1", versionNumber: 1, definition: { design, targeting, steps: [
+  return { experience: { id: "guide_1", name: "Onboarding guide", kind: "guide", widgetType: null, builderMode: "grapesjs" }, version: { id: "v1", versionNumber: 1, revision: 1, definition: { design, targeting, steps: [
     { id: "one", content: { heading: "First step", body: "One" }, target: { primarySelector: "#first", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true, placement: "bottom" } },
     { id: "two", content: { heading: "Second step", body: "Two" }, advance: { type: "route", pageRules: [{ id: "settings", kind: "include", operator: "equals", value: "/settings" }] }, target: { primarySelector: "#second", fallbackSelectors: [], reliability: "moderate" }, behavior: { dismissible: false, placement: "right" } },
   ] } } };
+}
+
+function onsiteDraft(): EditorDraft {
+  const content = { heading: "On-site heading", body: "Edit me", primaryAction: { label: "Got it", type: "dismiss" as const } };
+  return {
+    experience: { id: "exp_onsite", name: "On-site modal", kind: "widget", widgetType: "modal", builderMode: "onsite" },
+    version: {
+      id: "v_onsite",
+      versionNumber: 1,
+      revision: 1,
+      definition: {
+        content,
+        design,
+        behavior: { dismissible: true, modalLayout: "center", backdrop: true },
+        targeting,
+        builder: {
+          version: 1,
+          projectData: { movcues: { authoringSurface: "onsite", schemaVersion: 1 } },
+          html: '<section class="movcues-widget"><h2 data-movcues-content="heading">On-site heading</h2><p data-movcues-content="body">Edit me</p><button data-movcues-action-id="primary">Got it</button></section>',
+          css: ".movcues-widget{padding:18px}",
+        },
+      },
+    },
+  };
 }
 
 function widgetExperience(widgetType: "anchored_card", selector: string) {

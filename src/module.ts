@@ -1,6 +1,5 @@
 import { Analytics as CoreAnalytics } from "./core/Analytics";
 import { installUnloadHandlers } from "./core/unloadHandlers";
-import { EditorModeController } from "./experiences/editor/EditorModeController";
 import { ExperienceLoader } from "./experiences/runtime/ExperienceLoader";
 import type { AnalyticsRuntimeProviders } from "./experiences/runtimeInterfaces";
 import type { AnalyticsConfig } from "./types/config";
@@ -38,8 +37,9 @@ const bundledRuntimeProviders: AnalyticsRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) =>
       new ExperienceLoader(apiBase, siteId, session, trackEvent),
   },
-  editor: {
-    createController: (apiBase) => new EditorModeController(apiBase),
+  loadEditor: async () => {
+    const { EditorModeController } = await import("./experiences/editor/EditorModeController");
+    return { createController: (apiBase) => new EditorModeController(apiBase) };
   },
 };
 

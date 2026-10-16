@@ -2,6 +2,7 @@ import type {
   EditorDefinition,
   EditorDraft,
   ExperienceBehavior,
+  ExperienceContent,
   ExperienceLayer,
   ExperienceTarget,
   ExperienceTargeting,
@@ -10,6 +11,7 @@ import type {
   RuntimeGuideDefinition,
   RuntimeWidgetDefinition,
   SurveyConfig,
+  WidgetBuilderState,
 } from "../types";
 import { getGuideStepPattern, guideStepRequiresTarget, isGuideDefinition } from "../types";
 import type { EditorAuthoringState, EditorContinuation, EditorSession } from "../runtimeInterfaces";
@@ -17,10 +19,11 @@ import { clearEditorContinuation, storeEditorContinuation } from "../editorConti
 import { RouteObserver } from "../../dom/RouteObserver";
 import { ExperienceRenderer } from "../runtime/ExperienceRenderer";
 import { findTarget } from "../runtime/AnchoredCardRenderer";
-import { EditorBridge } from "./EditorBridge";
+import { DraftConflictError, EditorBridge, EditorSessionExpiredError } from "./EditorBridge";
 import { ElementPicker } from "./ElementPicker";
+import { OnsiteContentEditor, type OnsiteComponentSelection } from "./OnsiteContentEditor";
 
-type EditorMode = "select" | "navigate";
+type EditorMode = "design" | "target" | "navigate" | "preview";
 type TargetStatus = "found" | "off-page" | "missing" | "unconfigured";
 
 export class EditorModeController {
@@ -28,6 +31,8 @@ export class EditorModeController {
   private root: ShadowRoot | null = null;
   private picker = new ElementPicker();
   private preview = new ExperienceRenderer();
+  private contentEditor: OnsiteContentEditor | null = null;
+  private componentSelection: OnsiteComponentSelection | null = null;
   private routeObserver = new RouteObserver();
   private routeUnsubscribe: (() => void) | null = null;
   private mutationObserver: MutationObserver | null = null;
@@ -45,11 +50,12 @@ export class EditorModeController {
   private guide: RuntimeGuideDefinition | null = null;
   private survey: SurveyConfig | null = null;
   private stepIndex = 0;
-  private mode: EditorMode = "select";
+  private mode: EditorMode = "design";
   private dirty = false;
   private previewRendered = false;
   private currentPath = "";
   private persistBeforePageLeave = () => this.updateContinuation();
+  private protectUnsavedChanges = (event: BeforeUnloadEvent) => { if (!this.dirty) return; event.preventDefault(); event.returnValue = ""; };
 
   constructor(private apiBase: string) {}
 
@@ -109,7 +115,8 @@ export class EditorModeController {
     const restoredIndex = selectableSteps && restored?.selectedStepId ? selectableSteps.findIndex(step => step.id === restored.selectedStepId) : -1;
     this.stepIndex = selectableSteps ? restoredIndex >= 0 ? restoredIndex : clampStep(options.requestedStep ?? 0, selectableSteps.length) : 0;
     this.currentPath = currentPagePath();
-    this.mode = restored?.mode ?? "select";
+    const restoredMode = (restored as { mode?: string } | undefined)?.mode;
+    this.mode = restoredMode === "select" ? "target" : restoredMode === "design" || restoredMode === "target" || restoredMode === "navigate" || restoredMode === "preview" ? restoredMode : draft.experience.builderMode === "onsite" ? "design" : "target";
     this.updateContinuation();
     this.mount();
     this.expiryTimer = window.setTimeout(() => this.destroy(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
@@ -127,11 +134,12 @@ export class EditorModeController {
 
     this.bindPanel();
     this.syncPanel();
-    if (this.mode === "select") { this.renderPreview(); this.startPicker(); }
+    this.applyMode();
 
     this.routeUnsubscribe = this.routeObserver.onChange(() => this.onRouteChange());
     this.routeObserver.start();
     window.addEventListener("pagehide", this.persistBeforePageLeave);
+    window.addEventListener("beforeunload", this.protectUnsavedChanges);
     if (typeof MutationObserver !== "undefined") {
       this.mutationObserver = new MutationObserver(() => this.scheduleTargetRefresh());
       this.mutationObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["id", "class", "data-testid", "data-test", "data-qa", "data-cy", "aria-label", "role", "name", "href", "hidden"] });
@@ -141,15 +149,24 @@ export class EditorModeController {
   private panelMarkup(draft: EditorDraft): string {
     const selectableSteps = this.guide?.steps ?? this.survey?.steps;
     const guideMarkup = selectableSteps ? `<section class="section" data-guide><div class="eyebrow">${this.guide ? "Guide" : "Survey"}</div><div class="step-flow">${selectableSteps.map((_, index) => `<button class="step" type="button" data-step="${index}" aria-label="Open step ${index + 1}">${index + 1} <span data-step-icon>○</span></button>`).join('<span class="arrow">→</span>')}</div><div class="muted" data-step-label></div></section>` : "";
+    const designDisabled = draft.experience.builderMode !== "onsite" ? " disabled title=\"Content is edited in the GrapesJS Dashboard Builder\"" : "";
     return `<aside>
       <header data-drag-handle>
         <div class="header-copy"><strong>Movcues Live Editor</strong><span>${escapeText(draft.experience.name)}</span><small><i></i> Connected · <span data-save-state>Draft saved</span></small></div>
-        <div class="header-actions"><button type="button" data-minimize aria-label="Minimize editor">—</button><button type="button" data-close aria-label="Close editor">×</button></div>
+        <div class="header-actions"><button type="button" data-return-dashboard aria-label="Return to dashboard">↗</button><button type="button" data-minimize aria-label="Minimize editor">—</button><button type="button" data-close aria-label="Close editor">×</button></div>
       </header>
       <main>
-        <div class="modebar"><button type="button" data-mode="select">Select</button><button type="button" data-mode="navigate">Navigate</button></div>
+        <div class="modebar"><button type="button" data-mode="design"${designDisabled}>Design</button><button type="button" data-mode="target">Target</button><button type="button" data-mode="navigate">Navigate</button><button type="button" data-mode="preview">Preview</button></div>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         ${guideMarkup}
+        <section class="section content-inspector" data-content-inspector hidden>
+          <div class="content-heading"><div><div class="eyebrow">Content</div><strong data-component-label>Nothing selected</strong></div><button type="button" class="secondary-button compact" data-edit-component>Edit</button></div>
+          <div class="formatbar" data-text-controls><button type="button" data-format="strong" aria-label="Bold"><b>B</b></button><button type="button" data-format="em" aria-label="Italic"><i>I</i></button><button type="button" data-format="u" aria-label="Underline"><u>U</u></button><button type="button" data-list="ul" aria-label="Bulleted list">• List</button><button type="button" data-list="ol" aria-label="Numbered list">1. List</button></div>
+          <div class="format-row" data-text-controls><label>Align<select data-text-align><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label></div>
+          <div class="link-row" data-text-controls><input data-link-url type="url" placeholder="https://… or /path"><button type="button" class="secondary-button compact" data-apply-link>Link</button></div>
+          <div class="image-controls" data-image-controls hidden><label>Source URL<input data-image-src type="url"></label><label>Alt text<input data-image-alt type="text" maxlength="500"></label><button type="button" class="secondary-button" data-apply-image>Apply image</button></div>
+          <div class="history-row"><button type="button" class="secondary-button compact" data-undo disabled>Undo</button><button type="button" class="secondary-button compact" data-redo disabled>Redo</button></div>
+        </section>
         <section class="section" data-for="target">
           <div class="eyebrow">Target</div><strong class="truncate" data-target-label>Not selected</strong><div class="reliability" data-reliability></div>
           <button class="secondary-button" type="button" data-pick>Reselect target</button>
@@ -174,7 +191,7 @@ export class EditorModeController {
         <section class="section" data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
         <section class="section"><div class="eyebrow">Configured</div><dl data-configured></dl></section>
         <section class="section live"><div class="eyebrow">Live status</div><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></section>
-        <p class="hint" data-mode-hint></p>
+        <div class="save-recovery" data-save-recovery hidden><button type="button" class="secondary-button" data-retry-save>Retry save</button><button type="button" class="secondary-button" data-reload-draft hidden>Reload latest</button><span data-recovery-message>Local edits are preserved.</span></div><p class="hint" data-mode-hint></p>
       </main>
     </aside>`;
   }
@@ -182,7 +199,7 @@ export class EditorModeController {
   private bindPanel(): void {
     const root = this.root!;
     root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.addEventListener("click", () => this.setMode(button.dataset.mode as EditorMode)));
-    root.querySelectorAll<HTMLButtonElement>("[data-pick]").forEach(button => button.addEventListener("click", () => { if (this.mode === "navigate") this.setMode("select"); else this.startPicker(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-pick]").forEach(button => button.addEventListener("click", () => { if (this.mode !== "target") this.setMode("target"); else this.startPicker(); }));
     root.querySelector<HTMLButtonElement>("[data-pick-layer]")?.addEventListener("click", () => this.startLayerPicker());
     root.querySelectorAll<HTMLButtonElement>("[data-step]").forEach(button => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
     root.querySelector<HTMLButtonElement>("[data-minimize]")?.addEventListener("click", () => {
@@ -190,6 +207,17 @@ export class EditorModeController {
       const button = root.querySelector<HTMLButtonElement>("[data-minimize]")!; button.textContent = aside.classList.contains("minimized") ? "+" : "—";
     });
     root.querySelector<HTMLButtonElement>("[data-close]")?.addEventListener("click", () => void this.close());
+    root.querySelector<HTMLButtonElement>("[data-return-dashboard]")?.addEventListener("click", () => { window.opener?.focus(); void this.close(); });
+    root.querySelector<HTMLButtonElement>("[data-retry-save]")?.addEventListener("click", () => void this.persist());
+    root.querySelector<HTMLButtonElement>("[data-reload-draft]")?.addEventListener("click", () => window.location.reload());
+    root.querySelector<HTMLButtonElement>("[data-edit-component]")?.addEventListener("click", () => this.contentEditor?.editSelected());
+    root.querySelectorAll<HTMLButtonElement>("[data-format]").forEach(button => button.addEventListener("pointerdown", event => { event.preventDefault(); this.contentEditor?.formatInline(button.dataset.format as "strong" | "em" | "u"); this.syncContentInspector(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-list]").forEach(button => button.addEventListener("pointerdown", event => { event.preventDefault(); this.contentEditor?.toggleList(button.dataset.list as "ul" | "ol"); this.syncContentInspector(); }));
+    root.querySelector<HTMLSelectElement>("[data-text-align]")?.addEventListener("change", event => { this.contentEditor?.setAlignment((event.currentTarget as HTMLSelectElement).value as "left" | "center" | "right"); this.syncContentInspector(); });
+    root.querySelector<HTMLButtonElement>("[data-apply-link]")?.addEventListener("pointerdown", event => { event.preventDefault(); const input = root.querySelector<HTMLInputElement>("[data-link-url]"); if (input && !this.contentEditor?.applyLink(input.value)) input.setCustomValidity("Use an HTTP(S), email, phone, relative, or hash URL."); else input?.setCustomValidity(""); this.syncContentInspector(); });
+    root.querySelector<HTMLButtonElement>("[data-apply-image]")?.addEventListener("click", () => { const source = root.querySelector<HTMLInputElement>("[data-image-src]"); const alt = root.querySelector<HTMLInputElement>("[data-image-alt]"); if (source && alt && !this.contentEditor?.updateImage(source.value, alt.value)) source.setCustomValidity("Use an HTTP(S), relative, or supported data image URL."); else source?.setCustomValidity(""); this.syncContentInspector(); });
+    root.querySelector<HTMLButtonElement>("[data-undo]")?.addEventListener("click", () => { this.contentEditor?.undo(); this.syncContentInspector(); });
+    root.querySelector<HTMLButtonElement>("[data-redo]")?.addEventListener("click", () => { this.contentEditor?.redo(); this.syncContentInspector(); });
     this.bindDrag();
 
     this.onSelect("[data-alignment]", value => { this.currentBehavior().alignment = value as NonNullable<ExperienceBehavior["alignment"]>; });
@@ -253,32 +281,33 @@ export class EditorModeController {
     if (!steps || index < 0 || index >= steps.length || index === this.stepIndex) return;
     this.selectionGeneration++;
     this.picker.cancel();
+    this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
+    if (this.dirty) void this.persist();
     this.stepIndex = index;
     this.updateContinuation();
     this.syncPanel();
-    if (this.mode === "select") { this.renderPreview(); this.startPicker(); }
+    this.applyMode();
   }
 
   private setMode(mode: EditorMode): void {
-    if (this.mode === mode && (mode !== "select" || this.pickerIsSelecting())) return;
+    if (mode === "design" && this.draft?.experience.builderMode !== "onsite") return;
+    if (this.mode === mode && (mode !== "target" || this.pickerIsSelecting())) return;
     this.selectionGeneration++;
     this.picker.cancel();
+    this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
+    if (this.dirty) void this.persist();
     this.mode = mode;
     this.updateContinuation();
-    if (mode === "navigate") {
-      this.preview.destroy();
-      this.previewRendered = false;
-      this.syncPanel();
-      if (!this.dirty) this.setText("[data-save-state]", "Draft saved");
-      return;
-    }
-    this.renderPreview();
-    this.syncPanel();
-    this.startPicker();
+    this.applyMode();
+  }
+
+  private applyMode(): void {
+    if (this.mode === "navigate") { this.preview.destroy(); this.previewRendered = false; this.syncPanel(); return; }
+    this.renderPreview(); this.syncPanel(); if (this.mode === "target") this.startPicker();
   }
 
   private startPicker(): void {
-    if (!this.isTargetedType() || this.mode !== "select") return;
+    if (!this.isTargetedType() || this.mode !== "target") return;
     const generation = ++this.selectionGeneration;
     this.setText("[data-mode-hint]", "Select an element · Hold Shift to interact temporarily");
     void this.picker.pick().then(target => {
@@ -290,7 +319,7 @@ export class EditorModeController {
   }
 
   private startLayerPicker(): void {
-    if (this.mode === "navigate") this.mode = "select";
+    if (this.mode === "navigate" || this.mode === "preview") this.mode = "target";
     const generation = ++this.selectionGeneration;
     this.picker.cancel();
     this.setText("[data-mode-hint]", "Select the page element this experience should appear above or below");
@@ -306,12 +335,13 @@ export class EditorModeController {
     return !!document.querySelector("[data-movcues-picker-overlay]");
   }
 
-  private changed(): void {
+  private changed(render = true): void {
     this.dirty = true;
     this.updateContinuation();
     this.syncPanel();
-    if (this.mode === "select") this.renderPreview();
-    this.setText("[data-save-state]", "Saving…");
+    if (render && this.mode !== "navigate") this.renderPreview();
+    this.setText("[data-save-state]", "Unsaved");
+    const recovery = this.root?.querySelector<HTMLElement>("[data-save-recovery]"); if (recovery) recovery.hidden = true;
     clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => void this.persist(), 350);
   }
@@ -325,13 +355,26 @@ export class EditorModeController {
     }
     if (!this.dirty || !this.bridge || !this.definition) return true;
     this.dirty = false;
-    const bridge = this.bridge; const definition = this.definition;
-    const request = bridge.save(definition).then(() => {
+    this.setText("[data-save-state]", "Saving…");
+    const bridge = this.bridge; const definition = this.definition; const revision = this.draft?.version.revision ?? 1;
+    const request = bridge.save(definition, revision).then(version => {
+      if (this.draft) this.draft.version.revision = version.revision;
       this.setText("[data-save-state]", this.dirty ? "Saving…" : "Draft saved");
+      const recovery = this.root?.querySelector<HTMLElement>("[data-save-recovery]"); if (recovery) recovery.hidden = true;
       return true;
-    }).catch(() => {
-      this.setText("[data-save-state]", "Session expired");
-      this.destroy();
+    }).catch(error => {
+      if (error instanceof EditorSessionExpiredError) {
+        this.setText("[data-save-state]", "Session expired");
+        this.teardown(true);
+        return false;
+      }
+      this.dirty = true;
+      const conflict = error instanceof DraftConflictError;
+      this.setText("[data-save-state]", conflict ? "Conflict · reload required" : "Save failed");
+      const recovery = this.root?.querySelector<HTMLElement>("[data-save-recovery]"); if (recovery) recovery.hidden = false;
+      const retry = this.root?.querySelector<HTMLButtonElement>("[data-retry-save]"); if (retry) retry.hidden = conflict;
+      const reload = this.root?.querySelector<HTMLButtonElement>("[data-reload-draft]"); if (reload) reload.hidden = !conflict;
+      this.setText("[data-recovery-message]", conflict ? "Local edits are preserved until you reload the latest draft." : "Local edits are preserved.");
       return false;
     });
     this.saveInFlight = request;
@@ -349,6 +392,7 @@ export class EditorModeController {
   private renderPreview(): void {
     if (!this.definition || !this.draft || this.mode === "navigate") return;
     this.previewRendered = false;
+    this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
     const definition = this.guide ? { ...this.definition, steps: [this.guide.steps[this.stepIndex]] } as EditorDefinition : this.definition;
     const selectedStepId = this.survey?.steps[this.stepIndex]?.id;
     this.preview.render({
@@ -359,13 +403,53 @@ export class EditorModeController {
       priority: 0,
       definition,
     }, {
-      onVisible: () => { this.previewRendered = true; this.updateDiagnostics(); },
+      onVisible: () => { this.previewRendered = true; if (this.mode === "design") this.attachContentEditor(); this.updateDiagnostics(); },
       onDismiss: () => window.setTimeout(() => this.renderPreview(), 0),
       onAction: () => void 0,
       onComplete: () => window.setTimeout(() => this.renderPreview(), 0),
       onUnavailable: () => { this.previewRendered = false; this.updateDiagnostics(); },
     }, selectedStepId);
     this.updateDiagnostics();
+  }
+
+  private attachContentEditor(): void {
+    if (this.draft?.experience.builderMode !== "onsite" || this.mode !== "design") return;
+    const host = Array.from(document.querySelectorAll<HTMLElement>("[data-movcues-experience]")).find(
+      element => element.dataset.movcuesExperience === this.draft!.experience.id,
+    );
+    const builder = this.currentBuilder(); const content = this.currentContent();
+    if (!host?.shadowRoot || !builder || !content) return;
+    this.contentEditor = new OnsiteContentEditor(host.shadowRoot, builder, content, {
+      onChange: () => this.changed(false),
+      onSelectionChange: selection => { this.componentSelection = selection; this.syncContentInspector(); },
+    });
+    this.contentEditor.start();
+  }
+
+  private currentBuilder(): WidgetBuilderState | undefined {
+    if (!this.definition) return undefined;
+    if (this.guide) return this.guide.steps[this.stepIndex]?.builder;
+    if (this.survey) return this.survey.steps[this.stepIndex]?.builder;
+    return (this.definition as RuntimeWidgetDefinition).builder;
+  }
+
+  private currentContent(): ExperienceContent | undefined {
+    if (!this.definition) return undefined;
+    if (this.guide) return this.guide.steps[this.stepIndex]?.content;
+    if (this.survey) return this.survey.steps[this.stepIndex]?.content;
+    return (this.definition as RuntimeWidgetDefinition).content;
+  }
+
+  private syncContentInspector(): void {
+    if (!this.root) return; const selection = this.componentSelection; const inspector = this.root.querySelector<HTMLElement>("[data-content-inspector]");
+    if (!inspector) return; inspector.hidden = this.mode !== "design" || !selection;
+    if (!selection) return; this.setText("[data-component-label]", `${capitalize(selection.label)}${selection.editing ? " · Editing" : ""}`);
+    this.root.querySelectorAll<HTMLElement>("[data-text-controls]").forEach(element => { element.hidden = selection.kind === "image"; });
+    const imageControls = this.root.querySelector<HTMLElement>("[data-image-controls]"); if (imageControls) imageControls.hidden = selection.kind !== "image";
+    const edit = this.root.querySelector<HTMLButtonElement>("[data-edit-component]"); if (edit) edit.hidden = selection.kind === "image";
+    if (selection.kind === "image") { this.setValue("[data-image-src]", selection.src ?? ""); this.setValue("[data-image-alt]", selection.alt ?? ""); }
+    const undo = this.root.querySelector<HTMLButtonElement>("[data-undo]"); if (undo) undo.disabled = !this.contentEditor?.canUndo();
+    const redo = this.root.querySelector<HTMLButtonElement>("[data-redo]"); if (redo) redo.disabled = !this.contentEditor?.canRedo();
   }
 
   private syncPanel(): void {
@@ -413,7 +497,8 @@ export class EditorModeController {
     if (this.survey) this.setText("[data-step-label]", `Step ${this.stepIndex + 1} of ${this.survey.steps.length}`);
     this.renderConfigured(this.definition.targeting);
     this.updateDiagnostics();
-    this.setText("[data-mode-hint]", this.mode === "navigate" ? "Customer app interaction is enabled" : this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "Live placement preview");
+    this.syncContentInspector();
+    this.setText("[data-mode-hint]", this.mode === "design" ? "Click a component to select · Double-click text to edit" : this.mode === "target" ? this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "This experience does not need a page target" : this.mode === "navigate" ? "Customer app interaction is enabled" : "End-user preview · analytics and actions are disabled");
   }
 
   private renderConfigured(targeting: ExperienceTargeting): void {
@@ -483,7 +568,7 @@ export class EditorModeController {
     if (notice) notice.hidden = false;
     this.setText("[data-route-change]", `${previous} → ${next}`);
     this.updateDiagnostics();
-    if (this.mode === "select") this.renderPreview();
+    if (this.mode !== "navigate") { this.renderPreview(); if (this.mode === "target") this.startPicker(); }
   }
 
   private currentTarget(): ExperienceTarget | undefined {
@@ -556,9 +641,11 @@ export class EditorModeController {
     this.routeUnsubscribe?.(); this.routeUnsubscribe = null;
     this.routeObserver.stop();
     window.removeEventListener("pagehide", this.persistBeforePageLeave);
+    window.removeEventListener("beforeunload", this.protectUnsavedChanges);
     this.mutationObserver?.disconnect(); this.mutationObserver = null;
     this.dragCleanup?.(); this.dragCleanup = null;
     this.preview.destroy();
+    this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
     this.picker.cancel();
     this.host?.remove();
     this.host = null; this.root = null; this.bridge = null; this.session = null; this.draft = null; this.definition = null; this.guide = null; this.survey = null;
@@ -593,5 +680,5 @@ function formatAdvance(advance?: GuideAdvance): string {
 function escapeText(value: string): string { const span = document.createElement("span"); span.textContent = value; return span.innerHTML; }
 
 const STYLE = `
-:host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:312px;max-height:calc(100vh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100vh - 82px);overflow:auto}.minimized{width:260px}.minimized main{display:none}.modebar{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{padding:7px}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-flow{display:flex;align-items:center;overflow:auto}.step{flex:none;padding:4px 6px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.arrow{color:#cbd5e1;font-size:10px}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}[hidden]{display:none!important}
+:host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:min(312px,calc(100vw - 8px));max-height:calc(100dvh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100dvh - 82px);overflow:auto}.minimized{width:min(260px,calc(100vw - 8px))}.minimized main{display:none}.modebar{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button,.formatbar button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{min-width:0;padding:7px 3px}.modebar button:disabled{cursor:not-allowed;opacity:.42}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-flow{display:flex;align-items:center;overflow:auto}.step{flex:none;padding:4px 6px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.arrow{color:#cbd5e1;font-size:10px}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.secondary-button.compact{padding:5px 7px}.content-heading,.history-row,.link-row,.save-recovery{display:flex;align-items:center;justify-content:space-between;gap:6px}.content-heading>div{min-width:0}.formatbar{display:flex;flex-wrap:wrap;gap:4px}.formatbar button{padding:5px 7px}.link-row input{min-width:0}.history-row{justify-content:flex-start}.save-recovery{padding:8px 12px;border-bottom:1px solid #fee2e2;background:#fff7ed;color:#9a3412;font-size:11px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}[hidden]{display:none!important}@media(max-width:420px){aside{right:4px;top:4px;max-height:calc(100dvh - 8px)}main{max-height:calc(100dvh - 66px)}header{padding:9px}.section{padding:8px 10px}.modebar{padding:6px}.modebar button{font-size:10px}}
 `;

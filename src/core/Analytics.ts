@@ -246,7 +246,10 @@ export class Analytics {
 
   private async initializeEditor(editorToken: string | null, continuation: EditorContinuation | null, userConfig: AnalyticsConfig, generation: number): Promise<void> {
     try {
-      const runtime = this.runtimeProviders.editor ?? await loadEditorRuntime(this.config.editorRuntimeBundleUrl);
+      const runtime = this.runtimeProviders.editor ??
+        (this.runtimeProviders.loadEditor
+          ? await this.runtimeProviders.loadEditor()
+          : await loadEditorRuntime(this.config.editorRuntimeBundleUrl));
       if (!this.initialized || generation !== this.generation) return;
       if (!runtime) {
         this.fallbackFromEditor(userConfig, generation);
