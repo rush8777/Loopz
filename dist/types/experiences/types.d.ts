@@ -37,6 +37,7 @@ export interface ExperienceSize {
         value?: number;
     };
 }
+import type { SiteThemeTokens } from "../themes/types";
 export interface ExperienceDesign {
     width: LegacyExperienceWidth;
     size?: ExperienceSize;
@@ -45,6 +46,7 @@ export interface ExperienceDesign {
         foreground: string;
         primary: string;
         borderRadius: "sm" | "md" | "lg";
+        siteTheme?: SiteThemeTokens;
     };
 }
 export interface WidgetBuilderState {

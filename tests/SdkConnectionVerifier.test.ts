@@ -36,6 +36,18 @@ describe("SDK connection verification", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("uploads a theme only when public config contains a pending capture", async () => {
+    document.body.style.cssText = "background:#fff;color:#111;font-family:Arial;font-size:16px";
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ themeCapture: { id: "themec_1" } }) }).mockResolvedValueOnce({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    await acknowledgePendingSdkVerification("https://api.example.com", "site_1");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe("https://api.example.com/public/sites/site_1/theme-captures/themec_1");
+    const options = fetchMock.mock.calls[1][1];
+    expect(options).toMatchObject({ method: "POST", credentials: "omit", headers: { "Content-Type": "application/json" } });
+    expect(JSON.parse(options.body).tokens.version).toBe(1);
+  });
+
   it("does not let verification failures interrupt SDK initialization", async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("offline"));
     vi.stubGlobal("fetch", fetchMock);

@@ -2086,8 +2086,139 @@ function isEditorState(value) {
   const state = value;
   return typeof state.experienceId === "string" && !!state.experienceId && (state.selectedStepId === void 0 || typeof state.selectedStepId === "string") && (state.mode === "select" || state.mode === "navigate");
 }
-async function acknowledgePendingSdkVerification(apiBase, siteId) {
+const TRANSPARENT = /* @__PURE__ */ new Set(["transparent", "rgba(0, 0, 0, 0)", "rgba(0,0,0,0)"]);
+function visible(element) {
+  if (!(element instanceof HTMLElement)) return false;
+  const style = getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+}
+function firstVisible(selectors) {
+  return Array.from(document.querySelectorAll(selectors)).find(visible) ?? null;
+}
+function visibleElements(selectors) {
+  return Array.from(document.querySelectorAll(selectors)).filter(visible);
+}
+function px(value, fallback) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : fallback;
+}
+function weight(value, fallback) {
+  if (value === "normal") return 400;
+  if (value === "bold") return 700;
+  return Math.min(900, Math.max(100, Math.round(px(value, fallback) / 100) * 100));
+}
+function lineHeight(value, fontSize, fallback) {
+  if (value === "normal") return fallback;
+  const parsed = px(value, 0);
+  if (!parsed) return fallback;
+  return Math.round((value.includes("px") ? parsed / fontSize : parsed) * 100) / 100;
+}
+function color(value, fallback) {
+  return value && !TRANSPARENT.has(value) ? value : fallback;
+}
+function isOpaqueColor(value) {
+  return Boolean(value) && !TRANSPARENT.has(value);
+}
+function recurringStyle(elements, read2, accept = (value) => Boolean(value)) {
+  const grouped = /* @__PURE__ */ new Map();
+  elements.forEach((element) => {
+    const style = getComputedStyle(element);
+    const value = read2(style).trim();
+    if (!accept(value, style, element)) return;
+    const current = grouped.get(value);
+    grouped.set(value, current ? { ...current, count: current.count + 1 } : { element, count: 1 });
+  });
+  const best = [...grouped.entries()].sort((a, b) => b[1].count - a[1].count)[0];
+  return best ? { value: best[0], ...best[1] } : null;
+}
+function shadow(value) {
   var _a;
+  if (!value || value === "none") return { x: 0, y: 0, blur: 0, spread: 0, color: "rgba(0, 0, 0, 0)" };
+  const lengths = [];
+  const lengthPattern = /(-?\d+(?:\.\d+)?)px/g;
+  let lengthMatch;
+  while (lengths.length < 4 && (lengthMatch = lengthPattern.exec(value))) lengths.push(Number(lengthMatch[1]));
+  const foundColor = ((_a = value.match(/rgba?\([^)]*\)|hsla?\([^)]*\)|#[0-9a-f]{3,8}/i)) == null ? void 0 : _a[0]) ?? "rgba(0, 0, 0, 0.2)";
+  return { x: lengths[0] ?? 0, y: lengths[1] ?? 0, blur: Math.max(0, lengths[2] ?? 0), spread: lengths[3] ?? 0, color: foundColor };
+}
+function cssVariables() {
+  const result = {};
+  const style = getComputedStyle(document.documentElement);
+  for (let index = 0; index < style.length && Object.keys(result).length < 100; index += 1) {
+    const name = style.item(index);
+    if (!name.startsWith("--") || !/(color|font|radius|shadow|background|surface|border|primary|text|brand|accent|ink|muted|line|soft|canvas|panel)/i.test(name)) continue;
+    const value = style.getPropertyValue(name).trim();
+    if (value && value.length <= 300 && !/[{}]|url\s*\(|javascript\s*:/i.test(value)) result[name] = value;
+  }
+  return result;
+}
+function semanticVariable(variables, pattern) {
+  var _a;
+  return (_a = Object.entries(variables).find(([name, value]) => pattern.test(name) && isOpaqueColor(value))) == null ? void 0 : _a[1];
+}
+function hasVisibleBorder(style) {
+  return style.borderTopStyle !== "none" && px(style.borderTopWidth, 0) > 0;
+}
+function readyForCapture() {
+  const domReady = document.readyState === "loading" ? new Promise((resolve) => document.addEventListener("DOMContentLoaded", () => resolve(), { once: true })) : Promise.resolve();
+  return domReady.then(async () => {
+    var _a;
+    const fonts = (_a = document.fonts) == null ? void 0 : _a.ready;
+    if (fonts) await Promise.race([fonts.catch(() => void 0), new Promise((resolve) => setTimeout(resolve, 1500))]);
+  });
+}
+async function extractDesignTokens() {
+  await readyForCapture();
+  const body = visible(document.body) ? document.body : document.documentElement;
+  const bodyStyle = getComputedStyle(body);
+  const heading = firstVisible("h1,h2,h3,h4") ?? body;
+  const headingStyle = getComputedStyle(heading);
+  const variables = cssVariables();
+  const actions = visibleElements("button,[role=button],a[href],input[type=button],input[type=submit]");
+  const actionBackground = recurringStyle(actions, (style) => style.backgroundColor, (value) => isOpaqueColor(value));
+  const action = (actionBackground == null ? void 0 : actionBackground.element) ?? null;
+  const actionStyle = action ? getComputedStyle(action) : bodyStyle;
+  const surfaces = visibleElements("dialog,[role=dialog],article,form,input,textarea,[class*=card],[class*=panel],[class*=surface]");
+  const surfaceBackground = recurringStyle(surfaces, (style) => style.backgroundColor, (value) => isOpaqueColor(value));
+  const surface = (surfaceBackground == null ? void 0 : surfaceBackground.element) ?? body;
+  const surfaceStyle = getComputedStyle(surface);
+  const muted = recurringStyle(visibleElements("p,small,[class*=muted],[class*=secondary],[class*=subtitle],[class*=description]"), (style) => style.color, (value) => isOpaqueColor(value) && value !== bodyStyle.color);
+  const bordered = recurringStyle(surfaces, (style) => style.borderColor, (_value, style) => hasVisibleBorder(style));
+  const shadowed = recurringStyle([...actions, ...surfaces], (style) => style.boxShadow, (value) => Boolean(value) && value !== "none");
+  const bodySize = px(bodyStyle.fontSize, 16);
+  const headingSize = px(headingStyle.fontSize, Math.max(20, bodySize * 1.5));
+  const background = color(bodyStyle.backgroundColor, "#ffffff");
+  const text = color(bodyStyle.color, "#111827");
+  const primary = (actionBackground == null ? void 0 : actionBackground.value) ?? semanticVariable(variables, /(?:primary|brand|accent|action)/i) ?? color(actionStyle.color, "#2563eb");
+  const primaryForeground = action ? color(actionStyle.color, "#ffffff") : semanticVariable(variables, /(?:primary|brand).*(?:foreground|contrast|on)/i) ?? "#ffffff";
+  const surfaceColor = (surfaceBackground == null ? void 0 : surfaceBackground.value) ?? semanticVariable(variables, /(?:surface|card|panel|soft)/i) ?? background;
+  const mutedText = (muted == null ? void 0 : muted.value) ?? semanticVariable(variables, /(?:muted|subtle|secondary).*(?:text|foreground)?|--muted$/i) ?? text;
+  const border = (bordered == null ? void 0 : bordered.value) ?? semanticVariable(variables, /(?:border|line|divider)/i) ?? "rgba(15, 23, 42, 0.12)";
+  const radius = px(actionStyle.borderRadius || surfaceStyle.borderRadius, 8);
+  const capturedShadow = shadow((shadowed == null ? void 0 : shadowed.value) ?? surfaceStyle.boxShadow);
+  const confidence = {
+    "colors.background": bodyStyle.backgroundColor && !TRANSPARENT.has(bodyStyle.backgroundColor) ? 0.95 : 0.35,
+    "colors.text": bodyStyle.color ? 0.95 : 0.35,
+    "colors.primary": actionBackground ? Math.min(0.98, 0.7 + actionBackground.count * 0.08) : semanticVariable(variables, /(?:primary|brand|accent|action)/i) ? 0.7 : 0.35,
+    "colors.mutedText": muted ? 0.85 : 0.5,
+    "colors.border": bordered ? 0.85 : 0.5,
+    "typography.bodyFontFamily": bodyStyle.fontFamily ? 0.95 : 0.35,
+    "typography.headingFontFamily": heading !== body ? 0.9 : 0.5,
+    "radii.md": action ? 0.75 : 0.4
+  };
+  return {
+    tokens: {
+      version: 1,
+      colors: { background, surface: surfaceColor, text, mutedText, primary, primaryForeground, border },
+      typography: { bodyFontFamily: bodyStyle.fontFamily || "system-ui, sans-serif", headingFontFamily: headingStyle.fontFamily || bodyStyle.fontFamily || "system-ui, sans-serif", bodyFontSize: bodySize, headingFontSize: headingSize, bodyFontWeight: weight(bodyStyle.fontWeight, 400), headingFontWeight: weight(headingStyle.fontWeight, 700), bodyLineHeight: lineHeight(bodyStyle.lineHeight, bodySize, 1.5), headingLineHeight: lineHeight(headingStyle.lineHeight, headingSize, 1.25) },
+      radii: { sm: Math.max(0, Math.round(radius / 2)), md: radius, lg: Math.min(100, Math.round(radius * 2)) },
+      shadows: { sm: capturedShadow, md: capturedShadow }
+    },
+    evidence: { confidence, cssVariables: variables, sdkVersion: "0.1.0" }
+  };
+}
+async function processPendingSdkTasks(apiBase, siteId) {
+  var _a, _b;
   if (!apiBase || !siteId || typeof fetch === "undefined") return;
   try {
     const configResponse = await fetch(
@@ -2097,11 +2228,12 @@ async function acknowledgePendingSdkVerification(apiBase, siteId) {
     if (!configResponse.ok) return;
     const config = await configResponse.json();
     const verificationId = (_a = config.sdkVerification) == null ? void 0 : _a.id;
-    if (typeof verificationId !== "string" || !verificationId) return;
-    await fetch(
-      `${apiBase}/public/sites/${encodeURIComponent(siteId)}/sdk-verifications/${encodeURIComponent(verificationId)}/ack`,
-      { method: "POST", credentials: "omit", keepalive: true }
-    );
+    if (typeof verificationId === "string" && verificationId) await fetch(`${apiBase}/public/sites/${encodeURIComponent(siteId)}/sdk-verifications/${encodeURIComponent(verificationId)}/ack`, { method: "POST", credentials: "omit", keepalive: true });
+    const captureId = (_b = config.themeCapture) == null ? void 0 : _b.id;
+    if (typeof captureId === "string" && captureId) {
+      const payload = await extractDesignTokens();
+      await fetch(`${apiBase}/public/sites/${encodeURIComponent(siteId)}/theme-captures/${encodeURIComponent(captureId)}`, { method: "POST", credentials: "omit", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    }
   } catch {
   }
 }
@@ -2143,7 +2275,7 @@ let Analytics$1 = class Analytics {
       this.initialized = true;
       return;
     }
-    void acknowledgePendingSdkVerification(this.config.endpoint, this.config.siteId);
+    void processPendingSdkTasks(this.config.endpoint, this.config.siteId);
     this.session = new SessionManager(this.config.sessionInactivityMs);
     this.transport = new Transport(this.config.endpoint, this.config.siteId);
     this.queue = new EventQueue({ maxQueueSize: this.config.queue.maxQueueSize });
@@ -2836,8 +2968,8 @@ function pointerColor(card, design) {
   const background = getComputedStyle(widget).backgroundColor.trim();
   return isTransparent(background) ? design.theme.background : background;
 }
-function isTransparent(color) {
-  return !color || color.toLowerCase() === "transparent" || /^rgba\([^)]*,\s*0(?:\.0+)?\s*\)$/i.test(color);
+function isTransparent(color2) {
+  return !color2 || color2.toLowerCase() === "transparent" || /^rgba\([^)]*,\s*0(?:\.0+)?\s*\)$/i.test(color2);
 }
 function positionPointer(pointer, targetRect, cardSize, finalLeft, finalTop, placement, behavior) {
   const size = pointerSize(behavior);
