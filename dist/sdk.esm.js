@@ -1,4 +1,4 @@
-import { A, k } from "./module-CO7H_BO_.js";
+import { A, k } from "./module-COO9L-Tn.js";
 export {
   A as Analytics,
   k as createAnalytics

@@ -99,6 +99,25 @@ test('anchored authoring survives scroll with the production renderer and sticky
   await expect(heading).toHaveAttribute('contenteditable','true');await expect(heading).toHaveText('Anchored edit');
 });
 
+test('contextual inspector follows block, cell and step selection',async({page})=>{
+  await startController(page);const heading=page.locator('[data-movcues-experience] h2');await heading.click();
+  await expect(page.locator('[data-composition-inspector]')).toBeVisible();await expect(page.locator('[data-inspector=block]')).toBeVisible();await expect(page.locator('[data-block="heading,text"]')).toBeVisible();
+  await page.locator('[data-command=parent]').click();await expect(page.locator('[data-inspector=cell]')).toBeVisible();await expect(page.locator('[data-inspector=block]')).toBeHidden();
+  await page.locator('[data-select-step]').click();await expect(page.locator('[data-inspector=step]')).toBeVisible();
+});
+
+test('nested cell insertion and one-transaction pointer resize stay within the widget',async({page})=>{
+  await startController(page);const heading=page.locator('[data-movcues-experience] h2');await heading.click();await page.locator('[data-command=columns]').click();
+  await page.locator('[data-command=add]').click();await page.locator('[data-insert-block=image]').click();await heading.click();
+  const handle=page.locator('[data-movcues-resize-handle=row]');await expect(handle).toBeVisible();const box=await handle.boundingBox();await page.mouse.move(box!.x+14,box!.y+14);await page.mouse.down();await page.mouse.move(box!.x+45,box!.y+14,{steps:6});await page.mouse.up();
+  const sizing=await page.locator('[data-cell-size]').inputValue();expect(sizing).toBe('flexible');const overflow=await page.locator('[data-movcues-experience] .movcues-widget').evaluate((node:HTMLElement)=>node.scrollWidth-node.clientWidth);expect(overflow).toBeLessThanOrEqual(1);
+});
+
+for(const width of [320,360,390])test(`structured rows stack without horizontal overflow at ${width}px`,async({page})=>{
+  await startController(page,{width});await page.locator('[data-movcues-experience] h2').click();await page.locator('[data-command=columns]').click();
+  const layout=page.locator('[data-movcues-experience] .movcues-widget');const overflow=await layout.evaluate((node:HTMLElement)=>node.scrollWidth-node.clientWidth);expect(overflow).toBeLessThanOrEqual(1);await expect(page.locator('[data-movcues-experience] .movcues-button')).toBeVisible();
+});
+
  test('long content validates before save without truncating the visible text',async({page})=>{
   const body=page.locator('#authoring [data-movcues-content=body]');await body.dblclick();await body.fill('x'.repeat(2001));
   const state=await page.evaluate(()=>{const f=(window as any).fixture;f.editor.flush();return{body:f.content.body,errors:f.editor.getValidation(),html:f.builder.html};});

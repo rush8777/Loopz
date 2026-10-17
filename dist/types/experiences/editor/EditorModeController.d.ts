@@ -6,7 +6,9 @@ export declare class EditorModeController {
     private picker;
     private preview;
     private contentEditor;
+    private compositionEditor;
     private componentSelection;
+    private compositionSelection;
     private routeObserver;
     private routeUnsubscribe;
     private mutationObserver;
@@ -41,7 +43,14 @@ export declare class EditorModeController {
     private activate;
     private mount;
     private panelMarkup;
+    private stepButtons;
     private bindPanel;
+    private bindCompositionInspector;
+    private addGuideStep;
+    private duplicateGuideStep;
+    private deleteGuideStep;
+    private moveGuideStep;
+    private refreshStepBar;
     private bindDrag;
     private onSelect;
     private onInput;
@@ -66,6 +75,7 @@ export declare class EditorModeController {
     private currentBuilder;
     private currentContent;
     private syncContentInspector;
+    private syncCompositionInspector;
     private syncPanel;
     private renderConfigured;
     private updateDiagnostics;

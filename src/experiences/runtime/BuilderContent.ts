@@ -1,8 +1,10 @@
 import type { WidgetBuilderState } from "../types";
 import type { RenderCallbacks } from "./AnchoredCardRenderer";
 import { BUILDER_ALLOWED_ATTRIBUTES, BUILDER_ALLOWED_TAGS, BUILDER_BLOCKED_TAGS, BUILDER_SURVEY_INPUT_TAGS, builderImageUrlIsSafe, builderInputTypeIsSafe, builderLinkUrlIsSafe, safeScopedBuilderCss } from "./BuilderContentContract";
+export type BuilderAction = { id: string; type: "next_step" | "previous_step" | "dismiss" } | { id: string; type: "open_url"; url: string } | { id: string; type: "track_event"; eventName: string };
+export type BuilderRenderCallbacks = RenderCallbacks & { onActionId?: (action: BuilderAction, label: string) => void };
 
-export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder: WidgetBuilderState, callbacks: RenderCallbacks, allowSurveyInputs = false): boolean {
+export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder: WidgetBuilderState, callbacks: BuilderRenderCallbacks, allowSurveyInputs = false): boolean {
   const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
   const css = safeBuilderCss(builder.css);
   if (!html || css === null) return false;
@@ -18,8 +20,13 @@ export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder
   card.addEventListener("click", event => {
     const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movcues-action-id]") : null;
     if (!target || !card.contains(target)) return;
-    if (target.dataset.movcuesActionId === "primary") callbacks.onPrimary();
-    if (target.dataset.movcuesActionId === "secondary") callbacks.onSecondary();
+    const actionId = target.dataset.movcuesActionId;
+    if (actionId === "primary") callbacks.onPrimary();
+    else if (actionId === "secondary") callbacks.onSecondary();
+    else {
+      const action = findOnsiteAction(builder, actionId ?? "");
+      if (action) callbacks.onActionId?.(action, target.textContent?.trim() ?? "");
+    }
   });
   return true;
 }
@@ -45,7 +52,7 @@ export function sanitizeBuilderHtml(input: string, allowSurveyInputs = false): C
       if (!BUILDER_ALLOWED_ATTRIBUTES.has(name) || name.startsWith("on") || /javascript\s*:/i.test(attribute.value)) element.removeAttribute(attribute.name);
     }
     const action = element.getAttribute("data-movcues-action-id");
-    if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-movcues-action-id");
+    if (action && action !== "primary" && action !== "secondary" && !/^[A-Za-z][A-Za-z0-9_-]{2,63}$/.test(action)) element.removeAttribute("data-movcues-action-id");
     const surveyAction = element.getAttribute("data-movcues-survey-action");
     if (surveyAction && surveyAction !== "back" && surveyAction !== "next" && surveyAction !== "submit") element.removeAttribute("data-movcues-survey-action");
     if (element.tagName === "IMG") {
@@ -74,6 +81,17 @@ export function sanitizeBuilderHtml(input: string, allowSurveyInputs = false): C
     actions.slice(1).forEach(action => action.remove());
   }
   return Array.from(template.content.childNodes);
+}
+
+function findOnsiteAction(builder: WidgetBuilderState, id: string): BuilderAction | null {
+  const movcues = builder.projectData.movcues; const bindings = movcues && typeof movcues === "object" ? (movcues as Record<string, unknown>).actionBindings : null;
+  const candidate = bindings && typeof bindings === "object" ? (bindings as Record<string, unknown>)[id] : null;
+  if (!candidate || typeof candidate !== "object") return null;
+  const action = candidate as Record<string, unknown>;
+  if (action.id !== id || !["next_step", "previous_step", "dismiss", "open_url", "track_event"].includes(String(action.type))) return null;
+  if (action.type === "open_url" && (typeof action.url !== "string" || !/^https?:\/\//i.test(action.url) || !builderLinkUrlIsSafe(action.url))) return null;
+  if (action.type === "track_event" && (typeof action.eventName !== "string" || !action.eventName.trim() || action.eventName.length > 200)) return null;
+  return action as BuilderAction;
 }
 
 export function safeBuilderCss(input: string): string | null {

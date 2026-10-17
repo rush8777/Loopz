@@ -1,7 +1,7 @@
 export type ExperienceKind = "guide" | "widget" | "checklist";
 export type WidgetType = "anchored_card" | "toast" | "cursor_follow" | "modal" | "slideout" | "hotspot" | "banner" | "survey";
 export type BuilderMode = "grapesjs" | "onsite";
-export interface ExperienceAction { label: string; type: "dismiss" | "next_step" | "open_url" | "track_event"; url?: string; eventName?: string }
+export interface ExperienceAction { id?: string; label: string; type: "dismiss" | "next_step" | "previous_step" | "open_url" | "track_event"; url?: string; eventName?: string }
 export interface ExperienceContent { heading: string; body: string; primaryAction?: ExperienceAction; secondaryAction?: { label: string; type: "dismiss" } }
 export interface ExperienceTarget { primarySelector: string; fallbackSelectors: string[]; label?: string; role?: string; tagName?: string; reliability: "reliable" | "moderate" | "fragile"; targetContext?: { pagePath: string } }
 export type LegacyExperienceWidth = "sm" | "md" | "lg";
@@ -15,7 +15,7 @@ export interface PageRule { id: string; kind: "include" | "exclude"; operator: "
 export interface ExperienceTargeting { pageRules: PageRule[]; audience: { type: "all" } | { type: "segment"; segmentId: string } | { type: "segment_rules"; logic: "all" | "any"; conditions: Array<{ id: string; segmentId: string; operator: "matches" | "not_matches" }> }; trigger: { type: "page_load" } | { type: "custom_event"; eventName: string } | { type: "manual" }; frequency: { mode: "once" | "once_per_session" | "every_time"; cooldownHours?: number; maxImpressions?: number }; priority: number; interruptPolicy?: "queue" | "interrupt"; schedule?: { startsAt?: string; endsAt?: string }; allowedOrigins?: string[] }
 export type GuideAdvance = { type: "button" } | { type: "element_click" } | { type: "element_hover"; durationMs?: number } | { type: "custom_event"; eventName: string } | { type: "route"; pageRules: PageRule[] };
 export type GuideStepPattern = "anchored_card" | "modal";
-export interface GuideStep { id: string; pattern?: GuideStepPattern; content: ExperienceContent; builder?: WidgetBuilderState; size?: ExperienceSize; advance?: GuideAdvance; target?: ExperienceTarget; behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "pointer" | "dismissible" | "layer"> }
+export interface GuideStep { id: string; label?: string; pattern?: GuideStepPattern; content: ExperienceContent; builder?: WidgetBuilderState; size?: ExperienceSize; advance?: GuideAdvance; target?: ExperienceTarget; behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "pointer" | "dismissible" | "layer"> }
 export function getGuideStepPattern(step: Pick<GuideStep, "pattern">): GuideStepPattern { return step.pattern ?? "anchored_card"; }
 export function guideStepRequiresTarget(step: Pick<GuideStep, "pattern">): boolean { return getGuideStepPattern(step) === "anchored_card"; }
 export function guideStepSupportsTargetAdvance(step: Pick<GuideStep, "pattern">): boolean { return guideStepRequiresTarget(step); }

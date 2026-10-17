@@ -2594,7 +2594,7 @@ class EligibilityEngine {
 }
 const BUILDER_ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "HEADER", "H1", "H2", "H3", "H4", "P", "SPAN", "BR", "BUTTON", "IMG", "HR", "LABEL", "STRONG", "EM", "U", "A", "UL", "OL", "LI"]);
 const BUILDER_SURVEY_INPUT_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA"]);
-const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "href", "target", "rel", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
+const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "href", "target", "rel", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-document-version", "data-movcues-node-id", "data-movcues-block-id", "data-movcues-sizing", "data-movcues-responsive-stack", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
 const BUILDER_BLOCKED_TAGS = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO|SOURCE)$/i;
 const BUILDER_UNSAFE_CSS = /@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i;
 function builderImageUrlIsSafe(value) {
@@ -2637,10 +2637,16 @@ ${ISOLATION_CSS}`;
   card.appendChild(content);
   card.classList.add("builder-card");
   card.addEventListener("click", (event) => {
+    var _a, _b;
     const target = event.target instanceof Element ? event.target.closest("[data-movcues-action-id]") : null;
     if (!target || !card.contains(target)) return;
-    if (target.dataset.movcuesActionId === "primary") callbacks.onPrimary();
-    if (target.dataset.movcuesActionId === "secondary") callbacks.onSecondary();
+    const actionId = target.dataset.movcuesActionId;
+    if (actionId === "primary") callbacks.onPrimary();
+    else if (actionId === "secondary") callbacks.onSecondary();
+    else {
+      const action = findOnsiteAction(builder, actionId ?? "");
+      if (action) (_b = callbacks.onActionId) == null ? void 0 : _b.call(callbacks, action, ((_a = target.textContent) == null ? void 0 : _a.trim()) ?? "");
+    }
   });
   return true;
 }
@@ -2660,7 +2666,7 @@ function sanitizeBuilderHtml(input, allowSurveyInputs = false) {
       if (!BUILDER_ALLOWED_ATTRIBUTES.has(name) || name.startsWith("on") || /javascript\s*:/i.test(attribute.value)) element.removeAttribute(attribute.name);
     }
     const action = element.getAttribute("data-movcues-action-id");
-    if (action && action !== "primary" && action !== "secondary") element.removeAttribute("data-movcues-action-id");
+    if (action && action !== "primary" && action !== "secondary" && !/^[A-Za-z][A-Za-z0-9_-]{2,63}$/.test(action)) element.removeAttribute("data-movcues-action-id");
     const surveyAction = element.getAttribute("data-movcues-survey-action");
     if (surveyAction && surveyAction !== "back" && surveyAction !== "next" && surveyAction !== "submit") element.removeAttribute("data-movcues-survey-action");
     if (element.tagName === "IMG") {
@@ -2691,6 +2697,17 @@ function sanitizeBuilderHtml(input, allowSurveyInputs = false) {
     actions.slice(1).forEach((action) => action.remove());
   }
   return Array.from(template.content.childNodes);
+}
+function findOnsiteAction(builder, id) {
+  const movcues = builder.projectData.movcues;
+  const bindings = movcues && typeof movcues === "object" ? movcues.actionBindings : null;
+  const candidate = bindings && typeof bindings === "object" ? bindings[id] : null;
+  if (!candidate || typeof candidate !== "object") return null;
+  const action = candidate;
+  if (action.id !== id || !["next_step", "previous_step", "dismiss", "open_url", "track_event"].includes(String(action.type))) return null;
+  if (action.type === "open_url" && (typeof action.url !== "string" || !/^https?:\/\//i.test(action.url) || !builderLinkUrlIsSafe(action.url))) return null;
+  if (action.type === "track_event" && (typeof action.eventName !== "string" || !action.eventName.trim() || action.eventName.length > 200)) return null;
+  return action;
 }
 function safeBuilderCss(input) {
   return safeScopedBuilderCss(input);
@@ -3727,7 +3744,8 @@ class ExperienceRenderer {
         const action = step.content.primaryAction;
         if (action) callbacks.onAction(action);
         if ((((_a2 = step.advance) == null ? void 0 : _a2.type) ?? "button") === "button") (_b = callbacks.onGuideAdvance) == null ? void 0 : _b.call(callbacks);
-      }
+      },
+      onActionId: (action, label) => this.dispatchBuilderAction(action, label, callbacks)
     };
     const addBack = (card) => {
       var _a2;
@@ -3823,8 +3841,26 @@ class ExperienceRenderer {
           callbacks.onDismiss();
           this.destroy();
         }
-      }
+      },
+      onActionId: (action, label) => this.dispatchBuilderAction(action, label, callbacks)
     };
+  }
+  dispatchBuilderAction(action, label, callbacks) {
+    var _a, _b;
+    const runtimeAction = { ...action, label };
+    if (action.type === "next_step") {
+      callbacks.onAction(runtimeAction);
+      (_a = callbacks.onGuideAdvance) == null ? void 0 : _a.call(callbacks);
+    } else if (action.type === "previous_step") {
+      callbacks.onAction(runtimeAction);
+      (_b = callbacks.onGuideBack) == null ? void 0 : _b.call(callbacks);
+    } else {
+      callbacks.onAction(runtimeAction);
+      if (action.type === "dismiss") {
+        callbacks.onDismiss();
+        this.destroy();
+      }
+    }
   }
   clearSurface() {
     var _a, _b, _c, _d, _e;
@@ -4337,7 +4373,7 @@ class ExperienceLoader {
   }
   handleAction(runtime, action) {
     var _a;
-    if (!isGuideDefinition(runtime.experience.definition)) void this.recordAction(runtime, action.type);
+    if (!isGuideDefinition(runtime.experience.definition) || action.id) void this.recordAction(runtime, action.type);
     if (action.type === "open_url" && action.url) window.location.assign(action.url);
     if (action.type === "track_event" && action.eventName) (_a = this.trackEvent) == null ? void 0 : _a.call(this, action.eventName);
   }
@@ -4565,7 +4601,7 @@ const bundledRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-DuGqF4Uh.js");
+    const { EditorModeController } = await import("./EditorModeController-DyYb1CL1.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -4605,4 +4641,4 @@ export {
   createAnalytics as k,
   sanitizeBuilderHtml as s
 };
-//# sourceMappingURL=module-CO7H_BO_.js.map
+//# sourceMappingURL=module-COO9L-Tn.js.map

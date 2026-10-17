@@ -158,7 +158,7 @@ export class ExperienceLoader {
   }
 
   private handleAction(runtime: ActiveExperience, action: ExperienceAction): void {
-    if (!isGuideDefinition(runtime.experience.definition)) void this.recordAction(runtime, action.type);
+    if (!isGuideDefinition(runtime.experience.definition) || action.id) void this.recordAction(runtime, action.type);
     if (action.type === "open_url" && action.url) window.location.assign(action.url);
     if (action.type === "track_event" && action.eventName) this.trackEvent?.(action.eventName);
   }

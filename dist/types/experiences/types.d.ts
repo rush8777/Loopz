@@ -2,8 +2,9 @@ export type ExperienceKind = "guide" | "widget" | "checklist";
 export type WidgetType = "anchored_card" | "toast" | "cursor_follow" | "modal" | "slideout" | "hotspot" | "banner" | "survey";
 export type BuilderMode = "grapesjs" | "onsite";
 export interface ExperienceAction {
+    id?: string;
     label: string;
-    type: "dismiss" | "next_step" | "open_url" | "track_event";
+    type: "dismiss" | "next_step" | "previous_step" | "open_url" | "track_event";
     url?: string;
     eventName?: string;
 }
@@ -154,6 +155,7 @@ export type GuideAdvance = {
 export type GuideStepPattern = "anchored_card" | "modal";
 export interface GuideStep {
     id: string;
+    label?: string;
     pattern?: GuideStepPattern;
     content: ExperienceContent;
     builder?: WidgetBuilderState;

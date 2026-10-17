@@ -9,6 +9,7 @@ import { HotspotRenderer } from "./HotspotRenderer";
 import { BannerRenderer } from "./BannerRenderer";
 import { SurveyRenderer } from "./SurveyRenderer";
 import { LayerManager, type AppliedLayer } from "./layering/LayerManager";
+import type { BuilderAction, BuilderRenderCallbacks } from "./BuilderContent";
 
 export interface ExperienceRendererCallbacks {
   onVisible: () => void;
@@ -82,13 +83,14 @@ export class ExperienceRenderer {
     const stepIndex = guideStepId ? definition.steps.findIndex(item => item.id === guideStepId) : 0;
     const step = definition.steps[stepIndex]; if (!step) return false;
     const stepDesign = step.size ? { ...definition.design, size: step.size } : definition.design;
-    const stepCallbacks: RenderCallbacks = {
+    const stepCallbacks: BuilderRenderCallbacks = {
       onDismiss: () => { callbacks.onDismiss(); this.destroy(); },
       onSecondary: () => { callbacks.onDismiss(); this.destroy(); },
       onPrimary: () => {
         const action = step.content.primaryAction; if (action) callbacks.onAction(action);
         if ((step.advance?.type ?? "button") === "button") callbacks.onGuideAdvance?.();
       },
+      onActionId: (action, label) => this.dispatchBuilderAction(action, label, callbacks),
     };
     const addBack = (card: HTMLElement) => {
       if (stepIndex === 0) return;
@@ -134,12 +136,23 @@ export class ExperienceRenderer {
     }
   }
 
-  private callbacks(content: ExperienceContent, callbacks: ExperienceRendererCallbacks): RenderCallbacks {
+  private callbacks(content: ExperienceContent, callbacks: ExperienceRendererCallbacks): BuilderRenderCallbacks {
     return {
       onDismiss: () => { callbacks.onDismiss(); this.destroy(); },
       onSecondary: () => { callbacks.onDismiss(); this.destroy(); },
       onPrimary: () => { if (content.primaryAction) callbacks.onAction(content.primaryAction); if (content.primaryAction?.type === "dismiss") { callbacks.onDismiss(); this.destroy(); } },
+      onActionId: (action, label) => this.dispatchBuilderAction(action, label, callbacks),
     };
+  }
+
+  private dispatchBuilderAction(action: BuilderAction, label: string, callbacks: ExperienceRendererCallbacks): void {
+    const runtimeAction: ExperienceAction = { ...action, label };
+    if (action.type === "next_step") { callbacks.onAction(runtimeAction); callbacks.onGuideAdvance?.(); }
+    else if (action.type === "previous_step") { callbacks.onAction(runtimeAction); callbacks.onGuideBack?.(); }
+    else {
+      callbacks.onAction(runtimeAction);
+      if (action.type === "dismiss") { callbacks.onDismiss(); this.destroy(); }
+    }
   }
 
   private clearSurface(): void { this.cleanupAdvance?.(); this.cleanupAdvance = null; this.cancelPendingTarget?.(); this.cancelPendingTarget = null; this.renderer?.destroy(); this.renderer = null; this.appliedLayer?.destroy(); this.appliedLayer = null; this.host?.remove(); this.host = null; }

@@ -24,6 +24,7 @@ export declare class ExperienceRenderer {
     private renderGuide;
     private listenForAdvance;
     private callbacks;
+    private dispatchBuilderAction;
     private clearSurface;
     destroy(): void;
 }

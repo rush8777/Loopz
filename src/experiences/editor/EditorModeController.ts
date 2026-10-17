@@ -22,6 +22,8 @@ import { findTarget } from "../runtime/AnchoredCardRenderer";
 import { DraftConflictError, EditorBridge, EditorSessionExpiredError } from "./EditorBridge";
 import { ElementPicker } from "./ElementPicker";
 import { OnsiteContentEditor, type OnsiteComponentSelection } from "./OnsiteContentEditor";
+import { OnsiteCompositionEditor, type CompositionSelection } from "./OnsiteCompositionEditor";
+import { applyOnsiteDocument, cloneOnsite, createOnsiteDocument, duplicateDocument, onsiteDocumentFromBuilder, type OnsiteBlock, type OnsiteCell } from "../onsite/OnsiteDocument";
 
 type EditorMode = "design" | "target" | "navigate" | "preview";
 type TargetStatus = "found" | "off-page" | "missing" | "unconfigured";
@@ -32,7 +34,9 @@ export class EditorModeController {
   private picker = new ElementPicker();
   private preview = new ExperienceRenderer();
   private contentEditor: OnsiteContentEditor | null = null;
+  private compositionEditor: OnsiteCompositionEditor | null = null;
   private componentSelection: OnsiteComponentSelection | null = null;
+  private compositionSelection: CompositionSelection | null = null;
   private routeObserver = new RouteObserver();
   private routeUnsubscribe: (() => void) | null = null;
   private mutationObserver: MutationObserver | null = null;
@@ -60,7 +64,7 @@ export class EditorModeController {
   private previewGeneration = 0;
   private currentPath = "";
   private persistBeforePageLeave = () => this.updateContinuation();
-  private protectUnsavedChanges = (event: BeforeUnloadEvent) => { if (!this.dirty && !this.saveInFlight && !this.contentEditor?.isComposing()) return; event.preventDefault(); event.returnValue = ""; };
+  private protectUnsavedChanges = (event: BeforeUnloadEvent) => { if (!this.dirty && !this.saveInFlight && !this.contentEditor?.isComposing() && !this.compositionEditor?.isComposing()) return; event.preventDefault(); event.returnValue = ""; };
 
   constructor(private apiBase: string) {}
 
@@ -154,18 +158,42 @@ export class EditorModeController {
 
   private panelMarkup(draft: EditorDraft): string {
     const selectableSteps = this.guide?.steps ?? this.survey?.steps;
-    const guideMarkup = selectableSteps ? `<section class="section" data-guide><div class="eyebrow">${this.guide ? "Guide" : "Survey"}</div><div class="step-flow">${selectableSteps.map((_, index) => `<button class="step" type="button" data-step="${index}" aria-label="Open step ${index + 1}">${index + 1} <span data-step-icon>○</span></button>`).join('<span class="arrow">→</span>')}</div><div class="muted" data-step-label></div></section>` : "";
+    const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-add-step="modal">＋ Modal</button><button type="button" class="secondary-button compact" data-add-step="anchored_card">＋ Anchored</button></div>' : ""}</div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-duplicate-step>Duplicate</button><button type="button" class="secondary-button compact" data-step-left>←</button><button type="button" class="secondary-button compact" data-step-right>→</button><button type="button" class="secondary-button compact" data-delete-step>Delete</button></div>' : ""}</section>` : "";
     const designDisabled = draft.experience.builderMode !== "onsite" ? " disabled title=\"Content is edited in the GrapesJS Dashboard Builder\"" : "";
     return `<aside>
       <header data-drag-handle>
         <div class="header-copy"><strong>Movcues Live Editor</strong><span>${escapeText(draft.experience.name)}</span><small><i></i> Connected · <span data-save-state>Draft saved</span></small></div>
-        <div class="header-actions"><button type="button" data-return-dashboard aria-label="Return to dashboard">↗</button><button type="button" data-minimize aria-label="Minimize editor">—</button><button type="button" data-close aria-label="Close editor">×</button></div>
+        <div class="header-actions"><button type="button" data-global-undo aria-label="Undo">↶</button><button type="button" data-global-redo aria-label="Redo">↷</button><button type="button" data-move-side aria-label="Move inspector to other side">⇄</button><button type="button" data-return-dashboard aria-label="Return to dashboard">↗</button><button type="button" data-minimize aria-label="Minimize editor">—</button><button type="button" data-close aria-label="Close editor">×</button></div>
       </header>
       <main>
         <div class="modebar"><button type="button" data-mode="design"${designDisabled}>Design</button><button type="button" data-mode="target">Target</button><button type="button" data-mode="navigate">Navigate</button><button type="button" data-mode="preview">Preview</button></div>
         <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>Preview tests this step only. Links and external actions are disabled.</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         ${guideMarkup}
+        <section class="section composition-inspector" data-composition-inspector hidden>
+          <div class="content-heading"><div><div class="eyebrow">Inspector</div><strong data-composition-label>Step</strong></div><button type="button" class="secondary-button compact" data-select-step>Step</button></div>
+          <div data-inspector="step"><label>Step label<input data-step-name type="text" maxlength="80" placeholder="Step label"></label><div class="history-row"><button type="button" class="secondary-button compact" data-edge="top">Header</button><button type="button" class="secondary-button compact" data-edge="bottom">Footer</button><button type="button" class="secondary-button compact" data-edge="left">Left area</button><button type="button" class="secondary-button compact" data-edge="right">Right area</button></div></div>
+          <div data-inspector="cell" hidden>
+            <label>Direction<select data-cell-direction><option value="column">Column</option><option value="row">Row</option></select></label>
+            <label>Size<select data-cell-size><option value="flexible">Flexible</option><option value="hug">Hug content</option><option value="fixed">Fixed</option></select></label>
+            <label data-fixed-size hidden>Fixed size<div class="number"><input data-cell-fixed type="number" min="24" max="1200"><span>px</span></div></label>
+            <label>Align<select data-cell-align><option value="stretch">Stretch</option><option value="start">Start</option><option value="center">Center</option><option value="end">End</option></select></label>
+            <label>Gap<div class="number"><input data-cell-gap type="number" min="0" max="96"><span>px</span></div></label>
+            <label>Padding<div class="number"><input data-cell-padding type="number" min="0" max="128"><span>px</span></div></label>
+            <label>Background<input data-cell-background type="color" value="#ffffff"></label><label>Border<div class="number"><input data-cell-border type="number" min="0" max="16"><span>px</span></div></label><label>Radius<div class="number"><input data-cell-radius type="number" min="0" max="100"><span>px</span></div></label>
+            <label class="check"><input data-cell-stack type="checkbox"> Stack on narrow screens</label>
+          </div>
+          <div data-inspector="block" hidden>
+            <div data-block="heading,text"><div class="formatbar"><button type="button" data-v2-format="strong"><b>B</b></button><button type="button" data-v2-format="em"><i>I</i></button><button type="button" data-v2-format="u"><u>U</u></button><button type="button" data-v2-list="ul">• List</button><button type="button" data-v2-list="ol">1. List</button></div><div class="link-row"><input data-v2-link-url aria-label="Link URL" type="text" inputmode="url" placeholder="https://… or /path"><button type="button" class="secondary-button compact" data-v2-apply-link>Link</button></div><label>Font size<div class="number"><input data-block-font-size type="number" min="10" max="72"><span>px</span></div></label><label>Line height<input data-block-line-height type="number" min="0.9" max="3" step="0.05"></label><label>Weight<select data-block-weight><option value="400">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label><label>Text color<input data-block-color type="color"></label></div>
+            <div data-block="button"><label>Label<input data-button-label type="text" maxlength="80"></label><label>Variant<select data-button-variant><option value="primary">Primary</option><option value="secondary">Secondary</option><option value="outline">Outline</option></select></label><label>Action<select data-button-action><option value="dismiss">Dismiss</option>${this.guide ? '<option value="next_step">Next step</option><option value="previous_step">Previous step</option>' : ""}<option value="open_url">Open URL</option><option value="track_event">Track event</option></select></label><label data-action-url hidden>URL<input data-button-url type="url" placeholder="https://example.com"></label><label data-action-event hidden>Event<input data-button-event type="text" maxlength="200" placeholder="feature_clicked"></label><label>Background<input data-button-background type="color"></label><label>Text color<input data-button-color type="color"></label><label>Width<select data-button-width><option value="hug">Hug content</option><option value="full">Full width</option></select></label><label>Horizontal pad<div class="number"><input data-button-padding-x type="number" min="4" max="48"><span>px</span></div></label><label>Vertical pad<div class="number"><input data-button-padding-y type="number" min="4" max="32"><span>px</span></div></label><label>Radius<div class="number"><input data-button-radius type="number" min="0" max="48"><span>px</span></div></label></div>
+            <div data-block="image"><label>Source<input data-v2-image-src type="url"></label><label>Alt text<input data-v2-image-alt type="text" maxlength="500"></label><label>Fit<select data-image-fit><option value="cover">Cover</option><option value="contain">Contain</option></select></label><label>Width<div class="number"><input data-image-width type="number" min="1" max="100"><span>%</span></div></label><label>Radius<div class="number"><input data-image-radius type="number" min="0" max="100"><span>px</span></div></label></div>
+            <div data-block="divider"><label>Thickness<div class="number"><input data-divider-thickness type="number" min="1" max="16"><span>px</span></div></label><label>Color<input data-divider-color type="color"></label></div>
+            <div data-block="spacer"><label>Space<div class="number"><input data-spacer-size type="number" min="4" max="240"><span>px</span></div></label></div>
+            <div data-block="icon"><label>Icon<select data-icon-name><option value="check">Check</option><option value="star">Star</option><option value="info">Info</option><option value="warning">Warning</option><option value="sparkles">Sparkles</option><option value="arrow">Arrow</option><option value="heart">Heart</option><option value="rocket">Rocket</option></select></label><label>Size<div class="number"><input data-icon-size type="number" min="12" max="96"><span>px</span></div></label><label>Color<input data-icon-color type="color"></label></div>
+            <label>Alignment<select data-block-align><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+          </div>
+          <div class="history-row"><button type="button" class="secondary-button compact" data-v2-undo>Undo</button><button type="button" class="secondary-button compact" data-v2-redo>Redo</button></div>
+        </section>
         <section class="section content-inspector" data-content-inspector hidden>
           <div class="content-heading"><div><div class="eyebrow">Content</div><strong data-component-label>Nothing selected</strong></div><button type="button" class="secondary-button compact" data-edit-component>Edit</button></div>
           <div class="formatbar" data-text-controls><button type="button" data-format="strong" aria-label="Bold"><b>B</b></button><button type="button" data-format="em" aria-label="Italic"><i>I</i></button><button type="button" data-format="u" aria-label="Underline"><u>U</u></button><button type="button" data-list="ul" aria-label="Bulleted list">• List</button><button type="button" data-list="ol" aria-label="Numbered list">1. List</button></div>
@@ -174,18 +202,18 @@ export class EditorModeController {
           <div class="image-controls" data-image-controls hidden><label>Source URL<input data-image-src type="text" inputmode="url"></label><label>Alt text<input data-image-alt type="text" maxlength="500"></label><button type="button" class="secondary-button" data-apply-image>Apply image</button></div>
           <div class="history-row"><button type="button" class="secondary-button compact" data-undo disabled>Undo</button><button type="button" class="secondary-button compact" data-redo disabled>Redo</button></div>
         </section>
-        <section class="section" data-for="target">
+        <section class="section" data-step-only data-for="target">
           <div class="eyebrow">Target</div><strong class="truncate" data-target-label>Not selected</strong><div class="reliability" data-reliability></div>
           <button class="secondary-button" type="button" data-pick>Reselect target</button>
         </section>
-        <section class="section" data-layering-section>
+        <section class="section" data-step-only data-layering-section>
           <div class="eyebrow">Layering</div>
           <label>Policy<select data-layer-mode><option value="auto">Automatic</option><option value="relative">Relative to an element</option><option value="always_on_top">Always on top</option><option value="custom">Advanced / Custom</option></select></label>
           <div class="muted" data-layer-description></div>
           <div data-layer-relative hidden><strong class="truncate" data-layer-target>Not selected</strong><button class="secondary-button" type="button" data-pick-layer>Select element from page</button><label>Relationship<select data-layer-relation><option value="above">Above</option><option value="below">Below</option></select></label></div>
           <label data-layer-custom hidden>Custom z-index<input data-layer-z-index type="number" min="1" max="2147483647"></label>
         </section>
-        <section class="section" data-placement-section>
+        <section class="section" data-step-only data-placement-section>
           <div class="eyebrow">Placement</div>
           <div data-for="anchored"><div class="placement-grid">${placementButton("top", "Top")}${placementButton("left", "Left")}${placementButton("auto", "Auto")}${placementButton("right", "Right")}${placementButton("bottom", "Bottom")}</div><label>Alignment<select data-alignment><option value="start">Start</option><option value="center">Center</option><option value="end">End</option></select></label><label>Offset<div class="number"><input data-offset type="number" min="0" max="100"><span>px</span></div></label></div>
           <div data-for="toast"><label>Position<select data-toast-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label><label>Auto-dismiss<div class="number"><input data-auto-dismiss type="number" min="500" placeholder="Disabled"><span>ms</span></div></label></div>
@@ -195,13 +223,18 @@ export class EditorModeController {
           <div data-for="cursor"><label>X offset<div class="number"><input data-cursor-x type="number"><span>px</span></div></label><label>Y offset<div class="number"><input data-cursor-y type="number"><span>px</span></div></label></div>
           <div data-for="hotspot"><label>Beacon style<select data-hotspot-style><option value="pulse">Pulse</option><option value="dot">Dot</option><option value="question">Question mark</option></select></label><label>Beacon color<input data-hotspot-color type="color"></label></div>
         </section>
-        <section class="section" data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
-        <section class="section"><div class="eyebrow">Configured</div><dl data-configured></dl></section>
+        <section class="section" data-step-only data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
+        <section class="section" data-step-only><div class="eyebrow">Configured</div><dl data-configured></dl></section>
         <section class="section live"><div class="eyebrow">Live status</div><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></section>
         <p class="hint status-error" role="alert" data-content-error hidden></p>
         <div class="save-recovery" data-save-recovery hidden><button type="button" class="secondary-button" data-retry-save>Retry save</button><button type="button" class="secondary-button" data-reload-draft hidden>Reload latest</button><button type="button" class="secondary-button" data-export-draft>Copy / Export unsaved draft</button><button type="button" class="secondary-button" data-discard-draft>Discard and close</button><span data-recovery-message>Local edits are preserved.</span></div><p class="hint" data-mode-hint></p>
       </main>
     </aside>`;
+  }
+
+  private stepButtons(): string {
+    const steps = this.guide?.steps ?? this.survey?.steps ?? [];
+    return steps.map((step, index) => `<button class="step" type="button" data-step="${index}" aria-label="Open step ${index + 1}"><span>${index + 1}</span><small>${escapeText("label" in step && typeof step.label === "string" && step.label.trim() ? step.label : "content" in step && step.content.heading.trim() ? step.content.heading : `Step ${index + 1}`)}</small><i data-step-icon>○</i></button>`).join("");
   }
 
   private bindPanel(): void {
@@ -221,11 +254,22 @@ export class EditorModeController {
     root.querySelector<HTMLButtonElement>("[data-export-draft]")?.addEventListener("click", () => this.exportRecovery());
     root.querySelector<HTMLButtonElement>("[data-discard-draft]")?.addEventListener("click", () => { if (window.confirm("Discard unsaved edits and close?")) { this.recoveryDraft = null; this.destroy(); } });
     root.querySelector<HTMLButtonElement>("[data-reset-preview]")?.addEventListener("click", () => this.renderPreview());
-    root.querySelector<HTMLButtonElement>("[data-edit-component]")?.addEventListener("click", () => this.contentEditor?.editSelected());
-    root.querySelectorAll<HTMLButtonElement>("[data-format]").forEach(button => button.addEventListener("click", () => { this.contentEditor?.formatInline(button.dataset.format as "strong" | "em" | "u"); this.syncContentInspector(); }));
-    root.querySelectorAll<HTMLButtonElement>("[data-list]").forEach(button => button.addEventListener("click", () => { this.contentEditor?.toggleList(button.dataset.list as "ul" | "ol"); this.syncContentInspector(); }));
-    root.querySelector<HTMLSelectElement>("[data-text-align]")?.addEventListener("change", event => { this.contentEditor?.setAlignment((event.currentTarget as HTMLSelectElement).value as "left" | "center" | "right"); this.syncContentInspector(); });
-    root.querySelector<HTMLButtonElement>("[data-apply-link]")?.addEventListener("click", () => { const input = root.querySelector<HTMLInputElement>("[data-link-url]"); if (input && !this.contentEditor?.applyLink(input.value)) { input.setCustomValidity("Select text in a heading or body and use an HTTP(S), email, phone, relative, or hash URL."); input.reportValidity(); } else input?.setCustomValidity(""); this.syncContentInspector(); });
+    root.querySelector<HTMLButtonElement>("[data-global-undo]")?.addEventListener("click", () => { this.compositionEditor?.undo(); this.contentEditor?.undo(); this.syncContentInspector(); });
+    root.querySelector<HTMLButtonElement>("[data-global-redo]")?.addEventListener("click", () => { this.compositionEditor?.redo(); this.contentEditor?.redo(); this.syncContentInspector(); });
+    root.querySelector<HTMLButtonElement>("[data-move-side]")?.addEventListener("click", () => root.querySelector("aside")?.classList.toggle("left-side"));
+    root.querySelector<HTMLButtonElement>("[data-select-step]")?.addEventListener("click", () => this.compositionEditor?.selectStep());
+    root.querySelectorAll<HTMLButtonElement>("[data-edge]").forEach(button => button.addEventListener("click", () => this.compositionEditor?.addEdge(button.dataset.edge as "top" | "right" | "bottom" | "left")));
+    root.querySelectorAll<HTMLButtonElement>("[data-add-step]").forEach(button => button.addEventListener("click", () => this.addGuideStep(button.dataset.addStep as "modal" | "anchored_card")));
+    root.querySelector<HTMLButtonElement>("[data-duplicate-step]")?.addEventListener("click", () => this.duplicateGuideStep());
+    root.querySelector<HTMLButtonElement>("[data-delete-step]")?.addEventListener("click", () => this.deleteGuideStep());
+    root.querySelector<HTMLButtonElement>("[data-step-left]")?.addEventListener("click", () => this.moveGuideStep(-1));
+    root.querySelector<HTMLButtonElement>("[data-step-right]")?.addEventListener("click", () => this.moveGuideStep(1));
+    root.querySelector<HTMLInputElement>("[data-step-name]")?.addEventListener("change", event => { if (!this.guide) return; this.guide.steps[this.stepIndex].label = (event.currentTarget as HTMLInputElement).value.trim().slice(0, 80) || undefined; this.changed(); this.refreshStepBar(); });
+    root.querySelector<HTMLButtonElement>("[data-edit-component]")?.addEventListener("click", () => { this.compositionEditor?.editSelected(); this.contentEditor?.editSelected(); });
+    root.querySelectorAll<HTMLButtonElement>("[data-format]").forEach(button => button.addEventListener("click", () => { this.compositionEditor?.formatInline(button.dataset.format as "strong" | "em" | "u"); this.contentEditor?.formatInline(button.dataset.format as "strong" | "em" | "u"); this.syncContentInspector(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-list]").forEach(button => button.addEventListener("click", () => { this.compositionEditor?.toggleList(button.dataset.list as "ul" | "ol"); this.contentEditor?.toggleList(button.dataset.list as "ul" | "ol"); this.syncContentInspector(); }));
+    root.querySelector<HTMLSelectElement>("[data-text-align]")?.addEventListener("change", event => { const value = (event.currentTarget as HTMLSelectElement).value as "left" | "center" | "right"; this.compositionEditor?.setAlignment(value); this.contentEditor?.setAlignment(value); this.syncContentInspector(); });
+    root.querySelector<HTMLButtonElement>("[data-apply-link]")?.addEventListener("click", () => { const input = root.querySelector<HTMLInputElement>("[data-link-url]"); const applied = input ? (this.compositionEditor?.applyLink(input.value) ?? this.contentEditor?.applyLink(input.value)) : false; if (input && !applied) { input.setCustomValidity("Select text in a heading or body and use an HTTP(S), email, phone, relative, or hash URL."); input.reportValidity(); } else input?.setCustomValidity(""); this.syncContentInspector(); });
     root.querySelector<HTMLButtonElement>("[data-apply-image]")?.addEventListener("click", () => { const source = root.querySelector<HTMLInputElement>("[data-image-src]"); const alt = root.querySelector<HTMLInputElement>("[data-image-alt]"); if (source && alt && !this.contentEditor?.updateImage(source.value, alt.value)) source.setCustomValidity("Use an HTTP(S), relative, or supported data image URL."); else source?.setCustomValidity(""); this.syncContentInspector(); });
     root.querySelector<HTMLButtonElement>("[data-undo]")?.addEventListener("click", () => { this.contentEditor?.undo(); this.syncContentInspector(); });
     root.querySelector<HTMLButtonElement>("[data-redo]")?.addEventListener("click", () => { this.contentEditor?.redo(); this.syncContentInspector(); });
@@ -237,6 +281,8 @@ export class EditorModeController {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !(event.target instanceof HTMLInputElement)) { event.preventDefault(); event.shiftKey ? this.contentEditor?.redo() : this.contentEditor?.undo(); }
     });
     this.bindDrag();
+
+    this.bindCompositionInspector();
 
     this.onSelect("[data-alignment]", value => { this.currentBehavior().alignment = value as NonNullable<ExperienceBehavior["alignment"]>; });
     this.onSelect("[data-layer-mode]", value => {
@@ -262,6 +308,71 @@ export class EditorModeController {
     this.onSelect("[data-hotspot-style]", value => { this.currentBehavior().hotspotStyle = value as NonNullable<ExperienceBehavior["hotspotStyle"]>; });
     this.onInput("[data-hotspot-color]", value => { this.currentBehavior().hotspotColor = value; });
   }
+
+  private bindCompositionInspector(): void {
+    const root = this.root!;
+    const change = (selector: string, run: (value: string) => void) => root.querySelector<HTMLInputElement | HTMLSelectElement>(selector)?.addEventListener("change", event => run((event.currentTarget as HTMLInputElement | HTMLSelectElement).value));
+    const number = (value: string, fallback: number) => { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : fallback; };
+    change("[data-cell-direction]", value => this.compositionEditor?.updateCell({ direction: value as OnsiteCell["direction"] }));
+    change("[data-cell-size]", value => { const cell = this.compositionEditor?.getSelectedCell(); if (!cell) return; this.compositionEditor?.updateCell({ sizing: value === "fixed" ? { mode: "fixed", value: 160 } : value === "hug" ? { mode: "hug" } : { mode: "flexible", weight: 1 } }); });
+    change("[data-cell-fixed]", value => this.compositionEditor?.updateCell({ sizing: { mode: "fixed", value: Math.max(24, Math.min(1_200, number(value, 160))) } }));
+    change("[data-cell-align]", value => this.compositionEditor?.updateCell({ align: value as OnsiteCell["align"] }));
+    change("[data-cell-gap]", value => this.compositionEditor?.updateCell({ gap: Math.max(0, Math.min(96, number(value, 0))) }));
+    change("[data-cell-padding]", value => { const padding = Math.max(0, Math.min(128, number(value, 0))); this.compositionEditor?.updateCell({ padding: { top: padding, right: padding, bottom: padding, left: padding } }); });
+    change("[data-cell-background]", value => { const cell = this.compositionEditor?.getSelectedCell(); this.compositionEditor?.updateCell({ style: { ...cell?.style, background: value } }); });
+    change("[data-cell-border]", value => { const cell = this.compositionEditor?.getSelectedCell(); this.compositionEditor?.updateCell({ style: { ...cell?.style, borderWidth: Math.max(0, Math.min(16, number(value, 0))) } }); });
+    change("[data-cell-radius]", value => { const cell = this.compositionEditor?.getSelectedCell(); this.compositionEditor?.updateCell({ style: { ...cell?.style, borderRadius: Math.max(0, Math.min(100, number(value, 0))) } }); });
+    root.querySelector<HTMLInputElement>("[data-cell-stack]")?.addEventListener("change", event => this.compositionEditor?.updateCell({ responsiveStack: (event.currentTarget as HTMLInputElement).checked }));
+    change("[data-block-align]", value => this.compositionEditor?.updateBlock({ align: value as "left" | "center" | "right" } as Partial<OnsiteBlock>));
+    change("[data-block-font-size]", value => this.compositionEditor?.updateBlock({ fontSize: Math.max(10, Math.min(72, number(value, 15))) } as Partial<OnsiteBlock>));
+    change("[data-block-line-height]", value => this.compositionEditor?.updateBlock({ lineHeight: Math.max(.9, Math.min(3, number(value, 1.5))) } as Partial<OnsiteBlock>));
+    change("[data-block-weight]", value => this.compositionEditor?.updateBlock({ weight: number(value, 400) as 400 | 500 | 600 | 700 } as Partial<OnsiteBlock>));
+    change("[data-block-color]", value => this.compositionEditor?.updateBlock({ color: value } as Partial<OnsiteBlock>));
+    change("[data-button-label]", value => this.compositionEditor?.updateBlock({ label: value.trim().slice(0, 80) || "Button" } as Partial<OnsiteBlock>));
+    change("[data-button-variant]", value => this.compositionEditor?.updateBlock({ variant: value as "primary" | "secondary" | "outline" } as Partial<OnsiteBlock>));
+    change("[data-button-width]", value => this.compositionEditor?.updateBlock({ width: value as "hug" | "full" } as Partial<OnsiteBlock>));
+    change("[data-button-background]", value => this.compositionEditor?.updateBlock({ background: value } as Partial<OnsiteBlock>));
+    change("[data-button-color]", value => this.compositionEditor?.updateBlock({ color: value } as Partial<OnsiteBlock>));
+    change("[data-button-padding-x]", value => this.compositionEditor?.updateBlock({ paddingX: Math.max(4, Math.min(48, number(value, 16))) } as Partial<OnsiteBlock>));
+    change("[data-button-padding-y]", value => this.compositionEditor?.updateBlock({ paddingY: Math.max(4, Math.min(32, number(value, 9))) } as Partial<OnsiteBlock>));
+    change("[data-button-radius]", value => this.compositionEditor?.updateBlock({ radius: Math.max(0, Math.min(48, number(value, 8))) } as Partial<OnsiteBlock>));
+    change("[data-button-action]", value => { if (value === "open_url") this.compositionEditor?.updateButtonAction({ type: "open_url", url: "https://example.com" }); else if (value === "track_event") this.compositionEditor?.updateButtonAction({ type: "track_event", eventName: "button_clicked" }); else this.compositionEditor?.updateButtonAction({ type: value as "dismiss" | "next_step" | "previous_step" }); });
+    change("[data-button-url]", value => this.compositionEditor?.updateButtonAction({ type: "open_url", url: value.trim() }));
+    change("[data-button-event]", value => this.compositionEditor?.updateButtonAction({ type: "track_event", eventName: value.trim() }));
+    change("[data-v2-image-src]", value => this.compositionEditor?.updateBlock({ src: value.trim() } as Partial<OnsiteBlock>));
+    change("[data-v2-image-alt]", value => this.compositionEditor?.updateBlock({ alt: value.slice(0, 500) } as Partial<OnsiteBlock>));
+    change("[data-image-fit]", value => this.compositionEditor?.updateBlock({ fit: value as "cover" | "contain" } as Partial<OnsiteBlock>));
+    change("[data-image-width]", value => this.compositionEditor?.updateBlock({ width: Math.max(1, Math.min(100, number(value, 100))) } as Partial<OnsiteBlock>));
+    change("[data-image-radius]", value => this.compositionEditor?.updateBlock({ radius: Math.max(0, Math.min(100, number(value, 0))) } as Partial<OnsiteBlock>));
+    change("[data-divider-thickness]", value => this.compositionEditor?.updateBlock({ thickness: Math.max(1, Math.min(16, number(value, 1))) } as Partial<OnsiteBlock>));
+    change("[data-divider-color]", value => this.compositionEditor?.updateBlock({ color: value } as Partial<OnsiteBlock>));
+    change("[data-spacer-size]", value => this.compositionEditor?.updateBlock({ size: Math.max(4, Math.min(240, number(value, 24))) } as Partial<OnsiteBlock>));
+    change("[data-icon-name]", value => this.compositionEditor?.updateBlock({ icon: value as Extract<OnsiteBlock, { type: "icon" }>["icon"] } as Partial<OnsiteBlock>));
+    change("[data-icon-size]", value => this.compositionEditor?.updateBlock({ size: Math.max(12, Math.min(96, number(value, 28))) } as Partial<OnsiteBlock>));
+    change("[data-icon-color]", value => this.compositionEditor?.updateBlock({ color: value } as Partial<OnsiteBlock>));
+    root.querySelectorAll<HTMLButtonElement>("[data-v2-format]").forEach(button => button.addEventListener("click", () => this.compositionEditor?.formatInline(button.dataset.v2Format as "strong" | "em" | "u")));
+    root.querySelectorAll<HTMLButtonElement>("[data-v2-list]").forEach(button => button.addEventListener("click", () => this.compositionEditor?.toggleList(button.dataset.v2List as "ul" | "ol")));
+    root.querySelector<HTMLButtonElement>("[data-v2-apply-link]")?.addEventListener("click", () => { const input = root.querySelector<HTMLInputElement>("[data-v2-link-url]"); if (input && !this.compositionEditor?.applyLink(input.value)) { input.setCustomValidity("Use an HTTP(S), email, phone, relative, or hash URL."); input.reportValidity(); } else input?.setCustomValidity(""); });
+    root.querySelector<HTMLButtonElement>("[data-v2-undo]")?.addEventListener("click", () => this.compositionEditor?.undo());
+    root.querySelector<HTMLButtonElement>("[data-v2-redo]")?.addEventListener("click", () => this.compositionEditor?.redo());
+  }
+
+  private addGuideStep(pattern: "modal" | "anchored_card"): void {
+    if (!this.guide || !this.flushContent()) return;
+    const document = createOnsiteDocument(true); const builder: WidgetBuilderState = { version: 1, projectData: {}, html: "", css: "" }; const compiled = applyOnsiteDocument(builder, document, pattern);
+    const step = { id: editorId("step"), label: pattern === "modal" ? "Modal step" : "Anchored step", pattern, content: compiled.content, builder, advance: { type: "button" as const }, behavior: pattern === "modal" ? { dismissible: true } : { placement: "auto" as const, alignment: "center" as const, offset: 8, pointer: { enabled: true, size: 10 }, dismissible: true } };
+    this.guide.steps.splice(this.stepIndex + 1, 0, step); this.stepIndex++; this.changed(); this.refreshStepBar();
+  }
+
+  private duplicateGuideStep(): void {
+    if (!this.guide || !this.flushContent()) return; const source = this.guide.steps[this.stepIndex]; const copy = cloneOnsite(source); copy.id = editorId("step"); copy.label = `${source.label || source.content.heading || "Step"} copy`;
+    const document = onsiteDocumentFromBuilder(copy.builder); if (document && copy.builder) { const next = duplicateDocument(document); const compiled = applyOnsiteDocument(copy.builder, next, getGuideStepPattern(copy)); copy.content = compiled.content; }
+    this.guide.steps.splice(this.stepIndex + 1, 0, copy); this.stepIndex++; this.changed(); this.refreshStepBar();
+  }
+
+  private deleteGuideStep(): void { if (!this.guide || this.guide.steps.length <= 1 || !window.confirm("Delete this Guide step?")) return; if (!this.flushContent()) return; this.guide.steps.splice(this.stepIndex, 1); this.stepIndex = Math.min(this.stepIndex, this.guide.steps.length - 1); this.changed(); this.refreshStepBar(); }
+  private moveGuideStep(delta: -1 | 1): void { if (!this.guide || !this.flushContent()) return; const next = this.stepIndex + delta; if (next < 0 || next >= this.guide.steps.length) return; const [step] = this.guide.steps.splice(this.stepIndex, 1); this.guide.steps.splice(next, 0, step); this.stepIndex = next; this.changed(); this.refreshStepBar(); }
+  private refreshStepBar(): void { const flow = this.root?.querySelector<HTMLElement>("[data-step-flow]"); if (!flow) return; flow.innerHTML = this.stepButtons(); flow.querySelectorAll<HTMLButtonElement>("[data-step]").forEach(button => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step)))); this.syncPanel(); }
 
   private bindDrag(): void {
     const handle = this.root?.querySelector<HTMLElement>("[data-drag-handle]");
@@ -301,6 +412,7 @@ export class EditorModeController {
     this.selectionGeneration++;
     this.picker.cancel();
     this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
+    this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
     if (this.dirty) void this.persist();
     this.stepIndex = index;
     this.updateContinuation();
@@ -315,6 +427,7 @@ export class EditorModeController {
     this.selectionGeneration++;
     this.picker.cancel();
     this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
+    this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
     if (this.dirty) void this.persist();
     this.mode = mode;
     this.configureDiagnostics();
@@ -373,7 +486,9 @@ export class EditorModeController {
       this.setText("[data-save-state]", "Finish composing text before continuing"); return false;
     }
     const errors = this.contentEditor?.getValidation() ?? [];
-    this.showValidation(errors); return !errors.length;
+    if (this.compositionEditor && !this.compositionEditor.flush()) { const compositionErrors = this.compositionEditor.getValidation(); this.showValidation(compositionErrors); return false; }
+    const allErrors = [...errors, ...(this.compositionEditor?.getValidation() ?? [])];
+    this.showValidation(allErrors); return !allErrors.length;
   }
 
   private showValidation(errors: string[]): void {
@@ -392,10 +507,10 @@ export class EditorModeController {
   }
 
   private captureRecovery(): void {
-    if (!this.definition || (!this.dirty && !this.contentEditor?.isComposing())) return;
+    if (!this.definition || (!this.dirty && !this.contentEditor?.isComposing() && !this.compositionEditor?.isComposing())) return;
     // Contains only authored data, never the session or access token. No website storage.
     const definition = JSON.parse(JSON.stringify(this.definition)) as EditorDefinition;
-    const snapshot = this.contentEditor?.snapshot();
+    const snapshot = this.compositionEditor?.snapshot() ?? this.contentEditor?.snapshot();
     if (snapshot) {
       const part = isGuideDefinition(definition) ? definition.steps[this.stepIndex] : definition;
       part.builder = snapshot.builder; part.content = snapshot.content;
@@ -414,11 +529,11 @@ export class EditorModeController {
 
   private expireSession(): void {
     if (this.saveState === "expired") return;
-    this.contentEditor?.flush(); this.captureRecovery();
-    this.dirty = this.dirty || !!this.contentEditor?.isComposing();
+    this.contentEditor?.flush(); this.compositionEditor?.flush(); this.captureRecovery();
+    this.dirty = this.dirty || !!this.contentEditor?.isComposing() || !!this.compositionEditor?.isComposing();
     this.saveState = "expired"; this.lifecycle++;
     clearTimeout(this.saveTimer); clearTimeout(this.expiryTimer); clearInterval(this.validationTimer);
-    this.contentEditor?.destroy(); this.contentEditor = null;
+    this.contentEditor?.destroy(); this.contentEditor = null; this.compositionEditor?.destroy(); this.compositionEditor = null;
     this.previewGeneration++; this.preview.destroy(); this.previewRendered = false; this.picker.cancel();
     this.mutationObserver?.disconnect(); this.routeUnsubscribe?.(); this.routeObserver.stop();
     this.bridge = null; this.session = null; clearEditorContinuation();
@@ -474,6 +589,7 @@ export class EditorModeController {
     const generation = ++this.previewGeneration;
     this.previewRendered = false;
     this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
+    this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
     const definition = this.guide ? { ...this.definition, steps: [this.guide.steps[this.stepIndex]] } as EditorDefinition : this.definition;
     // Editor-only behavior overrides; production renderers and definitions stay unchanged.
     const rendered = JSON.parse(JSON.stringify(definition)) as EditorDefinition;
@@ -498,6 +614,8 @@ export class EditorModeController {
         this.previewRendered = true; if (this.mode === "design") this.attachContentEditor(); this.updateDiagnostics(); },
       onDismiss: () => { this.previewRendered = false; this.updateDiagnostics(); },
       onAction: () => void 0,
+      onGuideAdvance: () => { if (this.mode === "preview" && this.guide && this.stepIndex < this.guide.steps.length - 1) this.switchStep(this.stepIndex + 1); },
+      onGuideBack: () => { if (this.mode === "preview" && this.guide && this.stepIndex > 0) this.switchStep(this.stepIndex - 1); },
       onComplete: () => { this.previewRendered = false; this.updateDiagnostics(); },
       onUnavailable: () => { this.previewRendered = false; this.updateDiagnostics(); },
     }, selectedStepId);
@@ -511,7 +629,15 @@ export class EditorModeController {
     );
     const builder = this.currentBuilder(); const content = this.currentContent();
     if (!host?.shadowRoot || !builder || !content) return;
-    this.contentEditor?.destroy();
+    this.contentEditor?.destroy(); this.compositionEditor?.destroy();
+    try {
+        this.compositionEditor = new OnsiteCompositionEditor(host.shadowRoot, builder, content, this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : this.draft.experience.widgetType ?? "modal", Boolean(this.guide), {
+          onChange: () => this.changed(false),
+          onValidation: errors => this.showValidation(errors),
+          onSelectionChange: selection => { this.compositionSelection = selection; this.syncCompositionInspector(); },
+        });
+        this.compositionEditor.start(); return;
+    } catch (error) { this.showValidation([error instanceof Error ? error.message : "This layout could not be converted safely."]); this.compositionEditor = null; }
     this.contentEditor = new OnsiteContentEditor(host.shadowRoot, builder, content, {
       onChange: () => this.changed(false),
       onValidation: errors => this.showValidation(errors),
@@ -546,6 +672,19 @@ export class EditorModeController {
     if (selection.kind === "image") { this.setValue("[data-image-src]", selection.src ?? ""); this.setValue("[data-image-alt]", selection.alt ?? ""); }
     const undo = this.root.querySelector<HTMLButtonElement>("[data-undo]"); if (undo) undo.disabled = !this.contentEditor?.canUndo();
     const redo = this.root.querySelector<HTMLButtonElement>("[data-redo]"); if (redo) redo.disabled = !this.contentEditor?.canRedo();
+  }
+
+  private syncCompositionInspector(): void {
+    if (!this.root) return; const editor = this.compositionEditor; const selection = this.compositionSelection; const inspector = this.root.querySelector<HTMLElement>("[data-composition-inspector]"); if (!inspector) return;
+    inspector.hidden = this.mode !== "design" || !editor || !selection; this.root.querySelector<HTMLElement>("[data-content-inspector]")!.hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
+    if (!editor || !selection) return; this.setText("[data-composition-label]", selection.label);
+    this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { group.hidden = selection.kind !== "step"; });
+    this.root.querySelectorAll<HTMLElement>("[data-inspector]").forEach(group => { group.hidden = group.dataset.inspector !== selection.kind; });
+    const step = this.guide?.steps[this.stepIndex]; this.setValue("[data-step-name]", step?.label ?? step?.content.heading ?? "");
+    const cell = editor.getSelectedCell(); if (cell) { this.setValue("[data-cell-direction]", cell.direction); this.setValue("[data-cell-size]", cell.sizing.mode); this.setValue("[data-cell-fixed]", String(cell.sizing.mode === "fixed" ? cell.sizing.value : 160)); this.root.querySelector<HTMLElement>("[data-fixed-size]")!.hidden = cell.sizing.mode !== "fixed"; this.setValue("[data-cell-align]", cell.align); this.setValue("[data-cell-gap]", String(cell.gap)); this.setValue("[data-cell-padding]", String(cell.padding.top)); this.setValue("[data-cell-background]", cell.style?.background && /^#[0-9a-f]{6}$/i.test(cell.style.background) ? cell.style.background : "#ffffff"); this.setValue("[data-cell-border]", String(cell.style?.borderWidth ?? 0)); this.setValue("[data-cell-radius]", String(cell.style?.borderRadius ?? 0)); this.setChecked("[data-cell-stack]", Boolean(cell.responsiveStack)); }
+    const block = editor.getSelectedBlock(); this.root.querySelectorAll<HTMLElement>("[data-block]").forEach(group => { group.hidden = !block || !group.dataset.block!.split(",").includes(block.type); });
+    if (block) { this.setValue("[data-block-align]", block.align ?? "left"); if (block.type === "heading" || block.type === "text") { this.setValue("[data-block-font-size]", String(block.fontSize)); this.setValue("[data-block-line-height]", String(block.lineHeight ?? (block.type === "heading" ? 1.25 : 1.5))); this.setValue("[data-block-weight]", String(block.weight)); this.setValue("[data-block-color]", block.color && /^#[0-9a-f]{6}$/i.test(block.color) ? block.color : "#111827"); } if (block.type === "button") { this.setValue("[data-button-label]", block.label); this.setValue("[data-button-variant]", block.variant); this.setValue("[data-button-action]", block.action.type); this.setValue("[data-button-url]", "url" in block.action ? block.action.url : ""); this.setValue("[data-button-event]", "eventName" in block.action ? block.action.eventName : ""); this.setValue("[data-button-background]", block.background && /^#[0-9a-f]{6}$/i.test(block.background) ? block.background : "#2563eb"); this.setValue("[data-button-color]", block.color && /^#[0-9a-f]{6}$/i.test(block.color) ? block.color : "#ffffff"); this.setValue("[data-button-width]", block.width); this.setValue("[data-button-padding-x]", String(block.paddingX)); this.setValue("[data-button-padding-y]", String(block.paddingY)); this.setValue("[data-button-radius]", String(block.radius)); this.root.querySelector<HTMLElement>("[data-action-url]")!.hidden = block.action.type !== "open_url"; this.root.querySelector<HTMLElement>("[data-action-event]")!.hidden = block.action.type !== "track_event"; } if (block.type === "image") { this.setValue("[data-v2-image-src]", block.src); this.setValue("[data-v2-image-alt]", block.alt); this.setValue("[data-image-fit]", block.fit); this.setValue("[data-image-width]", String(block.width)); this.setValue("[data-image-radius]", String(block.radius)); } if (block.type === "divider") { this.setValue("[data-divider-thickness]", String(block.thickness)); this.setValue("[data-divider-color]", block.color); } if (block.type === "spacer") this.setValue("[data-spacer-size]", String(block.size)); if (block.type === "icon") { this.setValue("[data-icon-name]", block.icon); this.setValue("[data-icon-size]", String(block.size)); this.setValue("[data-icon-color]", block.color ?? "#2563eb"); } }
+    const undo = this.root.querySelector<HTMLButtonElement>("[data-v2-undo]"); if (undo) undo.disabled = !editor.canUndo(); const redo = this.root.querySelector<HTMLButtonElement>("[data-v2-redo]"); if (redo) redo.disabled = !editor.canRedo();
   }
 
   private syncPanel(): void {
@@ -596,6 +735,7 @@ export class EditorModeController {
     this.renderConfigured(this.definition.targeting);
     this.updateDiagnostics();
     this.syncContentInspector();
+    this.syncCompositionInspector();
     this.setText("[data-mode-hint]", this.mode === "design" && this.draft.experience.widgetType === "cursor_follow" ? "Stationary authoring view · Preview tests cursor-follow movement" : this.mode === "design" && this.isTargetedType() && !this.currentTarget() ? "Select a page target in Target mode before editing this anchored card" : this.mode === "design" ? "Click a component to select · Double-click text to edit" : this.mode === "target" ? this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "This experience does not need a page target" : this.mode === "navigate" ? "Customer app interaction is enabled" : "End-user preview · analytics and actions are disabled");
   }
 
@@ -638,6 +778,7 @@ export class EditorModeController {
     }
     if (this.guide) this.root.querySelectorAll<HTMLButtonElement>("[data-step]").forEach((button, index) => {
       const guideStep = this.guide!.steps[index];
+      if (!guideStep) { button.remove(); return; }
       const stepTarget = guideStep.target;
       const state = index === this.stepIndex ? "current" : guideStepRequiresTarget(guideStep) ? this.targetStatus(stepTarget) : "found";
       button.dataset.stepStatus = state;
@@ -765,9 +906,10 @@ export class EditorModeController {
     window.visualViewport?.removeEventListener("scroll", this.fitPanel);
     this.mutationObserver?.disconnect(); this.mutationObserver = null;
     this.dragCleanup?.(); this.dragCleanup = null;
-    this.contentEditor?.flush();
+    this.contentEditor?.flush(); this.compositionEditor?.flush();
     this.previewGeneration++; this.preview.destroy();
     this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
+    this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
     this.picker.cancel();
     this.host?.remove();
     this.host = null; this.root = null; this.bridge = null; this.session = null; this.draft = null; this.definition = null; this.guide = null; this.survey = null;
@@ -778,6 +920,7 @@ export class EditorModeController {
 }
 
 function placementButton(value: NonNullable<ExperienceBehavior["placement"]>, label: string): string { return `<button type="button" data-placement="${value}">${label}</button>`; }
+function editorId(prefix: string): string { const bytes = crypto.getRandomValues(new Uint32Array(2)); return `${prefix}_${Array.from(bytes).map(value => value.toString(36)).join("")}`.slice(0, 64); }
 function clampStep(value: number, length: number): number { return Number.isFinite(value) && length ? Math.max(0, Math.min(Math.trunc(value), length - 1)) : 0; }
 function validSession(value: Partial<EditorSession> | null): value is EditorSession { return !!value && typeof value.sessionId === "string" && !!value.sessionId && typeof value.accessToken === "string" && !!value.accessToken && typeof value.expiresAt === "string" && Number.isFinite(Date.parse(value.expiresAt)) && Date.parse(value.expiresAt) > Date.now(); }
 function numberValue(value: string, fallback: number): number { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : fallback; }
@@ -803,5 +946,5 @@ function formatAdvance(advance?: GuideAdvance): string {
 function escapeText(value: string): string { const span = document.createElement("span"); span.textContent = value; return span.innerHTML; }
 
 const STYLE = `
-:host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:min(312px,calc(100vw - 8px));max-height:calc(100dvh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100dvh - 82px);overflow:auto}.minimized{width:min(260px,calc(100vw - 8px))}.minimized main{display:none}.modebar{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button,.formatbar button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{min-width:0;padding:7px 3px}.modebar button:disabled{cursor:not-allowed;opacity:.42}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-flow{display:flex;align-items:center;overflow:auto}.step{flex:none;padding:4px 6px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.arrow{color:#cbd5e1;font-size:10px}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.secondary-button.compact{padding:5px 7px}.content-heading,.history-row,.link-row,.save-recovery{display:flex;align-items:center;justify-content:space-between;gap:6px}.content-heading>div{min-width:0}.formatbar{display:flex;flex-wrap:wrap;gap:4px}.formatbar button{padding:5px 7px}.link-row input{min-width:0}.history-row{justify-content:flex-start}.save-recovery{flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid #fee2e2;background:#fff7ed;color:#9a3412;font-size:11px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #2563eb;outline-offset:2px}textarea[data-recovery-export]{box-sizing:border-box;width:100%;height:180px;font:11px monospace}[hidden]{display:none!important}@media(max-width:420px){aside{right:4px;top:4px;max-height:calc(100dvh - 8px)}main{max-height:calc(100dvh - 66px)}header{padding:9px}.section{padding:8px 10px}.modebar{padding:6px}.modebar button{font-size:10px}}
+:host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:min(326px,calc(100vw - 8px));max-height:calc(100dvh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}aside.left-side{left:12px;right:auto}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100dvh - 82px);overflow:auto}.minimized{width:min(260px,calc(100vw - 8px))}.minimized main{display:none}.modebar{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button,.formatbar button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{min-width:0;padding:7px 3px}.modebar button:disabled{cursor:not-allowed;opacity:.42}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-navigator{position:fixed;left:50%;bottom:10px;width:min(680px,calc(100vw - 16px));transform:translateX(-50%);z-index:2147483647;border:1px solid #d7dce3;border-radius:10px;background:#fff;box-shadow:0 10px 32px rgba(15,23,42,.18)}.step-flow{display:flex;align-items:stretch;gap:4px;overflow:auto}.step{display:grid;grid-template-columns:auto minmax(54px,1fr) auto;align-items:center;gap:4px;flex:none;max-width:130px;padding:5px 7px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step small{overflow:hidden;font:10px/1.2 inherit;text-overflow:ellipsis;white-space:nowrap}.step i{font-style:normal}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.secondary-button.compact{padding:5px 7px}.content-heading,.history-row,.link-row,.save-recovery{display:flex;align-items:center;justify-content:space-between;gap:6px}.content-heading>div{min-width:0}.formatbar{display:flex;flex-wrap:wrap;gap:4px}.formatbar button{padding:5px 7px}.link-row input{min-width:0}.history-row{justify-content:flex-start;flex-wrap:wrap}.save-recovery{flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid #fee2e2;background:#fff7ed;color:#9a3412;font-size:11px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #2563eb;outline-offset:2px}textarea[data-recovery-export]{box-sizing:border-box;width:100%;height:180px;font:11px monospace}[hidden]{display:none!important}@media(max-width:480px){.step-navigator{position:static;width:auto;transform:none;box-shadow:none}}@media(max-width:420px){aside{right:4px;top:4px;max-height:calc(100dvh - 8px)}aside.left-side{left:4px}main{max-height:calc(100dvh - 66px)}header{padding:9px}.section{padding:8px 10px}.modebar{padding:6px}.modebar button{font-size:10px}}
 `;

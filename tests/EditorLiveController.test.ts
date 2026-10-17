@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Analytics } from "../src/core/Analytics";
 import { EDITOR_CONTINUATION_KEY } from "../src/experiences/editorContinuation";
 import { EditorModeController } from "../src/experiences/editor/EditorModeController";
-import { OnsiteContentEditor } from "../src/experiences/editor/OnsiteContentEditor";
 import { ElementPicker } from "../src/experiences/editor/ElementPicker";
 import { TargetSelectorGenerator } from "../src/experiences/editor/TargetSelectorGenerator";
 import { ExperienceRenderer } from "../src/experiences/runtime/ExperienceRenderer";
@@ -329,11 +328,34 @@ describe("live placement editor", () => {
 
   it("activates link formatting through click after keyboard focus, without pointerdown", async () => {
     vi.stubGlobal("fetch", editorFetch(onsiteDraft())); controller = new EditorModeController("https://api.example.com"); await controller.start("token");
-    const heading = document.querySelector("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLElement>("h2")!; heading.focus();
-    const apply = vi.spyOn(OnsiteContentEditor.prototype, "applyLink").mockReturnValue(true);
+    const heading = document.querySelector("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLElement>("h2")!; heading.click(); heading.focus();
     const url = editorRoot().querySelector<HTMLInputElement>("[data-link-url]")!; url.value = "/docs";
     const button = editorRoot().querySelector<HTMLButtonElement>("[data-apply-link]")!; button.focus(); button.click();
-    expect(apply).toHaveBeenCalledTimes(1); expect(apply).toHaveBeenCalledWith("/docs");
+    expect(document.querySelector("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLAnchorElement>('h2 a')?.getAttribute("href")).toBe("/docs");
+  });
+
+  it("builds nested cells, inserts a block and adds a full-width footer through contextual tools", async () => {
+    const fetchMock = editorFetch(onsiteDraft()); vi.stubGlobal("fetch", fetchMock); controller = new EditorModeController("https://api.example.com"); await controller.start("token");
+    const surface = document.querySelector("[data-movcues-experience]")!.shadowRoot!; surface.querySelector<HTMLElement>("h2")!.click();
+    surface.querySelector<HTMLButtonElement>('[data-command="columns"]')!.click(); surface.querySelector<HTMLButtonElement>('[data-command="add"]')!.click(); surface.querySelector<HTMLButtonElement>('[data-insert-block="image"]')!.click();
+    editorRoot().querySelector<HTMLButtonElement>("[data-select-step]")!.click(); editorRoot().querySelector<HTMLButtonElement>('[data-edge="bottom"]')!.click();
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true)); const calls = fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH"); const saved = JSON.parse(String(calls.at(-1)![1]?.body));
+    const sourceDocument = saved.definition.builder.projectData.movcues.onsiteDocument; expect(sourceDocument.schemaVersion).toBe(2); expect(sourceDocument.root.children.at(-1).block).toBeUndefined(); const nested = JSON.stringify(sourceDocument); expect(nested).toContain('"direction":"row"'); expect(nested).toContain('"type":"image"');
+  });
+
+  it("configures an independently identified button action", async () => {
+    const fetchMock = editorFetch(onsiteDraft()); vi.stubGlobal("fetch", fetchMock); controller = new EditorModeController("https://api.example.com"); await controller.start("token");
+    const surface = document.querySelector("[data-movcues-experience]")!.shadowRoot!; surface.querySelector<HTMLButtonElement>("[data-movcues-action-id]")!.click();
+    const action = editorRoot().querySelector<HTMLSelectElement>("[data-button-action]")!; action.value = "open_url"; action.dispatchEvent(new Event("change", { bubbles: true })); const url = editorRoot().querySelector<HTMLInputElement>("[data-button-url]")!; url.value = "https://example.com/docs"; url.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true)); const calls = fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH"); const saved = JSON.parse(String(calls.at(-1)![1]?.body)); const source = JSON.stringify(saved.definition.builder.projectData.movcues.onsiteDocument); expect(source).toContain('"type":"open_url"'); expect(source).toContain("https://example.com/docs"); expect(saved.definition.builder.html).toContain("data-movcues-action-id=\"action_");
+  });
+
+  it("adds, duplicates, reorders, renames and deletes Guide steps with fresh structured IDs", async () => {
+    const draft = guideDraft(); draft.experience.builderMode = "onsite"; if (!("steps" in draft.version.definition)) throw new Error("Guide expected"); draft.version.definition.steps.forEach(step => { step.pattern = "modal"; step.builder = { version: 1, projectData: { movcues: { authoringSurface: "onsite", schemaVersion: 1 } }, css: ".movcues-widget{}", html: `<section class="movcues-widget"><h2 data-movcues-content="heading">${step.content.heading}</h2><p data-movcues-content="body">${step.content.body}</p></section>` }; });
+    vi.spyOn(window, "confirm").mockReturnValue(true); const fetchMock = editorFetch(draft); vi.stubGlobal("fetch", fetchMock); controller = new EditorModeController("https://api.example.com"); await controller.start("token");
+    editorRoot().querySelector<HTMLButtonElement>('[data-add-step="modal"]')!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(3); editorRoot().querySelector<HTMLButtonElement>("[data-duplicate-step]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(4);
+    const name = editorRoot().querySelector<HTMLInputElement>("[data-step-name]")!; name.value = "Activation finish"; name.dispatchEvent(new Event("change", { bubbles: true })); editorRoot().querySelector<HTMLButtonElement>("[data-step-left]")!.click(); editorRoot().querySelector<HTMLButtonElement>('[data-step="0"]')!.click(); editorRoot().querySelector<HTMLButtonElement>("[data-delete-step]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(3);
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH" && JSON.parse(String(init.body)).definition.steps.length === 3)).toBe(true)); const calls = fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH" && JSON.parse(String(init.body)).definition.steps.length === 3); const saved = JSON.parse(String(calls.at(-1)![1]?.body)); expect(saved.definition.steps).toHaveLength(3); expect(saved.definition.steps.some((step: { label?: string }) => step.label === "Activation finish")).toBe(true); const ids = saved.definition.steps.map((step: { id: string }) => step.id); expect(new Set(ids).size).toBe(ids.length);
   });
 
 });
