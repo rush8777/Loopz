@@ -5,11 +5,14 @@ import {
   cloneOnsite,
   createBlock,
   duplicateCell,
+  emptyCell,
   findBlock,
   findCell,
   insertEdgeCell,
+  listBlocks,
   migrateV1Builder,
   moveCell,
+  onsiteId,
   onsiteDocumentFromBuilder,
   parentCell,
   removeCell,
@@ -42,7 +45,6 @@ export class OnsiteCompositionEditor {
   private surface: HTMLElement | null;
   private toolbar: HTMLElement;
   private palette: HTMLElement;
-  private breadcrumb: HTMLElement;
   private handles: HTMLElement[] = [];
   private selection: CompositionSelection = { kind: "step", label: "Step" };
   private history: HistoryEntry[] = [];
@@ -70,16 +72,16 @@ export class OnsiteCompositionEditor {
     this.surface = root.querySelector<HTMLElement>("[data-movcues-builder-surface]");
     this.toolbar = document.createElement("div"); this.toolbar.dataset.movcuesCompositionToolbar = "";
     this.palette = document.createElement("div"); this.palette.dataset.movcuesBlockPalette = ""; this.palette.hidden = true;
-    this.breadcrumb = document.createElement("nav"); this.breadcrumb.dataset.movcuesBreadcrumb = ""; this.breadcrumb.setAttribute("aria-label", "Selected layout path");
   }
 
   start(): void {
     if (!this.surface) return;
+    const repaired = this.repairDocumentStructure();
     this.compileAndPatch();
     const style = document.createElement("style"); style.dataset.movcuesCompositionStyle = ""; style.textContent = AUTHORING_STYLE; this.root.append(style);
-    this.toolbar.innerHTML = `<button data-command="add" title="Add block">＋ Add</button><button data-command="columns" title="Split into columns">⇆</button><button data-command="rows" title="Split into rows">⇅</button><button data-command="parent" title="Select parent">↑</button><button data-command="duplicate" title="Duplicate">⧉</button><button data-command="move-up" title="Move before">←</button><button data-command="move-down" title="Move after">→</button><button data-command="delete" title="Delete">⌫</button>`;
+    this.toolbar.innerHTML = `<button data-command="add" title="Add block" aria-label="Add block">+ Add</button><button data-command="columns" title="Split into columns" aria-label="Split into columns">Cols</button><button data-command="rows" title="Split into rows" aria-label="Split into rows">Rows</button><button data-command="parent" title="Select parent" aria-label="Select parent">Up</button><button data-command="duplicate" title="Duplicate" aria-label="Duplicate">Copy</button><button data-command="move-up" title="Move before" aria-label="Move before">&lt;</button><button data-command="move-down" title="Move after" aria-label="Move after">&gt;</button><button data-command="delete" title="Delete" aria-label="Delete">Del</button>`;
     this.palette.innerHTML = (Object.keys(BLOCK_LABEL) as OnsiteBlock["type"][]).map(type => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
-    this.root.append(this.toolbar, this.palette, this.breadcrumb);
+    this.root.append(this.toolbar, this.palette);
     this.surface.addEventListener("click", this.onSurfaceClick);
     this.surface.addEventListener("dblclick", this.onDoubleClick);
     this.surface.addEventListener("input", this.onInput);
@@ -91,7 +93,7 @@ export class OnsiteCompositionEditor {
     this.palette.addEventListener("click", this.onPaletteClick);
     this.root.addEventListener("scroll", this.positionTools, true);
     window.addEventListener("scroll", this.positionTools, true); window.addEventListener("resize", this.positionTools);
-    this.select({ kind: "step", label: "Step" }); this.pushHistory(); if (this.migrated) this.callbacks.onChange();
+    this.select({ kind: "step", label: "Step" }); this.pushHistory(); if (this.migrated || repaired) this.callbacks.onChange();
   }
 
   getDocument(): OnsiteDocument { return this.document; }
@@ -106,6 +108,7 @@ export class OnsiteCompositionEditor {
   flush(): boolean {
     if (this.composing) return false;
     clearTimeout(this.compileTimer); this.compileTimer = 0;
+    this.repairDocumentStructure();
     const validation = validateOnsiteDocument(this.document); this.callbacks.onValidation(validation.errors); if (!validation.valid) return false;
     const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType); Object.assign(this.content, compiled.content); return true;
   }
@@ -127,14 +130,28 @@ export class OnsiteCompositionEditor {
   }
 
   insertBlock(type: OnsiteBlock["type"]): boolean {
-    const cell = this.getSelectedCell(); if (!cell || cell.children) return false;
-    if (cell.block && !window.confirm("Replace the block in this cell? You can undo this change.")) return false;
-    this.beforeTransaction(); const block = createBlock(type, this.guide); cell.block = block; this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: cell.id, blockId: block.id, blockType: type }); return true;
+    const cell = this.getSelectedCell(); if (!cell) return false;
+    this.beforeTransaction(); const block = createBlock(type, this.guide);
+    if (cell.children) {
+      const added = emptyCell(block); cell.children.push(added);
+      this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: added.id, blockId: block.id, blockType: type }); return true;
+    }
+    if (!cell.block) {
+      cell.block = block;
+      this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: cell.id, blockId: block.id, blockType: type }); return true;
+    }
+    // Adding from a selected block inserts the new block after it instead of
+    // silently replacing the author’s current content.
+    const addedId = duplicateCell(this.document, cell.id) ?? splitCell(this.document, cell.id, "column");
+    const added = addedId ? findCell(this.document, addedId) : null;
+    if (!added) return false;
+    delete added.children; added.block = block;
+    this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: added.id, blockId: block.id, blockType: type }); return true;
   }
   split(direction: "row" | "column"): boolean { const cell = this.getSelectedCell(); if (!cell) return false; this.beforeTransaction(); const id = splitCell(this.document, cell.id, direction); if (!id) return false; this.commit({ kind: "cell", label: direction === "row" ? "Right cell" : "Lower cell", cellId: id }); return true; }
   addEdge(edge: "top" | "right" | "bottom" | "left"): void { this.beforeTransaction(); const id = insertEdgeCell(this.document, edge); this.commit({ kind: "cell", label: `${edge} cell`, cellId: id }); }
   duplicate(): boolean { const cell = this.getSelectedCell(); if (!cell || cell === this.document.root) return false; this.beforeTransaction(); const id = duplicateCell(this.document, cell.id); if (!id) return false; this.commit({ kind: "cell", label: "Duplicated cell", cellId: id }); return true; }
-  remove(): boolean { const cell = this.getSelectedCell(); if (!cell || cell === this.document.root) return false; if (!window.confirm("Delete this cell and its content?")) return false; this.beforeTransaction(); const parent = parentCell(this.document, cell.id); if (!removeCell(this.document, cell.id)) return false; this.commit(parent ? { kind: "cell", label: "Parent cell", cellId: parent.id } : { kind: "step", label: "Step" }); return true; }
+  remove(): boolean { const cell = this.getSelectedCell(); if (!cell || cell === this.document.root) return false; this.beforeTransaction(); const parent = parentCell(this.document, cell.id); if (!removeCell(this.document, cell.id)) return false; this.commit(parent ? { kind: "cell", label: "Parent cell", cellId: parent.id } : { kind: "step", label: "Step" }); return true; }
   move(delta: -1 | 1): boolean { const cell = this.getSelectedCell(); if (!cell) return false; this.beforeTransaction(); if (!moveCell(this.document, cell.id, delta)) return false; this.commit(this.selection); return true; }
 
   updateCell(update: Partial<Pick<OnsiteCell, "direction" | "align" | "justify" | "gap" | "padding" | "style" | "responsiveStack">> & { sizing?: OnsiteSizing }): void {
@@ -161,17 +178,39 @@ export class OnsiteCompositionEditor {
   private select(selection: CompositionSelection): void {
     this.selection = selection; this.surface?.querySelectorAll("[data-movcues-editor-selected]").forEach(element => element.removeAttribute("data-movcues-editor-selected"));
     const target = selection.kind === "block" ? this.surface?.querySelector(`[data-movcues-block-id="${selection.blockId}"]`) : selection.kind === "cell" ? this.surface?.querySelector(`[data-movcues-node-id="${selection.cellId}"]`) : this.surface?.querySelector(".movcues-widget");
-    target?.setAttribute("data-movcues-editor-selected", selection.kind); this.callbacks.onSelectionChange(selection); this.renderBreadcrumb(); this.renderResizeHandles(); requestAnimationFrame(this.positionTools);
+    target?.setAttribute("data-movcues-editor-selected", selection.kind); this.syncToolbarState(); this.callbacks.onSelectionChange(selection); this.renderResizeHandles(); requestAnimationFrame(this.positionTools);
   }
 
-  private beforeTransaction(): void { clearTimeout(this.typingTimer); this.flush(); }
-  private commit(selection: CompositionSelection): void { this.selection = selection; this.compileAndPatch(); this.pushHistory(); this.callbacks.onChange(); this.select(selection); }
+  private beforeTransaction(): void { clearTimeout(this.typingTimer); this.repairDocumentStructure(); this.flush(); }
+  private commit(selection: CompositionSelection): void { this.repairDocumentStructure(); this.selection = selection; this.compileAndPatch(); this.pushHistory(); this.callbacks.onChange(); this.select(selection); }
   private compileAndPatch(): void {
     const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType); Object.assign(this.content, compiled.content);
     const template = document.createElement("template"); template.innerHTML = compiled.html; this.surface?.replaceChildren(...Array.from(template.content.childNodes));
     const style = this.root.querySelector<HTMLStyleElement>("style[data-movcues-builder-style]"); if (style) style.textContent = `${compiled.css}\n[data-movcues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movcues-builder-surface]>.movcues-widget{position:relative!important;inset:auto!important}`;
   }
-  private scheduleCompile(): void { clearTimeout(this.compileTimer); this.compileTimer = window.setTimeout(() => { if (!this.destroyed && !this.composing) { const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType); Object.assign(this.content, compiled.content); this.callbacks.onValidation(validateOnsiteDocument(this.document).errors); } }, 160); }
+  private scheduleCompile(): void { clearTimeout(this.compileTimer); this.compileTimer = window.setTimeout(() => { if (!this.destroyed && !this.composing) { this.repairDocumentStructure(); const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType); Object.assign(this.content, compiled.content); this.callbacks.onValidation(validateOnsiteDocument(this.document).errors); } }, 160); }
+
+  private repairDocumentStructure(): boolean {
+    let repaired = false; const blockIds = new Set<string>();
+    const repair = (cell: OnsiteCell): void => {
+      if (cell.children && cell.block) {
+        const block = cell.block; delete cell.block;
+        // Keep a single copy when an earlier malformed mutation stored the same
+        // block both on a layout cell and within one of its descendants.
+        if (!cell.children.some(child => listBlocks(child).some(candidate => candidate.id === block.id))) cell.children.unshift(emptyCell(block));
+        repaired = true;
+      }
+      cell.children?.forEach(repair);
+      if (!cell.block) return;
+      if (blockIds.has(cell.block.id)) {
+        cell.block.id = onsiteId("block");
+        if (cell.block.type === "button") cell.block.action.id = onsiteId("action");
+        repaired = true;
+      }
+      blockIds.add(cell.block.id);
+    };
+    repair(this.document.root); return repaired;
+  }
 
   private pushHistory(): void {
     const document = cloneOnsite(this.document); const bytes = JSON.stringify(document).length; const entry = { document, selection: cloneOnsite(this.selection), bytes };
@@ -196,26 +235,43 @@ export class OnsiteCompositionEditor {
   private onCompositionEnd = (): void => { this.composing = false; this.scheduleCompile(); };
   private onSurfaceKeyDown = (event: KeyboardEvent): void => { if (event.key === "Escape" && event.target instanceof HTMLElement && event.target.isContentEditable) { event.target.blur(); event.preventDefault(); } if ((event.ctrlKey || event.metaKey) && !(event.target instanceof HTMLElement && event.target.isContentEditable)) { if (event.key === "ArrowUp") { this.selectParent(); event.preventDefault(); } if (event.key === "ArrowDown") { this.selectChild(); event.preventDefault(); } } };
 
-  private onToolbarClick = (event: Event): void => { const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-command]") : null; if (!button) return; const command = button.dataset.command; if (command === "add") { this.palette.hidden = !this.palette.hidden; this.positionTools(); } else if (command === "columns") this.split("row"); else if (command === "rows") this.split("column"); else if (command === "parent") this.selectParent(); else if (command === "duplicate") this.duplicate(); else if (command === "delete") this.remove(); else if (command === "move-up") this.move(-1); else if (command === "move-down") this.move(1); };
-  private onPaletteClick = (event: Event): void => { const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-insert-block]") : null; if (!button) return; if (this.insertBlock(button.dataset.insertBlock as OnsiteBlock["type"])) this.palette.hidden = true; };
+  private onToolbarClick = (event: Event): void => { const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-command]") : null; if (!button || button.disabled) return; event.preventDefault(); event.stopPropagation(); const command = button.dataset.command; if (command === "add") { this.palette.hidden = !this.palette.hidden; this.positionTools(); } else if (command === "columns") this.split("row"); else if (command === "rows") this.split("column"); else if (command === "parent") this.selectParent(); else if (command === "duplicate") this.duplicate(); else if (command === "delete") this.remove(); else if (command === "move-up") this.move(-1); else if (command === "move-down") this.move(1); };
+  private onPaletteClick = (event: Event): void => { const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-insert-block]") : null; if (!button) return; event.preventDefault(); event.stopPropagation(); if (this.insertBlock(button.dataset.insertBlock as OnsiteBlock["type"])) this.palette.hidden = true; };
 
-  private renderBreadcrumb(): void {
-    const path: OnsiteCell[] = []; const targetId = this.selection.kind === "step" ? null : this.selection.cellId;
-    const find = (cell: OnsiteCell): boolean => { path.push(cell); if (cell.id === targetId) return true; for (const child of cell.children ?? []) if (find(child)) return true; path.pop(); return false; };
-    if (targetId) find(this.document.root);
-    this.breadcrumb.innerHTML = `<button type="button" data-breadcrumb-step>Step</button>${path.map((cell, index) => `<span>›</span><button type="button" data-breadcrumb-cell="${cell.id}">${index ? "Cell" : "Root"}</button>`).join("")}${this.selection.kind === "block" ? `<span>›</span><button type="button" data-breadcrumb-block="${this.selection.blockId}">${BLOCK_LABEL[this.selection.blockType]}</button>` : ""}`;
-    this.breadcrumb.onclick = event => { const element = event.target as HTMLElement; if (element.closest("[data-breadcrumb-step]")) this.selectStep(); const id = element.closest<HTMLElement>("[data-breadcrumb-cell]")?.dataset.breadcrumbCell; if (id) this.select({ kind: "cell", label: "Cell", cellId: id }); };
+  private syncToolbarState(): void {
+    const cell = this.getSelectedCell(); const atRoot = !cell || cell === this.document.root;
+    for (const command of ["delete", "duplicate"] as const) {
+      const button = this.toolbar.querySelector<HTMLButtonElement>(`[data-command="${command}"]`); if (!button) continue;
+      button.disabled = atRoot; button.title = atRoot ? "Select an element to use this action" : command === "delete" ? "Delete selected element (Undo is available)" : "Duplicate";
+    }
   }
 
   private positionTools = (): void => {
     const selector = this.selection.kind === "block" ? `[data-movcues-block-id="${this.selection.blockId}"]` : this.selection.kind === "cell" ? `[data-movcues-node-id="${this.selection.cellId}"]` : ".movcues-widget";
-    const target = this.surface?.querySelector<HTMLElement>(selector); if (!target) { this.toolbar.hidden = true; this.breadcrumb.hidden = true; return; }
-    const rect = target.getBoundingClientRect(); this.toolbar.hidden = false; this.breadcrumb.hidden = false;
-    const toolbarRect = this.toolbar.getBoundingClientRect(); const left = Math.max(6, Math.min(innerWidth - toolbarRect.width - 6, rect.left)); const top = Math.max(6, rect.top - toolbarRect.height - 6);
-    this.toolbar.style.transform = `translate(${left}px,${top}px)`; this.breadcrumb.style.transform = `translate(${Math.max(6, Math.min(innerWidth - 300, rect.left))}px,${Math.min(innerHeight - 34, rect.bottom + 5)}px)`;
+    const target = this.surface?.querySelector<HTMLElement>(selector); if (!target) { this.toolbar.hidden = true; return; }
+    const rect = target.getBoundingClientRect(); this.toolbar.hidden = false;
+    const toolbarRect = this.toolbar.getBoundingClientRect(); const bounds = this.availableCanvasBounds();
+    const left = Math.max(bounds.left, Math.min(bounds.right - toolbarRect.width, rect.left));
+    // Keep the editing chrome out of the widget itself whenever there is room.
+    // A banner/root selection commonly starts at the very top of the page, where
+    // the old "toolbar above + breadcrumb below" pair covered authored content.
+    const below = rect.bottom + 8;
+    const above = rect.top - toolbarRect.height - 8;
+    const top = below + toolbarRect.height <= bounds.bottom ? below : above >= bounds.top ? above : Math.max(bounds.top, Math.min(bounds.bottom - toolbarRect.height, below));
+    this.toolbar.style.transform = `translate(${left}px,${top}px)`;
     if (!this.palette.hidden) this.palette.style.transform = `translate(${left}px,${Math.min(innerHeight - 220, top + toolbarRect.height + 4)}px)`;
     this.positionHandles();
   };
+
+  private availableCanvasBounds(): { left: number; right: number; top: number; bottom: number } {
+    const inset = 6; const aside = this.root.querySelector<HTMLElement>("aside"); const panel = aside?.getBoundingClientRect();
+    let left = inset; let right = innerWidth - inset;
+    if (panel && panel.width > 0 && panel.height > 0) {
+      if (panel.left < innerWidth / 2) left = Math.max(left, panel.right + inset);
+      else right = Math.min(right, panel.left - inset);
+    }
+    return { left, right: Math.max(left, right), top: inset, bottom: innerHeight - inset };
+  }
 
   private renderResizeHandles(): void { this.handles.forEach(handle => handle.remove()); this.handles = []; const cell = this.getSelectedCell(); const parent = cell ? parentCell(this.document, cell.id) : null; if (!cell || !parent?.children) return; const index = parent.children.findIndex(child => child.id === cell.id); const next = parent.children[index + 1]; if (!next) return; const handle = document.createElement("button"); handle.type = "button"; handle.dataset.movcuesResizeHandle = parent.direction; handle.dataset.first = cell.id; handle.dataset.second = next.id; handle.setAttribute("aria-label", `Resize ${parent.direction === "row" ? "columns" : "rows"}`); handle.addEventListener("pointerdown", this.startResize); handle.addEventListener("keydown", this.resizeWithKeyboard); this.root.append(handle); this.handles.push(handle); this.positionHandles(); }
   private positionHandles(): void { for (const handle of this.handles) { const first = this.surface?.querySelector<HTMLElement>(`[data-movcues-node-id="${handle.dataset.first}"]`); if (!first) continue; const rect = first.getBoundingClientRect(); const row = handle.dataset.movcuesResizeHandle === "row"; handle.style.transform = `translate(${row ? rect.right - 5 : rect.left + rect.width / 2 - 14}px,${row ? rect.top + rect.height / 2 - 14 : rect.bottom - 5}px)`; } }
@@ -226,15 +282,14 @@ export class OnsiteCompositionEditor {
   };
   private resizeWithKeyboard = (event: KeyboardEvent): void => { if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return; const handle = event.currentTarget as HTMLElement; const first = findCell(this.document, handle.dataset.first!); const weight = first?.sizing.mode === "flexible" ? first.sizing.weight : 1; const increase = event.key === "ArrowRight" || event.key === "ArrowDown"; this.beforeTransaction(); if (resizeSiblings(this.document, handle.dataset.first!, handle.dataset.second!, weight + (increase ? .1 : -.1))) this.commit(this.selection); event.preventDefault(); };
 
-  destroy(): void { this.destroyed = true; clearTimeout(this.compileTimer); clearTimeout(this.typingTimer); cancelAnimationFrame(this.resizeFrame); this.resizeCleanup?.(); this.surface?.removeEventListener("click", this.onSurfaceClick); this.surface?.removeEventListener("dblclick", this.onDoubleClick); this.surface?.removeEventListener("input", this.onInput); this.surface?.removeEventListener("blur", this.onBlur, true); this.surface?.removeEventListener("compositionstart", this.onCompositionStart); this.surface?.removeEventListener("compositionend", this.onCompositionEnd); this.surface?.removeEventListener("keydown", this.onSurfaceKeyDown); this.toolbar.remove(); this.palette.remove(); this.breadcrumb.remove(); this.handles.forEach(handle => handle.remove()); this.root.querySelector("style[data-movcues-composition-style]")?.remove(); window.removeEventListener("scroll", this.positionTools, true); window.removeEventListener("resize", this.positionTools); }
+  destroy(): void { this.destroyed = true; clearTimeout(this.compileTimer); clearTimeout(this.typingTimer); cancelAnimationFrame(this.resizeFrame); this.resizeCleanup?.(); this.surface?.removeEventListener("click", this.onSurfaceClick); this.surface?.removeEventListener("dblclick", this.onDoubleClick); this.surface?.removeEventListener("input", this.onInput); this.surface?.removeEventListener("blur", this.onBlur, true); this.surface?.removeEventListener("compositionstart", this.onCompositionStart); this.surface?.removeEventListener("compositionend", this.onCompositionEnd); this.surface?.removeEventListener("keydown", this.onSurfaceKeyDown); this.toolbar.remove(); this.palette.remove(); this.handles.forEach(handle => handle.remove()); this.root.querySelector("style[data-movcues-composition-style]")?.remove(); window.removeEventListener("scroll", this.positionTools, true); window.removeEventListener("resize", this.positionTools); }
 }
 
 const AUTHORING_STYLE = `
 [data-movcues-editor-selected=step]{outline:2px solid #2563eb!important;outline-offset:3px}[data-movcues-editor-selected=cell]{outline:2px solid #0ea5e9!important;outline-offset:-2px}[data-movcues-editor-selected=block]{outline:2px solid #2563eb!important;outline-offset:2px}
-[data-movcues-composition-toolbar],[data-movcues-block-palette],[data-movcues-breadcrumb],[data-movcues-resize-handle]{position:fixed;left:0;top:0;z-index:2147483646;pointer-events:auto;font:12px/1.2 ui-sans-serif,system-ui,sans-serif}
-[data-movcues-composition-toolbar]{display:flex;gap:2px;padding:4px;border:1px solid #dbe2ea;border-radius:8px;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.18)}[data-movcues-composition-toolbar] button,[data-movcues-block-palette] button,[data-movcues-breadcrumb] button{min-height:28px;padding:5px 7px;border:0;border-radius:5px;background:transparent;color:#334155;font:600 11px inherit;cursor:pointer}[data-movcues-composition-toolbar] button:hover,[data-movcues-block-palette] button:hover{background:#eff6ff;color:#1d4ed8}
+[data-movcues-composition-toolbar],[data-movcues-block-palette],[data-movcues-resize-handle]{position:fixed;left:0;top:0;z-index:2147483646;pointer-events:auto;font:12px/1.2 ui-sans-serif,system-ui,sans-serif}
+[data-movcues-composition-toolbar]{display:flex;gap:2px;max-width:calc(100vw - 12px);overflow:auto;padding:4px;border:1px solid #dbe2ea;border-radius:8px;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.18)}[data-movcues-composition-toolbar] button,[data-movcues-block-palette] button{min-height:28px;padding:5px 7px;border:0;border-radius:5px;background:transparent;color:#334155;font:600 11px inherit;cursor:pointer}[data-movcues-composition-toolbar] button:hover:not(:disabled),[data-movcues-block-palette] button:hover{background:#eff6ff;color:#1d4ed8}[data-movcues-composition-toolbar] button:disabled{cursor:not-allowed;opacity:.42}
 [data-movcues-block-palette]{display:grid;grid-template-columns:repeat(2,minmax(76px,1fr));gap:3px;width:180px;padding:6px;border:1px solid #dbe2ea;border-radius:9px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,.2)}[data-movcues-block-palette][hidden]{display:none}
-[data-movcues-breadcrumb]{display:flex;align-items:center;max-width:min(360px,calc(100vw - 12px));overflow:auto;padding:2px 4px;border:1px solid #dbe2ea;border-radius:7px;background:#fff;box-shadow:0 5px 16px rgba(15,23,42,.14);white-space:nowrap}[data-movcues-breadcrumb] span{color:#94a3b8}
 [data-movcues-resize-handle]{width:28px;height:28px;padding:0;border:2px solid #fff;border-radius:50%;background:#2563eb;box-shadow:0 2px 8px rgba(15,23,42,.25);cursor:col-resize}[data-movcues-resize-handle=column]{cursor:row-resize}[contenteditable=true]{cursor:text!important;outline:2px solid #60a5fa!important;outline-offset:2px}
 `;
 function escapeHtmlAttribute(value: string): string { return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;"); }

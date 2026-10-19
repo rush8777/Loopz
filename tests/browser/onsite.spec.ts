@@ -106,6 +106,28 @@ test('contextual inspector follows block, cell and step selection',async({page})
   await page.locator('[data-select-step]').click();await expect(page.locator('[data-inspector=step]')).toBeVisible();
 });
 
+test('adding from a selected block inserts a new block instead of replacing it',async({page})=>{
+  await startController(page);const heading=page.locator('[data-movcues-experience] h2');await heading.click();
+  await page.locator('[data-command=add]').click();await page.locator('[data-insert-block=image]').click();
+  await expect(page.locator('[data-movcues-experience] h2')).toHaveCount(1);await expect(page.locator('[data-movcues-experience] img')).toHaveCount(1);
+});
+
+test('delete removes the selected block immediately and the editor remains interactive',async({page})=>{
+  await startController(page);const heading=page.locator('[data-movcues-experience] h2');await heading.click();
+  await expect(page.locator('[data-command=delete]')).toBeEnabled();await page.locator('[data-command=delete]').click();
+  await expect(heading).toHaveCount(0);const body=page.locator('[data-movcues-experience] [data-movcues-content=body]');await body.click();
+  await expect(page.locator('[data-inspector=block]')).toBeVisible();
+});
+
+test('structured editor keeps one compact toolbar outside a banner widget and clear of the inspector',async({page})=>{
+  await startController(page,{widgetType:'banner'});
+  const toolbar=page.locator('[data-movcues-composition-toolbar]');const widget=page.locator('[data-movcues-experience] .movcues-widget');const inspector=page.locator('[data-movcues-editor] aside');
+  await expect(toolbar).toBeVisible();await expect(page.locator('[data-movcues-breadcrumb]')).toHaveCount(0);
+  const [toolbarBox,widgetBox,inspectorBox]=await Promise.all([toolbar.boundingBox(),widget.boundingBox(),inspector.boundingBox()]);
+  expect(toolbarBox!.y).toBeGreaterThanOrEqual(widgetBox!.y+widgetBox!.height-1);
+  expect(toolbarBox!.x+toolbarBox!.width).toBeLessThanOrEqual(inspectorBox!.x+1);
+});
+
 test('nested cell insertion and one-transaction pointer resize stay within the widget',async({page})=>{
   await startController(page);const heading=page.locator('[data-movcues-experience] h2');await heading.click();await page.locator('[data-command=columns]').click();
   await page.locator('[data-command=add]').click();await page.locator('[data-insert-block=image]').click();await heading.click();

@@ -31,7 +31,6 @@ export declare class OnsiteCompositionEditor {
     private surface;
     private toolbar;
     private palette;
-    private breadcrumb;
     private handles;
     private selection;
     private history;
@@ -94,6 +93,7 @@ export declare class OnsiteCompositionEditor {
     private commit;
     private compileAndPatch;
     private scheduleCompile;
+    private repairDocumentStructure;
     private pushHistory;
     private restore;
     private onSurfaceClick;
@@ -105,8 +105,9 @@ export declare class OnsiteCompositionEditor {
     private onSurfaceKeyDown;
     private onToolbarClick;
     private onPaletteClick;
-    private renderBreadcrumb;
+    private syncToolbarState;
     private positionTools;
+    private availableCanvasBounds;
     private renderResizeHandles;
     private positionHandles;
     private startResize;

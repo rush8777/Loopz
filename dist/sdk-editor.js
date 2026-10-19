@@ -2993,7 +2993,9 @@ ${ISOLATION_CSS}`;
       };
       this.onToolbarClick = (event) => {
         const button = event.target instanceof Element ? event.target.closest("button[data-command]") : null;
-        if (!button) return;
+        if (!button || button.disabled) return;
+        event.preventDefault();
+        event.stopPropagation();
         const command = button.dataset.command;
         if (command === "add") {
           this.palette.hidden = !this.palette.hidden;
@@ -3009,6 +3011,8 @@ ${ISOLATION_CSS}`;
       this.onPaletteClick = (event) => {
         const button = event.target instanceof Element ? event.target.closest("[data-insert-block]") : null;
         if (!button) return;
+        event.preventDefault();
+        event.stopPropagation();
         if (this.insertBlock(button.dataset.insertBlock)) this.palette.hidden = true;
       };
       this.positionTools = () => {
@@ -3017,17 +3021,17 @@ ${ISOLATION_CSS}`;
         const target = (_a = this.surface) == null ? void 0 : _a.querySelector(selector);
         if (!target) {
           this.toolbar.hidden = true;
-          this.breadcrumb.hidden = true;
           return;
         }
         const rect = target.getBoundingClientRect();
         this.toolbar.hidden = false;
-        this.breadcrumb.hidden = false;
         const toolbarRect = this.toolbar.getBoundingClientRect();
-        const left = Math.max(6, Math.min(innerWidth - toolbarRect.width - 6, rect.left));
-        const top = Math.max(6, rect.top - toolbarRect.height - 6);
+        const bounds = this.availableCanvasBounds();
+        const left = Math.max(bounds.left, Math.min(bounds.right - toolbarRect.width, rect.left));
+        const below = rect.bottom + 8;
+        const above = rect.top - toolbarRect.height - 8;
+        const top = below + toolbarRect.height <= bounds.bottom ? below : above >= bounds.top ? above : Math.max(bounds.top, Math.min(bounds.bottom - toolbarRect.height, below));
         this.toolbar.style.transform = `translate(${left}px,${top}px)`;
-        this.breadcrumb.style.transform = `translate(${Math.max(6, Math.min(innerWidth - 300, rect.left))}px,${Math.min(innerHeight - 34, rect.bottom + 5)}px)`;
         if (!this.palette.hidden) this.palette.style.transform = `translate(${left}px,${Math.min(innerHeight - 220, top + toolbarRect.height + 4)}px)`;
         this.positionHandles();
       };
@@ -3092,20 +3096,18 @@ ${ISOLATION_CSS}`;
       this.palette = document.createElement("div");
       this.palette.dataset.movcuesBlockPalette = "";
       this.palette.hidden = true;
-      this.breadcrumb = document.createElement("nav");
-      this.breadcrumb.dataset.movcuesBreadcrumb = "";
-      this.breadcrumb.setAttribute("aria-label", "Selected layout path");
     }
     start() {
       if (!this.surface) return;
+      const repaired = this.repairDocumentStructure();
       this.compileAndPatch();
       const style = document.createElement("style");
       style.dataset.movcuesCompositionStyle = "";
       style.textContent = AUTHORING_STYLE;
       this.root.append(style);
-      this.toolbar.innerHTML = `<button data-command="add" title="Add block">＋ Add</button><button data-command="columns" title="Split into columns">⇆</button><button data-command="rows" title="Split into rows">⇅</button><button data-command="parent" title="Select parent">↑</button><button data-command="duplicate" title="Duplicate">⧉</button><button data-command="move-up" title="Move before">←</button><button data-command="move-down" title="Move after">→</button><button data-command="delete" title="Delete">⌫</button>`;
+      this.toolbar.innerHTML = `<button data-command="add" title="Add block" aria-label="Add block">+ Add</button><button data-command="columns" title="Split into columns" aria-label="Split into columns">Cols</button><button data-command="rows" title="Split into rows" aria-label="Split into rows">Rows</button><button data-command="parent" title="Select parent" aria-label="Select parent">Up</button><button data-command="duplicate" title="Duplicate" aria-label="Duplicate">Copy</button><button data-command="move-up" title="Move before" aria-label="Move before">&lt;</button><button data-command="move-down" title="Move after" aria-label="Move after">&gt;</button><button data-command="delete" title="Delete" aria-label="Delete">Del</button>`;
       this.palette.innerHTML = Object.keys(BLOCK_LABEL).map((type) => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
-      this.root.append(this.toolbar, this.palette, this.breadcrumb);
+      this.root.append(this.toolbar, this.palette);
       this.surface.addEventListener("click", this.onSurfaceClick);
       this.surface.addEventListener("dblclick", this.onDoubleClick);
       this.surface.addEventListener("input", this.onInput);
@@ -3120,7 +3122,7 @@ ${ISOLATION_CSS}`;
       window.addEventListener("resize", this.positionTools);
       this.select({ kind: "step", label: "Step" });
       this.pushHistory();
-      if (this.migrated) this.callbacks.onChange();
+      if (this.migrated || repaired) this.callbacks.onChange();
     }
     getDocument() {
       return this.document;
@@ -3151,6 +3153,7 @@ ${ISOLATION_CSS}`;
       if (this.composing) return false;
       clearTimeout(this.compileTimer);
       this.compileTimer = 0;
+      this.repairDocumentStructure();
       const validation = validateOnsiteDocument(this.document);
       this.callbacks.onValidation(validation.errors);
       if (!validation.valid) return false;
@@ -3199,12 +3202,26 @@ ${ISOLATION_CSS}`;
     }
     insertBlock(type) {
       const cell = this.getSelectedCell();
-      if (!cell || cell.children) return false;
-      if (cell.block && !window.confirm("Replace the block in this cell? You can undo this change.")) return false;
+      if (!cell) return false;
       this.beforeTransaction();
       const block = createBlock(type, this.guide);
-      cell.block = block;
-      this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: cell.id, blockId: block.id, blockType: type });
+      if (cell.children) {
+        const added2 = emptyCell(block);
+        cell.children.push(added2);
+        this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: added2.id, blockId: block.id, blockType: type });
+        return true;
+      }
+      if (!cell.block) {
+        cell.block = block;
+        this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: cell.id, blockId: block.id, blockType: type });
+        return true;
+      }
+      const addedId = duplicateCell(this.document, cell.id) ?? splitCell(this.document, cell.id, "column");
+      const added = addedId ? findCell(this.document, addedId) : null;
+      if (!added) return false;
+      delete added.children;
+      added.block = block;
+      this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: added.id, blockId: block.id, blockType: type });
       return true;
     }
     split(direction) {
@@ -3233,7 +3250,6 @@ ${ISOLATION_CSS}`;
     remove() {
       const cell = this.getSelectedCell();
       if (!cell || cell === this.document.root) return false;
-      if (!window.confirm("Delete this cell and its content?")) return false;
       this.beforeTransaction();
       const parent = parentCell(this.document, cell.id);
       if (!removeCell(this.document, cell.id)) return false;
@@ -3338,16 +3354,18 @@ ${ISOLATION_CSS}`;
       (_a = this.surface) == null ? void 0 : _a.querySelectorAll("[data-movcues-editor-selected]").forEach((element) => element.removeAttribute("data-movcues-editor-selected"));
       const target = selection.kind === "block" ? (_b = this.surface) == null ? void 0 : _b.querySelector(`[data-movcues-block-id="${selection.blockId}"]`) : selection.kind === "cell" ? (_c = this.surface) == null ? void 0 : _c.querySelector(`[data-movcues-node-id="${selection.cellId}"]`) : (_d = this.surface) == null ? void 0 : _d.querySelector(".movcues-widget");
       target == null ? void 0 : target.setAttribute("data-movcues-editor-selected", selection.kind);
+      this.syncToolbarState();
       this.callbacks.onSelectionChange(selection);
-      this.renderBreadcrumb();
       this.renderResizeHandles();
       requestAnimationFrame(this.positionTools);
     }
     beforeTransaction() {
       clearTimeout(this.typingTimer);
+      this.repairDocumentStructure();
       this.flush();
     }
     commit(selection) {
+      this.repairDocumentStructure();
       this.selection = selection;
       this.compileAndPatch();
       this.pushHistory();
@@ -3369,11 +3387,35 @@ ${ISOLATION_CSS}`;
       clearTimeout(this.compileTimer);
       this.compileTimer = window.setTimeout(() => {
         if (!this.destroyed && !this.composing) {
+          this.repairDocumentStructure();
           const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType);
           Object.assign(this.content, compiled.content);
           this.callbacks.onValidation(validateOnsiteDocument(this.document).errors);
         }
       }, 160);
+    }
+    repairDocumentStructure() {
+      let repaired = false;
+      const blockIds = /* @__PURE__ */ new Set();
+      const repair = (cell) => {
+        var _a;
+        if (cell.children && cell.block) {
+          const block = cell.block;
+          delete cell.block;
+          if (!cell.children.some((child) => listBlocks(child).some((candidate) => candidate.id === block.id))) cell.children.unshift(emptyCell(block));
+          repaired = true;
+        }
+        (_a = cell.children) == null ? void 0 : _a.forEach(repair);
+        if (!cell.block) return;
+        if (blockIds.has(cell.block.id)) {
+          cell.block.id = onsiteId("block");
+          if (cell.block.type === "button") cell.block.action.id = onsiteId("action");
+          repaired = true;
+        }
+        blockIds.add(cell.block.id);
+      };
+      repair(this.document.root);
+      return repaired;
     }
     pushHistory() {
       const document2 = cloneOnsite(this.document);
@@ -3398,25 +3440,27 @@ ${ISOLATION_CSS}`;
       this.callbacks.onChange();
       this.select(this.selection);
     }
-    renderBreadcrumb() {
-      const path = [];
-      const targetId = this.selection.kind === "step" ? null : this.selection.cellId;
-      const find = (cell) => {
-        path.push(cell);
-        if (cell.id === targetId) return true;
-        for (const child of cell.children ?? []) if (find(child)) return true;
-        path.pop();
-        return false;
-      };
-      if (targetId) find(this.document.root);
-      this.breadcrumb.innerHTML = `<button type="button" data-breadcrumb-step>Step</button>${path.map((cell, index) => `<span>›</span><button type="button" data-breadcrumb-cell="${cell.id}">${index ? "Cell" : "Root"}</button>`).join("")}${this.selection.kind === "block" ? `<span>›</span><button type="button" data-breadcrumb-block="${this.selection.blockId}">${BLOCK_LABEL[this.selection.blockType]}</button>` : ""}`;
-      this.breadcrumb.onclick = (event) => {
-        var _a;
-        const element = event.target;
-        if (element.closest("[data-breadcrumb-step]")) this.selectStep();
-        const id = (_a = element.closest("[data-breadcrumb-cell]")) == null ? void 0 : _a.dataset.breadcrumbCell;
-        if (id) this.select({ kind: "cell", label: "Cell", cellId: id });
-      };
+    syncToolbarState() {
+      const cell = this.getSelectedCell();
+      const atRoot = !cell || cell === this.document.root;
+      for (const command of ["delete", "duplicate"]) {
+        const button = this.toolbar.querySelector(`[data-command="${command}"]`);
+        if (!button) continue;
+        button.disabled = atRoot;
+        button.title = atRoot ? "Select an element to use this action" : command === "delete" ? "Delete selected element (Undo is available)" : "Duplicate";
+      }
+    }
+    availableCanvasBounds() {
+      const inset = 6;
+      const aside = this.root.querySelector("aside");
+      const panel = aside == null ? void 0 : aside.getBoundingClientRect();
+      let left = inset;
+      let right = innerWidth - inset;
+      if (panel && panel.width > 0 && panel.height > 0) {
+        if (panel.left < innerWidth / 2) left = Math.max(left, panel.right + inset);
+        else right = Math.min(right, panel.left - inset);
+      }
+      return { left, right: Math.max(left, right), top: inset, bottom: innerHeight - inset };
     }
     renderResizeHandles() {
       this.handles.forEach((handle2) => handle2.remove());
@@ -3465,7 +3509,6 @@ ${ISOLATION_CSS}`;
       (_h = this.surface) == null ? void 0 : _h.removeEventListener("keydown", this.onSurfaceKeyDown);
       this.toolbar.remove();
       this.palette.remove();
-      this.breadcrumb.remove();
       this.handles.forEach((handle) => handle.remove());
       (_i = this.root.querySelector("style[data-movcues-composition-style]")) == null ? void 0 : _i.remove();
       window.removeEventListener("scroll", this.positionTools, true);
@@ -3474,10 +3517,9 @@ ${ISOLATION_CSS}`;
   }
   const AUTHORING_STYLE = `
 [data-movcues-editor-selected=step]{outline:2px solid #2563eb!important;outline-offset:3px}[data-movcues-editor-selected=cell]{outline:2px solid #0ea5e9!important;outline-offset:-2px}[data-movcues-editor-selected=block]{outline:2px solid #2563eb!important;outline-offset:2px}
-[data-movcues-composition-toolbar],[data-movcues-block-palette],[data-movcues-breadcrumb],[data-movcues-resize-handle]{position:fixed;left:0;top:0;z-index:2147483646;pointer-events:auto;font:12px/1.2 ui-sans-serif,system-ui,sans-serif}
-[data-movcues-composition-toolbar]{display:flex;gap:2px;padding:4px;border:1px solid #dbe2ea;border-radius:8px;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.18)}[data-movcues-composition-toolbar] button,[data-movcues-block-palette] button,[data-movcues-breadcrumb] button{min-height:28px;padding:5px 7px;border:0;border-radius:5px;background:transparent;color:#334155;font:600 11px inherit;cursor:pointer}[data-movcues-composition-toolbar] button:hover,[data-movcues-block-palette] button:hover{background:#eff6ff;color:#1d4ed8}
+[data-movcues-composition-toolbar],[data-movcues-block-palette],[data-movcues-resize-handle]{position:fixed;left:0;top:0;z-index:2147483646;pointer-events:auto;font:12px/1.2 ui-sans-serif,system-ui,sans-serif}
+[data-movcues-composition-toolbar]{display:flex;gap:2px;max-width:calc(100vw - 12px);overflow:auto;padding:4px;border:1px solid #dbe2ea;border-radius:8px;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.18)}[data-movcues-composition-toolbar] button,[data-movcues-block-palette] button{min-height:28px;padding:5px 7px;border:0;border-radius:5px;background:transparent;color:#334155;font:600 11px inherit;cursor:pointer}[data-movcues-composition-toolbar] button:hover:not(:disabled),[data-movcues-block-palette] button:hover{background:#eff6ff;color:#1d4ed8}[data-movcues-composition-toolbar] button:disabled{cursor:not-allowed;opacity:.42}
 [data-movcues-block-palette]{display:grid;grid-template-columns:repeat(2,minmax(76px,1fr));gap:3px;width:180px;padding:6px;border:1px solid #dbe2ea;border-radius:9px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,.2)}[data-movcues-block-palette][hidden]{display:none}
-[data-movcues-breadcrumb]{display:flex;align-items:center;max-width:min(360px,calc(100vw - 12px));overflow:auto;padding:2px 4px;border:1px solid #dbe2ea;border-radius:7px;background:#fff;box-shadow:0 5px 16px rgba(15,23,42,.14);white-space:nowrap}[data-movcues-breadcrumb] span{color:#94a3b8}
 [data-movcues-resize-handle]{width:28px;height:28px;padding:0;border:2px solid #fff;border-radius:50%;background:#2563eb;box-shadow:0 2px 8px rgba(15,23,42,.25);cursor:col-resize}[data-movcues-resize-handle=column]{cursor:row-resize}[contenteditable=true]{cursor:text!important;outline:2px solid #60a5fa!important;outline-offset:2px}
 `;
   function escapeHtmlAttribute(value) {
