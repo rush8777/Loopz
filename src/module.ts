@@ -4,6 +4,7 @@ import { EditorModeController } from "./experiences/editor/EditorModeController"
 import { ExperienceLoader } from "./experiences/runtime/ExperienceLoader";
 import type { AnalyticsRuntimeProviders } from "./experiences/runtimeInterfaces";
 import type { AnalyticsConfig } from "./types/config";
+import type { FunnelStep } from "./types/funnel";
 
 /**
  * npm / ESM entry point - builds into dist/sdk.esm.js (see vite.config.ts,
