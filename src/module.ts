@@ -135,3 +135,27 @@ export type {
   Viewport,
   ScrollPosition,
 } from "./types/events";
+
+
+/**
+ * Type surface for the CDN-provided browser global. In browser code, use the
+ * bare `analytics.*` identifier; no `Window.analytics` augmentation is added.
+ */
+export interface AnalyticsGlobalApi {
+  init(config: AnalyticsConfig): void;
+  start(): void;
+  stop(): void;
+  destroy(): void;
+  event(name: string, properties?: Record<string, unknown>): void;
+  identify(userId: string, attributes?: Record<string, unknown>): void;
+  reset(): void;
+  page(): void;
+  defineFunnel(name: string, steps: FunnelStep[]): void;
+  launchExperience(experienceId: string): void;
+  enableDebug(): void;
+  disableDebug(): void;
+}
+
+declare global {
+  const analytics: AnalyticsGlobalApi;
+}
