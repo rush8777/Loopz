@@ -1,6 +1,7 @@
 import type { ExperienceBehavior, ExperienceContent, ExperienceDesign, ExperienceTarget, WidgetBuilderState, WidgetType } from "../types";
 import { mountBuilderContent } from "./BuilderContent";
 import { applyBuilderSizeContent, applyWidgetSizeEnvelope } from "./WidgetSizing";
+import { AnchoredTargetBackdrop } from "./AnchoredTargetBackdrop";
 
 export interface RenderCallbacks { onDismiss: () => void; onPrimary: () => void; onSecondary: () => void; onBack?: () => void }
 
@@ -118,6 +119,7 @@ export class AnchoredCardRenderer {
     this.destroy();
     const card = buildCard(root, content, design, behavior, callbacks, builder, widgetType);
     const pointer = behavior.pointer?.enabled === false ? null : buildPointer(card, design, behavior);
+    const backdrop = behavior.backdrop ? new AnchoredTargetBackdrop(root, card, behavior, design, callbacks.onDismiss) : null;
     let frameId: number | null = null;
     let destroyed = false;
     let hidden = false;
@@ -131,6 +133,7 @@ export class AnchoredCardRenderer {
       hidden = next;
       card.style.visibility = next ? "hidden" : "";
       card.style.pointerEvents = next ? "none" : "";
+      backdrop?.setHidden(next);
     };
     const update = () => {
       if (destroyed) return;
@@ -139,6 +142,7 @@ export class AnchoredCardRenderer {
         return;
       }
       const rect = target.getBoundingClientRect();
+      backdrop?.update(rect);
       if (measureCard || !cardSize) {
         const bounds = card.getBoundingClientRect();
         cardSize = { width: bounds.width, height: bounds.height };
@@ -175,6 +179,7 @@ export class AnchoredCardRenderer {
       () => window.removeEventListener("scroll", onScroll, true),
       () => window.removeEventListener("resize", onResize),
       () => { destroyed = true; if (frameId !== null) cancelAnimationFrame(frameId); frameId = null; },
+      () => backdrop?.destroy(),
     );
     if (typeof ResizeObserver !== "undefined") {
       const observer = new ResizeObserver((entries) => schedule(true, entries.some(entry => entry.target === card)));

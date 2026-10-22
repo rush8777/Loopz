@@ -58,6 +58,93 @@ describe("AnchoredCardRenderer", () => {
     renderer.destroy();
   });
 
+  it("dims around an anchored target while leaving its rectangle uncovered", () => {
+    const { card, renderer } = renderAt(rect(100, 120, 50, 20), { ...behavior, backdrop: true, backdropOpacity: 0.6 });
+    const root = card.getRootNode() as ShadowRoot;
+    const panels = Array.from(root.querySelectorAll<HTMLElement>("[data-movcues-target-backdrop]"));
+    const highlight = root.querySelector<HTMLElement>("[data-movcues-target-highlight]");
+
+    expect(panels).toHaveLength(4);
+    expect(panels[0].style.cssText).toContain("rgba(0, 0, 0, 0.6)");
+    expect(rectStyles(panels[0])).toEqual(["0px", "0px", "1000px", "120px"]);
+    expect(rectStyles(panels[1])).toEqual(["150px", "120px", "850px", "20px"]);
+    expect(rectStyles(panels[2])).toEqual(["0px", "140px", "1000px", "660px"]);
+    expect(rectStyles(panels[3])).toEqual(["0px", "120px", "100px", "20px"]);
+    expect(highlight && rectStyles(highlight)).toEqual(["100px", "120px", "50px", "20px"]);
+    expect(highlight?.style.outline).toBe("2px solid #2563eb");
+    expect(root.childNodes.item(root.childNodes.length - 1)).toBe(card);
+    renderer.destroy();
+  });
+
+  it("updates, hides, dismisses, and removes the target backdrop with the anchored card", () => {
+    let targetRect = rect(100, 120, 50, 20);
+    const dismiss = vi.fn();
+    const host = document.createElement("div"); const root = host.attachShadow({ mode: "open" });
+    const target = document.createElement("button"); target.getBoundingClientRect = () => targetRect;
+    document.body.append(target, host);
+    const renderer = new AnchoredCardRenderer();
+    const card = renderer.render(root, target, content, design, { ...behavior, backdrop: true, closeOnBackdrop: true }, { onDismiss: dismiss, onPrimary: vi.fn(), onSecondary: vi.fn() });
+    const top = root.querySelector<HTMLElement>('[data-movcues-target-backdrop="top"]')!;
+
+    top.click();
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    targetRect = rect(240, 260, 80, 30);
+    window.dispatchEvent(new Event("scroll")); flushFrames();
+    expect(rectStyles(top)).toEqual(["0px", "0px", "1000px", "260px"]);
+
+    targetRect = rect(100, -150, 50, 20);
+    window.dispatchEvent(new Event("scroll")); flushFrames();
+    expect(card.style.visibility).toBe("hidden");
+    expect(top.style.visibility).toBe("hidden");
+    renderer.destroy();
+    expect(root.querySelector("[data-movcues-target-backdrop]")).toBeNull();
+    expect(root.querySelector("[data-movcues-target-highlight]")).toBeNull();
+  });
+
+  it("locks user scrolling only while an anchored target backdrop is mounted", () => {
+    document.documentElement.style.setProperty("overflow", "clip");
+    document.body.style.setProperty("overflow", "auto", "important");
+    const { renderer } = renderAt(rect(100, 120, 50, 20), { ...behavior, backdrop: true });
+    const wheel = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 100 });
+    const touchmove = new Event("touchmove", { bubbles: true, cancelable: true });
+    const pageDown = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "PageDown" });
+
+    document.body.dispatchEvent(wheel);
+    document.body.dispatchEvent(touchmove);
+    document.body.dispatchEvent(pageDown);
+    const input = document.createElement("input"); document.body.appendChild(input);
+    const inputArrow = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "ArrowDown" });
+    input.dispatchEvent(inputArrow);
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(touchmove.defaultPrevented).toBe(true);
+    expect(pageDown.defaultPrevented).toBe(true);
+    expect(inputArrow.defaultPrevented).toBe(false);
+    expect(document.documentElement.style.getPropertyValue("overflow")).toBe("hidden");
+    expect(document.documentElement.style.getPropertyPriority("overflow")).toBe("important");
+    expect(document.body.style.getPropertyValue("overflow")).toBe("hidden");
+
+    renderer.destroy();
+    expect(document.documentElement.style.getPropertyValue("overflow")).toBe("clip");
+    expect(document.documentElement.style.getPropertyPriority("overflow")).toBe("");
+    expect(document.body.style.getPropertyValue("overflow")).toBe("auto");
+    expect(document.body.style.getPropertyPriority("overflow")).toBe("important");
+    const unlockedWheel = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 100 });
+    document.body.dispatchEvent(unlockedWheel);
+    expect(unlockedWheel.defaultPrevented).toBe(false);
+    document.documentElement.style.removeProperty("overflow");
+    document.body.style.removeProperty("overflow");
+  });
+
+  it("does not lock scrolling for anchored cards without a backdrop", () => {
+    const { renderer } = renderAt(rect(100, 120, 50, 20));
+    const wheel = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 100 });
+    document.body.dispatchEvent(wheel);
+
+    expect(wheel.defaultPrevented).toBe(false);
+    expect(document.documentElement.style.overflow).toBe("");
+    renderer.destroy();
+  });
+
   it.each([
     ["bottom", rect(400, 120, 50, 20), "100px", ""],
     ["top", rect(400, 220, 50, 20), "100px", ""],
@@ -367,4 +454,8 @@ function flushFrames(): void {
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {
   return { x: left, y: top, left, top, width, height, right: left + width, bottom: top + height, toJSON: () => ({}) } as DOMRect;
+}
+
+function rectStyles(element: HTMLElement): string[] {
+  return [element.style.left, element.style.top, element.style.width, element.style.height];
 }

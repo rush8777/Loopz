@@ -207,13 +207,13 @@ describe("experience editor and runtime", () => {
     const target = document.createElement("button"); target.id = "mixed-guide-target"; document.body.appendChild(target);
     const guide: DeliveredExperience = { id: "guide_mixed", versionId: "v1", kind: "guide", widgetType: null, priority: 40, definition: { design, steps: [
       { id: "modal-first", pattern: "modal", content: { heading: "Modal first", body: "One", primaryAction: { label: "Next", type: "next_step" } }, advance: { type: "button" }, behavior: { dismissible: true } },
-      { id: "anchored", pattern: "anchored_card", content: { heading: "Anchored middle", body: "Two", primaryAction: { label: "Next", type: "next_step" } }, advance: { type: "button" }, target: { primarySelector: "#mixed-guide-target", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true, placement: "auto", alignment: "center", offset: 8 } },
+      { id: "anchored", pattern: "anchored_card", content: { heading: "Anchored middle", body: "Two", primaryAction: { label: "Next", type: "next_step" } }, advance: { type: "button" }, target: { primarySelector: "#mixed-guide-target", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true, placement: "auto", alignment: "center", offset: 8, backdrop: true, backdropOpacity: 0.55 } },
       { id: "modal-last", pattern: "modal", content: { heading: "Modal last", body: "Three", primaryAction: { label: "Finish", type: "next_step" } }, advance: { type: "button" }, behavior: { dismissible: true } },
     ] } };
     const fetchMock = experienceFetch(() => [guide]); vi.stubGlobal("fetch", fetchMock); const loader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await loader.evaluate();
     let root = document.querySelector("[data-movcues-experience]")!.shadowRoot!; expect(root.querySelector(".modal")?.textContent).toContain("Modal first"); root.querySelector<HTMLButtonElement>(".primary")!.click();
-    root = document.querySelector("[data-movcues-experience]")!.shadowRoot!; expect(root.querySelector(".modal")).toBeNull(); expect(root.querySelector(".card")?.textContent).toContain("Anchored middle"); root.querySelector<HTMLButtonElement>(".primary")!.click();
-    root = document.querySelector("[data-movcues-experience]")!.shadowRoot!; expect(root.querySelector(".modal")?.textContent).toContain("Modal last"); loader.destroy();
+    root = document.querySelector("[data-movcues-experience]")!.shadowRoot!; expect(root.querySelector(".modal")).toBeNull(); expect(root.querySelector(".card")?.textContent).toContain("Anchored middle"); expect(root.querySelectorAll("[data-movcues-target-backdrop]")).toHaveLength(4); expect(document.documentElement.style.overflow).toBe("hidden"); root.querySelector<HTMLButtonElement>(".primary")!.click();
+    root = document.querySelector("[data-movcues-experience]")!.shadowRoot!; expect(root.querySelector(".modal")?.textContent).toContain("Modal last"); expect(document.documentElement.style.overflow).toBe(""); loader.destroy();
   });
 
   it("waits for the next Guide step's page before rendering it", async () => {

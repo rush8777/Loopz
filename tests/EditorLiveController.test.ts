@@ -5,7 +5,7 @@ import { EditorModeController } from "../src/experiences/editor/EditorModeContro
 import { ElementPicker } from "../src/experiences/editor/ElementPicker";
 import { TargetSelectorGenerator } from "../src/experiences/editor/TargetSelectorGenerator";
 import { ExperienceRenderer } from "../src/experiences/runtime/ExperienceRenderer";
-import type { EditorDraft, ExperienceDesign, ExperienceTargeting } from "../src/experiences/types";
+import type { EditorDraft, ExperienceDesign, ExperienceTargeting, RuntimeWidgetDefinition } from "../src/experiences/types";
 
 const design: ExperienceDesign = { width: "md", theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } };
 const targeting: ExperienceTargeting = { pageRules: [{ id: "dashboard", kind: "include", operator: "equals", value: "/dashboard" }], audience: { type: "all" }, trigger: { type: "page_load" }, frequency: { mode: "once_per_session" }, priority: 40, interruptPolicy: "queue" };
@@ -48,6 +48,49 @@ describe("live placement editor", () => {
     target.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 2, clientY: 2 }));
     expect(customerClicks).toBe(1);
     expect(document.querySelector("[data-movcues-experience]")).toBeNull();
+  });
+
+  it("offers and previews a target-cutout backdrop for anchored Tooltip widgets", async () => {
+    const target = document.createElement("button"); target.id = "checkout"; document.body.appendChild(target);
+    target.getBoundingClientRect = () => ({ x: 100, y: 120, left: 100, top: 120, width: 80, height: 32, right: 180, bottom: 152, toJSON: () => ({}) }) as DOMRect;
+    vi.stubGlobal("fetch", editorFetch(widgetDraft("anchored_card", "#checkout")));
+    controller = new EditorModeController("https://api.example.com");
+    expect(await controller.start("one-time-token")).toBe(true);
+
+    const group = editorRoot().querySelector<HTMLElement>('[data-for="backdrop"]')!;
+    const toggle = group.querySelector<HTMLInputElement>("[data-backdrop]")!;
+    expect(group.hidden).toBe(false);
+    expect(toggle.checked).toBe(false);
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event("change", { bubbles: true }));
+    editorRoot().querySelector<HTMLButtonElement>('[data-mode="preview"]')!.click();
+
+    const preview = document.querySelector<HTMLElement>("[data-movcues-experience]")?.shadowRoot;
+    expect(preview?.querySelectorAll("[data-movcues-target-backdrop]")).toHaveLength(4);
+    expect(preview?.querySelector("[data-movcues-target-highlight]")).not.toBeNull();
+    expect(document.documentElement.style.overflow).toBe("hidden");
+
+    editorRoot().querySelector<HTMLButtonElement>('[data-mode="target"]')!.click();
+    expect(document.querySelector<HTMLElement>("[data-movcues-experience]")?.shadowRoot?.querySelector("[data-movcues-target-backdrop]")).toBeNull();
+    expect(document.documentElement.style.overflow).toBe("");
+    expect(toggle.checked).toBe(true);
+    editorRoot().querySelector<HTMLButtonElement>('[data-mode="preview"]')!.click();
+    expect(document.querySelector<HTMLElement>("[data-movcues-experience]")?.shadowRoot?.querySelectorAll("[data-movcues-target-backdrop]")).toHaveLength(4);
+  });
+
+  it("offers the same backdrop behavior for anchored Guide steps", async () => {
+    const target = document.createElement("button"); target.id = "first"; document.body.appendChild(target);
+    const draft = guideDraft(); if (!("steps" in draft.version.definition)) throw new Error("Expected Guide");
+    draft.version.definition.steps[0].behavior.backdrop = true;
+    vi.stubGlobal("fetch", editorFetch(draft));
+    controller = new EditorModeController("https://api.example.com");
+    expect(await controller.start("one-time-token")).toBe(true);
+
+    const group = editorRoot().querySelector<HTMLElement>('[data-for="backdrop"]')!;
+    expect(group.hidden).toBe(false);
+    expect(group.querySelector<HTMLInputElement>("[data-backdrop]")?.checked).toBe(true);
+    editorRoot().querySelector<HTMLButtonElement>('[data-mode="preview"]')!.click();
+    expect(document.querySelector<HTMLElement>("[data-movcues-experience]")?.shadowRoot?.querySelectorAll("[data-movcues-target-backdrop]")).toHaveLength(4);
   });
 
   it("temporarily passes customer interaction through while Shift is held and restores selection on release", async () => {
@@ -184,6 +227,56 @@ describe("live placement editor", () => {
     await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
     const save = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
     expect(JSON.parse(String(save[1]?.body))).toMatchObject({ revision: 1, definition: { content: { heading: "Edited in context" }, builder: { html: expect.stringContaining("Edited in context") } } });
+  });
+
+  it("updates an on-site anchored pointer when the root background changes", async () => {
+    const draft = onsiteDraft(); draft.experience.widgetType = "anchored_card";
+    const definition = draft.version.definition as RuntimeWidgetDefinition;
+    definition.target = { primarySelector: "#anchor", fallbackSelectors: [], reliability: "reliable" };
+    const target = document.createElement("button"); target.id = "anchor"; document.body.appendChild(target);
+    const fetchMock = editorFetch(draft); vi.stubGlobal("fetch", fetchMock); controller = new EditorModeController("https://api.example.com");
+    expect(await controller.start("token")).toBe(true);
+    const previewHost = document.querySelector<HTMLElement>('[data-movcues-experience="exp_onsite"]')!;
+    const pointer = previewHost.shadowRoot!.querySelector<HTMLElement>(".movcues-anchor-pointer")!;
+    const previewStyle = previewHost.shadowRoot!.querySelector<HTMLStyleElement>("style[data-movcues-builder-style]")!;
+    const background = editorRoot().querySelector<HTMLInputElement>("[data-cell-background]")!;
+    background.value = "#123456"; background.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(document.querySelector('[data-movcues-experience="exp_onsite"]')).toBe(previewHost);
+    expect(previewStyle.textContent).not.toContain(".movcues-anchor-pointer");
+    expect(getComputedStyle(pointer).color).toBe("rgb(18, 52, 86)");
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH" && String(init.body).includes("#123456"))).toBe(true));
+    const saved = JSON.parse(String(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH").at(-1)![1]?.body));
+    expect(saved.definition.builder.css).not.toContain(".movcues-anchor-pointer");
+    editorRoot().querySelector<HTMLButtonElement>("[data-v2-undo]")!.click();
+    expect(pointer.style.color).toBe("rgb(255, 255, 255)");
+    expect(pointer.style.getPropertyPriority("color")).toBe("");
+    expect(previewStyle.textContent).not.toContain(".movcues-anchor-pointer");
+  });
+
+  it("preserves and keeps editing an on-site anchored card across mode changes", async () => {
+    const draft = onsiteDraft(); draft.experience.widgetType = "anchored_card";
+    const definition = draft.version.definition as RuntimeWidgetDefinition;
+    definition.target = { primarySelector: "#anchor", fallbackSelectors: [], reliability: "reliable" };
+    const target = document.createElement("button"); target.id = "anchor"; document.body.appendChild(target);
+    const fetchMock = editorFetch(draft); vi.stubGlobal("fetch", fetchMock); controller = new EditorModeController("https://api.example.com");
+    expect(await controller.start("token")).toBe(true);
+
+    let background = editorRoot().querySelector<HTMLInputElement>("[data-cell-background]")!;
+    background.value = "#123456"; background.dispatchEvent(new Event("change", { bubbles: true }));
+    editorRoot().querySelector<HTMLButtonElement>('[data-mode="target"]')!.click();
+    editorRoot().querySelector<HTMLButtonElement>('[data-mode="design"]')!.click();
+
+    background = editorRoot().querySelector<HTMLInputElement>("[data-cell-background]")!;
+    expect(background.value).toBe("#123456");
+    background.value = "#654321"; background.dispatchEvent(new Event("change", { bubbles: true }));
+    const host = document.querySelector<HTMLElement>('[data-movcues-experience="exp_onsite"]')!;
+    const builderStyle = host.shadowRoot!.querySelector<HTMLStyleElement>("style[data-movcues-builder-style]");
+    expect(builderStyle).not.toBeNull();
+    expect(host.shadowRoot!.querySelector(".builder-content .movcues-widget")).not.toBeNull();
+    expect(host.shadowRoot!.querySelector<HTMLElement>(".movcues-anchor-pointer")!.style.color).toBe("rgb(101, 67, 33)");
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH" && String(init.body).includes("#654321"))).toBe(true));
+    const saved = JSON.parse(String(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH").at(-1)![1]?.body));
+    expect(saved.definition.builder.projectData.movcues.onsiteDocument.root.style.background).toBe("#654321");
   });
 
   it("preserves local text and offers reload recovery after a revision conflict", async () => {

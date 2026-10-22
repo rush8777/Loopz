@@ -72,6 +72,7 @@ export declare class EditorModeController {
     private close;
     private renderPreview;
     private attachContentEditor;
+    private syncOnsiteAnchoredPointer;
     private currentBuilder;
     private currentContent;
     private syncContentInspector;

@@ -2769,6 +2769,113 @@ function applyBuilderSizeContent(card, widgetType, design) {
 function clamp$1(value, min, max) {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? Math.round(value) : min));
 }
+const PANEL_NAMES = ["top", "right", "bottom", "left"];
+const SCROLL_KEYS = /* @__PURE__ */ new Set(["ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "End", "Home", "PageDown", "PageUp", " "]);
+let scrollLockCount = 0;
+let scrollLockCleanup = null;
+class AnchoredTargetBackdrop {
+  constructor(root, card, behavior, design, onDismiss) {
+    this.panels = [];
+    this.releaseScrollLock = lockDocumentScroll();
+    const opacity = finiteClamp(behavior.backdropOpacity ?? 0.45, 0, 1);
+    this.panels = PANEL_NAMES.map((name) => {
+      const panel = document.createElement("div");
+      panel.dataset.movcuesTargetBackdrop = name;
+      panel.style.cssText = `position:fixed;box-sizing:border-box;background:rgba(0,0,0,${opacity});pointer-events:auto`;
+      if (behavior.closeOnBackdrop && behavior.dismissible) panel.addEventListener("click", onDismiss);
+      root.insertBefore(panel, card);
+      return panel;
+    });
+    this.highlight = document.createElement("div");
+    this.highlight.dataset.movcuesTargetHighlight = "";
+    this.highlight.style.cssText = "position:fixed;box-sizing:border-box;border-radius:4px;pointer-events:none";
+    this.highlight.style.outline = `2px solid ${design.theme.primary}`;
+    root.insertBefore(this.highlight, card);
+  }
+  update(rect) {
+    const viewportWidth = Math.max(0, innerWidth);
+    const viewportHeight = Math.max(0, innerHeight);
+    const left = finiteClamp(rect.left, 0, viewportWidth);
+    const right = finiteClamp(rect.right, 0, viewportWidth);
+    const top = finiteClamp(rect.top, 0, viewportHeight);
+    const bottom = finiteClamp(rect.bottom, 0, viewportHeight);
+    const middleHeight = Math.max(0, bottom - top);
+    setRect(this.panels[0], 0, 0, viewportWidth, top);
+    setRect(this.panels[1], right, top, Math.max(0, viewportWidth - right), middleHeight);
+    setRect(this.panels[2], 0, bottom, viewportWidth, Math.max(0, viewportHeight - bottom));
+    setRect(this.panels[3], 0, top, left, middleHeight);
+    setRect(this.highlight, rect.left, rect.top, Math.max(0, rect.width), Math.max(0, rect.height));
+  }
+  setHidden(hidden) {
+    const visibility = hidden ? "hidden" : "";
+    this.panels.forEach((panel) => {
+      panel.style.visibility = visibility;
+    });
+    this.highlight.style.visibility = visibility;
+  }
+  destroy() {
+    this.releaseScrollLock();
+    this.panels.forEach((panel) => panel.remove());
+    this.panels = [];
+    this.highlight.remove();
+  }
+}
+function lockDocumentScroll() {
+  var _a;
+  scrollLockCount += 1;
+  if (scrollLockCount === 1) {
+    const rootStyle = captureProperty(document.documentElement.style, "overflow");
+    const bodyStyle = document.body ? captureProperty(document.body.style, "overflow") : null;
+    document.documentElement.style.setProperty("overflow", "hidden", "important");
+    (_a = document.body) == null ? void 0 : _a.style.setProperty("overflow", "hidden", "important");
+    const preventScroll = (event) => {
+      if (event.cancelable) event.preventDefault();
+    };
+    const preventScrollKey = (event) => {
+      if (!SCROLL_KEYS.has(event.key) || isEditableControl(event.target)) return;
+      if (event.cancelable) event.preventDefault();
+    };
+    document.addEventListener("wheel", preventScroll, { capture: true, passive: false });
+    document.addEventListener("touchmove", preventScroll, { capture: true, passive: false });
+    document.addEventListener("keydown", preventScrollKey, true);
+    scrollLockCleanup = () => {
+      document.removeEventListener("wheel", preventScroll, true);
+      document.removeEventListener("touchmove", preventScroll, true);
+      document.removeEventListener("keydown", preventScrollKey, true);
+      restoreProperty(document.documentElement.style, "overflow", rootStyle);
+      if (bodyStyle && document.body) restoreProperty(document.body.style, "overflow", bodyStyle);
+    };
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    scrollLockCount = Math.max(0, scrollLockCount - 1);
+    if (scrollLockCount === 0) {
+      scrollLockCleanup == null ? void 0 : scrollLockCleanup();
+      scrollLockCleanup = null;
+    }
+  };
+}
+function isEditableControl(target) {
+  return target instanceof Element && Boolean(target.closest("input,textarea,select,button,[contenteditable]:not([contenteditable='false'])"));
+}
+function captureProperty(style, property2) {
+  return { value: style.getPropertyValue(property2), priority: style.getPropertyPriority(property2) };
+}
+function restoreProperty(style, property2, captured) {
+  if (captured.value) style.setProperty(property2, captured.value, captured.priority);
+  else style.removeProperty(property2);
+}
+function setRect(element, left, top, width, height) {
+  element.style.left = `${left}px`;
+  element.style.top = `${top}px`;
+  element.style.width = `${width}px`;
+  element.style.height = `${height}px`;
+}
+function finiteClamp(value, minimum, maximum) {
+  return Number.isFinite(value) ? Math.max(minimum, Math.min(value, maximum)) : minimum;
+}
 function findTarget(target) {
   if (!target) return null;
   for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
@@ -2901,6 +3008,7 @@ class AnchoredCardRenderer {
     this.destroy();
     const card = buildCard(root, content, design, behavior, callbacks, builder, widgetType);
     const pointer = ((_a = behavior.pointer) == null ? void 0 : _a.enabled) === false ? null : buildPointer(card, design, behavior);
+    const backdrop = behavior.backdrop ? new AnchoredTargetBackdrop(root, card, behavior, design, callbacks.onDismiss) : null;
     let frameId = null;
     let destroyed = false;
     let hidden = false;
@@ -2914,6 +3022,7 @@ class AnchoredCardRenderer {
       hidden = next;
       card.style.visibility = next ? "hidden" : "";
       card.style.pointerEvents = next ? "none" : "";
+      backdrop == null ? void 0 : backdrop.setHidden(next);
     };
     const update = () => {
       if (destroyed) return;
@@ -2922,6 +3031,7 @@ class AnchoredCardRenderer {
         return;
       }
       const rect = target.getBoundingClientRect();
+      backdrop == null ? void 0 : backdrop.update(rect);
       if (measureCard || !cardSize) {
         const bounds2 = card.getBoundingClientRect();
         cardSize = { width: bounds2.width, height: bounds2.height };
@@ -2972,7 +3082,8 @@ class AnchoredCardRenderer {
         destroyed = true;
         if (frameId !== null) cancelAnimationFrame(frameId);
         frameId = null;
-      }
+      },
+      () => backdrop == null ? void 0 : backdrop.destroy()
     );
     if (typeof ResizeObserver !== "undefined") {
       const observer = new ResizeObserver((entries) => schedule(true, entries.some((entry) => entry.target === card)));
@@ -3775,7 +3886,7 @@ class ExperienceRenderer {
       const root = this.root(experience.id, { layer: step.behavior.layer ?? ((_a2 = definition.behavior) == null ? void 0 : _a2.layer) }, target2);
       const renderer = new AnchoredCardRenderer();
       this.renderer = renderer;
-      const behavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset, pointer: step.behavior.pointer };
+      const behavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset, pointer: step.behavior.pointer, backdrop: step.behavior.backdrop, backdropOpacity: step.behavior.backdropOpacity, closeOnBackdrop: step.behavior.closeOnBackdrop };
       const card = renderer.render(root, target2, step.content, stepDesign, behavior, stepCallbacks, step.builder, "anchored_card");
       addBack(card);
       this.listenForAdvance(target2, ((_b = step.advance) == null ? void 0 : _b.type) ?? "button", ((_c = step.advance) == null ? void 0 : _c.type) === "element_hover" ? step.advance.durationMs : void 0, callbacks.onGuideAdvance);
@@ -4601,7 +4712,7 @@ const bundledRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-D4YlaqJU.js");
+    const { EditorModeController } = await import("./EditorModeController-CyNvM3Jz.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -4641,4 +4752,4 @@ export {
   createAnalytics as k,
   sanitizeBuilderHtml as s
 };
-//# sourceMappingURL=module-BxY5ZirN.js.map
+//# sourceMappingURL=module-DiJ5Q2Q4.js.map

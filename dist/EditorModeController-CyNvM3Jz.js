@@ -1,4 +1,4 @@
-import { c as computeElementRole, a as computeElementLabel, b as builderLinkUrlIsSafe, d as builderImageUrlIsSafe, s as sanitizeBuilderHtml, E as ExperienceRenderer, R as RouteObserver, e as clearEditorContinuation, i as isGuideDefinition, g as getGuideStepPattern, f as guideStepRequiresTarget, h as findTarget, j as storeEditorContinuation } from "./module-BxY5ZirN.js";
+import { c as computeElementRole, a as computeElementLabel, b as builderLinkUrlIsSafe, d as builderImageUrlIsSafe, s as sanitizeBuilderHtml, E as ExperienceRenderer, R as RouteObserver, e as clearEditorContinuation, i as isGuideDefinition, g as getGuideStepPattern, f as guideStepRequiresTarget, h as findTarget, j as storeEditorContinuation } from "./module-DiJ5Q2Q4.js";
 class EditorBridge {
   constructor(apiBase, sessionId, accessToken) {
     this.apiBase = apiBase;
@@ -2268,7 +2268,8 @@ class EditorModeController {
           <div class="eyebrow">Placement</div>
           <div data-for="anchored"><div class="placement-grid">${placementButton("top", "Top")}${placementButton("left", "Left")}${placementButton("auto", "Auto")}${placementButton("right", "Right")}${placementButton("bottom", "Bottom")}</div><label>Alignment<select data-alignment><option value="start">Start</option><option value="center">Center</option><option value="end">End</option></select></label><label>Offset<div class="number"><input data-offset type="number" min="0" max="100"><span>px</span></div></label></div>
           <div data-for="toast"><label>Position<select data-toast-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label><label>Auto-dismiss<div class="number"><input data-auto-dismiss type="number" min="500" placeholder="Disabled"><span>ms</span></div></label></div>
-          <div data-for="modal"><label>Layout<select data-modal-layout><option value="center">Centered</option><option value="fullscreen">Fullscreen</option></select></label><label class="check"><input data-backdrop type="checkbox"> Backdrop</label><label>Backdrop opacity<input data-backdrop-opacity type="number" min="0" max="0.9" step="0.05"></label><label class="check"><input data-close-backdrop type="checkbox"> Dismiss on backdrop click</label></div>
+          <div data-for="modal"><label>Layout<select data-modal-layout><option value="center">Centered</option><option value="fullscreen">Fullscreen</option></select></label></div>
+          <div data-for="backdrop"><label class="check"><input data-backdrop type="checkbox"> Backdrop</label><label>Backdrop opacity<input data-backdrop-opacity type="number" min="0" max="0.9" step="0.05"></label><label class="check"><input data-close-backdrop type="checkbox"> Dismiss on backdrop click</label></div>
           <div data-for="slideout"><label>Position<select data-slideout-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="center-left">Center left</option><option value="center-right">Center right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label></div>
           <div data-for="banner"><label>Position<select data-banner-position><option value="top">Top</option><option value="bottom">Bottom</option></select></label></div>
           <div data-for="cursor"><label>X offset<div class="number"><input data-cursor-x type="number"><span>px</span></div></label><label>Y offset<div class="number"><input data-cursor-y type="number"><span>px</span></div></label></div>
@@ -3059,6 +3060,12 @@ class EditorModeController {
         rendered.behavior = { ...rendered.behavior, autoDismissMs: null, dismissible: false, closeOnBackdrop: false };
       }
     }
+    if (this.mode === "target") {
+      if (isGuideDefinition(rendered)) rendered.steps.forEach((step) => {
+        step.behavior.backdrop = false;
+      });
+      else if (this.draft.experience.widgetType === "anchored_card") rendered.behavior.backdrop = false;
+    }
     const selectedStepId = (_d = (_c = this.survey) == null ? void 0 : _c.steps[this.stepIndex]) == null ? void 0 : _d.id;
     this.preview.render({
       id: this.draft.experience.id,
@@ -3122,7 +3129,10 @@ class EditorModeController {
     (_c = this.compositionEditor) == null ? void 0 : _c.destroy();
     try {
       this.compositionEditor = new OnsiteCompositionEditor(host.shadowRoot, builder, content, this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : this.draft.experience.widgetType ?? "modal", Boolean(this.guide), {
-        onChange: () => this.changed(false),
+        onChange: () => {
+          this.syncOnsiteAnchoredPointer(host.shadowRoot, builder);
+          this.changed(false);
+        },
         onValidation: (errors) => this.showValidation(errors),
         onSelectionChange: (selection) => {
           this.compositionSelection = selection;
@@ -3130,6 +3140,7 @@ class EditorModeController {
         }
       });
       this.compositionEditor.start();
+      this.syncOnsiteAnchoredPointer(host.shadowRoot, builder);
       return;
     } catch (error) {
       this.showValidation([error instanceof Error ? error.message : "This layout could not be converted safely."]);
@@ -3144,6 +3155,19 @@ class EditorModeController {
       }
     });
     this.contentEditor.start();
+  }
+  syncOnsiteAnchoredPointer(root, builder) {
+    var _a, _b;
+    const pointer = root.querySelector(".movcues-anchor-pointer");
+    if (!pointer) return;
+    const color = (_b = (_a = onsiteDocumentFromBuilder(builder)) == null ? void 0 : _a.root.style) == null ? void 0 : _b.background;
+    if (color) {
+      if (pointer.dataset.movcuesAuthoringPointerColor === void 0) pointer.dataset.movcuesAuthoringPointerColor = pointer.style.color;
+      pointer.style.setProperty("color", color, "important");
+    } else if (pointer.dataset.movcuesAuthoringPointerColor !== void 0) {
+      pointer.style.setProperty("color", pointer.dataset.movcuesAuthoringPointerColor);
+      delete pointer.dataset.movcuesAuthoringPointerColor;
+    }
   }
   currentBuilder() {
     var _a, _b;
@@ -3282,7 +3306,7 @@ class EditorModeController {
     const behavior = this.currentBehavior();
     const widgetType = this.draft.experience.widgetType;
     const guidePattern = this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : null;
-    const activeGroups = new Set(guidePattern === "anchored_card" || !this.guide && widgetType === "anchored_card" ? ["target", "anchored"] : guidePattern === "modal" ? [] : widgetType === "hotspot" ? ["target", "anchored", "hotspot"] : widgetType === "toast" ? ["toast"] : widgetType === "modal" || widgetType === "survey" ? ["modal"] : widgetType === "slideout" ? ["slideout"] : widgetType === "banner" ? ["banner"] : ["cursor"]);
+    const activeGroups = new Set(guidePattern === "anchored_card" ? ["target", "anchored", "backdrop"] : !this.guide && widgetType === "anchored_card" ? ["target", "anchored", "backdrop"] : guidePattern === "modal" ? [] : widgetType === "hotspot" ? ["target", "anchored", "hotspot"] : widgetType === "toast" ? ["toast"] : widgetType === "modal" || widgetType === "survey" ? ["modal", "backdrop"] : widgetType === "slideout" ? ["slideout", "backdrop"] : widgetType === "banner" ? ["banner"] : ["cursor"]);
     this.root.querySelectorAll("[data-for]").forEach((group) => {
       group.hidden = !activeGroups.has(group.dataset.for);
     });
@@ -3596,4 +3620,4 @@ const STYLE = `
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-D4YlaqJU.js.map
+//# sourceMappingURL=EditorModeController-CyNvM3Jz.js.map

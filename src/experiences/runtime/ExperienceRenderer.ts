@@ -109,7 +109,7 @@ export class ExperienceRenderer {
     const mount = (target: Element) => {
       ensureGuideTargetInView(target);
       const root = this.root(experience.id, { layer: step.behavior.layer ?? definition.behavior?.layer }, target); const renderer = new AnchoredCardRenderer(); this.renderer = renderer;
-      const behavior: ExperienceBehavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset, pointer: step.behavior.pointer };
+      const behavior: ExperienceBehavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset, pointer: step.behavior.pointer, backdrop: step.behavior.backdrop, backdropOpacity: step.behavior.backdropOpacity, closeOnBackdrop: step.behavior.closeOnBackdrop };
       const card = renderer.render(root, target, step.content, stepDesign, behavior, stepCallbacks, step.builder, "anchored_card");
       addBack(card);
       this.listenForAdvance(target, step.advance?.type ?? "button", step.advance?.type === "element_hover" ? step.advance.durationMs : undefined, callbacks.onGuideAdvance);

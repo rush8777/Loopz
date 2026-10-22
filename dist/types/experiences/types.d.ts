@@ -162,7 +162,7 @@ export interface GuideStep {
     size?: ExperienceSize;
     advance?: GuideAdvance;
     target?: ExperienceTarget;
-    behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "pointer" | "dismissible" | "layer">;
+    behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "pointer" | "dismissible" | "layer" | "backdrop" | "backdropOpacity" | "closeOnBackdrop">;
 }
 export declare function getGuideStepPattern(step: Pick<GuideStep, "pattern">): GuideStepPattern;
 export declare function guideStepRequiresTarget(step: Pick<GuideStep, "pattern">): boolean;

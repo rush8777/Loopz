@@ -94,6 +94,18 @@ for(const width of [320,360,390])test(`editor controls stay reachable at ${width
 test('anchored authoring survives scroll with the production renderer and sticky header',async({page})=>{
   await startController(page,{widgetType:'anchored_card'});
   await expect(page.locator('[data-movcues-experience] [data-movcues-builder-surface]')).toBeVisible();
+  await page.locator('[data-backdrop]').check();
+  await expect(page.locator('[data-movcues-experience] [data-movcues-target-backdrop]')).toHaveCount(4);
+  const spotlight=await page.evaluate(()=>{
+    const target=document.querySelector('#anchor')!;const rect=target.getBoundingClientRect();
+    const host=document.querySelector<HTMLElement>('[data-movcues-experience]')!;const root=host.shadowRoot!;
+    const highlight=root.querySelector<HTMLElement>('[data-movcues-target-highlight]')!;
+    const top=root.querySelector<HTMLElement>('[data-movcues-target-backdrop="top"]')!;
+    return{target:{left:rect.left,top:rect.top,width:rect.width,height:rect.height},highlight:{left:parseFloat(highlight.style.left),top:parseFloat(highlight.style.top),width:parseFloat(highlight.style.width),height:parseFloat(highlight.style.height)},background:top.style.background,hit:document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2)?.id};
+  });
+  expect(spotlight.highlight).toEqual(spotlight.target);expect(spotlight.background).toContain('0.45');expect(spotlight.hit).toBe('anchor');
+  const lockedScrollY=await page.evaluate(()=>scrollY);await page.mouse.wheel(0,250);await expect.poll(()=>page.evaluate(()=>scrollY)).toBe(lockedScrollY);
+  await page.locator('[data-backdrop]').uncheck();await expect(page.locator('[data-movcues-experience] [data-movcues-target-backdrop]')).toHaveCount(0);
   const heading=page.locator('[data-movcues-experience] h2');await heading.dblclick();await heading.press('ControlOrMeta+a');await heading.pressSequentially('Anchored edit');
   await page.mouse.wheel(0,250);await page.mouse.wheel(0,-250);
   await expect(heading).toHaveAttribute('contenteditable','true');await expect(heading).toHaveText('Anchored edit');
