@@ -14,6 +14,7 @@ import {
   migrateV1Builder,
   moveCell,
   onsiteId,
+  onsiteImageSourceIsSafe,
   onsiteDocumentFromBuilder,
   parentCell,
   removeCell,
@@ -28,12 +29,13 @@ import {
   type OnsiteSizing,
 } from "../onsite/OnsiteDocument";
 import { builderLinkUrlIsSafe } from "../runtime/BuilderContentContract";
+import { prepareImageFile } from "./ImageFile";
 
 export type CompositionSelection =
   | { kind: "step"; label: string }
   | { kind: "cell"; label: string; cellId: string }
   | { kind: "block"; label: string; cellId: string; blockId: string; blockType: OnsiteBlock["type"] };
-interface Callbacks { onChange(): void; onSelectionChange(selection: CompositionSelection): void; onValidation(errors: string[]): void }
+interface Callbacks { onChange(): void; onSelectionChange(selection: CompositionSelection): void; onValidation(errors: string[]): void; onImageStatus?(message: string): void }
 interface HistoryEntry { document: OnsiteDocument; selection: CompositionSelection; bytes: number }
 type CellEdge = "top" | "right" | "bottom" | "left";
 
@@ -63,6 +65,11 @@ export class OnsiteCompositionEditor {
   private resizeFrame = 0;
   private destroyed = false;
   private readonly migrated: boolean;
+  private imageInput: HTMLInputElement;
+  private imageFileTarget: string | null = null;
+  private imageRequest = 0;
+  private imagePlaceholders = new Map<HTMLElement, HTMLImageElement>();
+  private imageDropTarget: HTMLElement | null = null;
 
   constructor(
     private root: ShadowRoot,
@@ -78,6 +85,12 @@ export class OnsiteCompositionEditor {
     this.surface = root.querySelector<HTMLElement>("[data-movcues-builder-surface]");
     this.toolbar = document.createElement("div"); this.toolbar.dataset.movcuesCompositionToolbar = "";
     this.palette = document.createElement("div"); this.palette.dataset.movcuesBlockPalette = ""; this.palette.hidden = true;
+    this.imageInput = document.createElement("input"); this.imageInput.type = "file"; this.imageInput.accept = "image/png,image/jpeg,image/webp";
+    this.imageInput.hidden = true; this.imageInput.dataset.movcuesImageFile = "";
+    this.imageInput.addEventListener("change", () => {
+      const id = this.imageFileTarget; this.imageFileTarget = null;
+      const file = this.imageInput.files?.[0]; if (id && file) void this.setImageFile(file, id);
+    });
   }
 
   start(): void {
@@ -98,7 +111,7 @@ export class OnsiteCompositionEditor {
     ];
     this.toolbar.innerHTML = tools.map(([command, label, icon]) => `<button type="button" data-command="${command}" title="${label}" aria-label="${label}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></button>`).join("");
     this.palette.innerHTML = (Object.keys(BLOCK_LABEL) as OnsiteBlock["type"][]).map(type => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
-    this.root.append(this.toolbar, this.palette);
+    this.root.append(this.toolbar, this.palette, this.imageInput);
     const edgeLabels = { top: "Add above", right: "Add to the right", bottom: "Add below", left: "Add to the left" };
     this.edgeButtons = (["top", "right", "bottom", "left"] as const).map(edge => {
       const button = document.createElement("button"); button.type = "button"; button.dataset.movcuesInsertEdge = edge;
@@ -113,6 +126,9 @@ export class OnsiteCompositionEditor {
     this.surface.addEventListener("compositionstart", this.onCompositionStart);
     this.surface.addEventListener("compositionend", this.onCompositionEnd);
     this.surface.addEventListener("keydown", this.onSurfaceKeyDown);
+    this.surface.addEventListener("dragover", this.onImageDragOver);
+    this.surface.addEventListener("dragleave", this.onImageDragLeave);
+    this.surface.addEventListener("drop", this.onImageDrop);
     this.toolbar.addEventListener("click", this.onToolbarClick);
     this.palette.addEventListener("click", this.onPaletteClick);
     this.root.addEventListener("scroll", this.positionTools, true);
@@ -194,6 +210,40 @@ export class OnsiteCompositionEditor {
   updateBlock(update: Partial<OnsiteBlock>): void {
     const block = this.getSelectedBlock(); if (!block) return; this.beforeTransaction(); Object.assign(block, cloneOnsite(update)); this.commit(this.selection);
   }
+  chooseImageFile(blockId?: string): void {
+    const block = blockId ? findBlock(this.document, blockId) : this.getSelectedBlock(); if (block?.type !== "image" || this.destroyed) return;
+    this.imageFileTarget = block.id; this.imageInput.value = ""; this.imageInput.click();
+  }
+
+  setImageSource(src: string): boolean {
+    if (this.getSelectedBlock()?.type !== "image") return false;
+    if (!onsiteImageSourceIsSafe(src)) { this.callbacks.onValidation(["Use an HTTP(S) image URL, a /path on your site, or choose an image file."]); return false; }
+    this.callbacks.onValidation([]); this.updateBlock({ src } as Partial<OnsiteBlock>); return true;
+  }
+
+  async setImageFile(file: File, blockId?: string): Promise<boolean> {
+    const block = blockId ? findBlock(this.document, blockId) : this.getSelectedBlock(); if (block?.type !== "image" || this.destroyed) return false;
+    const request = ++this.imageRequest; const id = block.id; const previousSrc = block.src;
+    const placeholder = this.surface?.querySelector<HTMLButtonElement>(`[data-movcues-image-placeholder][data-movcues-block-id="${id}"]`);
+    if (placeholder) { placeholder.disabled = true; placeholder.setAttribute("aria-busy", "true"); }
+    this.callbacks.onImageStatus?.("Preparing image…");
+    try {
+      const src = await prepareImageFile(file);
+      if (this.destroyed || request !== this.imageRequest) return false;
+      const current = findBlock(this.document, id); if (current?.type !== "image" || current.src !== previousSrc) return false;
+      const candidate = cloneOnsite(this.document); const image = findBlock(candidate, id); if (image?.type !== "image") return false; image.src = src;
+      const validation = validateOnsiteDocument(candidate); this.callbacks.onValidation(validation.errors); if (!validation.valid) return false;
+      if (!this.flush()) return false;
+      this.document = candidate; this.commit(this.selection); return true;
+    } catch (error) {
+      if (!this.destroyed && request === this.imageRequest) this.callbacks.onValidation([error instanceof Error ? error.message : "Image could not be added. Try another file."]);
+      return false;
+    } finally {
+      if (placeholder) { placeholder.disabled = false; placeholder.removeAttribute("aria-busy"); }
+      if (!this.destroyed && request === this.imageRequest) this.callbacks.onImageStatus?.("");
+      this.imageInput.value = "";
+    }
+  }
   updateButtonAction(action: { type: "next_step" | "previous_step" | "dismiss" } | { type: "open_url"; url: string } | { type: "track_event"; eventName: string }): void { const block = this.getSelectedBlock(); if (block?.type !== "button") return; this.beforeTransaction(); block.action = { id: block.action.id, ...action } as OnsiteButtonAction; this.commit(this.selection); }
   editSelected(): void { if (this.selection.kind !== "block") return; const block = this.getSelectedBlock(); if (!block || !["heading", "text", "button"].includes(block.type)) return; const element = this.surface?.querySelector<HTMLElement>(`[data-movcues-block-id="${block.id}"]`); if (element) { element.contentEditable = "true"; element.focus(); } }
   setAlignment(align: "left" | "center" | "right"): void { this.updateBlock({ align } as Partial<OnsiteBlock>); }
@@ -221,6 +271,14 @@ export class OnsiteCompositionEditor {
   private compileAndPatch(): void {
     const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType); Object.assign(this.content, compiled.content);
     const template = document.createElement("template"); template.innerHTML = compiled.html; this.surface?.replaceChildren(...Array.from(template.content.childNodes));
+    this.imagePlaceholders.clear();
+    this.surface?.querySelectorAll<HTMLImageElement>('img[data-movcues-block-id][src=""]').forEach(image => {
+      const placeholder = document.createElement("button"); placeholder.type = "button"; placeholder.className = image.className;
+      placeholder.dataset.movcuesBlockId = image.dataset.movcuesBlockId; placeholder.dataset.movcuesImagePlaceholder = "";
+      placeholder.setAttribute("aria-label", "Choose image");
+      placeholder.innerHTML = '<svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 3-3 6 6"/></svg><span>Drop an image or click to browse</span>';
+      image.replaceWith(placeholder); this.imagePlaceholders.set(placeholder, image);
+    });
     const style = this.root.querySelector<HTMLStyleElement>("style[data-movcues-builder-style]"); if (style) style.textContent = `${compiled.css}\n[data-movcues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movcues-builder-surface]>.movcues-widget{position:relative!important;inset:auto!important}`;
   }
   private scheduleCompile(): void { clearTimeout(this.compileTimer); this.compileTimer = window.setTimeout(() => { if (!this.destroyed && !this.composing) { this.repairDocumentStructure(); const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType); Object.assign(this.content, compiled.content); this.callbacks.onValidation(validateOnsiteDocument(this.document).errors); } }, 160); }
@@ -261,7 +319,29 @@ export class OnsiteCompositionEditor {
     const blockElement = element.closest<HTMLElement>("[data-movcues-block-id]"); const cellElement = element.closest<HTMLElement>("[data-movcues-node-id]");
     if (blockElement && cellElement) { const block = findBlock(this.document, blockElement.dataset.movcuesBlockId!); if (block) this.select({ kind: "block", label: BLOCK_LABEL[block.type], cellId: cellElement.dataset.movcuesNodeId!, blockId: block.id, blockType: block.type }); }
     else if (cellElement) this.select({ kind: "cell", label: "Cell", cellId: cellElement.dataset.movcuesNodeId! }); else this.selectStep();
+    if (blockElement?.hasAttribute("data-movcues-image-placeholder")) this.chooseImageFile(blockElement.dataset.movcuesBlockId);
     if (blockElement?.matches("button,a")) { event.preventDefault(); event.stopImmediatePropagation(); }
+  };
+  private onImageDragOver = (event: DragEvent): void => {
+    if (!event.dataTransfer?.types.includes("Files")) return;
+    event.preventDefault(); event.stopPropagation();
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movcues-block-id]") : null;
+    const block = target ? findBlock(this.document, target.dataset.movcuesBlockId!) : null;
+    this.clearImageDrop(); event.dataTransfer.dropEffect = block?.type === "image" ? "copy" : "none";
+    if (target && block?.type === "image") { this.imageDropTarget = target; target.setAttribute("data-movcues-image-drop", ""); }
+  };
+  private onImageDragLeave = (event: DragEvent): void => {
+    if (!(event.relatedTarget instanceof Node) || !this.imageDropTarget?.contains(event.relatedTarget)) this.clearImageDrop();
+  };
+  private clearImageDrop(): void { this.imageDropTarget?.removeAttribute("data-movcues-image-drop"); this.imageDropTarget = null; }
+  private onImageDrop = (event: DragEvent): void => {
+    if (!event.dataTransfer?.files.length) return;
+    event.preventDefault(); event.stopPropagation(); this.clearImageDrop();
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movcues-block-id]") : null;
+    const block = target ? findBlock(this.document, target.dataset.movcuesBlockId!) : null;
+    if (block?.type !== "image") { this.callbacks.onValidation(["Drop the file onto an image block."]); return; }
+    if (event.dataTransfer.files.length !== 1) { this.callbacks.onValidation(["Choose one image at a time."]); return; }
+    void this.setImageFile(event.dataTransfer.files[0], block.id);
   };
   private onDoubleClick = (event: Event): void => { const element = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movcues-block-id]") : null; const block = element ? findBlock(this.document, element.dataset.movcuesBlockId!) : null; if (element && (block?.type === "heading" || block?.type === "text" || block?.type === "button")) { element.contentEditable = "true"; element.focus(); } };
   private onInput = (event: Event): void => { const element = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movcues-block-id]") : null; const block = element ? findBlock(this.document, element.dataset.movcuesBlockId!) : null; if (!block || !element) return; if (block.type === "heading" || block.type === "text") block.html = sanitizeRichText(element.innerHTML); else if (block.type === "button") block.label = (element.textContent ?? "").slice(0, 80); else return; this.scheduleCompile(); this.positionTools(); this.callbacks.onChange(); clearTimeout(this.typingTimer); this.typingTimer = window.setTimeout(() => this.pushHistory(), 300); };
@@ -367,7 +447,17 @@ export class OnsiteCompositionEditor {
   };
   private resizeWithKeyboard = (event: KeyboardEvent): void => { if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return; const handle = event.currentTarget as HTMLElement; const first = findCell(this.document, handle.dataset.first!); const weight = first?.sizing.mode === "flexible" ? first.sizing.weight : 1; const increase = event.key === "ArrowRight" || event.key === "ArrowDown"; this.beforeTransaction(); if (resizeSiblings(this.document, handle.dataset.first!, handle.dataset.second!, weight + (increase ? .1 : -.1))) this.commit(this.selection); event.preventDefault(); };
 
-  destroy(): void { this.destroyed = true; clearTimeout(this.compileTimer); clearTimeout(this.typingTimer); cancelAnimationFrame(this.toolFrame); cancelAnimationFrame(this.resizeFrame); this.resizeCleanup?.(); this.closePalette(); this.surface?.removeEventListener("click", this.onSurfaceClick); this.surface?.removeEventListener("dblclick", this.onDoubleClick); this.surface?.removeEventListener("input", this.onInput); this.surface?.removeEventListener("blur", this.onBlur, true); this.surface?.removeEventListener("compositionstart", this.onCompositionStart); this.surface?.removeEventListener("compositionend", this.onCompositionEnd); this.surface?.removeEventListener("keydown", this.onSurfaceKeyDown); this.toolbar.remove(); this.palette.remove(); this.edgeButtons.forEach(button => button.remove()); this.handles.forEach(handle => handle.remove()); this.root.querySelector("style[data-movcues-composition-style]")?.remove(); this.root.removeEventListener("scroll", this.positionTools, true); window.removeEventListener("scroll", this.positionTools, true); window.removeEventListener("resize", this.positionTools); window.removeEventListener("pointerdown", this.dismissPalette, true); window.removeEventListener("keydown", this.onPaletteKeyDown); }
+  destroy(): void {
+    this.destroyed = true; this.imageRequest++; clearTimeout(this.compileTimer); clearTimeout(this.typingTimer); cancelAnimationFrame(this.toolFrame); cancelAnimationFrame(this.resizeFrame);
+    this.resizeCleanup?.(); this.closePalette(); this.clearImageDrop();
+    this.surface?.removeEventListener("click", this.onSurfaceClick); this.surface?.removeEventListener("dblclick", this.onDoubleClick); this.surface?.removeEventListener("input", this.onInput);
+    this.surface?.removeEventListener("blur", this.onBlur, true); this.surface?.removeEventListener("compositionstart", this.onCompositionStart); this.surface?.removeEventListener("compositionend", this.onCompositionEnd); this.surface?.removeEventListener("keydown", this.onSurfaceKeyDown);
+    this.surface?.removeEventListener("dragover", this.onImageDragOver); this.surface?.removeEventListener("dragleave", this.onImageDragLeave); this.surface?.removeEventListener("drop", this.onImageDrop);
+    this.imagePlaceholders.forEach((image, placeholder) => placeholder.replaceWith(image)); this.imagePlaceholders.clear(); this.imageInput.remove();
+    this.toolbar.remove(); this.palette.remove(); this.edgeButtons.forEach(button => button.remove()); this.handles.forEach(handle => handle.remove());
+    this.root.querySelector("style[data-movcues-composition-style]")?.remove(); this.root.removeEventListener("scroll", this.positionTools, true);
+    window.removeEventListener("scroll", this.positionTools, true); window.removeEventListener("resize", this.positionTools); window.removeEventListener("pointerdown", this.dismissPalette, true); window.removeEventListener("keydown", this.onPaletteKeyDown);
+  }
 }
 
 function placeOutside(rect: DOMRect, size: DOMRect, bounds: { left: number; right: number; top: number; bottom: number }): { left: number; top: number } {
@@ -388,6 +478,7 @@ const AUTHORING_STYLE = `
 [data-movcues-composition-toolbar],[data-movcues-block-palette],[data-movcues-resize-handle],[data-movcues-insert-edge]{box-sizing:border-box;position:fixed;left:0;top:0;z-index:2147483646;pointer-events:auto;font:12px/1.2 ui-sans-serif,system-ui,sans-serif}
 [data-movcues-composition-toolbar]{display:flex;gap:1px;max-width:calc(100vw - 12px);overflow:auto;padding:3px;border:1px solid #dbe2ea;border-radius:8px;background:#fff;box-shadow:0 4px 14px rgba(15,23,42,.14)}[data-movcues-composition-toolbar] button,[data-movcues-block-palette] button{min-height:28px;padding:5px 7px;border:0;border-radius:5px;background:transparent;color:#334155;font:600 11px inherit;cursor:pointer}[data-movcues-composition-toolbar] button{flex:none;width:28px;padding:0;font-size:16px}[data-movcues-composition-toolbar] button:hover:not(:disabled),[data-movcues-block-palette] button:hover{background:#eff6ff;color:#1d4ed8}[data-movcues-composition-toolbar] button:disabled{cursor:not-allowed;opacity:.42}
 [data-movcues-composition-toolbar] svg{display:block;margin:auto}
+[data-movcues-image-placeholder]{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:120px;padding:16px;border:1px dashed #94a3b8!important;background:#f8fafc;color:#64748b;font:12px/1.4 ui-sans-serif,system-ui,sans-serif;cursor:pointer;white-space:normal}[data-movcues-image-placeholder] svg{flex:none}[data-movcues-image-placeholder]:hover,[data-movcues-image-drop]{outline:2px solid #2563eb!important;outline-offset:2px;background:#eff6ff}[data-movcues-image-placeholder][aria-busy=true]{opacity:.6;cursor:wait}[data-movcues-image-file][hidden]{display:none!important}
 [data-movcues-insert-edge]{width:24px;height:24px;padding:0;border:1px solid #93c5fd;border-radius:50%;background:#fff;color:#2563eb;box-shadow:0 2px 6px rgba(15,23,42,.12);font-size:18px;cursor:pointer}[data-movcues-insert-edge]:hover,[data-movcues-insert-edge][aria-expanded=true]{background:#2563eb;color:#fff}
 [data-movcues-insertion-edge=top]{box-shadow:inset 0 3px #2563eb}[data-movcues-insertion-edge=bottom]{box-shadow:inset 0 -3px #2563eb}[data-movcues-insertion-edge=left]{box-shadow:inset 3px 0 #2563eb}[data-movcues-insertion-edge=right]{box-shadow:inset -3px 0 #2563eb}
 [data-movcues-composition-toolbar][hidden],[data-movcues-block-palette][hidden],[data-movcues-insert-edge][hidden]{display:none!important}

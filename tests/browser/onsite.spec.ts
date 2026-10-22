@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { Buffer } from "node:buffer";
 
 test.beforeEach(async ({ page }) => { await page.goto("/tests/browser/fixture.html"); await page.waitForFunction(() => !!(window as any).fixture); });
 
@@ -122,7 +123,56 @@ test('contextual inspector follows block, cell and step selection',async({page})
 test('adding from a selected block inserts a new block instead of replacing it',async({page})=>{
   await startController(page);const heading=page.locator('[data-movcues-experience] h2');await heading.click();
   await page.locator('[data-command=add]').click();await page.locator('[data-insert-block=image]').click();
-  await expect(page.locator('[data-movcues-experience] h2')).toHaveCount(1);await expect(page.locator('[data-movcues-experience] img')).toHaveCount(1);
+  await expect(page.locator('[data-movcues-experience] h2')).toHaveCount(1);await expect(page.locator('[data-movcues-image-placeholder]')).toHaveCount(1);
+});
+
+async function insertEmptyImage(page: import('@playwright/test').Page) {
+  await page.locator('[data-movcues-experience] h2').click();
+  await page.locator('[data-movcues-insert-edge=left]').click(); await page.locator('[data-insert-block=image]').click();
+  return page.locator('[data-movcues-image-placeholder]');
+}
+
+async function localPng(page: import('@playwright/test').Page) {
+  return page.evaluate(() => { const canvas = document.createElement('canvas'); canvas.width = 400; canvas.height = 240; const context = canvas.getContext('2d')!; context.fillStyle = '#2563eb'; context.fillRect(0, 0, 400, 240); return canvas.toDataURL('image/png'); });
+}
+
+test('image placeholder opens a file picker and the image persists through undo, reload and preview', async ({ page }) => {
+  await startController(page); const placeholder = await insertEmptyImage(page); await expect(placeholder).toContainText('Drop an image or click to browse');
+  expect((await placeholder.boundingBox())!.height).toBeGreaterThanOrEqual(100);
+  await page.screenshot({ path: test.info().outputPath('image-placeholder.png') });
+  await page.locator('[data-v2-image-alt]').fill('Feature preview'); await page.locator('[data-v2-image-alt]').press('Tab');
+  const png = await localPng(page); const picker = page.waitForEvent('filechooser'); await placeholder.click();
+  await (await picker).setFiles({ name: 'preview.png', mimeType: 'image/png', buffer: Buffer.from(png.split(',')[1], 'base64') });
+  const image = page.locator('[data-movcues-experience] img'); await expect(image).toBeVisible();
+  const src = await image.getAttribute('src'); expect(src).toMatch(/^data:image\/webp;base64,/); expect(src!.length).toBeLessThanOrEqual(65536);
+  await expect(image).toHaveAttribute('alt', 'Feature preview'); await expect(placeholder).toHaveCount(0);
+  await expect(page.locator('[data-v2-image-src]')).toHaveValue(''); await expect(page.locator('[data-choose-image]')).toHaveText('Replace image');
+  await page.locator('[data-global-undo]').click(); await expect(placeholder).toBeVisible();
+  await page.locator('[data-global-redo]').click(); await expect(image).toHaveAttribute('src', src!);
+  await expect(page.locator('[data-save-state]')).toHaveText('Draft saved');
+  await page.evaluate(async () => { const f = (window as any).fixture; f.controller.destroy(); f.controller = new f.Controller(location.origin); await f.controller.start('reload-image'); });
+  await expect(image).toHaveAttribute('src', src!); await expect(image).toHaveAttribute('alt', 'Feature preview');
+  await page.locator('[data-mode=preview]').click(); await expect(image).toHaveAttribute('src', src!);
+  await expect(page.locator('[data-movcues-image-placeholder],[data-movcues-image-file]')).toHaveCount(0);
+});
+
+test('dropping a local image onto the placeholder imports it and rejects unsupported files safely', async ({ page }) => {
+  await startController(page); const placeholder = await insertEmptyImage(page);
+  await placeholder.evaluate(node => {
+    const transfer = new DataTransfer(); transfer.items.add(new File(['bad'], 'document.txt', { type: 'text/plain' }));
+    node.dispatchEvent(new DragEvent('drop', { bubbles: true, composed: true, cancelable: true, dataTransfer: transfer }));
+  });
+  await expect(page.locator('[data-content-error]')).toContainText('PNG, JPG or WebP'); await expect(placeholder).toBeVisible();
+  const png = await localPng(page);
+  await placeholder.evaluate((node, source) => {
+    const bytes = Uint8Array.from(atob(source.split(',')[1]), char => char.charCodeAt(0)); const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], 'dropped.png', { type: 'image/png' }));
+    node.dispatchEvent(new DragEvent('dragover', { bubbles: true, composed: true, cancelable: true, dataTransfer: transfer }));
+    if (!node.hasAttribute('data-movcues-image-drop')) throw new Error('Missing drop feedback');
+    node.dispatchEvent(new DragEvent('drop', { bubbles: true, composed: true, cancelable: true, dataTransfer: transfer }));
+  }, png);
+  const image = page.locator('[data-movcues-experience] img'); await expect(image).toBeVisible();
+  await expect(image).toHaveAttribute('src', /^data:image\/webp;base64,/); await expect(page.locator('[data-content-error]')).toBeHidden();
 });
 
 test('edge insertion makes a local column, resizes, undoes and reloads the same layout', async ({ page }) => {

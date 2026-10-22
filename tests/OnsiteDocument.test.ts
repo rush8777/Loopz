@@ -13,11 +13,20 @@ import {
   resizeSiblings,
   splitCell,
   validateOnsiteDocument,
+  onsiteImageSourceIsSafe,
 } from "../src/experiences/onsite/OnsiteDocument";
 import { mountBuilderContent } from "../src/experiences/runtime/BuilderContent";
 import type { ExperienceContent, WidgetBuilderState } from "../src/experiences/types";
 
 describe("OnsiteDocument", () => {
+  it("bounds embedded raster images separately from remote URLs and rejects executable/mislabeled data", () => {
+    const png = "data:image/png;base64," + btoa("\x89PNG\r\n\x1a\n" + "a".repeat(3000));
+    expect(onsiteImageSourceIsSafe(png)).toBe(true);
+    expect(onsiteImageSourceIsSafe("https://example.com/" + "a".repeat(2000))).toBe(false);
+    expect(onsiteImageSourceIsSafe("data:image/png;base64," + btoa("<svg onload=alert(1)>"))).toBe(false);
+    expect(onsiteImageSourceIsSafe("data:image/svg+xml;base64," + btoa("<svg/>"))).toBe(false);
+    expect(onsiteImageSourceIsSafe(png + "a".repeat(65000))).toBe(false);
+  });
   it.each(["left", "right", "top", "bottom"] as const)("inserts %s of one cell without rearranging the full-width footer", edge => {
     const doc = createOnsiteDocument(); const selected = doc.root.children![0]; const footer = doc.root.children![1];
     const selectedId = selected.id; const headingId = selected.block!.id; const originalSizing = { mode: "fixed" as const, value: 220 }; selected.sizing = originalSizing;

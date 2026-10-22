@@ -18,6 +18,7 @@ interface Callbacks {
     onChange(): void;
     onSelectionChange(selection: CompositionSelection): void;
     onValidation(errors: string[]): void;
+    onImageStatus?(message: string): void;
 }
 type CellEdge = "top" | "right" | "bottom" | "left";
 /** Structured on-site authoring. It is imported only by the lazy editor bundle. */
@@ -48,6 +49,11 @@ export declare class OnsiteCompositionEditor {
     private resizeFrame;
     private destroyed;
     private readonly migrated;
+    private imageInput;
+    private imageFileTarget;
+    private imageRequest;
+    private imagePlaceholders;
+    private imageDropTarget;
     constructor(root: ShadowRoot, builder: WidgetBuilderState, content: ExperienceContent, widgetType: WidgetType | "anchored_card" | "modal", guide: boolean, callbacks: Callbacks);
     start(): void;
     getDocument(): OnsiteDocument;
@@ -81,6 +87,9 @@ export declare class OnsiteCompositionEditor {
         sizing?: OnsiteSizing;
     }): void;
     updateBlock(update: Partial<OnsiteBlock>): void;
+    chooseImageFile(blockId?: string): void;
+    setImageSource(src: string): boolean;
+    setImageFile(file: File, blockId?: string): Promise<boolean>;
     updateButtonAction(action: {
         type: "next_step" | "previous_step" | "dismiss";
     } | {
@@ -105,6 +114,10 @@ export declare class OnsiteCompositionEditor {
     private pushHistory;
     private restore;
     private onSurfaceClick;
+    private onImageDragOver;
+    private onImageDragLeave;
+    private clearImageDrop;
+    private onImageDrop;
     private onDoubleClick;
     private onInput;
     private onBlur;

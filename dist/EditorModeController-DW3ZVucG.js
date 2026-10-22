@@ -1,4 +1,4 @@
-import { c as computeElementRole, a as computeElementLabel, b as builderLinkUrlIsSafe, d as builderImageUrlIsSafe, s as sanitizeBuilderHtml, E as ExperienceRenderer, R as RouteObserver, e as clearEditorContinuation, i as isGuideDefinition, g as getGuideStepPattern, f as guideStepRequiresTarget, h as findTarget, j as storeEditorContinuation } from "./module-DcLifY27.js";
+import { c as computeElementRole, a as computeElementLabel, b as builderLinkUrlIsSafe, d as builderImageUrlIsSafe, s as sanitizeBuilderHtml, E as ExperienceRenderer, R as RouteObserver, e as clearEditorContinuation, i as isGuideDefinition, g as getGuideStepPattern, f as guideStepRequiresTarget, h as findTarget, j as storeEditorContinuation } from "./module-Dzz_b-8x.js";
 class EditorBridge {
   constructor(apiBase, sessionId, accessToken) {
     this.apiBase = apiBase;
@@ -953,6 +953,7 @@ const ONSITE_LIMITS = {
   maxNodes: 120,
   maxRichText: 1e4,
   maxImageUrl: 2e3,
+  maxInlineImage: 65536,
   maxSerializedBytes: 25e4,
   minFixedSize: 24,
   maxFixedSize: 1200
@@ -1170,7 +1171,7 @@ function validateBlock(block, path, addId, number, errors) {
     number(block.paddingX, 4, 48, `${path} horizontal padding`);
     number(block.paddingY, 4, 32, `${path} vertical padding`);
   } else if (block.type === "image") {
-    if (block.src.length > ONSITE_LIMITS.maxImageUrl || !builderImageUrlIsSafe(block.src)) errors.push(`${path} image URL is not allowed.`);
+    if (!onsiteImageSourceIsSafe(block.src)) errors.push(`${path} image must use a safe URL (up to 2,000 characters) or a small PNG, JPEG, WebP or GIF image (up to 64 KB encoded).`);
     if (block.alt.length > 500) errors.push(`${path} alt text exceeds 500 characters.`);
     if (!["contain", "cover"].includes(block.fit)) errors.push(`${path} has an invalid image fit.`);
     number(block.width, 1, 100, `${path} width`);
@@ -1185,6 +1186,28 @@ function validateBlock(block, path, addId, number, errors) {
     number(block.size, 12, 96, `${path} size`);
   }
   if ("color" in block && block.color && !COLOR_PATTERN.test(block.color)) errors.push(`${path} color is not supported.`);
+}
+function onsiteImageSourceIsSafe(src) {
+  if (typeof src !== "string") return false;
+  if (!/^data:/i.test(src)) return src.length <= ONSITE_LIMITS.maxImageUrl && builderImageUrlIsSafe(src);
+  if (src.length > ONSITE_LIMITS.maxInlineImage) return false;
+  const match = /^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$/i.exec(src);
+  if (!match || match[2].length % 4 !== 0) return false;
+  try {
+    const bytes = atob(match[2]);
+    switch (match[1].toLowerCase()) {
+      case "png":
+        return bytes.startsWith("PNG\r\n\n");
+      case "jpeg":
+        return bytes.startsWith("ÿØÿ");
+      case "webp":
+        return bytes.startsWith("RIFF") && bytes.slice(8, 12) === "WEBP";
+      case "gif":
+        return bytes.startsWith("GIF87a") || bytes.startsWith("GIF89a");
+    }
+  } catch {
+  }
+  return false;
 }
 function unexpectedKeys(value, allowed, path, errors) {
   const extra = Object.keys(value).filter((key) => !allowed.includes(key));
@@ -1447,6 +1470,46 @@ function escapeAttribute(value) {
 function round(value) {
   return String(Math.round(value * 100) / 100);
 }
+async function prepareImageFile(file) {
+  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) throw new Error("Choose a PNG, JPG or WebP image.");
+  if (!file.size || file.size > 10 * 1024 * 1024) throw new Error("Choose an image smaller than 10 MB.");
+  const url = URL.createObjectURL(file);
+  const image = new Image();
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        image.onload = image.onerror = null;
+        reject(new Error("Image took too long to open. Try another file."));
+      }, 15e3);
+      image.onload = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      image.onerror = () => {
+        clearTimeout(timer);
+        reject(new Error("This image could not be opened. Try another PNG, JPG or WebP file."));
+      };
+      image.src = url;
+    });
+    if (!image.naturalWidth || !image.naturalHeight || image.naturalWidth * image.naturalHeight > 4e7) throw new Error("This image is too large. Choose an image under 40 megapixels.");
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("This browser could not prepare the image.");
+    let scale = Math.min(1, 1280 / Math.max(image.naturalWidth, image.naturalHeight));
+    for (let attempt = 0; attempt < 8; attempt++) {
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const src = canvas.toDataURL("image/webp", Math.max(0.45, 0.85 - attempt * 0.08));
+      if (src.length <= ONSITE_LIMITS.maxInlineImage && onsiteImageSourceIsSafe(src)) return src;
+      scale *= 0.8;
+    }
+    throw new Error("This image is too detailed to save. Try a smaller image or use an image URL.");
+  } finally {
+    image.onload = image.onerror = null;
+    URL.revokeObjectURL(url);
+  }
+}
 const BLOCK_LABEL = { heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
 const HISTORY_LIMIT = 50;
 const HISTORY_BYTES = 2e6;
@@ -1473,6 +1536,10 @@ class OnsiteCompositionEditor {
     this.resizeCleanup = null;
     this.resizeFrame = 0;
     this.destroyed = false;
+    this.imageFileTarget = null;
+    this.imageRequest = 0;
+    this.imagePlaceholders = /* @__PURE__ */ new Map();
+    this.imageDropTarget = null;
     this.onSurfaceClick = (event) => {
       const element = event.target instanceof Element ? event.target : null;
       if (!element) return;
@@ -1483,10 +1550,47 @@ class OnsiteCompositionEditor {
         if (block) this.select({ kind: "block", label: BLOCK_LABEL[block.type], cellId: cellElement.dataset.movcuesNodeId, blockId: block.id, blockType: block.type });
       } else if (cellElement) this.select({ kind: "cell", label: "Cell", cellId: cellElement.dataset.movcuesNodeId });
       else this.selectStep();
+      if (blockElement == null ? void 0 : blockElement.hasAttribute("data-movcues-image-placeholder")) this.chooseImageFile(blockElement.dataset.movcuesBlockId);
       if (blockElement == null ? void 0 : blockElement.matches("button,a")) {
         event.preventDefault();
         event.stopImmediatePropagation();
       }
+    };
+    this.onImageDragOver = (event) => {
+      var _a;
+      if (!((_a = event.dataTransfer) == null ? void 0 : _a.types.includes("Files"))) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const target = event.target instanceof Element ? event.target.closest("[data-movcues-block-id]") : null;
+      const block = target ? findBlock(this.document, target.dataset.movcuesBlockId) : null;
+      this.clearImageDrop();
+      event.dataTransfer.dropEffect = (block == null ? void 0 : block.type) === "image" ? "copy" : "none";
+      if (target && (block == null ? void 0 : block.type) === "image") {
+        this.imageDropTarget = target;
+        target.setAttribute("data-movcues-image-drop", "");
+      }
+    };
+    this.onImageDragLeave = (event) => {
+      var _a;
+      if (!(event.relatedTarget instanceof Node) || !((_a = this.imageDropTarget) == null ? void 0 : _a.contains(event.relatedTarget))) this.clearImageDrop();
+    };
+    this.onImageDrop = (event) => {
+      var _a;
+      if (!((_a = event.dataTransfer) == null ? void 0 : _a.files.length)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.clearImageDrop();
+      const target = event.target instanceof Element ? event.target.closest("[data-movcues-block-id]") : null;
+      const block = target ? findBlock(this.document, target.dataset.movcuesBlockId) : null;
+      if ((block == null ? void 0 : block.type) !== "image") {
+        this.callbacks.onValidation(["Drop the file onto an image block."]);
+        return;
+      }
+      if (event.dataTransfer.files.length !== 1) {
+        this.callbacks.onValidation(["Choose one image at a time."]);
+        return;
+      }
+      void this.setImageFile(event.dataTransfer.files[0], block.id);
     };
     this.onDoubleClick = (event) => {
       const element = event.target instanceof Element ? event.target.closest("[data-movcues-block-id]") : null;
@@ -1650,6 +1754,18 @@ class OnsiteCompositionEditor {
     this.palette = document.createElement("div");
     this.palette.dataset.movcuesBlockPalette = "";
     this.palette.hidden = true;
+    this.imageInput = document.createElement("input");
+    this.imageInput.type = "file";
+    this.imageInput.accept = "image/png,image/jpeg,image/webp";
+    this.imageInput.hidden = true;
+    this.imageInput.dataset.movcuesImageFile = "";
+    this.imageInput.addEventListener("change", () => {
+      var _a;
+      const id = this.imageFileTarget;
+      this.imageFileTarget = null;
+      const file = (_a = this.imageInput.files) == null ? void 0 : _a[0];
+      if (id && file) void this.setImageFile(file, id);
+    });
   }
   start() {
     if (!this.surface) return;
@@ -1673,7 +1789,7 @@ class OnsiteCompositionEditor {
     ];
     this.toolbar.innerHTML = tools.map(([command, label, icon]) => `<button type="button" data-command="${command}" title="${label}" aria-label="${label}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></button>`).join("");
     this.palette.innerHTML = Object.keys(BLOCK_LABEL).map((type) => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
-    this.root.append(this.toolbar, this.palette);
+    this.root.append(this.toolbar, this.palette, this.imageInput);
     const edgeLabels = { top: "Add above", right: "Add to the right", bottom: "Add below", left: "Add to the left" };
     this.edgeButtons = ["top", "right", "bottom", "left"].map((edge) => {
       const button = document.createElement("button");
@@ -1698,6 +1814,9 @@ class OnsiteCompositionEditor {
     this.surface.addEventListener("compositionstart", this.onCompositionStart);
     this.surface.addEventListener("compositionend", this.onCompositionEnd);
     this.surface.addEventListener("keydown", this.onSurfaceKeyDown);
+    this.surface.addEventListener("dragover", this.onImageDragOver);
+    this.surface.addEventListener("dragleave", this.onImageDragLeave);
+    this.surface.addEventListener("drop", this.onImageDrop);
     this.toolbar.addEventListener("click", this.onToolbarClick);
     this.palette.addEventListener("click", this.onPaletteClick);
     this.root.addEventListener("scroll", this.positionTools, true);
@@ -1875,6 +1994,65 @@ class OnsiteCompositionEditor {
     Object.assign(block, cloneOnsite(update));
     this.commit(this.selection);
   }
+  chooseImageFile(blockId) {
+    const block = blockId ? findBlock(this.document, blockId) : this.getSelectedBlock();
+    if ((block == null ? void 0 : block.type) !== "image" || this.destroyed) return;
+    this.imageFileTarget = block.id;
+    this.imageInput.value = "";
+    this.imageInput.click();
+  }
+  setImageSource(src) {
+    var _a;
+    if (((_a = this.getSelectedBlock()) == null ? void 0 : _a.type) !== "image") return false;
+    if (!onsiteImageSourceIsSafe(src)) {
+      this.callbacks.onValidation(["Use an HTTP(S) image URL, a /path on your site, or choose an image file."]);
+      return false;
+    }
+    this.callbacks.onValidation([]);
+    this.updateBlock({ src });
+    return true;
+  }
+  async setImageFile(file, blockId) {
+    var _a, _b, _c, _d, _e;
+    const block = blockId ? findBlock(this.document, blockId) : this.getSelectedBlock();
+    if ((block == null ? void 0 : block.type) !== "image" || this.destroyed) return false;
+    const request = ++this.imageRequest;
+    const id = block.id;
+    const previousSrc = block.src;
+    const placeholder = (_a = this.surface) == null ? void 0 : _a.querySelector(`[data-movcues-image-placeholder][data-movcues-block-id="${id}"]`);
+    if (placeholder) {
+      placeholder.disabled = true;
+      placeholder.setAttribute("aria-busy", "true");
+    }
+    (_c = (_b = this.callbacks).onImageStatus) == null ? void 0 : _c.call(_b, "Preparing image…");
+    try {
+      const src = await prepareImageFile(file);
+      if (this.destroyed || request !== this.imageRequest) return false;
+      const current = findBlock(this.document, id);
+      if ((current == null ? void 0 : current.type) !== "image" || current.src !== previousSrc) return false;
+      const candidate = cloneOnsite(this.document);
+      const image = findBlock(candidate, id);
+      if ((image == null ? void 0 : image.type) !== "image") return false;
+      image.src = src;
+      const validation = validateOnsiteDocument(candidate);
+      this.callbacks.onValidation(validation.errors);
+      if (!validation.valid) return false;
+      if (!this.flush()) return false;
+      this.document = candidate;
+      this.commit(this.selection);
+      return true;
+    } catch (error) {
+      if (!this.destroyed && request === this.imageRequest) this.callbacks.onValidation([error instanceof Error ? error.message : "Image could not be added. Try another file."]);
+      return false;
+    } finally {
+      if (placeholder) {
+        placeholder.disabled = false;
+        placeholder.removeAttribute("aria-busy");
+      }
+      if (!this.destroyed && request === this.imageRequest) (_e = (_d = this.callbacks).onImageStatus) == null ? void 0 : _e.call(_d, "");
+      this.imageInput.value = "";
+    }
+  }
   updateButtonAction(action) {
     const block = this.getSelectedBlock();
     if ((block == null ? void 0 : block.type) !== "button") return;
@@ -1971,12 +2149,24 @@ class OnsiteCompositionEditor {
     this.select(selection);
   }
   compileAndPatch() {
-    var _a;
+    var _a, _b;
     const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType);
     Object.assign(this.content, compiled.content);
     const template = document.createElement("template");
     template.innerHTML = compiled.html;
     (_a = this.surface) == null ? void 0 : _a.replaceChildren(...Array.from(template.content.childNodes));
+    this.imagePlaceholders.clear();
+    (_b = this.surface) == null ? void 0 : _b.querySelectorAll('img[data-movcues-block-id][src=""]').forEach((image) => {
+      const placeholder = document.createElement("button");
+      placeholder.type = "button";
+      placeholder.className = image.className;
+      placeholder.dataset.movcuesBlockId = image.dataset.movcuesBlockId;
+      placeholder.dataset.movcuesImagePlaceholder = "";
+      placeholder.setAttribute("aria-label", "Choose image");
+      placeholder.innerHTML = '<svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 3-3 6 6"/></svg><span>Drop an image or click to browse</span>';
+      image.replaceWith(placeholder);
+      this.imagePlaceholders.set(placeholder, image);
+    });
     const style = this.root.querySelector("style[data-movcues-builder-style]");
     if (style) style.textContent = `${compiled.css}
 [data-movcues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movcues-builder-surface]>.movcues-widget{position:relative!important;inset:auto!important}`;
@@ -2037,6 +2227,11 @@ class OnsiteCompositionEditor {
     this.selection = cloneOnsite(entry.selection);
     this.callbacks.onChange();
     this.select(this.selection);
+  }
+  clearImageDrop() {
+    var _a;
+    (_a = this.imageDropTarget) == null ? void 0 : _a.removeAttribute("data-movcues-image-drop");
+    this.imageDropTarget = null;
   }
   openPalette(anchor, insertion = null) {
     var _a, _b, _c;
@@ -2157,14 +2352,16 @@ class OnsiteCompositionEditor {
     }
   }
   destroy() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
     this.destroyed = true;
+    this.imageRequest++;
     clearTimeout(this.compileTimer);
     clearTimeout(this.typingTimer);
     cancelAnimationFrame(this.toolFrame);
     cancelAnimationFrame(this.resizeFrame);
     (_a = this.resizeCleanup) == null ? void 0 : _a.call(this);
     this.closePalette();
+    this.clearImageDrop();
     (_b = this.surface) == null ? void 0 : _b.removeEventListener("click", this.onSurfaceClick);
     (_c = this.surface) == null ? void 0 : _c.removeEventListener("dblclick", this.onDoubleClick);
     (_d = this.surface) == null ? void 0 : _d.removeEventListener("input", this.onInput);
@@ -2172,11 +2369,17 @@ class OnsiteCompositionEditor {
     (_f = this.surface) == null ? void 0 : _f.removeEventListener("compositionstart", this.onCompositionStart);
     (_g = this.surface) == null ? void 0 : _g.removeEventListener("compositionend", this.onCompositionEnd);
     (_h = this.surface) == null ? void 0 : _h.removeEventListener("keydown", this.onSurfaceKeyDown);
+    (_i = this.surface) == null ? void 0 : _i.removeEventListener("dragover", this.onImageDragOver);
+    (_j = this.surface) == null ? void 0 : _j.removeEventListener("dragleave", this.onImageDragLeave);
+    (_k = this.surface) == null ? void 0 : _k.removeEventListener("drop", this.onImageDrop);
+    this.imagePlaceholders.forEach((image, placeholder) => placeholder.replaceWith(image));
+    this.imagePlaceholders.clear();
+    this.imageInput.remove();
     this.toolbar.remove();
     this.palette.remove();
     this.edgeButtons.forEach((button) => button.remove());
     this.handles.forEach((handle) => handle.remove());
-    (_i = this.root.querySelector("style[data-movcues-composition-style]")) == null ? void 0 : _i.remove();
+    (_l = this.root.querySelector("style[data-movcues-composition-style]")) == null ? void 0 : _l.remove();
     this.root.removeEventListener("scroll", this.positionTools, true);
     window.removeEventListener("scroll", this.positionTools, true);
     window.removeEventListener("resize", this.positionTools);
@@ -2200,6 +2403,7 @@ const AUTHORING_STYLE = `
 [data-movcues-composition-toolbar],[data-movcues-block-palette],[data-movcues-resize-handle],[data-movcues-insert-edge]{box-sizing:border-box;position:fixed;left:0;top:0;z-index:2147483646;pointer-events:auto;font:12px/1.2 ui-sans-serif,system-ui,sans-serif}
 [data-movcues-composition-toolbar]{display:flex;gap:1px;max-width:calc(100vw - 12px);overflow:auto;padding:3px;border:1px solid #dbe2ea;border-radius:8px;background:#fff;box-shadow:0 4px 14px rgba(15,23,42,.14)}[data-movcues-composition-toolbar] button,[data-movcues-block-palette] button{min-height:28px;padding:5px 7px;border:0;border-radius:5px;background:transparent;color:#334155;font:600 11px inherit;cursor:pointer}[data-movcues-composition-toolbar] button{flex:none;width:28px;padding:0;font-size:16px}[data-movcues-composition-toolbar] button:hover:not(:disabled),[data-movcues-block-palette] button:hover{background:#eff6ff;color:#1d4ed8}[data-movcues-composition-toolbar] button:disabled{cursor:not-allowed;opacity:.42}
 [data-movcues-composition-toolbar] svg{display:block;margin:auto}
+[data-movcues-image-placeholder]{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:120px;padding:16px;border:1px dashed #94a3b8!important;background:#f8fafc;color:#64748b;font:12px/1.4 ui-sans-serif,system-ui,sans-serif;cursor:pointer;white-space:normal}[data-movcues-image-placeholder] svg{flex:none}[data-movcues-image-placeholder]:hover,[data-movcues-image-drop]{outline:2px solid #2563eb!important;outline-offset:2px;background:#eff6ff}[data-movcues-image-placeholder][aria-busy=true]{opacity:.6;cursor:wait}[data-movcues-image-file][hidden]{display:none!important}
 [data-movcues-insert-edge]{width:24px;height:24px;padding:0;border:1px solid #93c5fd;border-radius:50%;background:#fff;color:#2563eb;box-shadow:0 2px 6px rgba(15,23,42,.12);font-size:18px;cursor:pointer}[data-movcues-insert-edge]:hover,[data-movcues-insert-edge][aria-expanded=true]{background:#2563eb;color:#fff}
 [data-movcues-insertion-edge=top]{box-shadow:inset 0 3px #2563eb}[data-movcues-insertion-edge=bottom]{box-shadow:inset 0 -3px #2563eb}[data-movcues-insertion-edge=left]{box-shadow:inset 3px 0 #2563eb}[data-movcues-insertion-edge=right]{box-shadow:inset -3px 0 #2563eb}
 [data-movcues-composition-toolbar][hidden],[data-movcues-block-palette][hidden],[data-movcues-insert-edge][hidden]{display:none!important}
@@ -2396,7 +2600,7 @@ class EditorModeController {
           <div data-inspector="block" hidden>
             <div data-block="heading,text"><div class="formatbar"><button type="button" data-v2-format="strong"><b>B</b></button><button type="button" data-v2-format="em"><i>I</i></button><button type="button" data-v2-format="u"><u>U</u></button><button type="button" data-v2-list="ul">• List</button><button type="button" data-v2-list="ol">1. List</button></div><div class="link-row"><input data-v2-link-url aria-label="Link URL" type="text" inputmode="url" placeholder="https://… or /path"><button type="button" class="secondary-button compact" data-v2-apply-link>Link</button></div><label>Font size<div class="number"><input data-block-font-size type="number" min="10" max="72"><span>px</span></div></label><label>Line height<input data-block-line-height type="number" min="0.9" max="3" step="0.05"></label><label>Weight<select data-block-weight><option value="400">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label><label>Text color<input data-block-color type="color"></label></div>
             <div data-block="button"><label>Label<input data-button-label type="text" maxlength="80"></label><label>Variant<select data-button-variant><option value="primary">Primary</option><option value="secondary">Secondary</option><option value="outline">Outline</option></select></label><label>Action<select data-button-action><option value="dismiss">Dismiss</option>${this.guide ? '<option value="next_step">Next step</option><option value="previous_step">Previous step</option>' : ""}<option value="open_url">Open URL</option><option value="track_event">Track event</option></select></label><label data-action-url hidden>URL<input data-button-url type="url" placeholder="https://example.com"></label><label data-action-event hidden>Event<input data-button-event type="text" maxlength="200" placeholder="feature_clicked"></label><label>Background<input data-button-background type="color"></label><label>Text color<input data-button-color type="color"></label><label>Width<select data-button-width><option value="hug">Hug content</option><option value="full">Full width</option></select></label><label>Horizontal pad<div class="number"><input data-button-padding-x type="number" min="4" max="48"><span>px</span></div></label><label>Vertical pad<div class="number"><input data-button-padding-y type="number" min="4" max="32"><span>px</span></div></label><label>Radius<div class="number"><input data-button-radius type="number" min="0" max="48"><span>px</span></div></label></div>
-            <div data-block="image"><label>Source<input data-v2-image-src type="url"></label><label>Alt text<input data-v2-image-alt type="text" maxlength="500"></label><label>Fit<select data-image-fit><option value="cover">Cover</option><option value="contain">Contain</option></select></label><label>Width<div class="number"><input data-image-width type="number" min="1" max="100"><span>%</span></div></label><label>Radius<div class="number"><input data-image-radius type="number" min="0" max="100"><span>px</span></div></label></div>
+            <div data-block="image"><button type="button" class="secondary-button" data-choose-image>Choose image</button><p class="muted">PNG, JPG or WebP · up to 10 MB. You can also drop a file onto the image.</p><p class="muted" data-image-status role="status" aria-live="polite"></p><label>Image URL<input data-v2-image-src type="url" placeholder="https://… (optional)"></label><label>Alt text<input data-v2-image-alt type="text" maxlength="500"></label><label>Fit<select data-image-fit><option value="cover">Cover</option><option value="contain">Contain</option></select></label><label>Width<div class="number"><input data-image-width type="number" min="1" max="100"><span>%</span></div></label><label>Radius<div class="number"><input data-image-radius type="number" min="0" max="100"><span>px</span></div></label></div>
             <div data-block="divider"><label>Thickness<div class="number"><input data-divider-thickness type="number" min="1" max="16"><span>px</span></div></label><label>Color<input data-divider-color type="color"></label></div>
             <div data-block="spacer"><label>Space<div class="number"><input data-spacer-size type="number" min="4" max="240"><span>px</span></div></label></div>
             <div data-block="icon"><label>Icon<select data-icon-name><option value="check">Check</option><option value="star">Star</option><option value="info">Info</option><option value="warning">Warning</option><option value="sparkles">Sparkles</option><option value="arrow">Arrow</option><option value="heart">Heart</option><option value="rocket">Rocket</option></select></label><label>Size<div class="number"><input data-icon-size type="number" min="12" max="96"><span>px</span></div></label><label>Color<input data-icon-color type="color"></label></div>
@@ -2662,7 +2866,7 @@ class EditorModeController {
     });
   }
   bindCompositionInspector() {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e;
     const root = this.root;
     const change = (selector, run) => {
       var _a2;
@@ -2786,7 +2990,11 @@ class EditorModeController {
     });
     change("[data-v2-image-src]", (value) => {
       var _a2;
-      return (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateBlock({ src: value.trim() });
+      return (_a2 = this.compositionEditor) == null ? void 0 : _a2.setImageSource(value.trim());
+    });
+    (_b = root.querySelector("[data-choose-image]")) == null ? void 0 : _b.addEventListener("click", () => {
+      var _a2;
+      return (_a2 = this.compositionEditor) == null ? void 0 : _a2.chooseImageFile();
     });
     change("[data-v2-image-alt]", (value) => {
       var _a2;
@@ -2836,7 +3044,7 @@ class EditorModeController {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.toggleList(button.dataset.v2List);
     }));
-    (_b = root.querySelector("[data-v2-apply-link]")) == null ? void 0 : _b.addEventListener("click", () => {
+    (_c = root.querySelector("[data-v2-apply-link]")) == null ? void 0 : _c.addEventListener("click", () => {
       var _a2;
       const input = root.querySelector("[data-v2-link-url]");
       if (input && !((_a2 = this.compositionEditor) == null ? void 0 : _a2.applyLink(input.value))) {
@@ -2844,11 +3052,11 @@ class EditorModeController {
         input.reportValidity();
       } else input == null ? void 0 : input.setCustomValidity("");
     });
-    (_c = root.querySelector("[data-v2-undo]")) == null ? void 0 : _c.addEventListener("click", () => {
+    (_d = root.querySelector("[data-v2-undo]")) == null ? void 0 : _d.addEventListener("click", () => {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.undo();
     });
-    (_d = root.querySelector("[data-v2-redo]")) == null ? void 0 : _d.addEventListener("click", () => {
+    (_e = root.querySelector("[data-v2-redo]")) == null ? void 0 : _e.addEventListener("click", () => {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.redo();
     });
@@ -3293,6 +3501,7 @@ class EditorModeController {
           this.changed(false);
         },
         onValidation: (errors) => this.showValidation(errors),
+        onImageStatus: (message) => this.setText("[data-image-status]", message),
         onSelectionChange: (selection) => {
           this.compositionSelection = selection;
           this.syncCompositionInspector();
@@ -3449,6 +3658,12 @@ class EditorModeController {
         this.setValue("[data-icon-size]", String(block.size));
         this.setValue("[data-icon-color]", block.color ?? "#2563eb");
       }
+    }
+    if ((block == null ? void 0 : block.type) === "image") {
+      const local = block.src.startsWith("data:");
+      if (local) this.setValue("[data-v2-image-src]", "");
+      this.root.querySelector("[data-v2-image-src]").placeholder = local ? "Added from file; paste a URL to replace" : "https://… (optional)";
+      this.setText("[data-choose-image]", block.src ? "Replace image" : "Choose image");
     }
     const undo = this.root.querySelector("[data-v2-undo]");
     if (undo) undo.disabled = !editor.canUndo();
@@ -3779,4 +3994,4 @@ const STYLE = `
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-Br33mxow.js.map
+//# sourceMappingURL=EditorModeController-DW3ZVucG.js.map

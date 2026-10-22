@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OnsiteCompositionEditor } from "../src/experiences/editor/OnsiteCompositionEditor";
 import { applyOnsiteDocument, createOnsiteDocument, emptyCell, listBlocks, onsiteDocumentFromBuilder, validateOnsiteDocument } from "../src/experiences/onsite/OnsiteDocument";
 import type { ExperienceContent, WidgetBuilderState } from "../src/experiences/types";
+import * as imageFiles from "../src/experiences/editor/ImageFile";
+
+const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
 describe("directional on-site insertion", () => {
   let editor: OnsiteCompositionEditor;
@@ -30,6 +33,32 @@ describe("directional on-site insertion", () => {
 
   afterEach(() => { editor.destroy(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
   const click = (selector: string) => root.querySelector<HTMLElement>(selector)!.click();
+
+  it("shows an empty image as a clickable placeholder and replaces it with one saved, undoable image", async () => {
+    editor.insertBlock("image"); const placeholder = root.querySelector<HTMLButtonElement>("[data-movcues-image-placeholder]")!;
+    expect(placeholder.textContent).toContain("Drop an image or click to browse");
+    expect(builder.html).not.toContain("placeholder"); expect(builder.html).toContain('src=""');
+    const choose = vi.spyOn(root.querySelector<HTMLInputElement>("[data-movcues-image-file]")!, "click"); placeholder.click(); expect(choose).toHaveBeenCalledTimes(1);
+    vi.spyOn(imageFiles, "prepareImageFile").mockResolvedValue(PNG); changed.mockClear();
+    expect(await editor.setImageFile(new File(["image"], "photo.png", { type: "image/png" }))).toBe(true);
+    expect(changed).toHaveBeenCalledTimes(1); expect(root.querySelector("[data-movcues-image-placeholder]")).toBeNull();
+    expect(root.querySelector("img")?.getAttribute("src")).toBe(PNG); expect(builder.html).toContain(PNG);
+    editor.undo(); expect(root.querySelector("[data-movcues-image-placeholder]")).toBeTruthy();
+    editor.redo(); expect(root.querySelector("img")?.getAttribute("src")).toBe(PNG);
+    expect(onsiteDocumentFromBuilder(builder)).toEqual(editor.getDocument());
+  });
+
+  it("keeps the previous image after a bad file or invalid local path and ignores a late result after destruction", async () => {
+    editor.insertBlock("image"); editor.setImageSource("https://example.com/photo.png"); changed.mockClear();
+    vi.spyOn(imageFiles, "prepareImageFile").mockRejectedValueOnce(new Error("Choose a PNG, JPG or WebP image."));
+    expect(await editor.setImageFile(new File(["bad"], "image.svg", { type: "image/svg+xml" }))).toBe(false);
+    expect(editor.setImageSource("C:\\Pictures\\photo.png")).toBe(false);
+    expect(root.querySelector("img")?.getAttribute("src")).toBe("https://example.com/photo.png"); expect(changed).not.toHaveBeenCalled();
+    let resolve!: (src: string) => void;
+    vi.mocked(imageFiles.prepareImageFile).mockImplementationOnce(() => new Promise<string>(done => { resolve = done; }));
+    const pending = editor.setImageFile(new File(["image"], "photo.png", { type: "image/png" }));
+    editor.destroy(); resolve(PNG); expect(await pending).toBe(false); expect(changed).not.toHaveBeenCalled();
+  });
 
   it("shows four small edge controls and inserts a horizontal neighbour in one undoable transaction", () => {
     const original = JSON.stringify(editor.getDocument()); const footerId = editor.getDocument().root.children![1].id;

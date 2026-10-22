@@ -5,6 +5,7 @@ export declare const ONSITE_LIMITS: {
     readonly maxNodes: 120;
     readonly maxRichText: 10000;
     readonly maxImageUrl: 2000;
+    readonly maxInlineImage: 65536;
     readonly maxSerializedBytes: 250000;
     readonly minFixedSize: 24;
     readonly maxFixedSize: 1200;
@@ -133,6 +134,7 @@ export declare function onsiteDocumentFromBuilder(builder?: WidgetBuilderState):
 export declare function applyOnsiteDocument(builder: WidgetBuilderState, document: OnsiteDocument, widgetType: WidgetType | "anchored_card" | "modal"): CompiledOnsiteDocument;
 export declare function compileOnsiteDocument(document: OnsiteDocument, widgetType: string): CompiledOnsiteDocument;
 export declare function validateOnsiteDocument(value: unknown): OnsiteValidationResult;
+export declare function onsiteImageSourceIsSafe(src: string): boolean;
 export declare function findCell(document: OnsiteDocument, id: string): OnsiteCell | null;
 export declare function findBlock(document: OnsiteDocument, id: string): OnsiteBlock | null;
 export declare function parentCell(document: OnsiteDocument, id: string): OnsiteCell | null;

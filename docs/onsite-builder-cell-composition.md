@@ -33,6 +33,7 @@ The backend recompiles the document and rejects a write when any compiled view d
 | Total cells | 120 |
 | Rich text per block | 10,000 characters |
 | Image URL | 2,000 characters |
+| Inline raster image | 65,536 encoded characters |
 | Serialized document | 250,000 bytes |
 | Fixed cell size | 24–1,200 px |
 | Gap | 0–96 px |
@@ -74,3 +75,13 @@ Select a cell or block and use one of its four small edge `+` buttons to choose 
 The compact SVG element toolbar stays outside the whole widget, with automatic edge fallback and viewport bounds. The chooser dismisses on Escape/outside click. Resize controls remain available after insertion on either side. All authoring controls remain in the lazy editor bundle and are absent from serialized content. No schema, backend, or production renderer changes are required.
 
 Verification: 308/308 SDK tests, TypeScript and production builds, and 13/13 focused Chromium tests passed. Browser coverage includes nested directional insertion, immediate resize, undo/redo, save/reload, chooser keyboard cancellation, exterior toolbar placement, and 320/360/390 px layouts. Chromium 153 was provided by a temporary test dependency because the standard browser download failed; no dependency was added to the project. Firefox and WebKit were not run for this follow-up.
+
+## Image input follow-up (2026-10-22)
+
+Empty image blocks now show a dashed image placeholder with “Drop an image or click to browse.” Clicking it or the inspector's Choose image button opens the file picker. Dropping a file onto an empty or existing image imports/replaces that image. The inspector retains optional image URL, alt text, fit, width and radius controls.
+
+PNG, JPEG and WebP files up to 10 MB are decoded locally, resized to at most 1,280 px on their longest edge and compressed to a bounded raster data URL. The encoded image must fit within 65,536 characters and the whole document must still fit within 250,000 bytes. Invalid files preserve the previous source and display an error. Each successful import is one undoable/autosaved operation. Images are embedded in the saved document and compiled HTML; no asset upload service is required. The backend must include the matching inline-image validation change before these documents can be saved.
+
+The placeholder, file picker and drop handling exist only in the editor and never appear in serialized content or visitor bundles. Production image rendering is unchanged.
+
+Verification: 312/312 SDK tests, TypeScript and production builds, 25/25 focused backend tests (including draft save and publish), and 15/15 focused Chromium tests passed. Browser coverage includes actual file selection, file drop, unsupported-file errors, undo/redo, save/reopen and preview. Firefox and WebKit were not run.
