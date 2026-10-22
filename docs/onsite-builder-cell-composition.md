@@ -66,3 +66,11 @@ Gzip sizes, measured with `gzip -9`, changed from 18,125 to 18,136 bytes for `sd
 ## Deferred scope
 
 Survey question authoring, answer branching, conditional workflows, arbitrary HTML/CSS/JavaScript, iframe blocks, media upload infrastructure, advanced animations, themes/templates, and AI generation remain outside this milestone.
+
+## Directional insertion follow-up (2026-10-22)
+
+Select a cell or block and use one of its four small edge `+` buttons to choose a block. Left/right insert beside the selected cell; above/below insert vertically. The editor reuses a matching parent axis or wraps only the selected cell, preserving unrelated full-width rows, existing content IDs, and the outer sizing allocation. The new block is selected immediately. Insertion is one undoable/autosaved operation, and documents exceeding the nesting limit are rejected before mutation.
+
+The compact SVG element toolbar stays outside the whole widget, with automatic edge fallback and viewport bounds. The chooser dismisses on Escape/outside click. Resize controls remain available after insertion on either side. All authoring controls remain in the lazy editor bundle and are absent from serialized content. No schema, backend, or production renderer changes are required.
+
+Verification: 308/308 SDK tests, TypeScript and production builds, and 13/13 focused Chromium tests passed. Browser coverage includes nested directional insertion, immediate resize, undo/redo, save/reload, chooser keyboard cancellation, exterior toolbar placement, and 320/360/390 px layouts. Chromium 153 was provided by a temporary test dependency because the standard browser download failed; no dependency was added to the project. Firefox and WebKit were not run for this follow-up.

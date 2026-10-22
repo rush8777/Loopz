@@ -19,6 +19,7 @@ interface Callbacks {
     onSelectionChange(selection: CompositionSelection): void;
     onValidation(errors: string[]): void;
 }
+type CellEdge = "top" | "right" | "bottom" | "left";
 /** Structured on-site authoring. It is imported only by the lazy editor bundle. */
 export declare class OnsiteCompositionEditor {
     private root;
@@ -31,6 +32,10 @@ export declare class OnsiteCompositionEditor {
     private surface;
     private toolbar;
     private palette;
+    private edgeButtons;
+    private insertion;
+    private paletteAnchor;
+    private toolFrame;
     private handles;
     private selection;
     private history;
@@ -63,7 +68,10 @@ export declare class OnsiteCompositionEditor {
     selectStep(): void;
     selectParent(): void;
     selectChild(): void;
-    insertBlock(type: OnsiteBlock["type"]): boolean;
+    insertBlock(type: OnsiteBlock["type"], insertion?: {
+        cellId: string;
+        edge: CellEdge;
+    }): boolean;
     split(direction: "row" | "column"): boolean;
     addEdge(edge: "top" | "right" | "bottom" | "left"): void;
     duplicate(): boolean;
@@ -105,8 +113,13 @@ export declare class OnsiteCompositionEditor {
     private onSurfaceKeyDown;
     private onToolbarClick;
     private onPaletteClick;
+    private openPalette;
+    private closePalette;
+    private dismissPalette;
+    private onPaletteKeyDown;
     private syncToolbarState;
     private positionTools;
+    private updateToolPositions;
     private availableCanvasBounds;
     private renderResizeHandles;
     private positionHandles;

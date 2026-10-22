@@ -140,6 +140,8 @@ export declare function cellForBlock(document: OnsiteDocument, id: string): Onsi
 export declare function listBlocks(cell: OnsiteCell): OnsiteBlock[];
 export declare function splitCell(document: OnsiteDocument, cellId: string, direction: OnsiteDirection): string | null;
 export declare function insertEdgeCell(document: OnsiteDocument, edge: "top" | "right" | "bottom" | "left"): string;
+/** Insert beside one cell, wrapping only that cell when its parent's axis differs. */
+export declare function insertAdjacentCell(document: OnsiteDocument, cellId: string, edge: "top" | "right" | "bottom" | "left"): string | null;
 export declare function removeCell(document: OnsiteDocument, id: string): boolean;
 export declare function moveCell(document: OnsiteDocument, id: string, delta: -1 | 1): boolean;
 export declare function resizeSiblings(document: OnsiteDocument, firstId: string, secondId: string, firstWeight: number): boolean;

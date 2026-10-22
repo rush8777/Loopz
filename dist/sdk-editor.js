@@ -2832,6 +2832,24 @@ ${ISOLATION_CSS}`;
     }
     return added.id;
   }
+  function insertAdjacentCell(document2, cellId, edge) {
+    const cell = findCell(document2, cellId);
+    if (!cell) return null;
+    if (cell === document2.root) return insertEdgeCell(document2, edge);
+    const parent = parentCell(document2, cellId);
+    if (!(parent == null ? void 0 : parent.children)) return null;
+    const direction = edge === "left" || edge === "right" ? "row" : "column";
+    const before = edge === "top" || edge === "left";
+    const index = parent.children.indexOf(cell);
+    const added = emptyCell();
+    if (parent.direction === direction) parent.children.splice(index + (before ? 0 : 1), 0, added);
+    else {
+      const group = { ...emptyCell(), direction, sizing: cloneOnsite(cell.sizing), gap: parent.gap, responsiveStack: direction === "row", children: before ? [added, cell] : [cell, added] };
+      cell.sizing = { mode: "flexible", weight: 1 };
+      parent.children.splice(index, 1, group);
+    }
+    return added.id;
+  }
   function removeCell(document2, id) {
     const parent = parentCell(document2, id);
     if (!(parent == null ? void 0 : parent.children) || parent.children.length <= 1) {
@@ -3025,6 +3043,10 @@ ${ISOLATION_CSS}`;
       this.widgetType = widgetType;
       this.guide = guide;
       this.callbacks = callbacks;
+      this.edgeButtons = [];
+      this.insertion = null;
+      this.paletteAnchor = null;
+      this.toolFrame = 0;
       this.handles = [];
       this.selection = { kind: "step", label: "Step" };
       this.history = [];
@@ -3067,6 +3089,7 @@ ${ISOLATION_CSS}`;
         else if (block.type === "button") block.label = (element.textContent ?? "").slice(0, 80);
         else return;
         this.scheduleCompile();
+        this.positionTools();
         this.callbacks.onChange();
         clearTimeout(this.typingTimer);
         this.typingTimer = window.setTimeout(() => this.pushHistory(), 300);
@@ -3109,8 +3132,8 @@ ${ISOLATION_CSS}`;
         event.stopPropagation();
         const command = button.dataset.command;
         if (command === "add") {
-          this.palette.hidden = !this.palette.hidden;
-          this.positionTools();
+          if (this.palette.hidden) this.openPalette(button);
+          else this.closePalette();
         } else if (command === "columns") this.split("row");
         else if (command === "rows") this.split("column");
         else if (command === "parent") this.selectParent();
@@ -3120,31 +3143,36 @@ ${ISOLATION_CSS}`;
         else if (command === "move-down") this.move(1);
       };
       this.onPaletteClick = (event) => {
+        var _a;
         const button = event.target instanceof Element ? event.target.closest("[data-insert-block]") : null;
         if (!button) return;
         event.preventDefault();
         event.stopPropagation();
-        if (this.insertBlock(button.dataset.insertBlock)) this.palette.hidden = true;
+        if (this.insertBlock(button.dataset.insertBlock, this.insertion ?? void 0)) {
+          this.closePalette();
+          const block = this.getSelectedBlock();
+          const element = block ? (_a = this.surface) == null ? void 0 : _a.querySelector(`[data-movcues-block-id="${block.id}"]`) : null;
+          if (element) {
+            element.tabIndex = -1;
+            element.focus({ preventScroll: true });
+          }
+        }
+      };
+      this.dismissPalette = (event) => {
+        if (!this.palette.hidden && !event.composedPath().some((node) => node === this.palette || node === this.paletteAnchor)) this.closePalette();
+      };
+      this.onPaletteKeyDown = (event) => {
+        if (event.key !== "Escape" || this.palette.hidden) return;
+        const anchor = this.paletteAnchor;
+        this.closePalette();
+        anchor == null ? void 0 : anchor.focus({ preventScroll: true });
+        event.preventDefault();
       };
       this.positionTools = () => {
-        var _a;
-        const selector = this.selection.kind === "block" ? `[data-movcues-block-id="${this.selection.blockId}"]` : this.selection.kind === "cell" ? `[data-movcues-node-id="${this.selection.cellId}"]` : ".movcues-widget";
-        const target = (_a = this.surface) == null ? void 0 : _a.querySelector(selector);
-        if (!target) {
-          this.toolbar.hidden = true;
-          return;
-        }
-        const rect = target.getBoundingClientRect();
-        this.toolbar.hidden = false;
-        const toolbarRect = this.toolbar.getBoundingClientRect();
-        const bounds = this.availableCanvasBounds();
-        const left = Math.max(bounds.left, Math.min(bounds.right - toolbarRect.width, rect.left));
-        const below = rect.bottom + 8;
-        const above = rect.top - toolbarRect.height - 8;
-        const top = below + toolbarRect.height <= bounds.bottom ? below : above >= bounds.top ? above : Math.max(bounds.top, Math.min(bounds.bottom - toolbarRect.height, below));
-        this.toolbar.style.transform = `translate(${left}px,${top}px)`;
-        if (!this.palette.hidden) this.palette.style.transform = `translate(${left}px,${Math.min(innerHeight - 220, top + toolbarRect.height + 4)}px)`;
-        this.positionHandles();
+        cancelAnimationFrame(this.toolFrame);
+        this.toolFrame = requestAnimationFrame(() => {
+          if (!this.destroyed) this.updateToolPositions();
+        });
       };
       this.startResize = (event) => {
         var _a, _b, _c;
@@ -3216,9 +3244,38 @@ ${ISOLATION_CSS}`;
       style.dataset.movcuesCompositionStyle = "";
       style.textContent = AUTHORING_STYLE;
       this.root.append(style);
-      this.toolbar.innerHTML = `<button data-command="add" title="Add block" aria-label="Add block">+ Add</button><button data-command="columns" title="Split into columns" aria-label="Split into columns">Cols</button><button data-command="rows" title="Split into rows" aria-label="Split into rows">Rows</button><button data-command="parent" title="Select parent" aria-label="Select parent">Up</button><button data-command="duplicate" title="Duplicate" aria-label="Duplicate">Copy</button><button data-command="move-up" title="Move before" aria-label="Move before">&lt;</button><button data-command="move-down" title="Move after" aria-label="Move after">&gt;</button><button data-command="delete" title="Delete" aria-label="Delete">Del</button>`;
+      this.toolbar.setAttribute("role", "toolbar");
+      this.toolbar.setAttribute("aria-label", "Selected element tools");
+      const tools = [
+        ["add", "Add block", '<path d="M8 3v10M3 8h10"/>'],
+        ["columns", "Split into columns", '<rect x="2" y="2" width="12" height="12" rx="1"/><path d="M8 2v12"/>'],
+        ["rows", "Split into rows", '<rect x="2" y="2" width="12" height="12" rx="1"/><path d="M2 8h12"/>'],
+        ["parent", "Select parent", '<path d="M8 13V3m-4 4 4-4 4 4"/>'],
+        ["duplicate", "Duplicate", '<rect x="6" y="6" width="8" height="8" rx="1"/><path d="M10 4V2H2v8h2"/>'],
+        ["move-up", "Move before", '<path d="M13 8H3m4-4L3 8l4 4"/>'],
+        ["move-down", "Move after", '<path d="M3 8h10M9 4l4 4-4 4"/>'],
+        ["delete", "Delete", '<path d="m4 4 8 8m0-8-8 8"/>']
+      ];
+      this.toolbar.innerHTML = tools.map(([command, label, icon]) => `<button type="button" data-command="${command}" title="${label}" aria-label="${label}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></button>`).join("");
       this.palette.innerHTML = Object.keys(BLOCK_LABEL).map((type) => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
       this.root.append(this.toolbar, this.palette);
+      const edgeLabels = { top: "Add above", right: "Add to the right", bottom: "Add below", left: "Add to the left" };
+      this.edgeButtons = ["top", "right", "bottom", "left"].map((edge) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.movcuesInsertEdge = edge;
+        button.textContent = "+";
+        button.title = edgeLabels[edge];
+        button.setAttribute("aria-label", edgeLabels[edge]);
+        button.setAttribute("aria-expanded", "false");
+        button.addEventListener("click", () => {
+          const cell = this.getSelectedCell();
+          if (this.paletteAnchor === button && !this.palette.hidden) this.closePalette();
+          else if (cell) this.openPalette(button, { cellId: cell.id, edge });
+        });
+        this.root.append(button);
+        return button;
+      });
       this.surface.addEventListener("click", this.onSurfaceClick);
       this.surface.addEventListener("dblclick", this.onDoubleClick);
       this.surface.addEventListener("input", this.onInput);
@@ -3231,6 +3288,8 @@ ${ISOLATION_CSS}`;
       this.root.addEventListener("scroll", this.positionTools, true);
       window.addEventListener("scroll", this.positionTools, true);
       window.addEventListener("resize", this.positionTools);
+      window.addEventListener("pointerdown", this.dismissPalette, true);
+      window.addEventListener("keydown", this.onPaletteKeyDown);
       this.select({ kind: "step", label: "Step" });
       this.pushHistory();
       if (this.migrated || repaired) this.callbacks.onChange();
@@ -3311,11 +3370,23 @@ ${ISOLATION_CSS}`;
       if (cell.block) this.select({ kind: "block", label: BLOCK_LABEL[cell.block.type], cellId: cell.id, blockId: cell.block.id, blockType: cell.block.type });
       else if ((_a = cell.children) == null ? void 0 : _a[0]) this.select({ kind: "cell", label: "Child cell", cellId: cell.children[0].id });
     }
-    insertBlock(type) {
+    insertBlock(type, insertion) {
       const cell = this.getSelectedCell();
       if (!cell) return false;
       this.beforeTransaction();
       const block = createBlock(type, this.guide);
+      if (insertion) {
+        const candidate = cloneOnsite(this.document);
+        const id = insertAdjacentCell(candidate, insertion.cellId, insertion.edge);
+        if (!id) return false;
+        findCell(candidate, id).block = block;
+        const validation = validateOnsiteDocument(candidate);
+        this.callbacks.onValidation(validation.errors);
+        if (!validation.valid) return false;
+        this.document = candidate;
+        this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: id, blockId: block.id, blockType: type });
+        return true;
+      }
       if (cell.children) {
         const added2 = emptyCell(block);
         cell.children.push(added2);
@@ -3461,6 +3532,7 @@ ${ISOLATION_CSS}`;
     }
     select(selection) {
       var _a, _b, _c, _d;
+      this.closePalette();
       this.selection = selection;
       (_a = this.surface) == null ? void 0 : _a.querySelectorAll("[data-movcues-editor-selected]").forEach((element) => element.removeAttribute("data-movcues-editor-selected"));
       const target = selection.kind === "block" ? (_b = this.surface) == null ? void 0 : _b.querySelector(`[data-movcues-block-id="${selection.blockId}"]`) : selection.kind === "cell" ? (_c = this.surface) == null ? void 0 : _c.querySelector(`[data-movcues-node-id="${selection.cellId}"]`) : (_d = this.surface) == null ? void 0 : _d.querySelector(".movcues-widget");
@@ -3468,7 +3540,7 @@ ${ISOLATION_CSS}`;
       this.syncToolbarState();
       this.callbacks.onSelectionChange(selection);
       this.renderResizeHandles();
-      requestAnimationFrame(this.positionTools);
+      this.positionTools();
     }
     beforeTransaction() {
       clearTimeout(this.typingTimer);
@@ -3551,6 +3623,25 @@ ${ISOLATION_CSS}`;
       this.callbacks.onChange();
       this.select(this.selection);
     }
+    openPalette(anchor, insertion = null) {
+      var _a, _b, _c;
+      this.closePalette();
+      this.insertion = insertion;
+      this.paletteAnchor = anchor;
+      this.palette.hidden = false;
+      anchor.setAttribute("aria-expanded", "true");
+      if (insertion) (_b = (_a = this.surface) == null ? void 0 : _a.querySelector(`[data-movcues-node-id="${insertion.cellId}"]`)) == null ? void 0 : _b.setAttribute("data-movcues-insertion-edge", insertion.edge);
+      this.positionTools();
+      (_c = this.palette.querySelector("button")) == null ? void 0 : _c.focus({ preventScroll: true });
+    }
+    closePalette() {
+      var _a, _b;
+      this.palette.hidden = true;
+      (_a = this.paletteAnchor) == null ? void 0 : _a.setAttribute("aria-expanded", "false");
+      this.paletteAnchor = null;
+      this.insertion = null;
+      (_b = this.surface) == null ? void 0 : _b.querySelectorAll("[data-movcues-insertion-edge]").forEach((element) => element.removeAttribute("data-movcues-insertion-edge"));
+    }
     syncToolbarState() {
       const cell = this.getSelectedCell();
       const atRoot = !cell || cell === this.document.root;
@@ -3561,37 +3652,83 @@ ${ISOLATION_CSS}`;
         button.title = atRoot ? "Select an element to use this action" : command === "delete" ? "Delete selected element (Undo is available)" : "Duplicate";
       }
     }
+    updateToolPositions() {
+      var _a, _b;
+      const cell = this.getSelectedCell();
+      const target = cell ? (_a = this.surface) == null ? void 0 : _a.querySelector(`[data-movcues-node-id="${cell.id}"]`) : null;
+      const widget = (_b = this.surface) == null ? void 0 : _b.querySelector(".movcues-widget");
+      if (!target || !widget) {
+        this.toolbar.hidden = true;
+        this.edgeButtons.forEach((button) => {
+          button.hidden = true;
+        });
+        this.closePalette();
+        return;
+      }
+      const rect = target.getBoundingClientRect();
+      const bounds = this.availableCanvasBounds();
+      const visible = rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth;
+      this.toolbar.hidden = !visible;
+      this.edgeButtons.forEach((button) => {
+        button.hidden = !visible;
+      });
+      if (!visible) {
+        this.closePalette();
+        return;
+      }
+      this.toolbar.style.maxWidth = `${bounds.right - bounds.left}px`;
+      const toolbarRect = this.toolbar.getBoundingClientRect();
+      const widgetRect = widget.getBoundingClientRect();
+      const point = placeOutside(widgetRect, toolbarRect, bounds);
+      this.toolbar.style.transform = `translate(${point.left}px,${point.top}px)`;
+      for (const button of this.edgeButtons) {
+        const edge = button.dataset.movcuesInsertEdge;
+        const x = edge === "left" ? rect.left : edge === "right" ? rect.right : rect.left + rect.width / 2;
+        const y = edge === "top" ? rect.top : edge === "bottom" ? rect.bottom : rect.top + rect.height / 2;
+        button.style.transform = `translate(${Math.max(2, Math.min(innerWidth - 26, x - 12))}px,${Math.max(2, Math.min(innerHeight - 26, y - 12))}px)`;
+      }
+      if (!this.palette.hidden && this.paletteAnchor) {
+        const palettePoint = placeOutside(this.paletteAnchor.getBoundingClientRect(), this.palette.getBoundingClientRect(), bounds);
+        this.palette.style.transform = `translate(${palettePoint.left}px,${palettePoint.top}px)`;
+      }
+      this.positionHandles();
+    }
     availableCanvasBounds() {
+      var _a, _b;
       const inset = 6;
-      const aside = this.root.querySelector("aside");
+      const aside = (_b = (_a = document.querySelector("[data-movcues-editor]")) == null ? void 0 : _a.shadowRoot) == null ? void 0 : _b.querySelector("aside");
       const panel = aside == null ? void 0 : aside.getBoundingClientRect();
       let left = inset;
       let right = innerWidth - inset;
       if (panel && panel.width > 0 && panel.height > 0) {
-        if (panel.left < innerWidth / 2) left = Math.max(left, panel.right + inset);
-        else right = Math.min(right, panel.left - inset);
+        if (panel.left < innerWidth / 2 && innerWidth - panel.right > 240) left = Math.max(left, panel.right + inset);
+        else if (panel.left >= innerWidth / 2 && panel.left > 240) right = Math.min(right, panel.left - inset);
       }
       return { left, right: Math.max(left, right), top: inset, bottom: innerHeight - inset };
     }
     renderResizeHandles() {
-      this.handles.forEach((handle2) => handle2.remove());
+      this.handles.forEach((handle) => handle.remove());
       this.handles = [];
       const cell = this.getSelectedCell();
       const parent = cell ? parentCell(this.document, cell.id) : null;
       if (!cell || !(parent == null ? void 0 : parent.children)) return;
-      const index = parent.children.findIndex((child) => child.id === cell.id);
-      const next = parent.children[index + 1];
-      if (!next) return;
-      const handle = document.createElement("button");
-      handle.type = "button";
-      handle.dataset.movcuesResizeHandle = parent.direction;
-      handle.dataset.first = cell.id;
-      handle.dataset.second = next.id;
-      handle.setAttribute("aria-label", `Resize ${parent.direction === "row" ? "columns" : "rows"}`);
-      handle.addEventListener("pointerdown", this.startResize);
-      handle.addEventListener("keydown", this.resizeWithKeyboard);
-      this.root.append(handle);
-      this.handles.push(handle);
+      const index = parent.children.indexOf(cell);
+      for (const firstIndex of [index - 1, index]) {
+        const first = parent.children[firstIndex];
+        const second = parent.children[firstIndex + 1];
+        if (!first || !second) continue;
+        const handle = document.createElement("button");
+        handle.type = "button";
+        handle.dataset.movcuesResizeHandle = parent.direction;
+        handle.dataset.first = first.id;
+        handle.dataset.second = second.id;
+        handle.textContent = parent.direction === "row" ? "↔" : "↕";
+        handle.setAttribute("aria-label", `Resize ${parent.direction === "row" ? "columns" : "rows"}`);
+        handle.addEventListener("pointerdown", this.startResize);
+        handle.addEventListener("keydown", this.resizeWithKeyboard);
+        this.root.append(handle);
+        this.handles.push(handle);
+      }
       this.positionHandles();
     }
     positionHandles() {
@@ -3601,7 +3738,7 @@ ${ISOLATION_CSS}`;
         if (!first) continue;
         const rect = first.getBoundingClientRect();
         const row = handle.dataset.movcuesResizeHandle === "row";
-        handle.style.transform = `translate(${row ? rect.right - 5 : rect.left + rect.width / 2 - 14}px,${row ? rect.top + rect.height / 2 - 14 : rect.bottom - 5}px)`;
+        handle.style.transform = `translate(${row ? rect.right - 5 : rect.left + rect.width / 2 + 16}px,${row ? rect.top + rect.height / 2 + 16 : rect.bottom - 5}px)`;
       }
     }
     destroy() {
@@ -3609,8 +3746,10 @@ ${ISOLATION_CSS}`;
       this.destroyed = true;
       clearTimeout(this.compileTimer);
       clearTimeout(this.typingTimer);
+      cancelAnimationFrame(this.toolFrame);
       cancelAnimationFrame(this.resizeFrame);
       (_a = this.resizeCleanup) == null ? void 0 : _a.call(this);
+      this.closePalette();
       (_b = this.surface) == null ? void 0 : _b.removeEventListener("click", this.onSurfaceClick);
       (_c = this.surface) == null ? void 0 : _c.removeEventListener("dblclick", this.onDoubleClick);
       (_d = this.surface) == null ? void 0 : _d.removeEventListener("input", this.onInput);
@@ -3620,18 +3759,38 @@ ${ISOLATION_CSS}`;
       (_h = this.surface) == null ? void 0 : _h.removeEventListener("keydown", this.onSurfaceKeyDown);
       this.toolbar.remove();
       this.palette.remove();
+      this.edgeButtons.forEach((button) => button.remove());
       this.handles.forEach((handle) => handle.remove());
       (_i = this.root.querySelector("style[data-movcues-composition-style]")) == null ? void 0 : _i.remove();
+      this.root.removeEventListener("scroll", this.positionTools, true);
       window.removeEventListener("scroll", this.positionTools, true);
       window.removeEventListener("resize", this.positionTools);
+      window.removeEventListener("pointerdown", this.dismissPalette, true);
+      window.removeEventListener("keydown", this.onPaletteKeyDown);
     }
+  }
+  function placeOutside(rect, size, bounds) {
+    const clampX = (x) => Math.max(bounds.left, Math.min(bounds.right - size.width, x));
+    const clampY = (y) => Math.max(bounds.top, Math.min(bounds.bottom - size.height, y));
+    const candidates = [
+      { left: clampX(rect.left), top: rect.bottom + 10 },
+      { left: clampX(rect.left), top: rect.top - size.height - 10 },
+      { left: rect.right + 10, top: clampY(rect.top) },
+      { left: rect.left - size.width - 10, top: clampY(rect.top) }
+    ];
+    return candidates.find((p) => p.left >= bounds.left && p.left + size.width <= bounds.right && p.top >= bounds.top && p.top + size.height <= bounds.bottom) ?? { left: clampX(rect.left), top: clampY(rect.bottom + 10) };
   }
   const AUTHORING_STYLE = `
 [data-movcues-editor-selected=step]{outline:2px solid #2563eb!important;outline-offset:3px}[data-movcues-editor-selected=cell]{outline:2px solid #0ea5e9!important;outline-offset:-2px}[data-movcues-editor-selected=block]{outline:2px solid #2563eb!important;outline-offset:2px}
-[data-movcues-composition-toolbar],[data-movcues-block-palette],[data-movcues-resize-handle]{position:fixed;left:0;top:0;z-index:2147483646;pointer-events:auto;font:12px/1.2 ui-sans-serif,system-ui,sans-serif}
-[data-movcues-composition-toolbar]{display:flex;gap:2px;max-width:calc(100vw - 12px);overflow:auto;padding:4px;border:1px solid #dbe2ea;border-radius:8px;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.18)}[data-movcues-composition-toolbar] button,[data-movcues-block-palette] button{min-height:28px;padding:5px 7px;border:0;border-radius:5px;background:transparent;color:#334155;font:600 11px inherit;cursor:pointer}[data-movcues-composition-toolbar] button:hover:not(:disabled),[data-movcues-block-palette] button:hover{background:#eff6ff;color:#1d4ed8}[data-movcues-composition-toolbar] button:disabled{cursor:not-allowed;opacity:.42}
+[data-movcues-composition-toolbar],[data-movcues-block-palette],[data-movcues-resize-handle],[data-movcues-insert-edge]{box-sizing:border-box;position:fixed;left:0;top:0;z-index:2147483646;pointer-events:auto;font:12px/1.2 ui-sans-serif,system-ui,sans-serif}
+[data-movcues-composition-toolbar]{display:flex;gap:1px;max-width:calc(100vw - 12px);overflow:auto;padding:3px;border:1px solid #dbe2ea;border-radius:8px;background:#fff;box-shadow:0 4px 14px rgba(15,23,42,.14)}[data-movcues-composition-toolbar] button,[data-movcues-block-palette] button{min-height:28px;padding:5px 7px;border:0;border-radius:5px;background:transparent;color:#334155;font:600 11px inherit;cursor:pointer}[data-movcues-composition-toolbar] button{flex:none;width:28px;padding:0;font-size:16px}[data-movcues-composition-toolbar] button:hover:not(:disabled),[data-movcues-block-palette] button:hover{background:#eff6ff;color:#1d4ed8}[data-movcues-composition-toolbar] button:disabled{cursor:not-allowed;opacity:.42}
+[data-movcues-composition-toolbar] svg{display:block;margin:auto}
+[data-movcues-insert-edge]{width:24px;height:24px;padding:0;border:1px solid #93c5fd;border-radius:50%;background:#fff;color:#2563eb;box-shadow:0 2px 6px rgba(15,23,42,.12);font-size:18px;cursor:pointer}[data-movcues-insert-edge]:hover,[data-movcues-insert-edge][aria-expanded=true]{background:#2563eb;color:#fff}
+[data-movcues-insertion-edge=top]{box-shadow:inset 0 3px #2563eb}[data-movcues-insertion-edge=bottom]{box-shadow:inset 0 -3px #2563eb}[data-movcues-insertion-edge=left]{box-shadow:inset 3px 0 #2563eb}[data-movcues-insertion-edge=right]{box-shadow:inset -3px 0 #2563eb}
+[data-movcues-composition-toolbar][hidden],[data-movcues-block-palette][hidden],[data-movcues-insert-edge][hidden]{display:none!important}
+[data-movcues-composition-toolbar] button:focus-visible,[data-movcues-block-palette] button:focus-visible,[data-movcues-insert-edge]:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
 [data-movcues-block-palette]{display:grid;grid-template-columns:repeat(2,minmax(76px,1fr));gap:3px;width:180px;padding:6px;border:1px solid #dbe2ea;border-radius:9px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,.2)}[data-movcues-block-palette][hidden]{display:none}
-[data-movcues-resize-handle]{width:28px;height:28px;padding:0;border:2px solid #fff;border-radius:50%;background:#2563eb;box-shadow:0 2px 8px rgba(15,23,42,.25);cursor:col-resize}[data-movcues-resize-handle=column]{cursor:row-resize}[contenteditable=true]{cursor:text!important;outline:2px solid #60a5fa!important;outline-offset:2px}
+[data-movcues-resize-handle]{width:28px;height:28px;padding:0;border:2px solid #fff;border-radius:50%;background:#2563eb;color:#fff;box-shadow:0 2px 8px rgba(15,23,42,.25);cursor:col-resize}[data-movcues-resize-handle=column]{cursor:row-resize}[contenteditable=true]{cursor:text!important;outline:2px solid #60a5fa!important;outline-offset:2px}
 `;
   function escapeHtmlAttribute(value) {
     return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");

@@ -6,6 +6,7 @@ import {
   duplicateCell,
   findCell,
   insertEdgeCell,
+  insertAdjacentCell,
   listBlocks,
   migrateV1Builder,
   moveCell,
@@ -17,6 +18,25 @@ import { mountBuilderContent } from "../src/experiences/runtime/BuilderContent";
 import type { ExperienceContent, WidgetBuilderState } from "../src/experiences/types";
 
 describe("OnsiteDocument", () => {
+  it.each(["left", "right", "top", "bottom"] as const)("inserts %s of one cell without rearranging the full-width footer", edge => {
+    const doc = createOnsiteDocument(); const selected = doc.root.children![0]; const footer = doc.root.children![1];
+    const selectedId = selected.id; const headingId = selected.block!.id; const originalSizing = { mode: "fixed" as const, value: 220 }; selected.sizing = originalSizing;
+    const addedId = insertAdjacentCell(doc, selected.id, edge)!;
+    const horizontal = edge === "left" || edge === "right";
+    const children = horizontal ? doc.root.children![0].children! : doc.root.children!;
+    expect(children.map(child => child.id).slice(0, 2)).toEqual(edge === "left" || edge === "top" ? [addedId, selectedId] : [selectedId, addedId]);
+    expect(findCell(doc, selectedId)?.block?.id).toBe(headingId);
+    if (horizontal) { expect(doc.root.children![0].direction).toBe("row"); expect(doc.root.children![0].sizing).toEqual(originalSizing); expect(doc.root.children![1]).toBe(footer); }
+    expect(validateOnsiteDocument(doc).valid).toBe(true);
+  });
+
+  it("wraps a nested group locally and reuses a matching axis for repeated insertion", () => {
+    const doc = createOnsiteDocument(); const first = doc.root.children![0]; const footer = doc.root.children![1];
+    insertAdjacentCell(doc, first.id, "left"); const row = doc.root.children![0];
+    const another = insertAdjacentCell(doc, first.id, "right")!; expect(row.children).toHaveLength(3); expect(row.children!.at(-1)?.id).toBe(another);
+    const above = insertAdjacentCell(doc, row.id, "top")!; expect(doc.root.children![0].id).toBe(above); expect(doc.root.children![1]).toBe(row); expect(doc.root.children![2]).toBe(footer);
+    expect(validateOnsiteDocument(doc).valid).toBe(true);
+  });
   it("compiles a deterministic responsive document and projects compatibility content", () => {
     const document = createOnsiteDocument(true); const text = listBlocks(document.root).find(block => block.type === "text"); if (text?.type === "text") text.html = "<ul><li>First</li><li>Second</li></ul>"; const builder: WidgetBuilderState = { version: 1, projectData: {}, html: "", css: "" };
     const first = applyOnsiteDocument(builder, document, "modal"); const second = applyOnsiteDocument(builder, document, "modal");

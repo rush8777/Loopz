@@ -49,6 +49,7 @@ async function startController(page: import('@playwright/test').Page, options: {
     targeting: { pageRules: [], audience: { type: 'all' }, trigger: { type: 'page_load' }, frequency: { mode: 'once' }, priority: 0 },
     builder: { version: 1, projectData: {}, css: '.movcues-widget{padding:10px;max-width:100%}', html: '<section class="movcues-widget"><h2 data-movcues-content="heading">Welcome</h2><div data-movcues-content="body">Edit this message</div><button data-movcues-action-id="primary">Continue</button></section>' },
   };
+  let savedDefinition = definition;
   let revision = 1; let release: (() => void) | undefined; let saves = 0;
   await page.route('**/public/experience-editor/**', async route => {
     if (route.request().url().endsWith('/exchange')) return route.fulfill({ json: { sessionId:'session',accessToken:'never-export-this-token',expiresAt:new Date(Date.now()+60000).toISOString() } });
@@ -56,9 +57,9 @@ async function startController(page: import('@playwright/test').Page, options: {
       saves++; const incoming = route.request().postDataJSON();
       if (options.delay && saves === 1) await new Promise<void>(resolve => { release = resolve; });
       if (incoming.revision !== revision) return route.fulfill({status:409,json:{error:'draft_conflict',currentRevision:revision}});
-      revision++; return route.fulfill({ json: { version: { id:'version',revision,versionNumber:1,definition:incoming.definition } } });
+      savedDefinition = incoming.definition; revision++; return route.fulfill({ json: { version: { id:'version',revision,versionNumber:1,definition:incoming.definition } } });
     }
-    return route.fulfill({ json: { experience: {id:'browser-exp',name:'Browser authoring',kind:'widget',widgetType:options.widgetType ?? 'modal',builderMode:'onsite'},version:{id:'version',revision,versionNumber:1,definition} } });
+    return route.fulfill({ json: { experience: {id:'browser-exp',name:'Browser authoring',kind:'widget',widgetType:options.widgetType ?? 'modal',builderMode:'onsite'},version:{id:'version',revision,versionNumber:1,definition:savedDefinition} } });
   });
   if (options.width) await page.setViewportSize({width:options.width,height:640});
   await page.evaluate(async () => { const f=(window as any).fixture;f.editor.destroy();document.querySelector("[data-fixture-toolbar]")?.remove();f.controller=new f.Controller(location.origin);await f.controller.start('one-time-launch'); });
@@ -124,6 +125,52 @@ test('adding from a selected block inserts a new block instead of replacing it',
   await expect(page.locator('[data-movcues-experience] h2')).toHaveCount(1);await expect(page.locator('[data-movcues-experience] img')).toHaveCount(1);
 });
 
+test('edge insertion makes a local column, resizes, undoes and reloads the same layout', async ({ page }) => {
+  const network = await startController(page); const widget = page.locator('[data-movcues-experience] .movcues-widget');
+  await widget.locator('h2').click();
+  await expect(page.locator('[data-movcues-insert-edge]')).toHaveCount(4);
+  await page.getByRole('button', { name: 'Add to the left', exact: true }).click();
+  await page.locator('[data-insert-block=text]').click();
+  const headingCell = widget.locator('h2').locator('..');
+  const row = headingCell.locator('..');
+  await expect(row).toHaveCSS('flex-direction', 'row');
+  await expect(row.locator(':scope > .movcues-cell')).toHaveCount(2);
+  const inserted = row.locator('.movcues-text'); await expect(inserted).toBeVisible();
+  const originalBody = widget.getByText('Edit this message', { exact: true });
+  const [rowBox, bodyBox] = await Promise.all([row.boundingBox(), originalBody.boundingBox()]);
+  expect(bodyBox!.y).toBeGreaterThanOrEqual(rowBox!.y + rowBox!.height);
+  await page.screenshot({ path: test.info().outputPath('directional-insertion.png') });
+  await page.locator('[data-global-undo]').click(); await expect(widget.locator('.movcues-text')).toHaveCount(1);
+  await page.locator('[data-global-redo]').click(); await expect(widget.locator('.movcues-text')).toHaveCount(2);
+  const handle = page.locator('[data-movcues-resize-handle=row]'); await handle.focus(); await handle.press('ArrowRight');
+  const structure = await row.getAttribute('data-movcues-node-id');
+  await expect.poll(network.getSaves).toBeGreaterThan(0); await expect(page.locator('[data-save-state]')).toHaveText('Draft saved');
+  await page.evaluate(async () => { const f = (window as any).fixture; f.controller.destroy(); f.controller = new f.Controller(location.origin); await f.controller.start('reload'); });
+  await expect(widget.locator(`[data-movcues-node-id="${structure}"]`)).toHaveCSS('flex-direction', 'row');
+  await expect(widget.locator('.movcues-text')).toHaveCount(2);
+});
+
+test('edge chooser cancels from keyboard and the small toolbar stays outside an interior selection', async ({ page }) => {
+  await startController(page); const widget = page.locator('[data-movcues-experience] .movcues-widget'); await widget.locator('h2').click();
+  const add = page.getByRole('button', { name: 'Add to the right', exact: true });
+  await add.focus(); await add.press('Enter'); await expect(page.locator('[data-movcues-block-palette]')).toBeVisible();
+  await page.keyboard.press('Escape'); await expect(page.locator('[data-movcues-block-palette]')).toBeHidden(); await expect(add).toBeFocused();
+  const [bar, box] = await Promise.all([page.locator('[data-movcues-composition-toolbar]').boundingBox(), widget.boundingBox()]);
+  expect(bar!.width).toBeLessThanOrEqual(250);
+  expect(bar!.y >= box!.y + box!.height || bar!.y + bar!.height <= box!.y || bar!.x >= box!.x + box!.width || bar!.x + bar!.width <= box!.x).toBe(true);
+});
+
+for (const width of [320, 360, 390]) test(`directional insertion stays usable at ${width}px`, async ({ page }) => {
+  await startController(page, { width }); await page.locator('[data-minimize]').click();
+  const widget = page.locator('[data-movcues-experience] .movcues-widget'); await widget.locator('h2').click();
+  await page.getByRole('button', { name: 'Add to the right', exact: true }).click(); await page.locator('[data-insert-block=icon]').click();
+  await expect(widget.locator('.movcues-icon')).toBeVisible();
+  expect(await widget.evaluate((element: HTMLElement) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+  const bar = await page.locator('[data-movcues-composition-toolbar]').boundingBox();
+  expect(bar!.x).toBeGreaterThanOrEqual(0); expect(bar!.x + bar!.width).toBeLessThanOrEqual(width);
+  for (const button of await page.locator('[data-movcues-insert-edge]').all()) await expect(button).toBeInViewport();
+});
+
 test('delete removes the selected block immediately and the editor remains interactive',async({page})=>{
   await startController(page);const heading=page.locator('[data-movcues-experience] h2');await heading.click();
   await expect(page.locator('[data-command=delete]')).toBeEnabled();await page.locator('[data-command=delete]').click();
@@ -148,7 +195,7 @@ test('nested cell insertion and one-transaction pointer resize stay within the w
 });
 
 for(const width of [320,360,390])test(`structured rows stack without horizontal overflow at ${width}px`,async({page})=>{
-  await startController(page,{width});await page.locator('[data-movcues-experience] h2').click();await page.locator('[data-command=columns]').click();
+  await startController(page,{width});await page.locator('[data-minimize]').click();await page.locator('[data-movcues-experience] h2').click();await page.locator('[data-command=columns]').click();
   const layout=page.locator('[data-movcues-experience] .movcues-widget');const overflow=await layout.evaluate((node:HTMLElement)=>node.scrollWidth-node.clientWidth);expect(overflow).toBeLessThanOrEqual(1);await expect(page.locator('[data-movcues-experience] .movcues-button')).toBeVisible();
 });
 

@@ -239,6 +239,22 @@ export function insertEdgeCell(document: OnsiteDocument, edge: "top" | "right" |
   else { const old = structuredCloneSafe(document.root); old.id = onsiteId("cell"); document.root = { ...emptyCell(), id: document.root.id, direction: wanted, responsiveStack: wanted === "row", children: edge === "top" || edge === "left" ? [added, old] : [old, added] }; }
   return added.id;
 }
+/** Insert beside one cell, wrapping only that cell when its parent's axis differs. */
+export function insertAdjacentCell(document: OnsiteDocument, cellId: string, edge: "top" | "right" | "bottom" | "left"): string | null {
+  const cell = findCell(document, cellId); if (!cell) return null;
+  if (cell === document.root) return insertEdgeCell(document, edge);
+  const parent = parentCell(document, cellId); if (!parent?.children) return null;
+  const direction = edge === "left" || edge === "right" ? "row" : "column";
+  const before = edge === "top" || edge === "left";
+  const index = parent.children.indexOf(cell); const added = emptyCell();
+  if (parent.direction === direction) parent.children.splice(index + (before ? 0 : 1), 0, added);
+  else {
+    const group: OnsiteCell = { ...emptyCell(), direction, sizing: cloneOnsite(cell.sizing), gap: parent.gap, responsiveStack: direction === "row", children: before ? [added, cell] : [cell, added] };
+    cell.sizing = { mode: "flexible", weight: 1 };
+    parent.children.splice(index, 1, group);
+  }
+  return added.id;
+}
 export function removeCell(document: OnsiteDocument, id: string): boolean {
   const parent = parentCell(document, id); if (!parent?.children || parent.children.length <= 1) { const cell = findCell(document, id); if (!cell || cell === document.root) return false; delete cell.block; return true; }
   parent.children = parent.children.filter(child => child.id !== id); if (parent.children.length === 1) collapseSingleChild(parent); return true;
