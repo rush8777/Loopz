@@ -64,12 +64,15 @@ export class OnsiteCompositionEditor {
   private resizeCleanup: (() => void) | null = null;
   private resizeFrame = 0;
   private destroyed = false;
+  private compiledState = "";
   private readonly migrated: boolean;
   private imageInput: HTMLInputElement;
   private imageFileTarget: string | null = null;
   private imageRequest = 0;
   private imagePlaceholders = new Map<HTMLElement, HTMLImageElement>();
   private imageDropTarget: HTMLElement | null = null;
+  private savedRange: Range | null = null;
+  private moveSource: string | null = null;
 
   constructor(
     private root: ShadowRoot,
@@ -107,9 +110,11 @@ export class OnsiteCompositionEditor {
       ["duplicate", "Duplicate", '<rect x="6" y="6" width="8" height="8" rx="1"/><path d="M10 4V2H2v8h2"/>'],
       ["move-up", "Move before", '<path d="M13 8H3m4-4L3 8l4 4"/>'],
       ["move-down", "Move after", '<path d="M3 8h10M9 4l4 4-4 4"/>'],
+      ["move", "Move to another cell: drag or click, then choose a cell", '<path d="M8 2v12M2 8h12m-4-4 4 4-4 4M6 4 2 8l4 4"/>'],
       ["delete", "Delete", '<path d="m4 4 8 8m0-8-8 8"/>'],
     ];
     this.toolbar.innerHTML = tools.map(([command, label, icon]) => `<button type="button" data-command="${command}" title="${label}" aria-label="${label}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></button>`).join("");
+    this.toolbar.querySelector<HTMLButtonElement>('[data-command="move"]')!.draggable = true;
     this.palette.innerHTML = (Object.keys(BLOCK_LABEL) as OnsiteBlock["type"][]).map(type => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
     this.root.append(this.toolbar, this.palette, this.imageInput);
     const edgeLabels = { top: "Add above", right: "Add to the right", bottom: "Add below", left: "Add to the left" };
@@ -129,6 +134,11 @@ export class OnsiteCompositionEditor {
     this.surface.addEventListener("dragover", this.onImageDragOver);
     this.surface.addEventListener("dragleave", this.onImageDragLeave);
     this.surface.addEventListener("drop", this.onImageDrop);
+    this.surface.addEventListener("keyup", this.rememberSelection);
+    this.surface.addEventListener("mouseup", this.rememberSelection);
+    this.surface.addEventListener("paste", this.onPaste);
+    this.toolbar.addEventListener("dragstart", this.onMoveDragStart);
+    this.toolbar.addEventListener("dragend", this.cancelMove);
     this.toolbar.addEventListener("click", this.onToolbarClick);
     this.palette.addEventListener("click", this.onPaletteClick);
     this.root.addEventListener("scroll", this.positionTools, true);
@@ -141,8 +151,8 @@ export class OnsiteCompositionEditor {
   getSelection(): CompositionSelection { return this.selection; }
   getSelectedCell(): OnsiteCell | null { const id = this.selection.kind === "step" ? this.document.root.id : this.selection.cellId; return findCell(this.document, id); }
   getSelectedBlock(): OnsiteBlock | null { return this.selection.kind === "block" ? findBlock(this.document, this.selection.blockId) : null; }
-  canUndo(): boolean { return this.historyIndex > 0; }
-  canRedo(): boolean { return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1; }
+  canUndo(): boolean { return this.historyIndex > 0 || this.historyIndex >= 0 && JSON.stringify(this.document) !== JSON.stringify(this.history[this.historyIndex].document); }
+  canRedo(): boolean { return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1 && JSON.stringify(this.document) === JSON.stringify(this.history[this.historyIndex].document); }
   isComposing(): boolean { return this.composing; }
   getValidation(): string[] { return validateOnsiteDocument(this.document).errors; }
 
@@ -150,13 +160,14 @@ export class OnsiteCompositionEditor {
     if (this.composing) return false;
     clearTimeout(this.compileTimer); this.compileTimer = 0;
     this.repairDocumentStructure();
+    const state = JSON.stringify(this.document); if (state === this.compiledState) return true;
     const validation = validateOnsiteDocument(this.document); this.callbacks.onValidation(validation.errors); if (!validation.valid) return false;
-    const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType); Object.assign(this.content, compiled.content); return true;
+    const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType); Object.assign(this.content, compiled.content); this.compiledState = state; return true;
   }
 
   snapshot(): { builder: WidgetBuilderState; content: ExperienceContent } { this.flush(); return { builder: cloneOnsite(this.builder), content: cloneOnsite(this.content) }; }
 
-  undo(): void { if (!this.canUndo() || this.composing) return; this.historyIndex--; this.restore(this.history[this.historyIndex]); }
+  undo(): void { if (this.composing) return; if (!this.flush()) { clearTimeout(this.typingTimer); const current = this.history[this.historyIndex]; if (current) this.restore(current); return; } this.pushHistory(); if (!this.canUndo()) return; clearTimeout(this.typingTimer); this.historyIndex--; this.restore(this.history[this.historyIndex]); }
   redo(): void { if (!this.canRedo() || this.composing) return; this.historyIndex++; this.restore(this.history[this.historyIndex]); }
 
   selectStep(): void { this.select({ kind: "step", label: "Step" }); }
@@ -171,8 +182,8 @@ export class OnsiteCompositionEditor {
   }
 
   insertBlock(type: OnsiteBlock["type"], insertion?: { cellId: string; edge: CellEdge }): boolean {
-    const cell = this.getSelectedCell(); if (!cell) return false;
-    this.beforeTransaction(); const block = createBlock(type, this.guide);
+    const cell = this.getSelectedCell(); if (!cell || this.composing) return false;
+    if (!this.beforeTransaction()) return false; const block = createBlock(type, this.guide);
     if (insertion) {
       // Validate a candidate first: canceled/invalid insertions never alter the saved tree.
       const candidate = cloneOnsite(this.document);
@@ -198,17 +209,30 @@ export class OnsiteCompositionEditor {
     delete added.children; added.block = block;
     this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: added.id, blockId: block.id, blockType: type }); return true;
   }
-  split(direction: "row" | "column"): boolean { const cell = this.getSelectedCell(); if (!cell) return false; this.beforeTransaction(); const id = splitCell(this.document, cell.id, direction); if (!id) return false; this.commit({ kind: "cell", label: direction === "row" ? "Right cell" : "Lower cell", cellId: id }); return true; }
-  addEdge(edge: "top" | "right" | "bottom" | "left"): void { this.beforeTransaction(); const id = insertEdgeCell(this.document, edge); this.commit({ kind: "cell", label: `${edge} cell`, cellId: id }); }
-  duplicate(): boolean { const cell = this.getSelectedCell(); if (!cell || cell === this.document.root) return false; this.beforeTransaction(); const id = duplicateCell(this.document, cell.id); if (!id) return false; this.commit({ kind: "cell", label: "Duplicated cell", cellId: id }); return true; }
-  remove(): boolean { const cell = this.getSelectedCell(); if (!cell || cell === this.document.root) return false; this.beforeTransaction(); const parent = parentCell(this.document, cell.id); if (!removeCell(this.document, cell.id)) return false; this.commit(parent ? { kind: "cell", label: "Parent cell", cellId: parent.id } : { kind: "step", label: "Step" }); return true; }
-  move(delta: -1 | 1): boolean { const cell = this.getSelectedCell(); if (!cell) return false; this.beforeTransaction(); if (!moveCell(this.document, cell.id, delta)) return false; this.commit(this.selection); return true; }
+  split(direction: "row" | "column"): boolean { const cell = this.getSelectedCell(); if (!cell || this.composing) return false; if (!this.beforeTransaction()) return false; const id = splitCell(this.document, cell.id, direction); if (!id) return false; this.commit({ kind: "cell", label: direction === "row" ? "Right cell" : "Lower cell", cellId: id }); return true; }
+  addEdge(edge: "top" | "right" | "bottom" | "left"): void { if (this.composing) return; if (!this.beforeTransaction()) return; const id = insertEdgeCell(this.document, edge); this.commit({ kind: "cell", label: `${edge} cell`, cellId: id }); }
+  duplicate(): boolean { const cell = this.getSelectedCell(); if (!cell || cell === this.document.root || this.composing) return false; if (!this.beforeTransaction()) return false; const id = duplicateCell(this.document, cell.id); if (!id) return false; this.commit({ kind: "cell", label: "Duplicated cell", cellId: id }); return true; }
+  remove(): boolean { const cell = this.getSelectedCell(); if (!cell || cell === this.document.root || this.composing) return false; if (!this.beforeTransaction()) return false; const parent = parentCell(this.document, cell.id); if (!removeCell(this.document, cell.id)) return false; this.commit(parent ? { kind: "cell", label: "Parent cell", cellId: parent.id } : { kind: "step", label: "Step" }); return true; }
+  move(delta: -1 | 1): boolean { const cell = this.getSelectedCell(); if (!cell || this.composing) return false; if (!this.beforeTransaction()) return false; if (!moveCell(this.document, cell.id, delta)) return false; this.commit(this.selection); return true; }
+
+  /** Move the existing subtree; never regenerate its cell/block/action IDs. */
+  moveTo(targetId: string, before = false, sourceId = this.moveSource ?? this.getSelectedCell()?.id): boolean {
+    if (!sourceId || sourceId === targetId || this.composing) return false;
+    const candidate = cloneOnsite(this.document); const source = findCell(candidate, sourceId); const target = findCell(candidate, targetId);
+    const from = parentCell(candidate, sourceId); if (!source || !target || !from?.children || findCell({ ...candidate, root: source }, targetId)) return false;
+    from.children.splice(from.children.indexOf(source), 1); if (!from.children.length) delete from.children;
+    if (!target.block && !target.children) target.children = [source];
+    else { const to = parentCell(candidate, targetId); if (!to?.children) return false; to.children.splice(to.children.indexOf(target) + (before ? 0 : 1), 0, source); }
+    const validation = validateOnsiteDocument(candidate); this.callbacks.onValidation(validation.errors); if (!validation.valid) return false;
+    if (!this.beforeTransaction()) return false; this.document = candidate; this.cancelMove();
+    this.commit(source.block ? { kind: "block", label: BLOCK_LABEL[source.block.type], cellId: source.id, blockId: source.block.id, blockType: source.block.type } : { kind: "cell", label: "Cell", cellId: source.id }); return true;
+  }
 
   updateCell(update: Partial<Pick<OnsiteCell, "direction" | "align" | "justify" | "gap" | "padding" | "style" | "responsiveStack">> & { sizing?: OnsiteSizing }): void {
-    const cell = this.getSelectedCell(); if (!cell) return; this.beforeTransaction(); Object.assign(cell, cloneOnsite(update)); this.commit(this.selection);
+    const cell = this.getSelectedCell(); if (!cell || this.composing) return; if (!this.beforeTransaction()) return; Object.assign(cell, cloneOnsite(update)); this.commit(this.selection);
   }
   updateBlock(update: Partial<OnsiteBlock>): void {
-    const block = this.getSelectedBlock(); if (!block) return; this.beforeTransaction(); Object.assign(block, cloneOnsite(update)); this.commit(this.selection);
+    const block = this.getSelectedBlock(); if (!block || this.composing) return; if (!this.beforeTransaction()) return; Object.assign(block, cloneOnsite(update)); this.commit(this.selection);
   }
   chooseImageFile(blockId?: string): void {
     const block = blockId ? findBlock(this.document, blockId) : this.getSelectedBlock(); if (block?.type !== "image" || this.destroyed) return;
@@ -244,20 +268,29 @@ export class OnsiteCompositionEditor {
       this.imageInput.value = "";
     }
   }
-  updateButtonAction(action: { type: "next_step" | "previous_step" | "dismiss" } | { type: "open_url"; url: string } | { type: "track_event"; eventName: string }): void { const block = this.getSelectedBlock(); if (block?.type !== "button") return; this.beforeTransaction(); block.action = { id: block.action.id, ...action } as OnsiteButtonAction; this.commit(this.selection); }
+  updateButtonAction(action: { type: "next_step" | "previous_step" | "dismiss" } | { type: "open_url"; url: string } | { type: "track_event"; eventName: string }): void { const block = this.getSelectedBlock(); if (block?.type !== "button") return; if (!this.beforeTransaction()) return; block.action = { id: block.action.id, ...action } as OnsiteButtonAction; this.commit(this.selection); }
   editSelected(): void { if (this.selection.kind !== "block") return; const block = this.getSelectedBlock(); if (!block || !["heading", "text", "button"].includes(block.type)) return; const element = this.surface?.querySelector<HTMLElement>(`[data-movcues-block-id="${block.id}"]`); if (element) { element.contentEditable = "true"; element.focus(); } }
   setAlignment(align: "left" | "center" | "right"): void { this.updateBlock({ align } as Partial<OnsiteBlock>); }
   formatInline(tag: "strong" | "em" | "u"): boolean { return this.wrapSelection(tag); }
-  toggleList(tag: "ul" | "ol"): boolean { const block = this.getSelectedBlock(); if (block?.type !== "text") return false; this.beforeTransaction(); const current = block.html.trim(); block.html = current.startsWith(`<${tag}>`) ? current.replace(new RegExp(`^<${tag}><li>|</li></${tag}>$`, "g"), "") : `<${tag}><li>${current}</li></${tag}>`; this.commit(this.selection); return true; }
+  toggleList(tag: "ul" | "ol"): boolean { const block = this.getSelectedBlock(); if (block?.type !== "text" || this.composing) return false; if (!this.beforeTransaction()) return false; const current = block.html.trim(); block.html = current.startsWith(`<${tag}>`) ? current.replace(new RegExp(`^<${tag}><li>|</li></${tag}>$`, "g"), "") : `<${tag}><li>${current}</li></${tag}>`; this.commit(this.selection); return true; }
   applyLink(url: string): boolean { if (!builderLinkUrlIsSafe(url)) return false; return this.wrapSelection("a", url); }
 
   private wrapSelection(tag: "strong" | "em" | "u" | "a", href?: string): boolean {
+    if (this.composing) return false;
     const block = this.getSelectedBlock(); if (!block || (block.type !== "heading" && block.type !== "text")) return false; const element = this.surface?.querySelector<HTMLElement>(`[data-movcues-block-id="${block.id}"]`); if (!element) return false;
-    this.beforeTransaction(); const selection = window.getSelection(); const range = selection?.rangeCount ? selection.getRangeAt(0) : null; const selectedInside = range && element.contains(range.commonAncestorContainer) && !range.collapsed;
+    if (!this.beforeTransaction()) return false; const selection = this.getTextSelection();
+    if (this.savedRange && element.contains(this.savedRange.commonAncestorContainer)) { selection?.removeAllRanges(); selection?.addRange(this.savedRange); }
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null; const selectedInside = range && element.contains(range.commonAncestorContainer) && !range.collapsed;
+    if (tag === "a" && (selectedInside ? range?.cloneContents().querySelector("a") || range?.startContainer.parentElement?.closest("a") || range?.endContainer.parentElement?.closest("a") : element.querySelector("a"))) return false;
     if (selectedInside && range) { const wrapper = document.createElement(tag); if (tag === "a" && href) { wrapper.setAttribute("href", href); if (/^https?:\/\//i.test(href)) { wrapper.setAttribute("target", "_blank"); wrapper.setAttribute("rel", "noopener noreferrer"); } } try { range.surroundContents(wrapper); } catch { wrapper.append(range.extractContents()); range.insertNode(wrapper); } block.html = sanitizeRichText(element.innerHTML); }
     else { const open = tag === "a" ? `<a href="${escapeHtmlAttribute(href ?? "")}"${/^https?:\/\//i.test(href ?? "") ? ' target="_blank" rel="noopener noreferrer"' : ""}>` : `<${tag}>`; block.html = `${open}${block.html}</${tag}>`; }
-    this.commit(this.selection); return true;
+    if (!selectedInside) element.innerHTML = block.html;
+    element.contentEditable = "true"; element.focus({ preventScroll: true });
+    this.rememberSelection(); this.flush(); this.pushHistory(); this.callbacks.onChange(); this.positionTools(); return true;
   }
+
+  private getTextSelection(): Selection | null { return (this.root as ShadowRoot & { getSelection?: () => Selection | null }).getSelection?.() ?? window.getSelection(); }
+  rememberSelection = (): void => { const range = this.getTextSelection()?.rangeCount ? this.getTextSelection()!.getRangeAt(0) : null; if (range && this.surface?.contains(range.commonAncestorContainer)) this.savedRange = range.cloneRange(); };
 
   private select(selection: CompositionSelection): void {
     this.closePalette();
@@ -266,12 +299,23 @@ export class OnsiteCompositionEditor {
     target?.setAttribute("data-movcues-editor-selected", selection.kind); this.syncToolbarState(); this.callbacks.onSelectionChange(selection); this.renderResizeHandles(); this.positionTools();
   }
 
-  private beforeTransaction(): void { clearTimeout(this.typingTimer); this.repairDocumentStructure(); this.flush(); }
-  private commit(selection: CompositionSelection): void { this.repairDocumentStructure(); this.selection = selection; this.compileAndPatch(); this.pushHistory(); this.callbacks.onChange(); this.select(selection); }
+  private beforeTransaction(): boolean { clearTimeout(this.typingTimer); this.repairDocumentStructure(); if (!this.flush()) return false; this.pushHistory(); return true; }
+  private commit(selection: CompositionSelection): void {
+    this.repairDocumentStructure(); const validation = validateOnsiteDocument(this.document);
+    if (!validation.valid) { const previous = this.history[this.historyIndex]; if (previous) { this.document = cloneOnsite(previous.document); this.compileAndPatch(); this.select(previous.selection); } this.callbacks.onValidation(validation.errors); return; }
+    if (JSON.stringify(this.document) === this.compiledState) { this.select(selection); return; }
+    this.selection = selection; this.compileAndPatch(); this.pushHistory(); this.callbacks.onChange(); this.select(selection);
+  }
   private compileAndPatch(): void {
     const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType); Object.assign(this.content, compiled.content);
+    this.compiledState = JSON.stringify(this.document);
     const template = document.createElement("template"); template.innerHTML = compiled.html; this.surface?.replaceChildren(...Array.from(template.content.childNodes));
     this.imagePlaceholders.clear();
+    this.savedRange = null;
+    this.surface?.querySelectorAll<HTMLElement>("[data-movcues-node-id]").forEach(cell => {
+      cell.tabIndex = 0; cell.setAttribute("aria-label", "Layout cell");
+      if (!cell.children.length) { const add = document.createElement("button"); add.type = "button"; add.dataset.movcuesEmptyCell = ""; add.textContent = "+ Add content"; cell.append(add); }
+    });
     this.surface?.querySelectorAll<HTMLImageElement>('img[data-movcues-block-id][src=""]').forEach(image => {
       const placeholder = document.createElement("button"); placeholder.type = "button"; placeholder.className = image.className;
       placeholder.dataset.movcuesBlockId = image.dataset.movcuesBlockId; placeholder.dataset.movcuesImagePlaceholder = "";
@@ -281,7 +325,7 @@ export class OnsiteCompositionEditor {
     });
     const style = this.root.querySelector<HTMLStyleElement>("style[data-movcues-builder-style]"); if (style) style.textContent = `${compiled.css}\n[data-movcues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movcues-builder-surface]>.movcues-widget{position:relative!important;inset:auto!important}`;
   }
-  private scheduleCompile(): void { clearTimeout(this.compileTimer); this.compileTimer = window.setTimeout(() => { if (!this.destroyed && !this.composing) { this.repairDocumentStructure(); const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType); Object.assign(this.content, compiled.content); this.callbacks.onValidation(validateOnsiteDocument(this.document).errors); } }, 160); }
+  private scheduleCompile(): void { clearTimeout(this.compileTimer); this.compileTimer = window.setTimeout(() => { if (!this.destroyed && !this.composing) this.flush(); }, 160); }
 
   private repairDocumentStructure(): boolean {
     let repaired = false; const blockIds = new Set<string>();
@@ -307,6 +351,7 @@ export class OnsiteCompositionEditor {
 
   private pushHistory(): void {
     const document = cloneOnsite(this.document); const bytes = JSON.stringify(document).length; const entry = { document, selection: cloneOnsite(this.selection), bytes };
+    if (this.historyIndex >= 0 && JSON.stringify(this.history[this.historyIndex].document) === JSON.stringify(document)) return;
     if (this.historyIndex < this.history.length - 1) { this.historyBytes -= this.history.slice(this.historyIndex + 1).reduce((sum, item) => sum + item.bytes, 0); this.history.splice(this.historyIndex + 1); }
     this.history.push(entry); this.historyBytes += bytes;
     while (this.history.length > HISTORY_LIMIT || this.historyBytes > HISTORY_BYTES) { const removed = this.history.shift(); this.historyBytes -= removed?.bytes ?? 0; }
@@ -317,12 +362,23 @@ export class OnsiteCompositionEditor {
   private onSurfaceClick = (event: Event): void => {
     const element = event.target instanceof Element ? event.target : null; if (!element) return;
     const blockElement = element.closest<HTMLElement>("[data-movcues-block-id]"); const cellElement = element.closest<HTMLElement>("[data-movcues-node-id]");
+    if (this.moveSource && cellElement) { event.preventDefault(); event.stopImmediatePropagation(); this.moveTo(cellElement.dataset.movcuesNodeId!); return; }
     if (blockElement && cellElement) { const block = findBlock(this.document, blockElement.dataset.movcuesBlockId!); if (block) this.select({ kind: "block", label: BLOCK_LABEL[block.type], cellId: cellElement.dataset.movcuesNodeId!, blockId: block.id, blockType: block.type }); }
     else if (cellElement) this.select({ kind: "cell", label: "Cell", cellId: cellElement.dataset.movcuesNodeId! }); else this.selectStep();
     if (blockElement?.hasAttribute("data-movcues-image-placeholder")) this.chooseImageFile(blockElement.dataset.movcuesBlockId);
+    if (element.closest("[data-movcues-empty-cell]")) this.openPalette(element.closest<HTMLElement>("[data-movcues-empty-cell]")!);
     if (blockElement?.matches("button,a")) { event.preventDefault(); event.stopImmediatePropagation(); }
   };
   private onImageDragOver = (event: DragEvent): void => {
+    if (this.moveSource && event.dataTransfer?.types.includes("application/x-movcues-cell")) {
+      event.preventDefault(); event.stopPropagation(); this.clearImageDrop();
+      const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movcues-node-id]") : null;
+      const source = findCell(this.document, this.moveSource);
+      if (target && source && target.dataset.movcuesNodeId !== this.document.root.id && !findCell({ ...this.document, root: source }, target.dataset.movcuesNodeId!)) {
+        this.imageDropTarget = target; const row = parentCell(this.document, target.dataset.movcuesNodeId!)?.direction === "row"; target.setAttribute("data-movcues-insertion-edge", this.dropBefore(target, event) ? row ? "left" : "top" : row ? "right" : "bottom"); event.dataTransfer.dropEffect = "move";
+      } else event.dataTransfer.dropEffect = "none";
+      return;
+    }
     if (!event.dataTransfer?.types.includes("Files")) return;
     event.preventDefault(); event.stopPropagation();
     const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movcues-block-id]") : null;
@@ -333,8 +389,12 @@ export class OnsiteCompositionEditor {
   private onImageDragLeave = (event: DragEvent): void => {
     if (!(event.relatedTarget instanceof Node) || !this.imageDropTarget?.contains(event.relatedTarget)) this.clearImageDrop();
   };
-  private clearImageDrop(): void { this.imageDropTarget?.removeAttribute("data-movcues-image-drop"); this.imageDropTarget = null; }
+  private clearImageDrop(): void { this.imageDropTarget?.removeAttribute("data-movcues-image-drop"); this.imageDropTarget?.removeAttribute("data-movcues-insertion-edge"); this.imageDropTarget = null; }
+  private dropBefore(target: HTMLElement, event: DragEvent): boolean { const rect = target.getBoundingClientRect(); const parent = parentCell(this.document, target.dataset.movcuesNodeId!); return parent?.direction === "row" ? event.clientX < rect.left + rect.width / 2 : event.clientY < rect.top + rect.height / 2; }
+  private onMoveDragStart = (event: DragEvent): void => { if (!(event.target instanceof Element) || !event.target.closest('[data-command="move"]')) return; const cell = this.getSelectedCell(); if (!cell || cell === this.document.root || !event.dataTransfer) { event.preventDefault(); return; } this.moveSource = cell.id; event.dataTransfer.setData("application/x-movcues-cell", cell.id); event.dataTransfer.effectAllowed = "move"; };
+  private cancelMove = (): void => { this.moveSource = null; this.clearImageDrop(); this.surface?.removeAttribute("data-movcues-moving"); this.toolbar.querySelector('[data-command="move"]')?.setAttribute("aria-pressed", "false"); };
   private onImageDrop = (event: DragEvent): void => {
+    if (this.moveSource && event.dataTransfer?.types.includes("application/x-movcues-cell")) { event.preventDefault(); event.stopPropagation(); const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movcues-node-id]") : null; if (target) this.moveTo(target.dataset.movcuesNodeId!, this.dropBefore(target, event)); this.cancelMove(); return; }
     if (!event.dataTransfer?.files.length) return;
     event.preventDefault(); event.stopPropagation(); this.clearImageDrop();
     const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movcues-block-id]") : null;
@@ -345,12 +405,23 @@ export class OnsiteCompositionEditor {
   };
   private onDoubleClick = (event: Event): void => { const element = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movcues-block-id]") : null; const block = element ? findBlock(this.document, element.dataset.movcuesBlockId!) : null; if (element && (block?.type === "heading" || block?.type === "text" || block?.type === "button")) { element.contentEditable = "true"; element.focus(); } };
   private onInput = (event: Event): void => { const element = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movcues-block-id]") : null; const block = element ? findBlock(this.document, element.dataset.movcuesBlockId!) : null; if (!block || !element) return; if (block.type === "heading" || block.type === "text") block.html = sanitizeRichText(element.innerHTML); else if (block.type === "button") block.label = (element.textContent ?? "").slice(0, 80); else return; this.scheduleCompile(); this.positionTools(); this.callbacks.onChange(); clearTimeout(this.typingTimer); this.typingTimer = window.setTimeout(() => this.pushHistory(), 300); };
-  private onBlur = (event: Event): void => { const element = event.target instanceof HTMLElement ? event.target : null; if (element?.isContentEditable) { element.contentEditable = "false"; this.flush(); this.pushHistory(); } };
+  private onBlur = (event: Event): void => { const element = event.target instanceof HTMLElement ? event.target : null; if (element?.isContentEditable) { this.rememberSelection(); if ((event as FocusEvent).relatedTarget) element.contentEditable = "false"; this.flush(); this.pushHistory(); } };
   private onCompositionStart = (): void => { this.composing = true; };
   private onCompositionEnd = (): void => { this.composing = false; this.scheduleCompile(); };
-  private onSurfaceKeyDown = (event: KeyboardEvent): void => { if (event.key === "Escape" && event.target instanceof HTMLElement && event.target.isContentEditable) { event.target.blur(); event.preventDefault(); } if ((event.ctrlKey || event.metaKey) && !(event.target instanceof HTMLElement && event.target.isContentEditable)) { if (event.key === "ArrowUp") { this.selectParent(); event.preventDefault(); } if (event.key === "ArrowDown") { this.selectChild(); event.preventDefault(); } } };
+  private onSurfaceKeyDown = (event: KeyboardEvent): void => {
+    if (this.composing) return;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (event.key === "Escape") { this.cancelMove(); if (target?.isContentEditable) target.blur(); }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.stopImmediatePropagation(); event.shiftKey ? this.redo() : this.undo(); return; }
+    if ((event.ctrlKey || event.metaKey) && ["b", "i", "u"].includes(event.key.toLowerCase())) { event.preventDefault(); this.rememberSelection(); this.formatInline(event.key.toLowerCase() === "b" ? "strong" : event.key.toLowerCase() === "i" ? "em" : "u"); return; }
+    if (target?.isContentEditable) return;
+    if (event.key === "Enter" && target?.matches("[data-movcues-node-id]")) { event.preventDefault(); if (this.moveSource) this.moveTo(target.dataset.movcuesNodeId!); else target.click(); }
+    if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) { event.preventDefault(); this.move(event.key === "ArrowUp" ? -1 : 1); }
+    else if (event.ctrlKey || event.metaKey) { if (event.key === "ArrowUp") { this.selectParent(); event.preventDefault(); } if (event.key === "ArrowDown") { this.selectChild(); event.preventDefault(); } }
+  };
+  private onPaste = (event: ClipboardEvent): void => { const target = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[contenteditable="true"]') : null; const selection = this.getTextSelection(); if (!target || !selection?.rangeCount || !event.clipboardData) return; const range = selection.getRangeAt(0); if (!target.contains(range.commonAncestorContainer)) return; event.preventDefault(); const text = document.createTextNode(event.clipboardData.getData("text/plain")); range.deleteContents(); range.insertNode(text); range.setStartAfter(text); range.collapse(true); selection.removeAllRanges(); selection.addRange(range); target.dispatchEvent(new Event("input", { bubbles: true })); };
 
-  private onToolbarClick = (event: Event): void => { const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-command]") : null; if (!button || button.disabled) return; event.preventDefault(); event.stopPropagation(); const command = button.dataset.command; if (command === "add") { if (this.palette.hidden) this.openPalette(button); else this.closePalette(); } else if (command === "columns") this.split("row"); else if (command === "rows") this.split("column"); else if (command === "parent") this.selectParent(); else if (command === "duplicate") this.duplicate(); else if (command === "delete") this.remove(); else if (command === "move-up") this.move(-1); else if (command === "move-down") this.move(1); };
+  private onToolbarClick = (event: Event): void => { const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-command]") : null; if (!button || button.disabled) return; event.preventDefault(); event.stopPropagation(); const command = button.dataset.command; if (command === "add") { if (this.palette.hidden) this.openPalette(button); else this.closePalette(); } else if (command === "columns") this.split("row"); else if (command === "rows") this.split("column"); else if (command === "parent") this.selectParent(); else if (command === "duplicate") this.duplicate(); else if (command === "delete") this.remove(); else if (command === "move-up") this.move(-1); else if (command === "move-down") this.move(1); else if (command === "move") { if (this.moveSource) this.cancelMove(); else { this.moveSource = this.getSelectedCell()?.id ?? null; this.surface?.setAttribute("data-movcues-moving", ""); button.setAttribute("aria-pressed", "true"); button.title = "Choose a destination cell, or press Escape to cancel"; } } };
   private onPaletteClick = (event: Event): void => {
     const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-insert-block]") : null; if (!button) return;
     event.preventDefault(); event.stopPropagation();
@@ -375,13 +446,14 @@ export class OnsiteCompositionEditor {
     if (!this.palette.hidden && !event.composedPath().some(node => node === this.palette || node === this.paletteAnchor)) this.closePalette();
   };
   private onPaletteKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === "Escape" && this.moveSource) { this.cancelMove(); event.preventDefault(); }
     if (event.key !== "Escape" || this.palette.hidden) return;
     const anchor = this.paletteAnchor; this.closePalette(); anchor?.focus({ preventScroll: true }); event.preventDefault();
   };
 
   private syncToolbarState(): void {
     const cell = this.getSelectedCell(); const atRoot = !cell || cell === this.document.root;
-    for (const command of ["delete", "duplicate"] as const) {
+    for (const command of ["delete", "duplicate", "move"] as const) {
       const button = this.toolbar.querySelector<HTMLButtonElement>(`[data-command="${command}"]`); if (!button) continue;
       button.disabled = atRoot; button.title = atRoot ? "Select an element to use this action" : command === "delete" ? "Delete selected element (Undo is available)" : "Duplicate";
     }
@@ -417,13 +489,16 @@ export class OnsiteCompositionEditor {
   }
 
   private availableCanvasBounds(): { left: number; right: number; top: number; bottom: number } {
-    const inset = 6; const aside = document.querySelector("[data-movcues-editor]")?.shadowRoot?.querySelector<HTMLElement>("aside"); const panel = aside?.getBoundingClientRect();
-    let left = inset; let right = innerWidth - inset;
+    const inset = 6; const editorRoot = document.querySelector("[data-movcues-editor]")?.shadowRoot; const panel = editorRoot?.querySelector<HTMLElement>("aside")?.getBoundingClientRect();
+    const controls = editorRoot?.querySelector<HTMLElement>("[data-editor-toolbar]")?.getBoundingClientRect();
+    let left = inset; let right = innerWidth - inset; let top = inset; let bottom = innerHeight - inset;
     if (panel && panel.width > 0 && panel.height > 0) {
       if (panel.left < innerWidth / 2 && innerWidth - panel.right > 240) left = Math.max(left, panel.right + inset);
       else if (panel.left >= innerWidth / 2 && panel.left > 240) right = Math.min(right, panel.left - inset);
+      else if (panel.width > innerWidth / 2) bottom = Math.min(bottom, panel.top - inset);
     }
-    return { left, right: Math.max(left, right), top: inset, bottom: innerHeight - inset };
+    if (controls && controls.height > 0) top = Math.max(top, controls.bottom + inset);
+    return { left, right: Math.max(left, right), top, bottom: Math.max(top + 36, bottom) };
   }
 
   private renderResizeHandles(): void {
@@ -440,12 +515,13 @@ export class OnsiteCompositionEditor {
     this.positionHandles();
   }
   private positionHandles(): void { for (const handle of this.handles) { const first = this.surface?.querySelector<HTMLElement>(`[data-movcues-node-id="${handle.dataset.first}"]`); if (!first) continue; const rect = first.getBoundingClientRect(); const row = handle.dataset.movcuesResizeHandle === "row"; handle.style.transform = `translate(${row ? rect.right - 5 : rect.left + rect.width / 2 + 16}px,${row ? rect.top + rect.height / 2 + 16 : rect.bottom - 5}px)`; } }
-  private startResize = (event: PointerEvent): void => { const handle = event.currentTarget as HTMLElement; const firstId = handle.dataset.first!; const secondId = handle.dataset.second!; const first = this.surface?.querySelector<HTMLElement>(`[data-movcues-node-id="${firstId}"]`); const second = this.surface?.querySelector<HTMLElement>(`[data-movcues-node-id="${secondId}"]`); if (!first || !second) return; this.beforeTransaction(); const row = handle.dataset.movcuesResizeHandle === "row"; const a = first.getBoundingClientRect(); const b = second.getBoundingClientRect(); const start = row ? event.clientX : event.clientY; const total = row ? a.width + b.width : a.height + b.height; const initial = row ? a.width : a.height; let ratio = initial / total * 2;
+  private startResize = (event: PointerEvent): void => { if (this.composing) return; const handle = event.currentTarget as HTMLElement; const firstId = handle.dataset.first!; const secondId = handle.dataset.second!; const first = this.surface?.querySelector<HTMLElement>(`[data-movcues-node-id="${firstId}"]`); const second = this.surface?.querySelector<HTMLElement>(`[data-movcues-node-id="${secondId}"]`); if (!first || !second) return; if (!this.beforeTransaction()) return; const row = handle.dataset.movcuesResizeHandle === "row"; const a = first.getBoundingClientRect(); const b = second.getBoundingClientRect(); const start = row ? event.clientX : event.clientY; const total = row ? a.width + b.width : a.height + b.height; const initial = row ? a.width : a.height; let ratio = initial / total * 2;
     const move = (next: PointerEvent) => { ratio = Math.max(.1, Math.min(1.9, ((initial + (row ? next.clientX : next.clientY) - start) / total) * 2)); cancelAnimationFrame(this.resizeFrame); this.resizeFrame = requestAnimationFrame(() => { first.style.flex = `${ratio} 1 0px`; second.style.flex = `${2 - ratio} 1 0px`; this.positionHandles(); }); };
-    const stop = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop); window.removeEventListener("pointercancel", stop); cancelAnimationFrame(this.resizeFrame); this.resizeFrame = 0; this.resizeCleanup = null; if (resizeSiblings(this.document, firstId, secondId, ratio)) this.commit(this.selection); };
-    this.resizeCleanup?.(); this.resizeCleanup = stop; window.addEventListener("pointermove", move); window.addEventListener("pointerup", stop); window.addEventListener("pointercancel", stop);
+    const finish = (save: boolean) => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop); window.removeEventListener("pointercancel", cancel); cancelAnimationFrame(this.resizeFrame); this.resizeFrame = 0; this.resizeCleanup = null; if (save && !this.destroyed && resizeSiblings(this.document, firstId, secondId, ratio)) this.commit(this.selection); else { first.style.flex = ""; second.style.flex = ""; } };
+    const stop = () => finish(true); const cancel = () => finish(false);
+    this.resizeCleanup?.(); this.resizeCleanup = cancel; window.addEventListener("pointermove", move); window.addEventListener("pointerup", stop); window.addEventListener("pointercancel", cancel);
   };
-  private resizeWithKeyboard = (event: KeyboardEvent): void => { if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return; const handle = event.currentTarget as HTMLElement; const first = findCell(this.document, handle.dataset.first!); const weight = first?.sizing.mode === "flexible" ? first.sizing.weight : 1; const increase = event.key === "ArrowRight" || event.key === "ArrowDown"; this.beforeTransaction(); if (resizeSiblings(this.document, handle.dataset.first!, handle.dataset.second!, weight + (increase ? .1 : -.1))) this.commit(this.selection); event.preventDefault(); };
+  private resizeWithKeyboard = (event: KeyboardEvent): void => { if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return; const handle = event.currentTarget as HTMLElement; const first = findCell(this.document, handle.dataset.first!); const weight = first?.sizing.mode === "flexible" ? first.sizing.weight : 1; const increase = event.key === "ArrowRight" || event.key === "ArrowDown"; if (!this.beforeTransaction()) return; if (resizeSiblings(this.document, handle.dataset.first!, handle.dataset.second!, weight + (increase ? .1 : -.1))) this.commit(this.selection); this.root.querySelector<HTMLButtonElement>(`[data-movcues-resize-handle][data-first="${handle.dataset.first}"][data-second="${handle.dataset.second}"]`)?.focus({ preventScroll: true }); event.preventDefault(); };
 
   destroy(): void {
     this.destroyed = true; this.imageRequest++; clearTimeout(this.compileTimer); clearTimeout(this.typingTimer); cancelAnimationFrame(this.toolFrame); cancelAnimationFrame(this.resizeFrame);
@@ -453,6 +529,10 @@ export class OnsiteCompositionEditor {
     this.surface?.removeEventListener("click", this.onSurfaceClick); this.surface?.removeEventListener("dblclick", this.onDoubleClick); this.surface?.removeEventListener("input", this.onInput);
     this.surface?.removeEventListener("blur", this.onBlur, true); this.surface?.removeEventListener("compositionstart", this.onCompositionStart); this.surface?.removeEventListener("compositionend", this.onCompositionEnd); this.surface?.removeEventListener("keydown", this.onSurfaceKeyDown);
     this.surface?.removeEventListener("dragover", this.onImageDragOver); this.surface?.removeEventListener("dragleave", this.onImageDragLeave); this.surface?.removeEventListener("drop", this.onImageDrop);
+    this.surface?.removeEventListener("keyup", this.rememberSelection); this.surface?.removeEventListener("mouseup", this.rememberSelection); this.surface?.removeEventListener("paste", this.onPaste);
+    this.toolbar.removeEventListener("dragstart", this.onMoveDragStart); this.toolbar.removeEventListener("dragend", this.cancelMove); this.cancelMove(); this.savedRange = null;
+    this.surface?.querySelectorAll("[data-movcues-empty-cell]").forEach(element => element.remove());
+    this.surface?.querySelectorAll("[data-movcues-node-id]").forEach(cell => { cell.removeAttribute("tabindex"); cell.removeAttribute("aria-label"); cell.removeAttribute("data-movcues-editor-selected"); });
     this.imagePlaceholders.forEach((image, placeholder) => placeholder.replaceWith(image)); this.imagePlaceholders.clear(); this.imageInput.remove();
     this.toolbar.remove(); this.palette.remove(); this.edgeButtons.forEach(button => button.remove()); this.handles.forEach(handle => handle.remove());
     this.root.querySelector("style[data-movcues-composition-style]")?.remove(); this.root.removeEventListener("scroll", this.positionTools, true);
@@ -474,9 +554,10 @@ function placeOutside(rect: DOMRect, size: DOMRect, bounds: { left: number; righ
 }
 
 const AUTHORING_STYLE = `
+[data-movcues-empty-cell]{width:100%;min-height:54px;border:1px dashed #94a3b8;border-radius:6px;background:#f8fafc;color:#64748b;font:12px ui-sans-serif,system-ui;cursor:pointer}[data-movcues-moving] [data-movcues-node-id]:hover{outline:2px dashed #2563eb;outline-offset:-2px}[data-command=move][aria-pressed=true]{background:#eff6ff;color:#1d4ed8}[data-movcues-node-id]:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
 [data-movcues-editor-selected=step]{outline:2px solid #2563eb!important;outline-offset:3px}[data-movcues-editor-selected=cell]{outline:2px solid #0ea5e9!important;outline-offset:-2px}[data-movcues-editor-selected=block]{outline:2px solid #2563eb!important;outline-offset:2px}
 [data-movcues-composition-toolbar],[data-movcues-block-palette],[data-movcues-resize-handle],[data-movcues-insert-edge]{box-sizing:border-box;position:fixed;left:0;top:0;z-index:2147483646;pointer-events:auto;font:12px/1.2 ui-sans-serif,system-ui,sans-serif}
-[data-movcues-composition-toolbar]{display:flex;gap:1px;max-width:calc(100vw - 12px);overflow:auto;padding:3px;border:1px solid #dbe2ea;border-radius:8px;background:#fff;box-shadow:0 4px 14px rgba(15,23,42,.14)}[data-movcues-composition-toolbar] button,[data-movcues-block-palette] button{min-height:28px;padding:5px 7px;border:0;border-radius:5px;background:transparent;color:#334155;font:600 11px inherit;cursor:pointer}[data-movcues-composition-toolbar] button{flex:none;width:28px;padding:0;font-size:16px}[data-movcues-composition-toolbar] button:hover:not(:disabled),[data-movcues-block-palette] button:hover{background:#eff6ff;color:#1d4ed8}[data-movcues-composition-toolbar] button:disabled{cursor:not-allowed;opacity:.42}
+[data-movcues-composition-toolbar]{display:flex;gap:1px;max-width:calc(100vw - 12px);overflow:auto;padding:3px;border:1px solid #dbe2ea;border-radius:8px;background:#fff;box-shadow:0 4px 14px rgba(15,23,42,.14)}[data-movcues-composition-toolbar] button,[data-movcues-block-palette] button{min-height:28px;padding:5px 7px;border:0;border-radius:5px;background:transparent;color:#334155;font:600 11px inherit;cursor:pointer}[data-movcues-composition-toolbar] button{flex:none;width:26px;padding:0;font-size:16px}[data-movcues-composition-toolbar] button:hover:not(:disabled),[data-movcues-block-palette] button:hover{background:#eff6ff;color:#1d4ed8}[data-movcues-composition-toolbar] button:disabled{cursor:not-allowed;opacity:.42}
 [data-movcues-composition-toolbar] svg{display:block;margin:auto}
 [data-movcues-image-placeholder]{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:120px;padding:16px;border:1px dashed #94a3b8!important;background:#f8fafc;color:#64748b;font:12px/1.4 ui-sans-serif,system-ui,sans-serif;cursor:pointer;white-space:normal}[data-movcues-image-placeholder] svg{flex:none}[data-movcues-image-placeholder]:hover,[data-movcues-image-drop]{outline:2px solid #2563eb!important;outline-offset:2px;background:#eff6ff}[data-movcues-image-placeholder][aria-busy=true]{opacity:.6;cursor:wait}[data-movcues-image-file][hidden]{display:none!important}
 [data-movcues-insert-edge]{width:24px;height:24px;padding:0;border:1px solid #93c5fd;border-radius:50%;background:#fff;color:#2563eb;box-shadow:0 2px 6px rgba(15,23,42,.12);font-size:18px;cursor:pointer}[data-movcues-insert-edge]:hover,[data-movcues-insert-edge][aria-expanded=true]{background:#2563eb;color:#fff}

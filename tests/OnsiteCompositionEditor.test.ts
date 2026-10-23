@@ -34,6 +34,65 @@ describe("directional on-site insertion", () => {
   afterEach(() => { editor.destroy(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
   const click = (selector: string) => root.querySelector<HTMLElement>(selector)!.click();
 
+  it("undoes immediate typing and preserves it when a structural operation follows", () => {
+    const heading = root.querySelector<HTMLElement>("h2")!; const original = heading.textContent;
+    heading.textContent = "Latest typing"; heading.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(editor.canUndo()).toBe(true); editor.undo(); expect(root.querySelector("h2")!.textContent).toBe(original);
+    editor.redo(); expect(root.querySelector("h2")!.textContent).toBe("Latest typing");
+    root.querySelector<HTMLElement>("h2")!.click(); editor.split("row"); editor.undo(); expect(root.querySelector("h2")!.textContent).toBe("Latest typing");
+    editor.undo(); expect(root.querySelector("h2")!.textContent).toBe(original);
+  });
+
+  it("moves a subtree between parents without changing IDs, with one undo and no cycles", () => {
+    editor.split("row"); const doc = editor.getDocument(); const row = doc.root.children![0]; const source = row.children![0]; const target = doc.root.children![1];
+    const ids = listBlocks(source).map(block => block.id); const original = JSON.stringify(doc); changed.mockClear();
+    expect(editor.moveTo(target.id, false, row.id)).toBe(true);
+    expect(editor.getDocument().root.children!.map(cell => cell.id)).toEqual([target.id, row.id, doc.root.children![2].id]); expect(listBlocks(editor.getDocument().root).map(block => block.id)).toEqual(expect.arrayContaining(ids));
+    expect(changed).toHaveBeenCalledTimes(1); editor.undo(); expect(JSON.stringify(editor.getDocument())).toBe(original); editor.redo();
+    const moved = JSON.stringify(editor.getDocument()); expect(editor.moveTo(source.id, false, row.id)).toBe(false); expect(JSON.stringify(editor.getDocument())).toBe(moved);
+    expect(validateOnsiteDocument(editor.getDocument()).valid).toBe(true);
+  });
+
+  it("exposes an insertion prompt on empty cells without saving editor markup", () => {
+    editor.split("row"); const add = root.querySelector<HTMLButtonElement>("[data-movcues-empty-cell]")!;
+    expect(add.textContent).toBe("+ Add content"); add.click(); click('[data-insert-block="text"]');
+    expect(root.querySelector("[data-movcues-empty-cell]")).toBeNull(); expect(builder.html).not.toContain("Add content"); expect(builder.html).not.toContain("tabindex");
+  });
+
+  it("cancels an unfinished resize on destruction without saving a late change", () => {
+    editor.split("row"); const original = JSON.stringify(editor.getDocument()); changed.mockClear();
+    const handle = root.querySelector<HTMLButtonElement>('[data-movcues-resize-handle="row"]')!;
+    handle.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 300, clientY: 150 }));
+    window.dispatchEvent(new MouseEvent("pointermove", { clientX: 370, clientY: 150 }));
+    editor.destroy(); window.dispatchEvent(new MouseEvent("pointerup"));
+    expect(changed).not.toHaveBeenCalled(); expect(JSON.stringify(editor.getDocument())).toBe(original);
+  });
+
+  it("keeps keyboard resize focused and avoids recompiling unchanged documents", () => {
+    editor.split("row"); const handle = root.querySelector<HTMLButtonElement>('[data-movcues-resize-handle="row"]')!; handle.focus();
+    handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    expect(root.activeElement).toBe(root.querySelector('[data-movcues-resize-handle="row"]'));
+    const project = builder.projectData; expect(editor.flush()).toBe(true); expect(editor.flush()).toBe(true); expect(builder.projectData).toBe(project);
+  });
+
+  it("rejects an over-deep split and protects in-progress IME input from structural edits", () => {
+    const doc = editor.getDocument(); let nested = doc.root.children![0];
+    for (let index = 0; index < 6; index++) nested = { ...emptyCell(), children: [nested] };
+    doc.root.children![0] = nested; editor.flush(); const original = JSON.stringify(doc); changed.mockClear();
+    editor.split("row"); expect(JSON.stringify(editor.getDocument())).toBe(original); expect(changed).not.toHaveBeenCalled();
+    expect(validation.mock.calls.at(-1)?.[0].join(" ")).toContain("maximum nesting depth");
+    const heading = root.querySelector<HTMLElement>("h2")!; heading.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    expect(editor.insertBlock("image")).toBe(false); expect(editor.split("column")).toBe(false); expect(JSON.stringify(editor.getDocument())).toBe(original);
+    heading.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+  });
+
+  it("keeps invalid long text intact, blocks structural writes and can undo safely", () => {
+    const heading = root.querySelector<HTMLElement>("h2")!; const original = heading.textContent;
+    heading.textContent = "a".repeat(10001); heading.dispatchEvent(new Event("input", { bubbles: true })); changed.mockClear();
+    expect(editor.split("row")).toBe(false); expect(changed).not.toHaveBeenCalled(); expect(heading.textContent).toHaveLength(10001);
+    editor.undo(); expect(root.querySelector("h2")!.textContent).toBe(original); expect(editor.canRedo()).toBe(false);
+  });
+
   it("shows an empty image as a clickable placeholder and replaces it with one saved, undoable image", async () => {
     editor.insertBlock("image"); const placeholder = root.querySelector<HTMLButtonElement>("[data-movcues-image-placeholder]")!;
     expect(placeholder.textContent).toContain("Drop an image or click to browse");

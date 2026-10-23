@@ -2807,6 +2807,11 @@ class AnchoredTargetBackdrop {
     setRect(this.highlight, rect.left, rect.top, Math.max(0, rect.width), Math.max(0, rect.height));
   }
   setHidden(hidden) {
+    var _a;
+    if (hidden) {
+      (_a = this.releaseScrollLock) == null ? void 0 : _a.call(this);
+      this.releaseScrollLock = null;
+    } else if (!this.releaseScrollLock) this.releaseScrollLock = lockDocumentScroll();
     const visibility = hidden ? "hidden" : "";
     this.panels.forEach((panel) => {
       panel.style.visibility = visibility;
@@ -2814,7 +2819,9 @@ class AnchoredTargetBackdrop {
     this.highlight.style.visibility = visibility;
   }
   destroy() {
-    this.releaseScrollLock();
+    var _a;
+    (_a = this.releaseScrollLock) == null ? void 0 : _a.call(this);
+    this.releaseScrollLock = null;
     this.panels.forEach((panel) => panel.remove());
     this.panels = [];
     this.highlight.remove();
@@ -2829,10 +2836,12 @@ function lockDocumentScroll() {
     document.documentElement.style.setProperty("overflow", "hidden", "important");
     (_a = document.body) == null ? void 0 : _a.style.setProperty("overflow", "hidden", "important");
     const preventScroll = (event) => {
+      const delta = event instanceof WheelEvent ? event.deltaY : 0;
+      if (event.composedPath().some((node) => node instanceof HTMLElement && node !== document.body && node !== document.documentElement && /auto|scroll/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight && (!delta || (delta > 0 ? node.scrollTop + node.clientHeight < node.scrollHeight : node.scrollTop > 0)))) return;
       if (event.cancelable) event.preventDefault();
     };
     const preventScrollKey = (event) => {
-      if (!SCROLL_KEYS.has(event.key) || isEditableControl(event.target)) return;
+      if (!SCROLL_KEYS.has(event.key) || event.composedPath().some(isEditableControl)) return;
       if (event.cancelable) event.preventDefault();
     };
     document.addEventListener("wheel", preventScroll, { capture: true, passive: false });
@@ -3031,6 +3040,10 @@ class AnchoredCardRenderer {
         return;
       }
       const rect = target.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) {
+        setHidden(true);
+        return;
+      }
       backdrop == null ? void 0 : backdrop.update(rect);
       if (measureCard || !cardSize) {
         const bounds2 = card.getBoundingClientRect();
@@ -4712,7 +4725,7 @@ const bundledRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-DW3ZVucG.js");
+    const { EditorModeController } = await import("./EditorModeController-BCckyuzB.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -4752,4 +4765,4 @@ export {
   createAnalytics as k,
   sanitizeBuilderHtml as s
 };
-//# sourceMappingURL=module-Dzz_b-8x.js.map
+//# sourceMappingURL=module-BId9Bfd5.js.map

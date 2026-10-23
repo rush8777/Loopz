@@ -48,12 +48,15 @@ export declare class OnsiteCompositionEditor {
     private resizeCleanup;
     private resizeFrame;
     private destroyed;
+    private compiledState;
     private readonly migrated;
     private imageInput;
     private imageFileTarget;
     private imageRequest;
     private imagePlaceholders;
     private imageDropTarget;
+    private savedRange;
+    private moveSource;
     constructor(root: ShadowRoot, builder: WidgetBuilderState, content: ExperienceContent, widgetType: WidgetType | "anchored_card" | "modal", guide: boolean, callbacks: Callbacks);
     start(): void;
     getDocument(): OnsiteDocument;
@@ -83,6 +86,8 @@ export declare class OnsiteCompositionEditor {
     duplicate(): boolean;
     remove(): boolean;
     move(delta: -1 | 1): boolean;
+    /** Move the existing subtree; never regenerate its cell/block/action IDs. */
+    moveTo(targetId: string, before?: boolean, sourceId?: string | undefined): boolean;
     updateCell(update: Partial<Pick<OnsiteCell, "direction" | "align" | "justify" | "gap" | "padding" | "style" | "responsiveStack">> & {
         sizing?: OnsiteSizing;
     }): void;
@@ -105,6 +110,8 @@ export declare class OnsiteCompositionEditor {
     toggleList(tag: "ul" | "ol"): boolean;
     applyLink(url: string): boolean;
     private wrapSelection;
+    private getTextSelection;
+    rememberSelection: () => void;
     private select;
     private beforeTransaction;
     private commit;
@@ -117,6 +124,9 @@ export declare class OnsiteCompositionEditor {
     private onImageDragOver;
     private onImageDragLeave;
     private clearImageDrop;
+    private dropBefore;
+    private onMoveDragStart;
+    private cancelMove;
     private onImageDrop;
     private onDoubleClick;
     private onInput;
@@ -124,6 +134,7 @@ export declare class OnsiteCompositionEditor {
     private onCompositionStart;
     private onCompositionEnd;
     private onSurfaceKeyDown;
+    private onPaste;
     private onToolbarClick;
     private onPaletteClick;
     private openPalette;

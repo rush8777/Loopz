@@ -14,7 +14,7 @@ let scrollLockCleanup: (() => void) | null = null;
 export class AnchoredTargetBackdrop {
   private panels: HTMLElement[] = [];
   private highlight: HTMLElement;
-  private releaseScrollLock: () => void;
+  private releaseScrollLock: (() => void) | null;
 
   constructor(root: ShadowRoot, card: HTMLElement, behavior: ExperienceBehavior, design: ExperienceDesign, onDismiss: () => void) {
     this.releaseScrollLock = lockDocumentScroll();
@@ -51,13 +51,15 @@ export class AnchoredTargetBackdrop {
   }
 
   setHidden(hidden: boolean): void {
+    if (hidden) { this.releaseScrollLock?.(); this.releaseScrollLock = null; }
+    else if (!this.releaseScrollLock) this.releaseScrollLock = lockDocumentScroll();
     const visibility = hidden ? "hidden" : "";
     this.panels.forEach(panel => { panel.style.visibility = visibility; });
     this.highlight.style.visibility = visibility;
   }
 
   destroy(): void {
-    this.releaseScrollLock();
+    this.releaseScrollLock?.(); this.releaseScrollLock = null;
     this.panels.forEach(panel => panel.remove());
     this.panels = [];
     this.highlight.remove();
@@ -71,9 +73,17 @@ function lockDocumentScroll(): () => void {
     const bodyStyle = document.body ? captureProperty(document.body.style, "overflow") : null;
     document.documentElement.style.setProperty("overflow", "hidden", "important");
     document.body?.style.setProperty("overflow", "hidden", "important");
-    const preventScroll = (event: Event) => { if (event.cancelable) event.preventDefault(); };
+    const preventScroll = (event: Event) => {
+      // The document stays locked, but scrollable controls and widget content
+      // must remain usable (including controls inside a shadow root).
+      const delta = event instanceof WheelEvent ? event.deltaY : 0;
+      if (event.composedPath().some(node => node instanceof HTMLElement && node !== document.body && node !== document.documentElement &&
+        /auto|scroll/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight &&
+        (!delta || (delta > 0 ? node.scrollTop + node.clientHeight < node.scrollHeight : node.scrollTop > 0)))) return;
+      if (event.cancelable) event.preventDefault();
+    };
     const preventScrollKey = (event: KeyboardEvent) => {
-      if (!SCROLL_KEYS.has(event.key) || isEditableControl(event.target)) return;
+      if (!SCROLL_KEYS.has(event.key) || event.composedPath().some(isEditableControl)) return;
       if (event.cancelable) event.preventDefault();
     };
     document.addEventListener("wheel", preventScroll, { capture: true, passive: false });

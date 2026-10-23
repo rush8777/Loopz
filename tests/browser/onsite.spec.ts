@@ -41,7 +41,7 @@ for (const width of [320,360,390]) test(`mobile viewport ${width}px, image undo 
   await page.evaluate(() => { const f=(window as any).fixture; for(let i=0;i<20;i++){f.editor.destroy();f.editor.start();}f.editor.destroy();if(f.root.querySelector('[data-movcues-authoring-outline]'))throw new Error('Leaked overlay'); });
 });
 
-async function startController(page: import('@playwright/test').Page, options: { width?: number; widgetType?: string; delay?: boolean } = {}) {
+async function startController(page: import('@playwright/test').Page, options: { width?: number; widgetType?: string; delay?: boolean; guide?: boolean; missing?: boolean; failSave?: boolean } = {}) {
   const definition = {
     content: { heading: 'Welcome', body: 'Edit this message', primaryAction: { label: 'Continue', type: 'dismiss' } },
     design: { width: 'md', theme: { background: '#fff', foreground: '#111', primary: '#2563eb', borderRadius: 'md' } },
@@ -50,17 +50,22 @@ async function startController(page: import('@playwright/test').Page, options: {
     targeting: { pageRules: [], audience: { type: 'all' }, trigger: { type: 'page_load' }, frequency: { mode: 'once' }, priority: 0 },
     builder: { version: 1, projectData: {}, css: '.movcues-widget{padding:10px;max-width:100%}', html: '<section class="movcues-widget"><h2 data-movcues-content="heading">Welcome</h2><div data-movcues-content="body">Edit this message</div><button data-movcues-action-id="primary">Continue</button></section>' },
   };
-  let savedDefinition = definition;
+  if (options.missing) definition.target.primarySelector = '#delayed-anchor';
+  let savedDefinition: any = options.guide ? { design: definition.design, targeting: definition.targeting, steps: [
+    { id: 'first', pattern: 'modal', label: 'First', content: { ...definition.content, primaryAction: { label: 'Continue', type: 'next_step' } }, builder: definition.builder, behavior: { dismissible: true }, advance: { type: 'button' } },
+    { id: 'second', pattern: 'modal', label: 'Second', content: { ...definition.content, heading: 'Second', primaryAction: { label: 'Continue', type: 'next_step' } }, builder: { ...definition.builder, html: definition.builder.html.replace('Welcome</h2>', 'Second</h2>') }, behavior: { dismissible: true }, advance: { type: 'button' } },
+  ] } : definition;
   let revision = 1; let release: (() => void) | undefined; let saves = 0;
   await page.route('**/public/experience-editor/**', async route => {
     if (route.request().url().endsWith('/exchange')) return route.fulfill({ json: { sessionId:'session',accessToken:'never-export-this-token',expiresAt:new Date(Date.now()+60000).toISOString() } });
     if (route.request().method() === 'PATCH') {
       saves++; const incoming = route.request().postDataJSON();
+      if (options.failSave && saves === 1) return route.fulfill({status:503,json:{error:'temporarily_unavailable'}});
       if (options.delay && saves === 1) await new Promise<void>(resolve => { release = resolve; });
       if (incoming.revision !== revision) return route.fulfill({status:409,json:{error:'draft_conflict',currentRevision:revision}});
       savedDefinition = incoming.definition; revision++; return route.fulfill({ json: { version: { id:'version',revision,versionNumber:1,definition:incoming.definition } } });
     }
-    return route.fulfill({ json: { experience: {id:'browser-exp',name:'Browser authoring',kind:'widget',widgetType:options.widgetType ?? 'modal',builderMode:'onsite'},version:{id:'version',revision,versionNumber:1,definition:savedDefinition} } });
+    return route.fulfill({ json: { experience: {id:'browser-exp',name:'Browser authoring',kind:options.guide ? 'guide' : 'widget',widgetType:options.guide ? null : options.widgetType ?? 'modal',builderMode:'onsite'},version:{id:'version',revision,versionNumber:1,definition:savedDefinition} } });
   });
   if (options.width) await page.setViewportSize({width:options.width,height:640});
   await page.evaluate(async () => { const f=(window as any).fixture;f.editor.destroy();document.querySelector("[data-fixture-toolbar]")?.remove();f.controller=new f.Controller(location.origin);await f.controller.start('one-time-launch'); });
@@ -83,7 +88,8 @@ test('conflict preserves a token-free export until explicit reload',async({page}
   await page.locator('[data-export-draft]').click();const data=await page.locator('[data-recovery-export]').inputValue();
   expect(data).toContain('Unsaved conflict text');expect(data).not.toContain('never-export-this-token');
   await page.reload(); // deliberate user decision: this does not silently restore a website-storage draft
-  await expect(page.locator('[data-movcues-editor]')).toHaveCount(0);
+  await expect(page.locator('[data-editor-toolbar]')).toHaveCount(0);
+  await expect(page.locator('[data-movcues-editor]:not([data-fixture-toolbar])')).toHaveCount(0);
 });
 
 for(const width of [320,360,390])test(`editor controls stay reachable at ${width}px and a shrinking viewport`,async({page})=>{
@@ -253,4 +259,126 @@ for(const width of [320,360,390])test(`structured rows stack without horizontal 
   const body=page.locator('#authoring [data-movcues-content=body]');await body.dblclick();await body.fill('x'.repeat(2001));
   const state=await page.evaluate(()=>{const f=(window as any).fixture;f.editor.flush();return{body:f.content.body,errors:f.editor.getValidation(),html:f.builder.html};});
   expect(state.body.length).toBe(2001);expect(state.errors.join(' ')).toContain('2000');expect(state.html).toContain('x'.repeat(2001));
+});
+
+test('structured formatting preserves a partial selection and the live text node', async ({ page }) => {
+  await startController(page); const heading = page.locator('[data-movcues-experience] h2'); await heading.dblclick();
+  await heading.press('Home'); await heading.press('ControlOrMeta+a'); await heading.press('ArrowLeft');
+  await heading.press('Shift+ArrowRight'); await heading.press('Shift+ArrowRight'); await heading.press('Shift+ArrowRight');
+  await heading.evaluate(node => { (window as any).originalHeading = node; });
+  await page.locator('[data-v2-format=strong]').click(); await expect(heading.locator('strong')).toHaveText('Wel');
+  expect(await heading.evaluate(node => node === (window as any).originalHeading)).toBe(true);
+  await expect(heading).toBeFocused(); await page.locator('[data-global-undo]').click(); await expect(heading.locator('strong')).toHaveCount(0);
+});
+
+test('immediate keyboard undo captures typing before its history debounce', async ({ page }) => {
+  await startController(page); const heading = page.locator('[data-movcues-experience] h2'); await heading.dblclick(); await heading.press('ControlOrMeta+a'); await heading.pressSequentially('Immediate change');
+  await heading.press('ControlOrMeta+z'); await expect(heading).toHaveText('Welcome'); await page.locator('[data-global-redo]').click(); await expect(heading).toHaveText('Immediate change');
+});
+
+test('empty cells, cross-parent drag movement, keyboard movement and persistence preserve IDs', async ({ page }) => {
+  await startController(page); const widget = page.locator('[data-movcues-experience] .movcues-widget');
+  await widget.locator('h2').click(); const headingId = await widget.locator('h2').getAttribute('data-movcues-block-id');
+  await page.locator('[data-command=columns]').click(); const empty = page.locator('[data-movcues-empty-cell]'); await expect(empty).toBeVisible();
+  await empty.click(); await page.locator('[data-insert-block=icon]').click();
+  const source = widget.locator('h2').locator('..');
+  const id = await source.getAttribute('data-movcues-node-id'); const target = widget.locator('[data-movcues-content=body]').locator('..');
+  await widget.locator('h2').click(); await page.locator('[data-command=move]').dragTo(target, { targetPosition: { x: 20, y: 20 } });
+  await expect(widget.locator(`h2[data-movcues-block-id="${headingId}"]`)).toBeVisible();
+  expect(await widget.locator(`h2[data-movcues-block-id="${headingId}"]`).locator('..').getAttribute('data-movcues-node-id')).toBe(id);
+  await page.locator('[data-global-undo]').click(); await expect(widget.locator('[data-movcues-content=body]').locator('..').locator('..').locator(':scope > [data-movcues-node-id]')).toHaveCount(3);
+  await page.locator('[data-global-redo]').click();
+  await page.locator('[data-command=move]').focus(); await page.locator('[data-command=move]').press('Enter');
+  for (let index = 0; index < 70; index++) {
+    if (await target.evaluate(node => (node.getRootNode() as ShadowRoot).activeElement === node)) break;
+    await page.keyboard.press('Tab');
+  }
+  await expect(target).toBeFocused(); await page.keyboard.press('Enter'); await expect(page.locator('[data-command=move]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('[data-save-state]')).toHaveText('Draft saved');
+  await page.evaluate(async () => { const f=(window as any).fixture; f.controller.destroy(); f.controller=new f.Controller(location.origin); await f.controller.start('reopen'); });
+  await expect(widget.locator(`h2[data-movcues-block-id="${headingId}"]`)).toBeVisible();
+});
+
+test('Guide step dock supports add, edit, preview next/back and save/reopen', async ({ page }) => {
+  await startController(page, { guide: true });
+  await page.locator('[data-select-step]').click(); await page.locator('[data-add-step=modal]').click();
+  await expect(page.locator('[data-step]')).toHaveCount(3); await expect(page.locator('[data-step="1"]')).toHaveClass(/active/);
+  const heading = page.locator('[data-movcues-experience] h2'); await heading.dblclick(); await heading.press('ControlOrMeta+a'); await heading.pressSequentially('Added step');
+  await page.locator('[data-movcues-insert-edge=right]').click(); await page.locator('[data-insert-block=button]').click();
+  await page.locator('[data-button-label]').fill('Go back'); await page.locator('[data-button-label]').press('Tab'); await page.locator('[data-button-action]').selectOption('previous_step');
+  await page.locator('[data-step="0"]').click(); await expect(heading).toHaveText('Welcome');
+  await page.locator('[data-mode=preview]').click(); await page.locator('[data-movcues-experience] .movcues-button').click(); await expect(heading).toHaveText('Added step');
+  await page.locator('[data-movcues-experience]').getByRole('button', { name: 'Go back', exact: true }).click(); await expect(heading).toHaveText('Welcome');
+  await page.locator('[data-mode=design]').click(); await expect(page.locator('[data-save-state]')).toHaveText('Draft saved');
+  await page.evaluate(async () => { const f=(window as any).fixture; f.controller.destroy(); f.controller=new f.Controller(location.origin); await f.controller.start('reopen-guide'); });
+  await expect(page.locator('[data-step]')).toHaveCount(3); await page.locator('[data-step="1"]').click(); await expect(heading).toHaveText('Added step');
+});
+
+test('failed save preserves content, recovers on retry, and saves only the recovered revision', async ({ page }) => {
+  const network = await startController(page, { failSave: true }); const heading = page.locator('[data-movcues-experience] h2');
+  await heading.dblclick(); await heading.press('ControlOrMeta+a'); await heading.pressSequentially('Recover this');
+  await expect(page.locator('[data-save-state]')).toHaveText('Save failed'); await expect(heading).toHaveText('Recover this');
+  await page.locator('[data-retry-save]').click(); await expect(page.locator('[data-save-state]')).toHaveText('Draft saved'); expect(network.getSaves()).toBe(2);
+});
+
+test('an asynchronously inserted target mounts without a new editor session', async ({ page }) => {
+  await startController(page, { widgetType: 'anchored_card', missing: true });
+  await expect(page.locator('[data-movcues-experience]')).toHaveCount(0);
+  await page.evaluate(() => { const target = document.createElement('button'); target.id = 'delayed-anchor'; target.textContent = 'Dynamic target'; document.body.prepend(target); });
+  await expect(page.locator('[data-movcues-experience] h2')).toBeVisible();
+  await page.locator('[data-mode=navigate]').click(); await expect(page.locator('[data-movcues-experience]')).toHaveCount(0);
+});
+
+test('backdrop restores scroll styles when hidden, dismissed or closed and keeps target and shadow inputs interactive', async ({ page }) => {
+  await startController(page, { widgetType: 'anchored_card' });
+  await page.evaluate(() => { document.documentElement.style.setProperty('overflow', 'clip'); document.body.style.setProperty('overflow', 'auto', 'important'); (window as any).targetClicks = 0; document.querySelector('#anchor')!.addEventListener('click', () => (window as any).targetClicks++); });
+  await page.locator('[data-backdrop]').check(); await page.locator('#anchor').click(); expect(await page.evaluate(() => (window as any).targetClicks)).toBe(1);
+  expect(await page.locator('[data-offset]').evaluate(node => { const event = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, composed: true, cancelable: true }); node.dispatchEvent(event); return event.defaultPrevented; })).toBe(false);
+  await page.evaluate(() => { (document.querySelector('#anchor') as HTMLElement).hidden = true; });
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe('auto');
+  await expect(page.locator('[data-movcues-target-highlight]')).toBeHidden();
+  await page.evaluate(() => { (document.querySelector('#anchor') as HTMLElement).hidden = false; });
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe('hidden');
+  await page.locator('[data-close-backdrop]').check(); await page.locator('[data-mode=preview]').click();
+  await page.locator('[data-movcues-target-backdrop=bottom]').click({ position: { x: 10, y: 400 } });
+  await expect(page.locator('[data-movcues-target-backdrop]')).toHaveCount(0);
+  expect(await page.evaluate(() => [document.documentElement.style.overflow, document.body.style.overflow, document.body.style.getPropertyPriority('overflow')])).toEqual(['clip', 'auto', 'important']);
+  await page.locator('[data-close]').click(); await expect(page.locator('[data-editor-toolbar]')).toHaveCount(0);
+});
+
+test('compiled visitor content dispatches independent button actions once without authoring controls', async ({ page }) => {
+  await page.evaluate(() => {
+    const f = (window as any).fixture; f.editor.destroy(); document.querySelector('[data-fixture-toolbar]')?.remove();
+    const doc = f.createOnsiteDocument(true); const buttons = f.listBlocks(doc.root).filter((block: any) => block.type === 'button'); buttons[0].label = 'Next step';
+    const tracked = f.createBlock('button', true); tracked.label = 'Track it'; tracked.action = { id: tracked.action.id, type: 'track_event', eventName: 'feature_clicked' }; doc.root.children.push(f.emptyCell(tracked));
+    const dismiss = f.createBlock('button', true); dismiss.label = 'Dismiss it'; dismiss.action = { id: dismiss.action.id, type: 'dismiss' }; doc.root.children.push(f.emptyCell(dismiss));
+    const builder = { version: 1, projectData: {}, html: '', css: '' }; const compiled = f.applyOnsiteDocument(builder, doc, 'modal');
+    f.runtime = new f.ExperienceRenderer(); f.actions = []; f.advances = 0;
+    f.runtime.render({ id: 'published-fixture', versionId: 'published-version', kind: 'guide', widgetType: null, priority: 0, definition: { steps: [{ id: 'one', pattern: 'modal', content: compiled.content, builder, behavior: { dismissible: true }, advance: { type: 'button' } }], design: { width: 'md', theme: { background: '#fff', foreground: '#111', primary: '#2563eb', borderRadius: 'md' } }, targeting: {} } }, { onVisible() {}, onDismiss() {}, onComplete() {}, onAction(action: any) { f.actions.push(action); }, onGuideAdvance() { f.advances++; } });
+  });
+  const runtime = page.locator('[data-movcues-experience=published-fixture]');
+  await runtime.getByRole('button', { name: 'Track it', exact: true }).click(); await runtime.getByRole('button', { name: 'Next step', exact: true }).click();
+  expect(await page.evaluate(() => { const f=(window as any).fixture; return { actions: f.actions.map((a: any) => a.type), advances: f.advances }; })).toEqual({ actions: ['track_event', 'next_step'], advances: 1 });
+  await expect(page.locator('[data-movcues-composition-toolbar],[data-movcues-insert-edge],[data-editor-toolbar]')).toHaveCount(0);
+  await runtime.getByRole('button', { name: 'Dismiss it', exact: true }).click(); await expect(runtime).toHaveCount(0);
+});
+
+for (const width of [320, 360, 390]) test(`floating controls and Guide dock remain usable without inspector overlap at ${width}px`, async ({ page }) => {
+  await startController(page, { width, guide: true });
+  const widget = page.locator('[data-movcues-experience] .movcues-widget'); await widget.locator('h2').click();
+  const toolbar = page.locator('[data-movcues-composition-toolbar]'); const inspector = page.locator('[data-movcues-editor] aside');
+  const a = (await toolbar.boundingBox())!; const b = (await inspector.boundingBox())!;
+  expect(a.x).toBeGreaterThanOrEqual(0); expect(a.x+a.width).toBeLessThanOrEqual(width);
+  expect(a.y+a.height <= b.y || a.y >= b.y+b.height || a.x+a.width <= b.x || a.x >= b.x+b.width).toBe(true);
+  await page.locator('[data-movcues-insert-edge=left]').click(); await expect(page.locator('[data-insert-block=icon]')).toBeInViewport();
+  await page.locator('[data-insert-block=icon]').click(); await expect(widget.locator('.movcues-icon')).toBeVisible();
+  await expect(page.locator('[data-step="1"]')).toBeInViewport();
+  await page.locator('[data-step="1"]').click(); await expect(widget.locator('h2')).toHaveText('Second');
+  if (width === 320) await page.screenshot({ path: test.info().outputPath('mobile-editor.png') });
+});
+
+test('a dragged floating toolbar is clamped after the viewport shrinks', async ({ page }) => {
+  await startController(page); const header = page.locator('[data-drag-handle] .header-copy'); const rect = (await header.boundingBox())!;
+  await page.mouse.move(rect.x+15, rect.y+8); await page.mouse.down(); await page.mouse.move(rect.x+400, rect.y+150, { steps: 8 }); await page.mouse.up();
+  await page.setViewportSize({ width: 320, height: 300 }); await expect(page.locator('[data-close]')).toBeInViewport(); await expect(page.locator('[data-minimize]')).toBeInViewport();
 });

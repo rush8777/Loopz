@@ -135,6 +135,38 @@ describe("AnchoredCardRenderer", () => {
     document.body.style.removeProperty("overflow");
   });
 
+  it("releases a hidden spotlight's scroll lock and reacquires it only when visible", () => {
+    let targetRect = rect(100, 120, 50, 20);
+    const target = document.createElement("button"); document.body.append(target); target.getBoundingClientRect = () => targetRect;
+    const host = document.createElement("div"); document.body.append(host); const root = host.attachShadow({ mode: "open" });
+    document.body.style.setProperty("overflow", "auto", "important");
+    const renderer = new AnchoredCardRenderer(); renderer.render(root, target, content, design, { ...behavior, backdrop: true }, { onDismiss: vi.fn(), onPrimary: vi.fn(), onSecondary: vi.fn() });
+    expect(document.body.style.overflow).toBe("hidden");
+    targetRect = rect(100, -1000, 50, 20); window.dispatchEvent(new Event("scroll")); flushFrames();
+    expect(document.body.style.overflow).toBe("auto"); expect(document.body.style.getPropertyPriority("overflow")).toBe("important");
+    targetRect = rect(100, 120, 50, 20); window.dispatchEvent(new Event("scroll")); flushFrames(); expect(document.body.style.overflow).toBe("hidden");
+    renderer.destroy(); renderer.destroy(); expect(document.body.style.overflow).toBe("auto"); document.body.style.removeProperty("overflow");
+  });
+
+  it("allows shadow-root inputs and nested scrolling while keeping the page locked", () => {
+    const { card, renderer } = renderAt(rect(100, 120, 50, 20), { ...behavior, backdrop: true });
+    const input = document.createElement("input"); card.append(input);
+    const key = new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, composed: true, cancelable: true }); input.dispatchEvent(key); expect(key.defaultPrevented).toBe(false);
+    const scroll = document.createElement("div"); scroll.style.overflowY = "auto"; Object.defineProperties(scroll, { scrollHeight: { value: 300 }, clientHeight: { value: 100 } }); card.append(scroll);
+    const wheel = new WheelEvent("wheel", { deltaY: 50, bubbles: true, composed: true, cancelable: true }); scroll.dispatchEvent(wheel); expect(wheel.defaultPrevented).toBe(false);
+    scroll.scrollTop = 200; const boundary = new WheelEvent("wheel", { deltaY: 50, bubbles: true, composed: true, cancelable: true }); scroll.dispatchEvent(boundary); expect(boundary.defaultPrevented).toBe(true);
+    renderer.destroy();
+  });
+
+  it("does not lock the document for a collapsed target and restores scrolling after target removal", () => {
+    const target = document.createElement("button"); document.body.append(target); let bounds = rect(0, 0, 0, 0); target.getBoundingClientRect = () => bounds;
+    const host = document.createElement("div"); document.body.append(host); const root = host.attachShadow({ mode: "open" });
+    const renderer = new AnchoredCardRenderer(); const card = renderer.render(root, target, content, design, { ...behavior, backdrop: true }, { onDismiss: vi.fn(), onPrimary: vi.fn(), onSecondary: vi.fn() });
+    expect(card.style.visibility).toBe("hidden"); expect(document.documentElement.style.overflow).not.toBe("hidden");
+    bounds = rect(100, 120, 80, 20); resizeObservers[0].fire(target); flushFrames(); expect(document.documentElement.style.overflow).toBe("hidden");
+    target.remove(); resizeObservers[0].fire(target); flushFrames(); expect(document.documentElement.style.overflow).not.toBe("hidden"); renderer.destroy();
+  });
+
   it("does not lock scrolling for anchored cards without a backdrop", () => {
     const { renderer } = renderAt(rect(100, 120, 50, 20));
     const wheel = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 100 });

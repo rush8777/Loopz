@@ -137,8 +137,10 @@ export class EditorModeController {
     if (!this.draft || !this.definition) return;
     this.host = document.createElement("div");
     this.host.dataset.movcuesEditor = "";
+    this.host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647";
     this.root = this.host.attachShadow({ mode: "open" });
     this.root.innerHTML = `<style>${STYLE}</style>${this.panelMarkup(this.draft)}`;
+    if (this.guide) this.root.querySelectorAll("[data-guide] .history-row").forEach(actions => this.root!.querySelector('[data-inspector="step"]')?.append(actions));
     document.documentElement.appendChild(this.host);
 
     this.bindPanel();
@@ -160,16 +162,17 @@ export class EditorModeController {
     const selectableSteps = this.guide?.steps ?? this.survey?.steps;
     const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-add-step="modal">＋ Modal</button><button type="button" class="secondary-button compact" data-add-step="anchored_card">＋ Anchored</button></div>' : ""}</div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-duplicate-step>Duplicate</button><button type="button" class="secondary-button compact" data-step-left>←</button><button type="button" class="secondary-button compact" data-step-right>→</button><button type="button" class="secondary-button compact" data-delete-step>Delete</button></div>' : ""}</section>` : "";
     const designDisabled = draft.experience.builderMode !== "onsite" ? " disabled title=\"Content is edited in the GrapesJS Dashboard Builder\"" : "";
-    return `<aside>
+    return `<div class="editor-toolbar" data-editor-toolbar role="region" aria-label="Movcues editing controls">
       <header data-drag-handle>
         <div class="header-copy"><strong>Movcues Live Editor</strong><span>${escapeText(draft.experience.name)}</span><small><i></i> Connected · <span data-save-state>Draft saved</span></small></div>
-        <div class="header-actions"><button type="button" data-global-undo aria-label="Undo">↶</button><button type="button" data-global-redo aria-label="Redo">↷</button><button type="button" data-move-side aria-label="Move inspector to other side">⇄</button><button type="button" data-return-dashboard aria-label="Return to dashboard">↗</button><button type="button" data-minimize aria-label="Minimize editor">—</button><button type="button" data-close aria-label="Close editor">×</button></div>
+        <div class="header-actions"><button type="button" data-global-undo aria-label="Undo">↶</button><button type="button" data-global-redo aria-label="Redo">↷</button><button type="button" data-save aria-label="Save draft">Save</button><button type="button" data-move-side aria-label="Move inspector to other side">⇄</button><button type="button" data-return-dashboard aria-label="Return to dashboard">↗</button><button type="button" data-minimize aria-label="Toggle inspector" aria-expanded="true">☷</button><button type="button" data-close aria-label="Close editor">×</button></div>
       </header>
-      <main>
         <div class="modebar"><button type="button" data-mode="design"${designDisabled}>Design</button><button type="button" data-mode="target">Target</button><button type="button" data-mode="navigate">Navigate</button><button type="button" data-mode="preview">Preview</button></div>
+      </div>
+      ${guideMarkup}
+      <aside aria-label="Contextual inspector"><main>
         <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>Preview tests this step only. Links and external actions are disabled.</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
-        ${guideMarkup}
         <section class="section composition-inspector" data-composition-inspector hidden>
           <div class="content-heading"><div><div class="eyebrow">Inspector</div><strong data-composition-label>Step</strong></div><button type="button" class="secondary-button compact" data-select-step>Step</button></div>
           <div data-inspector="step"><label>Step label<input data-step-name type="text" maxlength="80" placeholder="Step label"></label><div class="history-row"><button type="button" class="secondary-button compact" data-edge="top">Header</button><button type="button" class="secondary-button compact" data-edge="bottom">Footer</button><button type="button" class="secondary-button compact" data-edge="left">Left area</button><button type="button" class="secondary-button compact" data-edge="right">Right area</button></div></div>
@@ -226,7 +229,7 @@ export class EditorModeController {
         </section>
         <section class="section" data-step-only data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
         <section class="section" data-step-only><div class="eyebrow">Configured</div><dl data-configured></dl></section>
-        <section class="section live"><div class="eyebrow">Live status</div><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></section>
+        <details class="section live"><summary>Connection & target status</summary><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></details>
         <p class="hint status-error" role="alert" data-content-error hidden></p>
         <div class="save-recovery" data-save-recovery hidden><button type="button" class="secondary-button" data-retry-save>Retry save</button><button type="button" class="secondary-button" data-reload-draft hidden>Reload latest</button><button type="button" class="secondary-button" data-export-draft>Copy / Export unsaved draft</button><button type="button" class="secondary-button" data-discard-draft>Discard and close</button><span data-recovery-message>Local edits are preserved.</span></div><p class="hint" data-mode-hint></p>
       </main>
@@ -246,8 +249,9 @@ export class EditorModeController {
     root.querySelectorAll<HTMLButtonElement>("[data-step]").forEach(button => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
     root.querySelector<HTMLButtonElement>("[data-minimize]")?.addEventListener("click", () => {
       const aside = root.querySelector("aside")!; aside.classList.toggle("minimized");
-      const button = root.querySelector<HTMLButtonElement>("[data-minimize]")!; button.textContent = aside.classList.contains("minimized") ? "+" : "—";
+      root.querySelector<HTMLButtonElement>("[data-minimize]")!.setAttribute("aria-expanded", String(!aside.classList.contains("minimized")));
     });
+    root.querySelector<HTMLButtonElement>("[data-save]")?.addEventListener("click", () => void this.persist());
     root.querySelector<HTMLButtonElement>("[data-close]")?.addEventListener("click", () => void this.close());
     root.querySelector<HTMLButtonElement>("[data-return-dashboard]")?.addEventListener("click", () => { window.opener?.focus(); void this.close(); });
     root.querySelector<HTMLButtonElement>("[data-retry-save]")?.addEventListener("click", () => void this.persist());
@@ -274,12 +278,13 @@ export class EditorModeController {
     root.querySelector<HTMLButtonElement>("[data-apply-image]")?.addEventListener("click", () => { const source = root.querySelector<HTMLInputElement>("[data-image-src]"); const alt = root.querySelector<HTMLInputElement>("[data-image-alt]"); if (source && alt && !this.contentEditor?.updateImage(source.value, alt.value)) source.setCustomValidity("Use an HTTP(S), relative, or supported data image URL."); else source?.setCustomValidity(""); this.syncContentInspector(); });
     root.querySelector<HTMLButtonElement>("[data-undo]")?.addEventListener("click", () => { this.contentEditor?.undo(); this.syncContentInspector(); });
     root.querySelector<HTMLButtonElement>("[data-redo]")?.addEventListener("click", () => { this.contentEditor?.redo(); this.syncContentInspector(); });
-    root.addEventListener("pointerdown", () => this.contentEditor?.rememberSelection(), true);
-    root.addEventListener("focusin", () => this.contentEditor?.rememberSelection(), true);
+    root.addEventListener("pointerdown", event => { this.contentEditor?.rememberSelection(); this.compositionEditor?.rememberSelection(); if (event.target instanceof Element && event.target.closest("[data-v2-format],[data-v2-list]")) event.preventDefault(); }, true);
+    root.addEventListener("focusin", () => { this.contentEditor?.rememberSelection(); this.compositionEditor?.rememberSelection(); }, true);
     root.addEventListener("keydown", rawEvent => {
       const event = rawEvent as KeyboardEvent;
       if (event.key === "Escape") { this.contentEditor?.editSelected(); event.preventDefault(); }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !(event.target instanceof HTMLInputElement)) { event.preventDefault(); event.shiftKey ? this.contentEditor?.redo() : this.contentEditor?.undo(); }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void this.persist(); }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); if (event.shiftKey) { this.compositionEditor?.redo(); this.contentEditor?.redo(); } else { this.compositionEditor?.undo(); this.contentEditor?.undo(); } }
     });
     this.bindDrag();
 
@@ -378,20 +383,24 @@ export class EditorModeController {
 
   private bindDrag(): void {
     const handle = this.root?.querySelector<HTMLElement>("[data-drag-handle]");
-    const aside = this.root?.querySelector<HTMLElement>("aside");
+    const aside = this.root?.querySelector<HTMLElement>("[data-editor-toolbar]");
     if (!handle || !aside) return;
     handle.addEventListener("pointerdown", event => {
       if ((event.target as Element).closest("button")) return;
       const rect = aside.getBoundingClientRect();
       const startX = event.clientX; const startY = event.clientY;
+      let frame = 0;
       const move = (next: PointerEvent) => {
+        cancelAnimationFrame(frame); frame = requestAnimationFrame(() => {
         aside.style.right = "auto";
+        aside.style.transform = "none";
         aside.style.left = `${Math.max(4, Math.min(innerWidth - rect.width - 4, rect.left + next.clientX - startX))}px`;
-        aside.style.top = `${Math.max(4, Math.min(innerHeight - 48, rect.top + next.clientY - startY))}px`;
+        aside.style.top = `${Math.max(4, Math.min(innerHeight - rect.height - 4, rect.top + next.clientY - startY))}px`;
+        });
       };
-      const stop = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop); this.dragCleanup = null; };
+      const stop = () => { cancelAnimationFrame(frame); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop); window.removeEventListener("pointercancel", stop); this.dragCleanup = null; };
       this.dragCleanup?.(); this.dragCleanup = stop;
-      window.addEventListener("pointermove", move); window.addEventListener("pointerup", stop);
+      window.addEventListener("pointermove", move); window.addEventListener("pointerup", stop); window.addEventListener("pointercancel", stop);
     });
   }
 
@@ -475,7 +484,7 @@ export class EditorModeController {
     if (this.saveState === "expired") return;
     this.dirty = true; this.editGeneration++;
     this.updateContinuation();
-    if (render) this.syncPanel(); else this.syncContentInspector();
+    if (render) this.syncPanel(); else { this.syncContentInspector(); this.syncCompositionInspector(); }
     if (render && this.mode !== "navigate") this.renderPreview();
     if (this.saveState !== "conflict" && this.saveState !== "failed") this.saveState = this.saveInFlight ? "saving" : "dirty";
     this.showSaveState();
@@ -501,6 +510,7 @@ export class EditorModeController {
   private showSaveState(): void {
     const labels = { clean: "Draft saved", dirty: "Unsaved", saving: "Saving…", failed: "Save failed", conflict: "Conflict · reload required", expired: "Session expired · export unsaved edits" };
     this.setText("[data-save-state]", labels[this.saveState]);
+    const save = this.root?.querySelector<HTMLButtonElement>("[data-save]"); if (save) save.disabled = !this.dirty || ["saving", "conflict", "expired"].includes(this.saveState);
     const recovering = ["failed", "conflict", "expired"].includes(this.saveState);
     const recovery = this.root?.querySelector<HTMLElement>("[data-save-recovery]"); if (recovery) recovery.hidden = !recovering;
     const retry = this.root?.querySelector<HTMLButtonElement>("[data-retry-save]"); if (retry) retry.hidden = this.saveState !== "failed";
@@ -697,7 +707,9 @@ export class EditorModeController {
     if (!this.root) return; const editor = this.compositionEditor; const selection = this.compositionSelection; const inspector = this.root.querySelector<HTMLElement>("[data-composition-inspector]"); if (!inspector) return;
     inspector.hidden = this.mode !== "design" || !editor || !selection; this.root.querySelector<HTMLElement>("[data-content-inspector]")!.hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
     if (!editor || !selection) return; this.setText("[data-composition-label]", selection.label);
-    this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { group.hidden = selection.kind !== "step"; });
+    this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { if (selection.kind !== "step") group.hidden = true; });
+    if (selection.kind === "step") this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { group.hidden = group.hasAttribute("data-for") ? !this.isTargetedType() : group.hasAttribute("data-step-summary") ? !this.guide : group.hasAttribute("data-placement-section") ? Boolean(this.guide && getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal") : false; });
+    const stepName = this.root.querySelector<HTMLInputElement>("[data-step-name]")?.closest("label"); if (stepName) stepName.hidden = !this.guide;
     this.root.querySelectorAll<HTMLElement>("[data-inspector]").forEach(group => { group.hidden = group.dataset.inspector !== selection.kind; });
     const step = this.guide?.steps[this.stepIndex]; this.setValue("[data-step-name]", step?.label ?? step?.content.heading ?? "");
     const cell = editor.getSelectedCell(); if (cell) { this.setValue("[data-cell-direction]", cell.direction); this.setValue("[data-cell-size]", cell.sizing.mode); this.setValue("[data-cell-fixed]", String(cell.sizing.mode === "fixed" ? cell.sizing.value : 160)); this.root.querySelector<HTMLElement>("[data-fixed-size]")!.hidden = cell.sizing.mode !== "fixed"; this.setValue("[data-cell-align]", cell.align); this.setValue("[data-cell-gap]", String(cell.gap)); this.setValue("[data-cell-padding]", String(cell.padding.top)); this.setValue("[data-cell-background]", cell.style?.background && /^#[0-9a-f]{6}$/i.test(cell.style.background) ? cell.style.background : "#ffffff"); this.setValue("[data-cell-border]", String(cell.style?.borderWidth ?? 0)); this.setValue("[data-cell-radius]", String(cell.style?.borderRadius ?? 0)); this.setChecked("[data-cell-stack]", Boolean(cell.responsiveStack)); }
@@ -709,6 +721,7 @@ export class EditorModeController {
       this.setText("[data-choose-image]", block.src ? "Replace image" : "Choose image");
     }
     const undo = this.root.querySelector<HTMLButtonElement>("[data-v2-undo]"); if (undo) undo.disabled = !editor.canUndo(); const redo = this.root.querySelector<HTMLButtonElement>("[data-v2-redo]"); if (redo) redo.disabled = !editor.canRedo();
+    this.root.querySelector<HTMLButtonElement>("[data-global-undo]")!.disabled = !editor.canUndo(); this.root.querySelector<HTMLButtonElement>("[data-global-redo]")!.disabled = !editor.canRedo();
   }
 
   private syncPanel(): void {
@@ -720,6 +733,7 @@ export class EditorModeController {
     const guidePattern = this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : null;
     const activeGroups = new Set<string>(guidePattern === "anchored_card" ? ["target", "anchored", "backdrop"] : !this.guide && widgetType === "anchored_card" ? ["target", "anchored", "backdrop"] : guidePattern === "modal" ? [] : widgetType === "hotspot" ? ["target", "anchored", "hotspot"] : widgetType === "toast" ? ["toast"] : widgetType === "modal" || widgetType === "survey" ? ["modal", "backdrop"] : widgetType === "slideout" ? ["slideout", "backdrop"] : widgetType === "banner" ? ["banner"] : ["cursor"]);
     this.root.querySelectorAll<HTMLElement>("[data-for]").forEach(group => { group.hidden = !activeGroups.has(group.dataset.for!); });
+    if (this.mode !== "design") this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { group.hidden = this.mode !== "target" || group.dataset.for !== "target" || !activeGroups.has("target"); });
     const placementSection = this.root.querySelector<HTMLElement>("[data-placement-section]"); if (placementSection) placementSection.hidden = Boolean(this.guide && guidePattern === "modal");
     this.root.querySelector<HTMLElement>("[data-step-summary]")!.hidden = !this.guide;
     this.root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.classList.toggle("active", button.dataset.mode === this.mode));
@@ -828,11 +842,21 @@ export class EditorModeController {
     const viewport = window.visualViewport;
     const width = viewport?.width ?? innerWidth; const height = viewport?.height ?? innerHeight;
     const x = viewport?.offsetLeft ?? 0; const y = viewport?.offsetTop ?? 0;
+    const toolbar = this.root?.querySelector<HTMLElement>("[data-editor-toolbar]");
+    if (toolbar) {
+      toolbar.style.maxWidth = `${Math.max(0, width - 8)}px`;
+      const bounds = toolbar.getBoundingClientRect();
+      if (bounds.left < x + 4 || bounds.right > x + width - 4 || bounds.top < y + 4 || bounds.bottom > y + height - 4) {
+        toolbar.style.transform = "none"; toolbar.style.left = `${Math.max(x + 4, Math.min(x + width - bounds.width - 4, bounds.left))}px`;
+        toolbar.style.top = `${Math.max(y + 4, Math.min(y + height - bounds.height - 4, bounds.top))}px`;
+      }
+    }
     aside.style.maxWidth = `${Math.max(0, width - 8)}px`; aside.style.maxHeight = `${Math.max(48, height - 8)}px`;
-    const main = this.root?.querySelector<HTMLElement>("main"); if (main) main.style.maxHeight = `${Math.max(0, height - 74)}px`;
+    const main = this.root?.querySelector<HTMLElement>("main"); if (main) main.style.maxHeight = `${Math.max(0, width <= 480 ? height * .38 : height - 32)}px`;
     const rect = aside.getBoundingClientRect();
     if (aside.style.left) aside.style.left = `${Math.max(x + 4, Math.min(x + width - rect.width - 4, rect.left))}px`;
-    aside.style.top = `${Math.max(y + 4, Math.min(y + height - 48, rect.top || y + 4))}px`;
+    if (width <= 480) { aside.style.top = "auto"; aside.style.bottom = this.guide || this.survey ? "70px" : "8px"; }
+    else { aside.style.bottom = "auto"; aside.style.top = `${Math.max(y + 4, Math.min(y + height - 48, rect.top || y + 4))}px`; }
   };
 
   private scheduleTargetRefresh(): void {
@@ -969,6 +993,15 @@ function formatAdvance(advance?: GuideAdvance): string {
 }
 function escapeText(value: string): string { const span = document.createElement("span"); span.textContent = value; return span.innerHTML; }
 
-const STYLE = `
+const BASE_STYLE = `
 :host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:min(326px,calc(100vw - 8px));max-height:calc(100dvh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}aside.left-side{left:12px;right:auto}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100dvh - 82px);overflow:auto}.minimized{width:min(260px,calc(100vw - 8px))}.minimized main{display:none}.modebar{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button,.formatbar button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{min-width:0;padding:7px 3px}.modebar button:disabled{cursor:not-allowed;opacity:.42}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-navigator{position:fixed;left:50%;bottom:10px;width:min(680px,calc(100vw - 16px));transform:translateX(-50%);z-index:2147483647;border:1px solid #d7dce3;border-radius:10px;background:#fff;box-shadow:0 10px 32px rgba(15,23,42,.18)}.step-flow{display:flex;align-items:stretch;gap:4px;overflow:auto}.step{display:grid;grid-template-columns:auto minmax(54px,1fr) auto;align-items:center;gap:4px;flex:none;max-width:130px;padding:5px 7px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step small{overflow:hidden;font:10px/1.2 inherit;text-overflow:ellipsis;white-space:nowrap}.step i{font-style:normal}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.secondary-button.compact{padding:5px 7px}.content-heading,.history-row,.link-row,.save-recovery{display:flex;align-items:center;justify-content:space-between;gap:6px}.content-heading>div{min-width:0}.formatbar{display:flex;flex-wrap:wrap;gap:4px}.formatbar button{padding:5px 7px}.link-row input{min-width:0}.history-row{justify-content:flex-start;flex-wrap:wrap}.save-recovery{flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid #fee2e2;background:#fff7ed;color:#9a3412;font-size:11px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #2563eb;outline-offset:2px}textarea[data-recovery-export]{box-sizing:border-box;width:100%;height:180px;font:11px monospace}[hidden]{display:none!important}@media(max-width:480px){.step-navigator{position:static;width:auto;transform:none;box-shadow:none}}@media(max-width:420px){aside{right:4px;top:4px;max-height:calc(100dvh - 8px)}aside.left-side{left:4px}main{max-height:calc(100dvh - 66px)}header{padding:9px}.section{padding:8px 10px}.modebar{padding:6px}.modebar button{font-size:10px}}
+`;
+
+const STYLE = `${BASE_STYLE}
+.editor-toolbar{position:fixed;left:50%;transform:translateX(-50%);top:12px;width:min(410px,calc(100vw - 8px));z-index:2147483647;border:1px solid #d7dce3;border-radius:10px;background:#fff;color:#111827;box-shadow:0 8px 24px rgba(15,23,42,.16);font:12px/1.3 ui-sans-serif,system-ui,sans-serif;overflow:hidden}
+.editor-toolbar header{padding:7px 8px;gap:4px;align-items:center}.header-copy>span{display:none}.header-copy strong{font-size:11px}.header-copy small{margin-top:1px;font-size:10px}.header-actions{flex-wrap:wrap;justify-content:flex-end;gap:1px}.header-actions button{width:25px;height:28px;font-size:14px}.header-actions [data-save]{width:38px;font-size:11px}.header-actions button:disabled{opacity:.4;cursor:default}
+.editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .history-row{gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .content-heading>.history-row{display:none}
+[data-composition-inspector]>.history-row{display:none}
+@media(max-width:800px){.editor-toolbar{width:min(350px,calc(100vw - 8px))}aside{width:min(300px,calc(100vw - 8px))}}
+@media(max-width:480px){.editor-toolbar{left:4px;top:4px;transform:none}.header-copy strong{font-size:10px}.header-copy small{font-size:9px}.header-actions [data-return-dashboard],.header-actions [data-move-side]{display:none}aside{width:calc(100vw - 8px)}.step-navigator{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:calc(100vw - 8px);box-shadow:0 4px 14px rgba(15,23,42,.12)}.step-navigator>.history-row{display:none}.step-navigator .content-heading{display:none}}
 `;

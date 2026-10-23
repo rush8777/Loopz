@@ -142,6 +142,8 @@ export class AnchoredCardRenderer {
         return;
       }
       const rect = target.getBoundingClientRect();
+      // A collapsed/hidden target has no usable spotlight or anchor rectangle.
+      if (rect.width <= 0 || rect.height <= 0) { setHidden(true); return; }
       backdrop?.update(rect);
       if (measureCard || !cardSize) {
         const bounds = card.getBoundingClientRect();

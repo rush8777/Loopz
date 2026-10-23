@@ -1,4 +1,4 @@
-import { c as computeElementRole, a as computeElementLabel, b as builderLinkUrlIsSafe, d as builderImageUrlIsSafe, s as sanitizeBuilderHtml, E as ExperienceRenderer, R as RouteObserver, e as clearEditorContinuation, i as isGuideDefinition, g as getGuideStepPattern, f as guideStepRequiresTarget, h as findTarget, j as storeEditorContinuation } from "./module-Dzz_b-8x.js";
+import { c as computeElementRole, a as computeElementLabel, b as builderLinkUrlIsSafe, d as builderImageUrlIsSafe, s as sanitizeBuilderHtml, E as ExperienceRenderer, R as RouteObserver, e as clearEditorContinuation, i as isGuideDefinition, g as getGuideStepPattern, f as guideStepRequiresTarget, h as findTarget, j as storeEditorContinuation } from "./module-BId9Bfd5.js";
 class EditorBridge {
   constructor(apiBase, sessionId, accessToken) {
     this.apiBase = apiBase;
@@ -1536,29 +1536,58 @@ class OnsiteCompositionEditor {
     this.resizeCleanup = null;
     this.resizeFrame = 0;
     this.destroyed = false;
+    this.compiledState = "";
     this.imageFileTarget = null;
     this.imageRequest = 0;
     this.imagePlaceholders = /* @__PURE__ */ new Map();
     this.imageDropTarget = null;
+    this.savedRange = null;
+    this.moveSource = null;
+    this.rememberSelection = () => {
+      var _a, _b;
+      const range = ((_a = this.getTextSelection()) == null ? void 0 : _a.rangeCount) ? this.getTextSelection().getRangeAt(0) : null;
+      if (range && ((_b = this.surface) == null ? void 0 : _b.contains(range.commonAncestorContainer))) this.savedRange = range.cloneRange();
+    };
     this.onSurfaceClick = (event) => {
       const element = event.target instanceof Element ? event.target : null;
       if (!element) return;
       const blockElement = element.closest("[data-movcues-block-id]");
       const cellElement = element.closest("[data-movcues-node-id]");
+      if (this.moveSource && cellElement) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this.moveTo(cellElement.dataset.movcuesNodeId);
+        return;
+      }
       if (blockElement && cellElement) {
         const block = findBlock(this.document, blockElement.dataset.movcuesBlockId);
         if (block) this.select({ kind: "block", label: BLOCK_LABEL[block.type], cellId: cellElement.dataset.movcuesNodeId, blockId: block.id, blockType: block.type });
       } else if (cellElement) this.select({ kind: "cell", label: "Cell", cellId: cellElement.dataset.movcuesNodeId });
       else this.selectStep();
       if (blockElement == null ? void 0 : blockElement.hasAttribute("data-movcues-image-placeholder")) this.chooseImageFile(blockElement.dataset.movcuesBlockId);
+      if (element.closest("[data-movcues-empty-cell]")) this.openPalette(element.closest("[data-movcues-empty-cell]"));
       if (blockElement == null ? void 0 : blockElement.matches("button,a")) {
         event.preventDefault();
         event.stopImmediatePropagation();
       }
     };
     this.onImageDragOver = (event) => {
-      var _a;
-      if (!((_a = event.dataTransfer) == null ? void 0 : _a.types.includes("Files"))) return;
+      var _a, _b, _c;
+      if (this.moveSource && ((_a = event.dataTransfer) == null ? void 0 : _a.types.includes("application/x-movcues-cell"))) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.clearImageDrop();
+        const target2 = event.target instanceof Element ? event.target.closest("[data-movcues-node-id]") : null;
+        const source = findCell(this.document, this.moveSource);
+        if (target2 && source && target2.dataset.movcuesNodeId !== this.document.root.id && !findCell({ ...this.document, root: source }, target2.dataset.movcuesNodeId)) {
+          this.imageDropTarget = target2;
+          const row = ((_b = parentCell(this.document, target2.dataset.movcuesNodeId)) == null ? void 0 : _b.direction) === "row";
+          target2.setAttribute("data-movcues-insertion-edge", this.dropBefore(target2, event) ? row ? "left" : "top" : row ? "right" : "bottom");
+          event.dataTransfer.dropEffect = "move";
+        } else event.dataTransfer.dropEffect = "none";
+        return;
+      }
+      if (!((_c = event.dataTransfer) == null ? void 0 : _c.types.includes("Files"))) return;
       event.preventDefault();
       event.stopPropagation();
       const target = event.target instanceof Element ? event.target.closest("[data-movcues-block-id]") : null;
@@ -1574,9 +1603,35 @@ class OnsiteCompositionEditor {
       var _a;
       if (!(event.relatedTarget instanceof Node) || !((_a = this.imageDropTarget) == null ? void 0 : _a.contains(event.relatedTarget))) this.clearImageDrop();
     };
+    this.onMoveDragStart = (event) => {
+      if (!(event.target instanceof Element) || !event.target.closest('[data-command="move"]')) return;
+      const cell = this.getSelectedCell();
+      if (!cell || cell === this.document.root || !event.dataTransfer) {
+        event.preventDefault();
+        return;
+      }
+      this.moveSource = cell.id;
+      event.dataTransfer.setData("application/x-movcues-cell", cell.id);
+      event.dataTransfer.effectAllowed = "move";
+    };
+    this.cancelMove = () => {
+      var _a, _b;
+      this.moveSource = null;
+      this.clearImageDrop();
+      (_a = this.surface) == null ? void 0 : _a.removeAttribute("data-movcues-moving");
+      (_b = this.toolbar.querySelector('[data-command="move"]')) == null ? void 0 : _b.setAttribute("aria-pressed", "false");
+    };
     this.onImageDrop = (event) => {
-      var _a;
-      if (!((_a = event.dataTransfer) == null ? void 0 : _a.files.length)) return;
+      var _a, _b;
+      if (this.moveSource && ((_a = event.dataTransfer) == null ? void 0 : _a.types.includes("application/x-movcues-cell"))) {
+        event.preventDefault();
+        event.stopPropagation();
+        const target2 = event.target instanceof Element ? event.target.closest("[data-movcues-node-id]") : null;
+        if (target2) this.moveTo(target2.dataset.movcuesNodeId, this.dropBefore(target2, event));
+        this.cancelMove();
+        return;
+      }
+      if (!((_b = event.dataTransfer) == null ? void 0 : _b.files.length)) return;
       event.preventDefault();
       event.stopPropagation();
       this.clearImageDrop();
@@ -1616,7 +1671,8 @@ class OnsiteCompositionEditor {
     this.onBlur = (event) => {
       const element = event.target instanceof HTMLElement ? event.target : null;
       if (element == null ? void 0 : element.isContentEditable) {
-        element.contentEditable = "false";
+        this.rememberSelection();
+        if (event.relatedTarget) element.contentEditable = "false";
         this.flush();
         this.pushHistory();
       }
@@ -1629,11 +1685,34 @@ class OnsiteCompositionEditor {
       this.scheduleCompile();
     };
     this.onSurfaceKeyDown = (event) => {
-      if (event.key === "Escape" && event.target instanceof HTMLElement && event.target.isContentEditable) {
-        event.target.blur();
-        event.preventDefault();
+      if (this.composing) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (event.key === "Escape") {
+        this.cancelMove();
+        if (target == null ? void 0 : target.isContentEditable) target.blur();
       }
-      if ((event.ctrlKey || event.metaKey) && !(event.target instanceof HTMLElement && event.target.isContentEditable)) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        event.shiftKey ? this.redo() : this.undo();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && ["b", "i", "u"].includes(event.key.toLowerCase())) {
+        event.preventDefault();
+        this.rememberSelection();
+        this.formatInline(event.key.toLowerCase() === "b" ? "strong" : event.key.toLowerCase() === "i" ? "em" : "u");
+        return;
+      }
+      if (target == null ? void 0 : target.isContentEditable) return;
+      if (event.key === "Enter" && (target == null ? void 0 : target.matches("[data-movcues-node-id]"))) {
+        event.preventDefault();
+        if (this.moveSource) this.moveTo(target.dataset.movcuesNodeId);
+        else target.click();
+      }
+      if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+        event.preventDefault();
+        this.move(event.key === "ArrowUp" ? -1 : 1);
+      } else if (event.ctrlKey || event.metaKey) {
         if (event.key === "ArrowUp") {
           this.selectParent();
           event.preventDefault();
@@ -1644,7 +1723,24 @@ class OnsiteCompositionEditor {
         }
       }
     };
+    this.onPaste = (event) => {
+      const target = event.target instanceof HTMLElement ? event.target.closest('[contenteditable="true"]') : null;
+      const selection = this.getTextSelection();
+      if (!target || !(selection == null ? void 0 : selection.rangeCount) || !event.clipboardData) return;
+      const range = selection.getRangeAt(0);
+      if (!target.contains(range.commonAncestorContainer)) return;
+      event.preventDefault();
+      const text = document.createTextNode(event.clipboardData.getData("text/plain"));
+      range.deleteContents();
+      range.insertNode(text);
+      range.setStartAfter(text);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+    };
     this.onToolbarClick = (event) => {
+      var _a, _b;
       const button = event.target instanceof Element ? event.target.closest("button[data-command]") : null;
       if (!button || button.disabled) return;
       event.preventDefault();
@@ -1660,6 +1756,15 @@ class OnsiteCompositionEditor {
       else if (command === "delete") this.remove();
       else if (command === "move-up") this.move(-1);
       else if (command === "move-down") this.move(1);
+      else if (command === "move") {
+        if (this.moveSource) this.cancelMove();
+        else {
+          this.moveSource = ((_a = this.getSelectedCell()) == null ? void 0 : _a.id) ?? null;
+          (_b = this.surface) == null ? void 0 : _b.setAttribute("data-movcues-moving", "");
+          button.setAttribute("aria-pressed", "true");
+          button.title = "Choose a destination cell, or press Escape to cancel";
+        }
+      }
     };
     this.onPaletteClick = (event) => {
       var _a;
@@ -1681,6 +1786,10 @@ class OnsiteCompositionEditor {
       if (!this.palette.hidden && !event.composedPath().some((node) => node === this.palette || node === this.paletteAnchor)) this.closePalette();
     };
     this.onPaletteKeyDown = (event) => {
+      if (event.key === "Escape" && this.moveSource) {
+        this.cancelMove();
+        event.preventDefault();
+      }
       if (event.key !== "Escape" || this.palette.hidden) return;
       const anchor = this.paletteAnchor;
       this.closePalette();
@@ -1695,13 +1804,14 @@ class OnsiteCompositionEditor {
     };
     this.startResize = (event) => {
       var _a, _b, _c;
+      if (this.composing) return;
       const handle = event.currentTarget;
       const firstId = handle.dataset.first;
       const secondId = handle.dataset.second;
       const first = (_a = this.surface) == null ? void 0 : _a.querySelector(`[data-movcues-node-id="${firstId}"]`);
       const second = (_b = this.surface) == null ? void 0 : _b.querySelector(`[data-movcues-node-id="${secondId}"]`);
       if (!first || !second) return;
-      this.beforeTransaction();
+      if (!this.beforeTransaction()) return;
       const row = handle.dataset.movcuesResizeHandle === "row";
       const a = first.getBoundingClientRect();
       const b = second.getBoundingClientRect();
@@ -1718,29 +1828,37 @@ class OnsiteCompositionEditor {
           this.positionHandles();
         });
       };
-      const stop = () => {
+      const finish = (save) => {
         window.removeEventListener("pointermove", move);
         window.removeEventListener("pointerup", stop);
-        window.removeEventListener("pointercancel", stop);
+        window.removeEventListener("pointercancel", cancel);
         cancelAnimationFrame(this.resizeFrame);
         this.resizeFrame = 0;
         this.resizeCleanup = null;
-        if (resizeSiblings(this.document, firstId, secondId, ratio)) this.commit(this.selection);
+        if (save && !this.destroyed && resizeSiblings(this.document, firstId, secondId, ratio)) this.commit(this.selection);
+        else {
+          first.style.flex = "";
+          second.style.flex = "";
+        }
       };
+      const stop = () => finish(true);
+      const cancel = () => finish(false);
       (_c = this.resizeCleanup) == null ? void 0 : _c.call(this);
-      this.resizeCleanup = stop;
+      this.resizeCleanup = cancel;
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", stop);
-      window.addEventListener("pointercancel", stop);
+      window.addEventListener("pointercancel", cancel);
     };
     this.resizeWithKeyboard = (event) => {
+      var _a;
       if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
       const handle = event.currentTarget;
       const first = findCell(this.document, handle.dataset.first);
       const weight = (first == null ? void 0 : first.sizing.mode) === "flexible" ? first.sizing.weight : 1;
       const increase = event.key === "ArrowRight" || event.key === "ArrowDown";
-      this.beforeTransaction();
+      if (!this.beforeTransaction()) return;
       if (resizeSiblings(this.document, handle.dataset.first, handle.dataset.second, weight + (increase ? 0.1 : -0.1))) this.commit(this.selection);
+      (_a = this.root.querySelector(`[data-movcues-resize-handle][data-first="${handle.dataset.first}"][data-second="${handle.dataset.second}"]`)) == null ? void 0 : _a.focus({ preventScroll: true });
       event.preventDefault();
     };
     const existing = onsiteDocumentFromBuilder(builder);
@@ -1785,9 +1903,11 @@ class OnsiteCompositionEditor {
       ["duplicate", "Duplicate", '<rect x="6" y="6" width="8" height="8" rx="1"/><path d="M10 4V2H2v8h2"/>'],
       ["move-up", "Move before", '<path d="M13 8H3m4-4L3 8l4 4"/>'],
       ["move-down", "Move after", '<path d="M3 8h10M9 4l4 4-4 4"/>'],
+      ["move", "Move to another cell: drag or click, then choose a cell", '<path d="M8 2v12M2 8h12m-4-4 4 4-4 4M6 4 2 8l4 4"/>'],
       ["delete", "Delete", '<path d="m4 4 8 8m0-8-8 8"/>']
     ];
     this.toolbar.innerHTML = tools.map(([command, label, icon]) => `<button type="button" data-command="${command}" title="${label}" aria-label="${label}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></button>`).join("");
+    this.toolbar.querySelector('[data-command="move"]').draggable = true;
     this.palette.innerHTML = Object.keys(BLOCK_LABEL).map((type) => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
     this.root.append(this.toolbar, this.palette, this.imageInput);
     const edgeLabels = { top: "Add above", right: "Add to the right", bottom: "Add below", left: "Add to the left" };
@@ -1817,6 +1937,11 @@ class OnsiteCompositionEditor {
     this.surface.addEventListener("dragover", this.onImageDragOver);
     this.surface.addEventListener("dragleave", this.onImageDragLeave);
     this.surface.addEventListener("drop", this.onImageDrop);
+    this.surface.addEventListener("keyup", this.rememberSelection);
+    this.surface.addEventListener("mouseup", this.rememberSelection);
+    this.surface.addEventListener("paste", this.onPaste);
+    this.toolbar.addEventListener("dragstart", this.onMoveDragStart);
+    this.toolbar.addEventListener("dragend", this.cancelMove);
     this.toolbar.addEventListener("click", this.onToolbarClick);
     this.palette.addEventListener("click", this.onPaletteClick);
     this.root.addEventListener("scroll", this.positionTools, true);
@@ -1842,10 +1967,10 @@ class OnsiteCompositionEditor {
     return this.selection.kind === "block" ? findBlock(this.document, this.selection.blockId) : null;
   }
   canUndo() {
-    return this.historyIndex > 0;
+    return this.historyIndex > 0 || this.historyIndex >= 0 && JSON.stringify(this.document) !== JSON.stringify(this.history[this.historyIndex].document);
   }
   canRedo() {
-    return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1;
+    return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1 && JSON.stringify(this.document) === JSON.stringify(this.history[this.historyIndex].document);
   }
   isComposing() {
     return this.composing;
@@ -1858,11 +1983,14 @@ class OnsiteCompositionEditor {
     clearTimeout(this.compileTimer);
     this.compileTimer = 0;
     this.repairDocumentStructure();
+    const state = JSON.stringify(this.document);
+    if (state === this.compiledState) return true;
     const validation = validateOnsiteDocument(this.document);
     this.callbacks.onValidation(validation.errors);
     if (!validation.valid) return false;
     const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType);
     Object.assign(this.content, compiled.content);
+    this.compiledState = state;
     return true;
   }
   snapshot() {
@@ -1870,7 +1998,16 @@ class OnsiteCompositionEditor {
     return { builder: cloneOnsite(this.builder), content: cloneOnsite(this.content) };
   }
   undo() {
-    if (!this.canUndo() || this.composing) return;
+    if (this.composing) return;
+    if (!this.flush()) {
+      clearTimeout(this.typingTimer);
+      const current = this.history[this.historyIndex];
+      if (current) this.restore(current);
+      return;
+    }
+    this.pushHistory();
+    if (!this.canUndo()) return;
+    clearTimeout(this.typingTimer);
     this.historyIndex--;
     this.restore(this.history[this.historyIndex]);
   }
@@ -1906,8 +2043,8 @@ class OnsiteCompositionEditor {
   }
   insertBlock(type, insertion) {
     const cell = this.getSelectedCell();
-    if (!cell) return false;
-    this.beforeTransaction();
+    if (!cell || this.composing) return false;
+    if (!this.beforeTransaction()) return false;
     const block = createBlock(type, this.guide);
     if (insertion) {
       const candidate = cloneOnsite(this.document);
@@ -1942,22 +2079,23 @@ class OnsiteCompositionEditor {
   }
   split(direction) {
     const cell = this.getSelectedCell();
-    if (!cell) return false;
-    this.beforeTransaction();
+    if (!cell || this.composing) return false;
+    if (!this.beforeTransaction()) return false;
     const id = splitCell(this.document, cell.id, direction);
     if (!id) return false;
     this.commit({ kind: "cell", label: direction === "row" ? "Right cell" : "Lower cell", cellId: id });
     return true;
   }
   addEdge(edge) {
-    this.beforeTransaction();
+    if (this.composing) return;
+    if (!this.beforeTransaction()) return;
     const id = insertEdgeCell(this.document, edge);
     this.commit({ kind: "cell", label: `${edge} cell`, cellId: id });
   }
   duplicate() {
     const cell = this.getSelectedCell();
-    if (!cell || cell === this.document.root) return false;
-    this.beforeTransaction();
+    if (!cell || cell === this.document.root || this.composing) return false;
+    if (!this.beforeTransaction()) return false;
     const id = duplicateCell(this.document, cell.id);
     if (!id) return false;
     this.commit({ kind: "cell", label: "Duplicated cell", cellId: id });
@@ -1965,8 +2103,8 @@ class OnsiteCompositionEditor {
   }
   remove() {
     const cell = this.getSelectedCell();
-    if (!cell || cell === this.document.root) return false;
-    this.beforeTransaction();
+    if (!cell || cell === this.document.root || this.composing) return false;
+    if (!this.beforeTransaction()) return false;
     const parent = parentCell(this.document, cell.id);
     if (!removeCell(this.document, cell.id)) return false;
     this.commit(parent ? { kind: "cell", label: "Parent cell", cellId: parent.id } : { kind: "step", label: "Step" });
@@ -1974,23 +2112,48 @@ class OnsiteCompositionEditor {
   }
   move(delta) {
     const cell = this.getSelectedCell();
-    if (!cell) return false;
-    this.beforeTransaction();
+    if (!cell || this.composing) return false;
+    if (!this.beforeTransaction()) return false;
     if (!moveCell(this.document, cell.id, delta)) return false;
     this.commit(this.selection);
     return true;
   }
+  /** Move the existing subtree; never regenerate its cell/block/action IDs. */
+  moveTo(targetId, before = false, sourceId = this.moveSource ?? ((_a) => (_a = this.getSelectedCell()) == null ? void 0 : _a.id)()) {
+    if (!sourceId || sourceId === targetId || this.composing) return false;
+    const candidate = cloneOnsite(this.document);
+    const source = findCell(candidate, sourceId);
+    const target = findCell(candidate, targetId);
+    const from = parentCell(candidate, sourceId);
+    if (!source || !target || !(from == null ? void 0 : from.children) || findCell({ ...candidate, root: source }, targetId)) return false;
+    from.children.splice(from.children.indexOf(source), 1);
+    if (!from.children.length) delete from.children;
+    if (!target.block && !target.children) target.children = [source];
+    else {
+      const to = parentCell(candidate, targetId);
+      if (!(to == null ? void 0 : to.children)) return false;
+      to.children.splice(to.children.indexOf(target) + (before ? 0 : 1), 0, source);
+    }
+    const validation = validateOnsiteDocument(candidate);
+    this.callbacks.onValidation(validation.errors);
+    if (!validation.valid) return false;
+    if (!this.beforeTransaction()) return false;
+    this.document = candidate;
+    this.cancelMove();
+    this.commit(source.block ? { kind: "block", label: BLOCK_LABEL[source.block.type], cellId: source.id, blockId: source.block.id, blockType: source.block.type } : { kind: "cell", label: "Cell", cellId: source.id });
+    return true;
+  }
   updateCell(update) {
     const cell = this.getSelectedCell();
-    if (!cell) return;
-    this.beforeTransaction();
+    if (!cell || this.composing) return;
+    if (!this.beforeTransaction()) return;
     Object.assign(cell, cloneOnsite(update));
     this.commit(this.selection);
   }
   updateBlock(update) {
     const block = this.getSelectedBlock();
-    if (!block) return;
-    this.beforeTransaction();
+    if (!block || this.composing) return;
+    if (!this.beforeTransaction()) return;
     Object.assign(block, cloneOnsite(update));
     this.commit(this.selection);
   }
@@ -2056,7 +2219,7 @@ class OnsiteCompositionEditor {
   updateButtonAction(action) {
     const block = this.getSelectedBlock();
     if ((block == null ? void 0 : block.type) !== "button") return;
-    this.beforeTransaction();
+    if (!this.beforeTransaction()) return;
     block.action = { id: block.action.id, ...action };
     this.commit(this.selection);
   }
@@ -2079,8 +2242,8 @@ class OnsiteCompositionEditor {
   }
   toggleList(tag) {
     const block = this.getSelectedBlock();
-    if ((block == null ? void 0 : block.type) !== "text") return false;
-    this.beforeTransaction();
+    if ((block == null ? void 0 : block.type) !== "text" || this.composing) return false;
+    if (!this.beforeTransaction()) return false;
     const current = block.html.trim();
     block.html = current.startsWith(`<${tag}>`) ? current.replace(new RegExp(`^<${tag}><li>|</li></${tag}>$`, "g"), "") : `<${tag}><li>${current}</li></${tag}>`;
     this.commit(this.selection);
@@ -2091,15 +2254,21 @@ class OnsiteCompositionEditor {
     return this.wrapSelection("a", url);
   }
   wrapSelection(tag, href) {
-    var _a;
+    var _a, _b, _c;
+    if (this.composing) return false;
     const block = this.getSelectedBlock();
     if (!block || block.type !== "heading" && block.type !== "text") return false;
     const element = (_a = this.surface) == null ? void 0 : _a.querySelector(`[data-movcues-block-id="${block.id}"]`);
     if (!element) return false;
-    this.beforeTransaction();
-    const selection = window.getSelection();
+    if (!this.beforeTransaction()) return false;
+    const selection = this.getTextSelection();
+    if (this.savedRange && element.contains(this.savedRange.commonAncestorContainer)) {
+      selection == null ? void 0 : selection.removeAllRanges();
+      selection == null ? void 0 : selection.addRange(this.savedRange);
+    }
     const range = (selection == null ? void 0 : selection.rangeCount) ? selection.getRangeAt(0) : null;
     const selectedInside = range && element.contains(range.commonAncestorContainer) && !range.collapsed;
+    if (tag === "a" && (selectedInside ? (range == null ? void 0 : range.cloneContents().querySelector("a")) || ((_b = range == null ? void 0 : range.startContainer.parentElement) == null ? void 0 : _b.closest("a")) || ((_c = range == null ? void 0 : range.endContainer.parentElement) == null ? void 0 : _c.closest("a")) : element.querySelector("a"))) return false;
     if (selectedInside && range) {
       const wrapper = document.createElement(tag);
       if (tag === "a" && href) {
@@ -2120,8 +2289,19 @@ class OnsiteCompositionEditor {
       const open = tag === "a" ? `<a href="${escapeHtmlAttribute(href ?? "")}"${/^https?:\/\//i.test(href ?? "") ? ' target="_blank" rel="noopener noreferrer"' : ""}>` : `<${tag}>`;
       block.html = `${open}${block.html}</${tag}>`;
     }
-    this.commit(this.selection);
+    if (!selectedInside) element.innerHTML = block.html;
+    element.contentEditable = "true";
+    element.focus({ preventScroll: true });
+    this.rememberSelection();
+    this.flush();
+    this.pushHistory();
+    this.callbacks.onChange();
+    this.positionTools();
     return true;
+  }
+  getTextSelection() {
+    var _a, _b;
+    return ((_b = (_a = this.root).getSelection) == null ? void 0 : _b.call(_a)) ?? window.getSelection();
   }
   select(selection) {
     var _a, _b, _c, _d;
@@ -2138,10 +2318,27 @@ class OnsiteCompositionEditor {
   beforeTransaction() {
     clearTimeout(this.typingTimer);
     this.repairDocumentStructure();
-    this.flush();
+    if (!this.flush()) return false;
+    this.pushHistory();
+    return true;
   }
   commit(selection) {
     this.repairDocumentStructure();
+    const validation = validateOnsiteDocument(this.document);
+    if (!validation.valid) {
+      const previous = this.history[this.historyIndex];
+      if (previous) {
+        this.document = cloneOnsite(previous.document);
+        this.compileAndPatch();
+        this.select(previous.selection);
+      }
+      this.callbacks.onValidation(validation.errors);
+      return;
+    }
+    if (JSON.stringify(this.document) === this.compiledState) {
+      this.select(selection);
+      return;
+    }
     this.selection = selection;
     this.compileAndPatch();
     this.pushHistory();
@@ -2149,14 +2346,27 @@ class OnsiteCompositionEditor {
     this.select(selection);
   }
   compileAndPatch() {
-    var _a, _b;
+    var _a, _b, _c;
     const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType);
     Object.assign(this.content, compiled.content);
+    this.compiledState = JSON.stringify(this.document);
     const template = document.createElement("template");
     template.innerHTML = compiled.html;
     (_a = this.surface) == null ? void 0 : _a.replaceChildren(...Array.from(template.content.childNodes));
     this.imagePlaceholders.clear();
-    (_b = this.surface) == null ? void 0 : _b.querySelectorAll('img[data-movcues-block-id][src=""]').forEach((image) => {
+    this.savedRange = null;
+    (_b = this.surface) == null ? void 0 : _b.querySelectorAll("[data-movcues-node-id]").forEach((cell) => {
+      cell.tabIndex = 0;
+      cell.setAttribute("aria-label", "Layout cell");
+      if (!cell.children.length) {
+        const add = document.createElement("button");
+        add.type = "button";
+        add.dataset.movcuesEmptyCell = "";
+        add.textContent = "+ Add content";
+        cell.append(add);
+      }
+    });
+    (_c = this.surface) == null ? void 0 : _c.querySelectorAll('img[data-movcues-block-id][src=""]').forEach((image) => {
       const placeholder = document.createElement("button");
       placeholder.type = "button";
       placeholder.className = image.className;
@@ -2174,12 +2384,7 @@ class OnsiteCompositionEditor {
   scheduleCompile() {
     clearTimeout(this.compileTimer);
     this.compileTimer = window.setTimeout(() => {
-      if (!this.destroyed && !this.composing) {
-        this.repairDocumentStructure();
-        const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType);
-        Object.assign(this.content, compiled.content);
-        this.callbacks.onValidation(validateOnsiteDocument(this.document).errors);
-      }
+      if (!this.destroyed && !this.composing) this.flush();
     }, 160);
   }
   repairDocumentStructure() {
@@ -2209,6 +2414,7 @@ class OnsiteCompositionEditor {
     const document2 = cloneOnsite(this.document);
     const bytes = JSON.stringify(document2).length;
     const entry = { document: document2, selection: cloneOnsite(this.selection), bytes };
+    if (this.historyIndex >= 0 && JSON.stringify(this.history[this.historyIndex].document) === JSON.stringify(document2)) return;
     if (this.historyIndex < this.history.length - 1) {
       this.historyBytes -= this.history.slice(this.historyIndex + 1).reduce((sum, item) => sum + item.bytes, 0);
       this.history.splice(this.historyIndex + 1);
@@ -2229,9 +2435,15 @@ class OnsiteCompositionEditor {
     this.select(this.selection);
   }
   clearImageDrop() {
-    var _a;
+    var _a, _b;
     (_a = this.imageDropTarget) == null ? void 0 : _a.removeAttribute("data-movcues-image-drop");
+    (_b = this.imageDropTarget) == null ? void 0 : _b.removeAttribute("data-movcues-insertion-edge");
     this.imageDropTarget = null;
+  }
+  dropBefore(target, event) {
+    const rect = target.getBoundingClientRect();
+    const parent = parentCell(this.document, target.dataset.movcuesNodeId);
+    return (parent == null ? void 0 : parent.direction) === "row" ? event.clientX < rect.left + rect.width / 2 : event.clientY < rect.top + rect.height / 2;
   }
   openPalette(anchor, insertion = null) {
     var _a, _b, _c;
@@ -2255,7 +2467,7 @@ class OnsiteCompositionEditor {
   syncToolbarState() {
     const cell = this.getSelectedCell();
     const atRoot = !cell || cell === this.document.root;
-    for (const command of ["delete", "duplicate"]) {
+    for (const command of ["delete", "duplicate", "move"]) {
       const button = this.toolbar.querySelector(`[data-command="${command}"]`);
       if (!button) continue;
       button.disabled = atRoot;
@@ -2304,17 +2516,22 @@ class OnsiteCompositionEditor {
     this.positionHandles();
   }
   availableCanvasBounds() {
-    var _a, _b;
+    var _a, _b, _c;
     const inset = 6;
-    const aside = (_b = (_a = document.querySelector("[data-movcues-editor]")) == null ? void 0 : _a.shadowRoot) == null ? void 0 : _b.querySelector("aside");
-    const panel = aside == null ? void 0 : aside.getBoundingClientRect();
+    const editorRoot = (_a = document.querySelector("[data-movcues-editor]")) == null ? void 0 : _a.shadowRoot;
+    const panel = (_b = editorRoot == null ? void 0 : editorRoot.querySelector("aside")) == null ? void 0 : _b.getBoundingClientRect();
+    const controls = (_c = editorRoot == null ? void 0 : editorRoot.querySelector("[data-editor-toolbar]")) == null ? void 0 : _c.getBoundingClientRect();
     let left = inset;
     let right = innerWidth - inset;
+    let top = inset;
+    let bottom = innerHeight - inset;
     if (panel && panel.width > 0 && panel.height > 0) {
       if (panel.left < innerWidth / 2 && innerWidth - panel.right > 240) left = Math.max(left, panel.right + inset);
       else if (panel.left >= innerWidth / 2 && panel.left > 240) right = Math.min(right, panel.left - inset);
+      else if (panel.width > innerWidth / 2) bottom = Math.min(bottom, panel.top - inset);
     }
-    return { left, right: Math.max(left, right), top: inset, bottom: innerHeight - inset };
+    if (controls && controls.height > 0) top = Math.max(top, controls.bottom + inset);
+    return { left, right: Math.max(left, right), top, bottom: Math.max(top + 36, bottom) };
   }
   renderResizeHandles() {
     this.handles.forEach((handle) => handle.remove());
@@ -2352,7 +2569,7 @@ class OnsiteCompositionEditor {
     }
   }
   destroy() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q;
     this.destroyed = true;
     this.imageRequest++;
     clearTimeout(this.compileTimer);
@@ -2372,6 +2589,19 @@ class OnsiteCompositionEditor {
     (_i = this.surface) == null ? void 0 : _i.removeEventListener("dragover", this.onImageDragOver);
     (_j = this.surface) == null ? void 0 : _j.removeEventListener("dragleave", this.onImageDragLeave);
     (_k = this.surface) == null ? void 0 : _k.removeEventListener("drop", this.onImageDrop);
+    (_l = this.surface) == null ? void 0 : _l.removeEventListener("keyup", this.rememberSelection);
+    (_m = this.surface) == null ? void 0 : _m.removeEventListener("mouseup", this.rememberSelection);
+    (_n = this.surface) == null ? void 0 : _n.removeEventListener("paste", this.onPaste);
+    this.toolbar.removeEventListener("dragstart", this.onMoveDragStart);
+    this.toolbar.removeEventListener("dragend", this.cancelMove);
+    this.cancelMove();
+    this.savedRange = null;
+    (_o = this.surface) == null ? void 0 : _o.querySelectorAll("[data-movcues-empty-cell]").forEach((element) => element.remove());
+    (_p = this.surface) == null ? void 0 : _p.querySelectorAll("[data-movcues-node-id]").forEach((cell) => {
+      cell.removeAttribute("tabindex");
+      cell.removeAttribute("aria-label");
+      cell.removeAttribute("data-movcues-editor-selected");
+    });
     this.imagePlaceholders.forEach((image, placeholder) => placeholder.replaceWith(image));
     this.imagePlaceholders.clear();
     this.imageInput.remove();
@@ -2379,7 +2609,7 @@ class OnsiteCompositionEditor {
     this.palette.remove();
     this.edgeButtons.forEach((button) => button.remove());
     this.handles.forEach((handle) => handle.remove());
-    (_l = this.root.querySelector("style[data-movcues-composition-style]")) == null ? void 0 : _l.remove();
+    (_q = this.root.querySelector("style[data-movcues-composition-style]")) == null ? void 0 : _q.remove();
     this.root.removeEventListener("scroll", this.positionTools, true);
     window.removeEventListener("scroll", this.positionTools, true);
     window.removeEventListener("resize", this.positionTools);
@@ -2399,9 +2629,10 @@ function placeOutside(rect, size, bounds) {
   return candidates.find((p) => p.left >= bounds.left && p.left + size.width <= bounds.right && p.top >= bounds.top && p.top + size.height <= bounds.bottom) ?? { left: clampX(rect.left), top: clampY(rect.bottom + 10) };
 }
 const AUTHORING_STYLE = `
+[data-movcues-empty-cell]{width:100%;min-height:54px;border:1px dashed #94a3b8;border-radius:6px;background:#f8fafc;color:#64748b;font:12px ui-sans-serif,system-ui;cursor:pointer}[data-movcues-moving] [data-movcues-node-id]:hover{outline:2px dashed #2563eb;outline-offset:-2px}[data-command=move][aria-pressed=true]{background:#eff6ff;color:#1d4ed8}[data-movcues-node-id]:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
 [data-movcues-editor-selected=step]{outline:2px solid #2563eb!important;outline-offset:3px}[data-movcues-editor-selected=cell]{outline:2px solid #0ea5e9!important;outline-offset:-2px}[data-movcues-editor-selected=block]{outline:2px solid #2563eb!important;outline-offset:2px}
 [data-movcues-composition-toolbar],[data-movcues-block-palette],[data-movcues-resize-handle],[data-movcues-insert-edge]{box-sizing:border-box;position:fixed;left:0;top:0;z-index:2147483646;pointer-events:auto;font:12px/1.2 ui-sans-serif,system-ui,sans-serif}
-[data-movcues-composition-toolbar]{display:flex;gap:1px;max-width:calc(100vw - 12px);overflow:auto;padding:3px;border:1px solid #dbe2ea;border-radius:8px;background:#fff;box-shadow:0 4px 14px rgba(15,23,42,.14)}[data-movcues-composition-toolbar] button,[data-movcues-block-palette] button{min-height:28px;padding:5px 7px;border:0;border-radius:5px;background:transparent;color:#334155;font:600 11px inherit;cursor:pointer}[data-movcues-composition-toolbar] button{flex:none;width:28px;padding:0;font-size:16px}[data-movcues-composition-toolbar] button:hover:not(:disabled),[data-movcues-block-palette] button:hover{background:#eff6ff;color:#1d4ed8}[data-movcues-composition-toolbar] button:disabled{cursor:not-allowed;opacity:.42}
+[data-movcues-composition-toolbar]{display:flex;gap:1px;max-width:calc(100vw - 12px);overflow:auto;padding:3px;border:1px solid #dbe2ea;border-radius:8px;background:#fff;box-shadow:0 4px 14px rgba(15,23,42,.14)}[data-movcues-composition-toolbar] button,[data-movcues-block-palette] button{min-height:28px;padding:5px 7px;border:0;border-radius:5px;background:transparent;color:#334155;font:600 11px inherit;cursor:pointer}[data-movcues-composition-toolbar] button{flex:none;width:26px;padding:0;font-size:16px}[data-movcues-composition-toolbar] button:hover:not(:disabled),[data-movcues-block-palette] button:hover{background:#eff6ff;color:#1d4ed8}[data-movcues-composition-toolbar] button:disabled{cursor:not-allowed;opacity:.42}
 [data-movcues-composition-toolbar] svg{display:block;margin:auto}
 [data-movcues-image-placeholder]{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:120px;padding:16px;border:1px dashed #94a3b8!important;background:#f8fafc;color:#64748b;font:12px/1.4 ui-sans-serif,system-ui,sans-serif;cursor:pointer;white-space:normal}[data-movcues-image-placeholder] svg{flex:none}[data-movcues-image-placeholder]:hover,[data-movcues-image-drop]{outline:2px solid #2563eb!important;outline-offset:2px;background:#eff6ff}[data-movcues-image-placeholder][aria-busy=true]{opacity:.6;cursor:wait}[data-movcues-image-file][hidden]{display:none!important}
 [data-movcues-insert-edge]{width:24px;height:24px;padding:0;border:1px solid #93c5fd;border-radius:50%;background:#fff;color:#2563eb;box-shadow:0 2px 6px rgba(15,23,42,.12);font-size:18px;cursor:pointer}[data-movcues-insert-edge]:hover,[data-movcues-insert-edge][aria-expanded=true]{background:#2563eb;color:#fff}
@@ -2459,7 +2690,7 @@ class EditorModeController {
       event.returnValue = "";
     };
     this.fitPanel = () => {
-      var _a, _b;
+      var _a, _b, _c;
       const aside = (_a = this.root) == null ? void 0 : _a.querySelector("aside");
       if (!aside) return;
       const viewport = window.visualViewport;
@@ -2467,13 +2698,29 @@ class EditorModeController {
       const height = (viewport == null ? void 0 : viewport.height) ?? innerHeight;
       const x = (viewport == null ? void 0 : viewport.offsetLeft) ?? 0;
       const y = (viewport == null ? void 0 : viewport.offsetTop) ?? 0;
+      const toolbar = (_b = this.root) == null ? void 0 : _b.querySelector("[data-editor-toolbar]");
+      if (toolbar) {
+        toolbar.style.maxWidth = `${Math.max(0, width - 8)}px`;
+        const bounds = toolbar.getBoundingClientRect();
+        if (bounds.left < x + 4 || bounds.right > x + width - 4 || bounds.top < y + 4 || bounds.bottom > y + height - 4) {
+          toolbar.style.transform = "none";
+          toolbar.style.left = `${Math.max(x + 4, Math.min(x + width - bounds.width - 4, bounds.left))}px`;
+          toolbar.style.top = `${Math.max(y + 4, Math.min(y + height - bounds.height - 4, bounds.top))}px`;
+        }
+      }
       aside.style.maxWidth = `${Math.max(0, width - 8)}px`;
       aside.style.maxHeight = `${Math.max(48, height - 8)}px`;
-      const main = (_b = this.root) == null ? void 0 : _b.querySelector("main");
-      if (main) main.style.maxHeight = `${Math.max(0, height - 74)}px`;
+      const main = (_c = this.root) == null ? void 0 : _c.querySelector("main");
+      if (main) main.style.maxHeight = `${Math.max(0, width <= 480 ? height * 0.38 : height - 32)}px`;
       const rect = aside.getBoundingClientRect();
       if (aside.style.left) aside.style.left = `${Math.max(x + 4, Math.min(x + width - rect.width - 4, rect.left))}px`;
-      aside.style.top = `${Math.max(y + 4, Math.min(y + height - 48, rect.top || y + 4))}px`;
+      if (width <= 480) {
+        aside.style.top = "auto";
+        aside.style.bottom = this.guide || this.survey ? "70px" : "8px";
+      } else {
+        aside.style.bottom = "auto";
+        aside.style.top = `${Math.max(y + 4, Math.min(y + height - 48, rect.top || y + 4))}px`;
+      }
     };
   }
   async start(rawToken) {
@@ -2553,8 +2800,13 @@ class EditorModeController {
     if (!this.draft || !this.definition) return;
     this.host = document.createElement("div");
     this.host.dataset.movcuesEditor = "";
+    this.host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647";
     this.root = this.host.attachShadow({ mode: "open" });
     this.root.innerHTML = `<style>${STYLE}</style>${this.panelMarkup(this.draft)}`;
+    if (this.guide) this.root.querySelectorAll("[data-guide] .history-row").forEach((actions) => {
+      var _a2;
+      return (_a2 = this.root.querySelector('[data-inspector="step"]')) == null ? void 0 : _a2.append(actions);
+    });
     document.documentElement.appendChild(this.host);
     this.bindPanel();
     this.syncPanel();
@@ -2574,16 +2826,17 @@ class EditorModeController {
     const selectableSteps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
     const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-add-step="modal">＋ Modal</button><button type="button" class="secondary-button compact" data-add-step="anchored_card">＋ Anchored</button></div>' : ""}</div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-duplicate-step>Duplicate</button><button type="button" class="secondary-button compact" data-step-left>←</button><button type="button" class="secondary-button compact" data-step-right>→</button><button type="button" class="secondary-button compact" data-delete-step>Delete</button></div>' : ""}</section>` : "";
     const designDisabled = draft.experience.builderMode !== "onsite" ? ' disabled title="Content is edited in the GrapesJS Dashboard Builder"' : "";
-    return `<aside>
+    return `<div class="editor-toolbar" data-editor-toolbar role="region" aria-label="Movcues editing controls">
       <header data-drag-handle>
         <div class="header-copy"><strong>Movcues Live Editor</strong><span>${escapeText(draft.experience.name)}</span><small><i></i> Connected · <span data-save-state>Draft saved</span></small></div>
-        <div class="header-actions"><button type="button" data-global-undo aria-label="Undo">↶</button><button type="button" data-global-redo aria-label="Redo">↷</button><button type="button" data-move-side aria-label="Move inspector to other side">⇄</button><button type="button" data-return-dashboard aria-label="Return to dashboard">↗</button><button type="button" data-minimize aria-label="Minimize editor">—</button><button type="button" data-close aria-label="Close editor">×</button></div>
+        <div class="header-actions"><button type="button" data-global-undo aria-label="Undo">↶</button><button type="button" data-global-redo aria-label="Redo">↷</button><button type="button" data-save aria-label="Save draft">Save</button><button type="button" data-move-side aria-label="Move inspector to other side">⇄</button><button type="button" data-return-dashboard aria-label="Return to dashboard">↗</button><button type="button" data-minimize aria-label="Toggle inspector" aria-expanded="true">☷</button><button type="button" data-close aria-label="Close editor">×</button></div>
       </header>
-      <main>
         <div class="modebar"><button type="button" data-mode="design"${designDisabled}>Design</button><button type="button" data-mode="target">Target</button><button type="button" data-mode="navigate">Navigate</button><button type="button" data-mode="preview">Preview</button></div>
+      </div>
+      ${guideMarkup}
+      <aside aria-label="Contextual inspector"><main>
         <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>Preview tests this step only. Links and external actions are disabled.</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
-        ${guideMarkup}
         <section class="section composition-inspector" data-composition-inspector hidden>
           <div class="content-heading"><div><div class="eyebrow">Inspector</div><strong data-composition-label>Step</strong></div><button type="button" class="secondary-button compact" data-select-step>Step</button></div>
           <div data-inspector="step"><label>Step label<input data-step-name type="text" maxlength="80" placeholder="Step label"></label><div class="history-row"><button type="button" class="secondary-button compact" data-edge="top">Header</button><button type="button" class="secondary-button compact" data-edge="bottom">Footer</button><button type="button" class="secondary-button compact" data-edge="left">Left area</button><button type="button" class="secondary-button compact" data-edge="right">Right area</button></div></div>
@@ -2640,7 +2893,7 @@ class EditorModeController {
         </section>
         <section class="section" data-step-only data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
         <section class="section" data-step-only><div class="eyebrow">Configured</div><dl data-configured></dl></section>
-        <section class="section live"><div class="eyebrow">Live status</div><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></section>
+        <details class="section live"><summary>Connection & target status</summary><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></details>
         <p class="hint status-error" role="alert" data-content-error hidden></p>
         <div class="save-recovery" data-save-recovery hidden><button type="button" class="secondary-button" data-retry-save>Retry save</button><button type="button" class="secondary-button" data-reload-draft hidden>Reload latest</button><button type="button" class="secondary-button" data-export-draft>Copy / Export unsaved draft</button><button type="button" class="secondary-button" data-discard-draft>Discard and close</button><span data-recovery-message>Local edits are preserved.</span></div><p class="hint" data-mode-hint></p>
       </main>
@@ -2652,7 +2905,7 @@ class EditorModeController {
     return steps.map((step, index) => `<button class="step" type="button" data-step="${index}" aria-label="Open step ${index + 1}"><span>${index + 1}</span><small>${escapeText("label" in step && typeof step.label === "string" && step.label.trim() ? step.label : "content" in step && step.content.heading.trim() ? step.content.heading : `Step ${index + 1}`)}</small><i data-step-icon>○</i></button>`).join("");
   }
   bindPanel() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y;
     const root = this.root;
     root.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this.setMode(button.dataset.mode)));
     root.querySelectorAll("[data-pick]").forEach((button) => button.addEventListener("click", () => {
@@ -2664,47 +2917,47 @@ class EditorModeController {
     (_b = root.querySelector("[data-minimize]")) == null ? void 0 : _b.addEventListener("click", () => {
       const aside = root.querySelector("aside");
       aside.classList.toggle("minimized");
-      const button = root.querySelector("[data-minimize]");
-      button.textContent = aside.classList.contains("minimized") ? "+" : "—";
+      root.querySelector("[data-minimize]").setAttribute("aria-expanded", String(!aside.classList.contains("minimized")));
     });
-    (_c = root.querySelector("[data-close]")) == null ? void 0 : _c.addEventListener("click", () => void this.close());
-    (_d = root.querySelector("[data-return-dashboard]")) == null ? void 0 : _d.addEventListener("click", () => {
+    (_c = root.querySelector("[data-save]")) == null ? void 0 : _c.addEventListener("click", () => void this.persist());
+    (_d = root.querySelector("[data-close]")) == null ? void 0 : _d.addEventListener("click", () => void this.close());
+    (_e = root.querySelector("[data-return-dashboard]")) == null ? void 0 : _e.addEventListener("click", () => {
       var _a2;
       (_a2 = window.opener) == null ? void 0 : _a2.focus();
       void this.close();
     });
-    (_e = root.querySelector("[data-retry-save]")) == null ? void 0 : _e.addEventListener("click", () => void this.persist());
-    (_f = root.querySelector("[data-reload-draft]")) == null ? void 0 : _f.addEventListener("click", () => {
+    (_f = root.querySelector("[data-retry-save]")) == null ? void 0 : _f.addEventListener("click", () => void this.persist());
+    (_g = root.querySelector("[data-reload-draft]")) == null ? void 0 : _g.addEventListener("click", () => {
       if (window.confirm("Reloading discards local edits. Copy / Export them first if you need them. Reload latest?")) {
         this.recoveryDraft = null;
         window.location.reload();
       }
     });
-    (_g = root.querySelector("[data-export-draft]")) == null ? void 0 : _g.addEventListener("click", () => this.exportRecovery());
-    (_h = root.querySelector("[data-discard-draft]")) == null ? void 0 : _h.addEventListener("click", () => {
+    (_h = root.querySelector("[data-export-draft]")) == null ? void 0 : _h.addEventListener("click", () => this.exportRecovery());
+    (_i = root.querySelector("[data-discard-draft]")) == null ? void 0 : _i.addEventListener("click", () => {
       if (window.confirm("Discard unsaved edits and close?")) {
         this.recoveryDraft = null;
         this.destroy();
       }
     });
-    (_i = root.querySelector("[data-reset-preview]")) == null ? void 0 : _i.addEventListener("click", () => this.renderPreview());
-    (_j = root.querySelector("[data-global-undo]")) == null ? void 0 : _j.addEventListener("click", () => {
+    (_j = root.querySelector("[data-reset-preview]")) == null ? void 0 : _j.addEventListener("click", () => this.renderPreview());
+    (_k = root.querySelector("[data-global-undo]")) == null ? void 0 : _k.addEventListener("click", () => {
       var _a2, _b2;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.undo();
       (_b2 = this.contentEditor) == null ? void 0 : _b2.undo();
       this.syncContentInspector();
     });
-    (_k = root.querySelector("[data-global-redo]")) == null ? void 0 : _k.addEventListener("click", () => {
+    (_l = root.querySelector("[data-global-redo]")) == null ? void 0 : _l.addEventListener("click", () => {
       var _a2, _b2;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.redo();
       (_b2 = this.contentEditor) == null ? void 0 : _b2.redo();
       this.syncContentInspector();
     });
-    (_l = root.querySelector("[data-move-side]")) == null ? void 0 : _l.addEventListener("click", () => {
+    (_m = root.querySelector("[data-move-side]")) == null ? void 0 : _m.addEventListener("click", () => {
       var _a2;
       return (_a2 = root.querySelector("aside")) == null ? void 0 : _a2.classList.toggle("left-side");
     });
-    (_m = root.querySelector("[data-select-step]")) == null ? void 0 : _m.addEventListener("click", () => {
+    (_n = root.querySelector("[data-select-step]")) == null ? void 0 : _n.addEventListener("click", () => {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.selectStep();
     });
@@ -2713,17 +2966,17 @@ class EditorModeController {
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.addEdge(button.dataset.edge);
     }));
     root.querySelectorAll("[data-add-step]").forEach((button) => button.addEventListener("click", () => this.addGuideStep(button.dataset.addStep)));
-    (_n = root.querySelector("[data-duplicate-step]")) == null ? void 0 : _n.addEventListener("click", () => this.duplicateGuideStep());
-    (_o = root.querySelector("[data-delete-step]")) == null ? void 0 : _o.addEventListener("click", () => this.deleteGuideStep());
-    (_p = root.querySelector("[data-step-left]")) == null ? void 0 : _p.addEventListener("click", () => this.moveGuideStep(-1));
-    (_q = root.querySelector("[data-step-right]")) == null ? void 0 : _q.addEventListener("click", () => this.moveGuideStep(1));
-    (_r = root.querySelector("[data-step-name]")) == null ? void 0 : _r.addEventListener("change", (event) => {
+    (_o = root.querySelector("[data-duplicate-step]")) == null ? void 0 : _o.addEventListener("click", () => this.duplicateGuideStep());
+    (_p = root.querySelector("[data-delete-step]")) == null ? void 0 : _p.addEventListener("click", () => this.deleteGuideStep());
+    (_q = root.querySelector("[data-step-left]")) == null ? void 0 : _q.addEventListener("click", () => this.moveGuideStep(-1));
+    (_r = root.querySelector("[data-step-right]")) == null ? void 0 : _r.addEventListener("click", () => this.moveGuideStep(1));
+    (_s = root.querySelector("[data-step-name]")) == null ? void 0 : _s.addEventListener("change", (event) => {
       if (!this.guide) return;
       this.guide.steps[this.stepIndex].label = event.currentTarget.value.trim().slice(0, 80) || void 0;
       this.changed();
       this.refreshStepBar();
     });
-    (_s = root.querySelector("[data-edit-component]")) == null ? void 0 : _s.addEventListener("click", () => {
+    (_t = root.querySelector("[data-edit-component]")) == null ? void 0 : _t.addEventListener("click", () => {
       var _a2, _b2;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.editSelected();
       (_b2 = this.contentEditor) == null ? void 0 : _b2.editSelected();
@@ -2740,14 +2993,14 @@ class EditorModeController {
       (_b2 = this.contentEditor) == null ? void 0 : _b2.toggleList(button.dataset.list);
       this.syncContentInspector();
     }));
-    (_t = root.querySelector("[data-text-align]")) == null ? void 0 : _t.addEventListener("change", (event) => {
+    (_u = root.querySelector("[data-text-align]")) == null ? void 0 : _u.addEventListener("change", (event) => {
       var _a2, _b2;
       const value = event.currentTarget.value;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.setAlignment(value);
       (_b2 = this.contentEditor) == null ? void 0 : _b2.setAlignment(value);
       this.syncContentInspector();
     });
-    (_u = root.querySelector("[data-apply-link]")) == null ? void 0 : _u.addEventListener("click", () => {
+    (_v = root.querySelector("[data-apply-link]")) == null ? void 0 : _v.addEventListener("click", () => {
       var _a2, _b2;
       const input = root.querySelector("[data-link-url]");
       const applied = input ? ((_a2 = this.compositionEditor) == null ? void 0 : _a2.applyLink(input.value)) ?? ((_b2 = this.contentEditor) == null ? void 0 : _b2.applyLink(input.value)) : false;
@@ -2757,7 +3010,7 @@ class EditorModeController {
       } else input == null ? void 0 : input.setCustomValidity("");
       this.syncContentInspector();
     });
-    (_v = root.querySelector("[data-apply-image]")) == null ? void 0 : _v.addEventListener("click", () => {
+    (_w = root.querySelector("[data-apply-image]")) == null ? void 0 : _w.addEventListener("click", () => {
       var _a2;
       const source = root.querySelector("[data-image-src]");
       const alt = root.querySelector("[data-image-alt]");
@@ -2765,34 +3018,47 @@ class EditorModeController {
       else source == null ? void 0 : source.setCustomValidity("");
       this.syncContentInspector();
     });
-    (_w = root.querySelector("[data-undo]")) == null ? void 0 : _w.addEventListener("click", () => {
+    (_x = root.querySelector("[data-undo]")) == null ? void 0 : _x.addEventListener("click", () => {
       var _a2;
       (_a2 = this.contentEditor) == null ? void 0 : _a2.undo();
       this.syncContentInspector();
     });
-    (_x = root.querySelector("[data-redo]")) == null ? void 0 : _x.addEventListener("click", () => {
+    (_y = root.querySelector("[data-redo]")) == null ? void 0 : _y.addEventListener("click", () => {
       var _a2;
       (_a2 = this.contentEditor) == null ? void 0 : _a2.redo();
       this.syncContentInspector();
     });
-    root.addEventListener("pointerdown", () => {
-      var _a2;
-      return (_a2 = this.contentEditor) == null ? void 0 : _a2.rememberSelection();
+    root.addEventListener("pointerdown", (event) => {
+      var _a2, _b2;
+      (_a2 = this.contentEditor) == null ? void 0 : _a2.rememberSelection();
+      (_b2 = this.compositionEditor) == null ? void 0 : _b2.rememberSelection();
+      if (event.target instanceof Element && event.target.closest("[data-v2-format],[data-v2-list]")) event.preventDefault();
     }, true);
     root.addEventListener("focusin", () => {
-      var _a2;
-      return (_a2 = this.contentEditor) == null ? void 0 : _a2.rememberSelection();
+      var _a2, _b2;
+      (_a2 = this.contentEditor) == null ? void 0 : _a2.rememberSelection();
+      (_b2 = this.compositionEditor) == null ? void 0 : _b2.rememberSelection();
     }, true);
     root.addEventListener("keydown", (rawEvent) => {
-      var _a2, _b2, _c2;
+      var _a2, _b2, _c2, _d2, _e2;
       const event = rawEvent;
       if (event.key === "Escape") {
         (_a2 = this.contentEditor) == null ? void 0 : _a2.editSelected();
         event.preventDefault();
       }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !(event.target instanceof HTMLInputElement)) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
-        event.shiftKey ? (_b2 = this.contentEditor) == null ? void 0 : _b2.redo() : (_c2 = this.contentEditor) == null ? void 0 : _c2.undo();
+        void this.persist();
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)) {
+        event.preventDefault();
+        if (event.shiftKey) {
+          (_b2 = this.compositionEditor) == null ? void 0 : _b2.redo();
+          (_c2 = this.contentEditor) == null ? void 0 : _c2.redo();
+        } else {
+          (_d2 = this.compositionEditor) == null ? void 0 : _d2.undo();
+          (_e2 = this.contentEditor) == null ? void 0 : _e2.undo();
+        }
       }
     });
     this.bindDrag();
@@ -3118,7 +3384,7 @@ class EditorModeController {
   bindDrag() {
     var _a, _b;
     const handle = (_a = this.root) == null ? void 0 : _a.querySelector("[data-drag-handle]");
-    const aside = (_b = this.root) == null ? void 0 : _b.querySelector("aside");
+    const aside = (_b = this.root) == null ? void 0 : _b.querySelector("[data-editor-toolbar]");
     if (!handle || !aside) return;
     handle.addEventListener("pointerdown", (event) => {
       var _a2;
@@ -3126,20 +3392,28 @@ class EditorModeController {
       const rect = aside.getBoundingClientRect();
       const startX = event.clientX;
       const startY = event.clientY;
+      let frame = 0;
       const move = (next) => {
-        aside.style.right = "auto";
-        aside.style.left = `${Math.max(4, Math.min(innerWidth - rect.width - 4, rect.left + next.clientX - startX))}px`;
-        aside.style.top = `${Math.max(4, Math.min(innerHeight - 48, rect.top + next.clientY - startY))}px`;
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() => {
+          aside.style.right = "auto";
+          aside.style.transform = "none";
+          aside.style.left = `${Math.max(4, Math.min(innerWidth - rect.width - 4, rect.left + next.clientX - startX))}px`;
+          aside.style.top = `${Math.max(4, Math.min(innerHeight - rect.height - 4, rect.top + next.clientY - startY))}px`;
+        });
       };
       const stop = () => {
+        cancelAnimationFrame(frame);
         window.removeEventListener("pointermove", move);
         window.removeEventListener("pointerup", stop);
+        window.removeEventListener("pointercancel", stop);
         this.dragCleanup = null;
       };
       (_a2 = this.dragCleanup) == null ? void 0 : _a2.call(this);
       this.dragCleanup = stop;
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", stop);
+      window.addEventListener("pointercancel", stop);
     });
   }
   onSelect(selector, update) {
@@ -3245,7 +3519,10 @@ class EditorModeController {
     this.editGeneration++;
     this.updateContinuation();
     if (render) this.syncPanel();
-    else this.syncContentInspector();
+    else {
+      this.syncContentInspector();
+      this.syncCompositionInspector();
+    }
     if (render && this.mode !== "navigate") this.renderPreview();
     if (this.saveState !== "conflict" && this.saveState !== "failed") this.saveState = this.saveInFlight ? "saving" : "dirty";
     this.showSaveState();
@@ -3277,15 +3554,17 @@ class EditorModeController {
     }
   }
   showSaveState() {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     const labels = { clean: "Draft saved", dirty: "Unsaved", saving: "Saving…", failed: "Save failed", conflict: "Conflict · reload required", expired: "Session expired · export unsaved edits" };
     this.setText("[data-save-state]", labels[this.saveState]);
+    const save = (_a = this.root) == null ? void 0 : _a.querySelector("[data-save]");
+    if (save) save.disabled = !this.dirty || ["saving", "conflict", "expired"].includes(this.saveState);
     const recovering = ["failed", "conflict", "expired"].includes(this.saveState);
-    const recovery = (_a = this.root) == null ? void 0 : _a.querySelector("[data-save-recovery]");
+    const recovery = (_b = this.root) == null ? void 0 : _b.querySelector("[data-save-recovery]");
     if (recovery) recovery.hidden = !recovering;
-    const retry = (_b = this.root) == null ? void 0 : _b.querySelector("[data-retry-save]");
+    const retry = (_c = this.root) == null ? void 0 : _c.querySelector("[data-retry-save]");
     if (retry) retry.hidden = this.saveState !== "failed";
-    const reload = (_c = this.root) == null ? void 0 : _c.querySelector("[data-reload-draft]");
+    const reload = (_d = this.root) == null ? void 0 : _d.querySelector("[data-reload-draft]");
     if (reload) reload.hidden = !["conflict", "expired"].includes(this.saveState);
     this.setText("[data-recovery-message]", "Local edits remain in memory in this tab. Export before reloading or leaving.");
   }
@@ -3582,7 +3861,7 @@ class EditorModeController {
     if (redo) redo.disabled = !((_b = this.contentEditor) == null ? void 0 : _b.canRedo());
   }
   syncCompositionInspector() {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e;
     if (!this.root) return;
     const editor = this.compositionEditor;
     const selection = this.compositionSelection;
@@ -3593,12 +3872,17 @@ class EditorModeController {
     if (!editor || !selection) return;
     this.setText("[data-composition-label]", selection.label);
     this.root.querySelectorAll("[data-step-only]").forEach((group) => {
-      group.hidden = selection.kind !== "step";
+      if (selection.kind !== "step") group.hidden = true;
     });
+    if (selection.kind === "step") this.root.querySelectorAll("[data-step-only]").forEach((group) => {
+      group.hidden = group.hasAttribute("data-for") ? !this.isTargetedType() : group.hasAttribute("data-step-summary") ? !this.guide : group.hasAttribute("data-placement-section") ? Boolean(this.guide && getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal") : false;
+    });
+    const stepName = (_a = this.root.querySelector("[data-step-name]")) == null ? void 0 : _a.closest("label");
+    if (stepName) stepName.hidden = !this.guide;
     this.root.querySelectorAll("[data-inspector]").forEach((group) => {
       group.hidden = group.dataset.inspector !== selection.kind;
     });
-    const step = (_a = this.guide) == null ? void 0 : _a.steps[this.stepIndex];
+    const step = (_b = this.guide) == null ? void 0 : _b.steps[this.stepIndex];
     this.setValue("[data-step-name]", (step == null ? void 0 : step.label) ?? (step == null ? void 0 : step.content.heading) ?? "");
     const cell = editor.getSelectedCell();
     if (cell) {
@@ -3609,9 +3893,9 @@ class EditorModeController {
       this.setValue("[data-cell-align]", cell.align);
       this.setValue("[data-cell-gap]", String(cell.gap));
       this.setValue("[data-cell-padding]", String(cell.padding.top));
-      this.setValue("[data-cell-background]", ((_b = cell.style) == null ? void 0 : _b.background) && /^#[0-9a-f]{6}$/i.test(cell.style.background) ? cell.style.background : "#ffffff");
-      this.setValue("[data-cell-border]", String(((_c = cell.style) == null ? void 0 : _c.borderWidth) ?? 0));
-      this.setValue("[data-cell-radius]", String(((_d = cell.style) == null ? void 0 : _d.borderRadius) ?? 0));
+      this.setValue("[data-cell-background]", ((_c = cell.style) == null ? void 0 : _c.background) && /^#[0-9a-f]{6}$/i.test(cell.style.background) ? cell.style.background : "#ffffff");
+      this.setValue("[data-cell-border]", String(((_d = cell.style) == null ? void 0 : _d.borderWidth) ?? 0));
+      this.setValue("[data-cell-radius]", String(((_e = cell.style) == null ? void 0 : _e.borderRadius) ?? 0));
       this.setChecked("[data-cell-stack]", Boolean(cell.responsiveStack));
     }
     const block = editor.getSelectedBlock();
@@ -3669,6 +3953,8 @@ class EditorModeController {
     if (undo) undo.disabled = !editor.canUndo();
     const redo = this.root.querySelector("[data-v2-redo]");
     if (redo) redo.disabled = !editor.canRedo();
+    this.root.querySelector("[data-global-undo]").disabled = !editor.canUndo();
+    this.root.querySelector("[data-global-redo]").disabled = !editor.canRedo();
   }
   syncPanel() {
     var _a, _b;
@@ -3683,6 +3969,9 @@ class EditorModeController {
     const activeGroups = new Set(guidePattern === "anchored_card" ? ["target", "anchored", "backdrop"] : !this.guide && widgetType === "anchored_card" ? ["target", "anchored", "backdrop"] : guidePattern === "modal" ? [] : widgetType === "hotspot" ? ["target", "anchored", "hotspot"] : widgetType === "toast" ? ["toast"] : widgetType === "modal" || widgetType === "survey" ? ["modal", "backdrop"] : widgetType === "slideout" ? ["slideout", "backdrop"] : widgetType === "banner" ? ["banner"] : ["cursor"]);
     this.root.querySelectorAll("[data-for]").forEach((group) => {
       group.hidden = !activeGroups.has(group.dataset.for);
+    });
+    if (this.mode !== "design") this.root.querySelectorAll("[data-step-only]").forEach((group) => {
+      group.hidden = this.mode !== "target" || group.dataset.for !== "target" || !activeGroups.has("target");
     });
     const placementSection = this.root.querySelector("[data-placement-section]");
     if (placementSection) placementSection.hidden = Boolean(this.guide && guidePattern === "modal");
@@ -3988,10 +4277,18 @@ function escapeText(value) {
   span.textContent = value;
   return span.innerHTML;
 }
-const STYLE = `
+const BASE_STYLE = `
 :host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:min(326px,calc(100vw - 8px));max-height:calc(100dvh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}aside.left-side{left:12px;right:auto}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100dvh - 82px);overflow:auto}.minimized{width:min(260px,calc(100vw - 8px))}.minimized main{display:none}.modebar{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button,.formatbar button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{min-width:0;padding:7px 3px}.modebar button:disabled{cursor:not-allowed;opacity:.42}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-navigator{position:fixed;left:50%;bottom:10px;width:min(680px,calc(100vw - 16px));transform:translateX(-50%);z-index:2147483647;border:1px solid #d7dce3;border-radius:10px;background:#fff;box-shadow:0 10px 32px rgba(15,23,42,.18)}.step-flow{display:flex;align-items:stretch;gap:4px;overflow:auto}.step{display:grid;grid-template-columns:auto minmax(54px,1fr) auto;align-items:center;gap:4px;flex:none;max-width:130px;padding:5px 7px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step small{overflow:hidden;font:10px/1.2 inherit;text-overflow:ellipsis;white-space:nowrap}.step i{font-style:normal}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.secondary-button.compact{padding:5px 7px}.content-heading,.history-row,.link-row,.save-recovery{display:flex;align-items:center;justify-content:space-between;gap:6px}.content-heading>div{min-width:0}.formatbar{display:flex;flex-wrap:wrap;gap:4px}.formatbar button{padding:5px 7px}.link-row input{min-width:0}.history-row{justify-content:flex-start;flex-wrap:wrap}.save-recovery{flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid #fee2e2;background:#fff7ed;color:#9a3412;font-size:11px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #2563eb;outline-offset:2px}textarea[data-recovery-export]{box-sizing:border-box;width:100%;height:180px;font:11px monospace}[hidden]{display:none!important}@media(max-width:480px){.step-navigator{position:static;width:auto;transform:none;box-shadow:none}}@media(max-width:420px){aside{right:4px;top:4px;max-height:calc(100dvh - 8px)}aside.left-side{left:4px}main{max-height:calc(100dvh - 66px)}header{padding:9px}.section{padding:8px 10px}.modebar{padding:6px}.modebar button{font-size:10px}}
+`;
+const STYLE = `${BASE_STYLE}
+.editor-toolbar{position:fixed;left:50%;transform:translateX(-50%);top:12px;width:min(410px,calc(100vw - 8px));z-index:2147483647;border:1px solid #d7dce3;border-radius:10px;background:#fff;color:#111827;box-shadow:0 8px 24px rgba(15,23,42,.16);font:12px/1.3 ui-sans-serif,system-ui,sans-serif;overflow:hidden}
+.editor-toolbar header{padding:7px 8px;gap:4px;align-items:center}.header-copy>span{display:none}.header-copy strong{font-size:11px}.header-copy small{margin-top:1px;font-size:10px}.header-actions{flex-wrap:wrap;justify-content:flex-end;gap:1px}.header-actions button{width:25px;height:28px;font-size:14px}.header-actions [data-save]{width:38px;font-size:11px}.header-actions button:disabled{opacity:.4;cursor:default}
+.editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .history-row{gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .content-heading>.history-row{display:none}
+[data-composition-inspector]>.history-row{display:none}
+@media(max-width:800px){.editor-toolbar{width:min(350px,calc(100vw - 8px))}aside{width:min(300px,calc(100vw - 8px))}}
+@media(max-width:480px){.editor-toolbar{left:4px;top:4px;transform:none}.header-copy strong{font-size:10px}.header-copy small{font-size:9px}.header-actions [data-return-dashboard],.header-actions [data-move-side]{display:none}aside{width:calc(100vw - 8px)}.step-navigator{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:calc(100vw - 8px);box-shadow:0 4px 14px rgba(15,23,42,.12)}.step-navigator>.history-row{display:none}.step-navigator .content-heading{display:none}}
 `;
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-DW3ZVucG.js.map
+//# sourceMappingURL=EditorModeController-BCckyuzB.js.map

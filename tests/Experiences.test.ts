@@ -205,6 +205,7 @@ describe("experience editor and runtime", () => {
 
   it("renders and advances one Guide across Modal and Anchored Card patterns", async () => {
     const target = document.createElement("button"); target.id = "mixed-guide-target"; document.body.appendChild(target);
+    target.getBoundingClientRect = () => new DOMRect(100, 120, 80, 30);
     const guide: DeliveredExperience = { id: "guide_mixed", versionId: "v1", kind: "guide", widgetType: null, priority: 40, definition: { design, steps: [
       { id: "modal-first", pattern: "modal", content: { heading: "Modal first", body: "One", primaryAction: { label: "Next", type: "next_step" } }, advance: { type: "button" }, behavior: { dismissible: true } },
       { id: "anchored", pattern: "anchored_card", content: { heading: "Anchored middle", body: "Two", primaryAction: { label: "Next", type: "next_step" } }, advance: { type: "button" }, target: { primarySelector: "#mixed-guide-target", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true, placement: "auto", alignment: "center", offset: 8, backdrop: true, backdropOpacity: 0.55 } },

@@ -5,6 +5,8 @@
 </div><script type="module">
 import { OnsiteContentEditor } from '/src/experiences/editor/OnsiteContentEditor.ts';
 import { EditorModeController } from '/src/experiences/editor/EditorModeController.ts';
+import { ExperienceRenderer } from '/src/experiences/runtime/ExperienceRenderer.ts';
+import { applyOnsiteDocument, createBlock, createOnsiteDocument, emptyCell, listBlocks } from '/src/experiences/onsite/OnsiteDocument.ts';
 const starter = '<section class="movcues-widget"><h2 data-movcues-content="heading">Welcome home</h2><div data-movcues-content="body">First line<br>Second line</div><img src="/image.png" alt="Image"><button data-movcues-action-id="primary">Continue</button></section>';
 const root = document.querySelector('#authoring').attachShadow({ mode:'open' });
 root.innerHTML = `<style>[contenteditable]{outline:1px solid blue}img{width:30px;height:30px}</style><div data-movcues-builder-surface>${starter}</div>`;
@@ -14,5 +16,5 @@ const editor = new OnsiteContentEditor(root,builder,content,{onChange(){},onSele
 document.querySelector('#bold').onclick=()=>editor.formatInline('strong');
 document.querySelector('#link').onclick=()=>editor.applyLink(document.querySelector('#url').value);
 document.querySelector('#undo').onclick=()=>editor.undo();document.querySelector('#redo').onclick=()=>editor.redo();
-window.fixture={editor,builder,content,root,Controller:EditorModeController};
+window.fixture={editor,builder,content,root,Controller:EditorModeController,ExperienceRenderer,applyOnsiteDocument,createBlock,createOnsiteDocument,emptyCell,listBlocks};
 </script>
