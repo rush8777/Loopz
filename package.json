@@ -46,7 +46,8 @@
     "build": "vite build && vite build --mode minify && vite build --mode experiences && vite build --mode experiences-minify && vite build --mode editor && vite build --mode editor-minify && vite build --mode replay && vite build --mode replay-minify && vite build --mode heatmap && vite build --mode heatmap-minify && vite build --mode v1 && vite build --mode module && tsc -p tsconfig.build.json",
     "test": "vitest run",
     "dev": "vite",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "test:integration": "playwright test --config playwright.integration.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

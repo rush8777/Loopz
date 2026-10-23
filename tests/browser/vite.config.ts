@@ -1,2 +1,2 @@
 import { defineConfig } from 'vite';
-export default defineConfig({ plugins: [{ name: 'guide-test-routes', configureServer(server) { server.middlewares.use((request, _response, next) => { if (request.url?.startsWith('/journey/')) request.url = '/tests/browser/guide-app.html'; next(); }); } }] });
+export default defineConfig({ server: { hmr: false }, plugins: [{ name: 'guide-test-routes', configureServer(server) { server.middlewares.use((request, _response, next) => { if (request.url?.startsWith('/integration/')) request.url = '/tests/integration/host.html'; if (request.url?.startsWith('/journey/')) request.url = '/tests/browser/guide-app.html'; next(); }); } }] });

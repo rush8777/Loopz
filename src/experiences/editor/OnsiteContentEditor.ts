@@ -1,3 +1,4 @@
+import { editorRange, setEditorRange } from "./EditorSelection";
 import type { ExperienceContent, WidgetBuilderState } from "../types";
 import { sanitizeBuilderHtml } from "../runtime/BuilderContent";
 import { builderImageUrlIsSafe, builderLinkUrlIsSafe } from "../runtime/BuilderContentContract";
@@ -140,12 +141,12 @@ export class OnsiteContentEditor {
 
   applyLink(url: string): boolean {
     if (this.composing || !this.selected || this.selectionKind(this.selected) !== "text" || !builderLinkUrlIsSafe(url) || !this.restoreSelection()) return false;
-    const selection = this.getSelection(); const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const range = editorRange(this.root);
     if (!range || range.collapsed || !this.selected?.contains(range.commonAncestorContainer)) return false;
     if (this.selected?.closest("a") || range.startContainer.parentElement?.closest("a") || range.endContainer.parentElement?.closest("a") || range.cloneContents().querySelector("a")) return false;
     this.beforeOperation();
     const anchor = document.createElement("a"); anchor.href = url; if (/^https?:\/\//i.test(url)) { anchor.target = "_blank"; anchor.rel = "noopener noreferrer"; }
-    anchor.append(range.extractContents()); range.insertNode(anchor); selection?.removeAllRanges(); range.selectNodeContents(anchor); selection?.addRange(range); this.savedRange = range.cloneRange(); this.commit(); return true;
+    anchor.append(range.extractContents()); range.insertNode(anchor); range.selectNodeContents(anchor); setEditorRange(this.root, range); this.savedRange = range.cloneRange(); this.commit(); return true;
   }
 
   setAlignment(alignment: "left" | "center" | "right"): void {
@@ -249,7 +250,7 @@ export class OnsiteContentEditor {
     const keyEvent = event as KeyboardEvent;
     if (this.composing || keyEvent.isComposing || keyEvent.keyCode === 229) return;
     if ((keyEvent.ctrlKey || keyEvent.metaKey) && keyEvent.key.toLowerCase() === "a" && this.isEditing() && this.selected) {
-      keyEvent.preventDefault(); const range = document.createRange(); range.selectNodeContents(this.selected); const selection = this.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); this.savedRange = range.cloneRange(); return;
+      keyEvent.preventDefault(); const range = document.createRange(); range.selectNodeContents(this.selected); setEditorRange(this.root, range); this.savedRange = range.cloneRange(); return;
     }
     if ((keyEvent.key === "Enter" || keyEvent.key === " ") && this.selected && !this.isEditing() && this.selectionKind(this.selected) !== "image") { keyEvent.preventDefault(); this.editSelected(); return; }
     if (keyEvent.key === "Escape") { keyEvent.preventDefault(); const component = this.selected; this.deselect(); component?.focus({ preventScroll: true }); return; }
@@ -260,8 +261,7 @@ export class OnsiteContentEditor {
   private onPaste = (event: Event) => {
     if (!this.isEditing() || this.composing) return;
     const paste = event as ClipboardEvent; const text = paste.clipboardData?.getData("text/plain"); if (text === undefined) return;
-    paste.preventDefault(); const selection = this.getSelection(); if (!selection?.rangeCount) return;
-    const range = selection.getRangeAt(0); if (!this.selected?.contains(range.commonAncestorContainer)) return; this.beforeOperation(); range.deleteContents(); const node = document.createTextNode(text); range.insertNode(node); range.setStartAfter(node); range.collapse(true); selection.removeAllRanges(); selection.addRange(range); this.savedRange = range.cloneRange(); this.commit();
+    const range = editorRange(this.root); if (!range || !this.selected?.contains(range.commonAncestorContainer)) return; paste.preventDefault(); this.beforeOperation(); range.deleteContents(); const node = document.createTextNode(text); range.insertNode(node); range.setStartAfter(node); range.collapse(true); setEditorRange(this.root, range); this.savedRange = range.cloneRange(); this.commit();
   };
 
   private componentFrom(event: Event): HTMLElement | null {
@@ -285,16 +285,15 @@ export class OnsiteContentEditor {
     if (commit) this.flush();
     this.selected?.removeAttribute("contenteditable"); this.selected?.removeAttribute("spellcheck"); this.emitSelection();
   }
-  private getSelection(): Selection | null { return (this.root as ShadowRoot & { getSelection?: () => Selection | null }).getSelection?.() ?? window.getSelection(); }
-  rememberSelection = () => { const selection = this.getSelection(); if (selection?.rangeCount && this.selected?.contains(selection.getRangeAt(0).commonAncestorContainer)) this.savedRange = selection.getRangeAt(0).cloneRange(); };
+  rememberSelection = () => { const range = editorRange(this.root); if (range && this.selected?.contains(range.commonAncestorContainer)) this.savedRange = range.cloneRange(); };
   private restoreSelection(): boolean { if (!this.savedRange || !this.selected?.contains(this.savedRange.commonAncestorContainer)) { this.savedRange = null; return false; }
-    this.selected.focus({ preventScroll: true }); const selection = this.getSelection(); selection?.removeAllRanges(); selection?.addRange(this.savedRange); return true; }
+    this.selected.focus({ preventScroll: true }); setEditorRange(this.root, this.savedRange); return true; }
   private wrapSelection(tag: "strong" | "em" | "u"): void {
-    if (this.composing || !this.restoreSelection()) return; const selection = this.getSelection(); const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    if (this.composing || !this.restoreSelection()) return; const range = editorRange(this.root);
     if (!range || range.collapsed || !this.selected?.contains(range.commonAncestorContainer)) return;
     if (range.cloneContents().querySelector("ul,ol,li,div,p,button,img")) return;
     this.beforeOperation();
-    const wrapper = document.createElement(tag); wrapper.append(range.extractContents()); range.insertNode(wrapper); range.selectNodeContents(wrapper); selection?.removeAllRanges(); selection?.addRange(range); this.savedRange = range.cloneRange(); this.commit();
+    const wrapper = document.createElement(tag); wrapper.append(range.extractContents()); range.insertNode(wrapper); range.selectNodeContents(wrapper); setEditorRange(this.root, range); this.savedRange = range.cloneRange(); this.commit();
   }
 
   private serialize(): string {
@@ -377,9 +376,9 @@ export class OnsiteContentEditor {
     if (current) Object.assign(current, this.selectionState());
   }
   private selectionOffsets(): { start: number; end: number } {
-    const selection = this.getSelection();
-    if (!this.selected || !selection?.rangeCount || !this.selected.contains(selection.getRangeAt(0).commonAncestorContainer)) return { start: 0, end: 0 };
-    const range = selection.getRangeAt(0); const prefix = range.cloneRange(); prefix.selectNodeContents(this.selected); prefix.setEnd(range.startContainer, range.startOffset);
+    const range = editorRange(this.root);
+    if (!this.selected || !range || !this.selected.contains(range.commonAncestorContainer)) return { start: 0, end: 0 };
+    const prefix = range.cloneRange(); prefix.selectNodeContents(this.selected); prefix.setEnd(range.startContainer, range.startOffset);
     return { start: prefix.toString().length, end: prefix.toString().length + range.toString().length };
   }
   private selectionState() { return { key: this.componentKey(this.selected), editing: this.isEditing(), ...this.selectionOffsets() }; }
@@ -390,7 +389,7 @@ export class OnsiteContentEditor {
     if (!nodes.length) { this.selected.append(document.createTextNode("")); nodes.push(this.selected.firstChild as Text); }
     const locate = (offset: number): [Text, number] => { for (const text of nodes) { if (offset <= text.length) return [text, offset]; offset -= text.length; } const last = nodes[nodes.length - 1]; return [last, last.length]; };
     const range = document.createRange(); range.setStart(...locate(start)); range.setEnd(...locate(end));
-    const selection = this.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); this.savedRange = range.cloneRange();
+    setEditorRange(this.root, range); this.savedRange = range.cloneRange();
   }
   private pushHistory(): void {
     const html = this.builder.html;

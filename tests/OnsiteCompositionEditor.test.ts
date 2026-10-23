@@ -34,6 +34,17 @@ describe("directional on-site insertion", () => {
   afterEach(() => { editor.destroy(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
   const click = (selector: string) => root.querySelector<HTMLElement>(selector)!.click();
 
+  it("keeps Select All scoped to the active block inside the shadow root", () => {
+    const heading = root.querySelector<HTMLElement>("h2")!;
+    heading.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    Object.defineProperty(heading, "isContentEditable", { value: true });
+    const addRange = vi.fn(); Object.defineProperty(root, "getSelection", { value: () => ({ removeAllRanges: vi.fn(), addRange }) });
+    const event = new KeyboardEvent("keydown", { key: "a", ctrlKey: true, bubbles: true, cancelable: true }); heading.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    // jsdom has no native shadow selection; the browser suite verifies selection and typing.
+    expect(addRange).toHaveBeenCalledWith(expect.any(Range)); expect(addRange.mock.calls[0][0].commonAncestorContainer).toBe(heading);
+  });
+
   it("undoes immediate typing and preserves it when a structural operation follows", () => {
     const heading = root.querySelector<HTMLElement>("h2")!; const original = heading.textContent;
     heading.textContent = "Latest typing"; heading.dispatchEvent(new Event("input", { bubbles: true }));

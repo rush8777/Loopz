@@ -70,7 +70,6 @@ export declare class OnsiteContentEditor {
     private isEditing;
     isComposing(): boolean;
     private finishEditing;
-    private getSelection;
     rememberSelection: () => void;
     private restoreSelection;
     private wrapSelection;

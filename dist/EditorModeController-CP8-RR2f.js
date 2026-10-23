@@ -1,4 +1,4 @@
-import { c as computeElementRole, a as computeElementLabel, b as builderLinkUrlIsSafe, d as builderImageUrlIsSafe, s as sanitizeBuilderHtml, E as ExperienceRenderer, R as RouteObserver, e as clearEditorContinuation, i as isGuideDefinition, g as guideStepRequiresTarget, f as guideInteractionTarget, h as getGuideStepPattern, j as guideStepConfigurationErrors, m as matchesGuideRoute, k as findTarget, l as storeEditorContinuation } from "./module-Bbxer3wj.js";
+import { c as computeElementRole, a as computeElementLabel, b as builderLinkUrlIsSafe, d as builderImageUrlIsSafe, s as sanitizeBuilderHtml, E as ExperienceRenderer, R as RouteObserver, e as clearEditorContinuation, i as isGuideDefinition, g as guideStepRequiresTarget, f as guideInteractionTarget, h as getGuideStepPattern, j as guideStepConfigurationErrors, m as matchesGuideRoute, k as findTarget, l as storeEditorContinuation } from "./module-7PkX9Fa2.js";
 class EditorBridge {
   constructor(apiBase, sessionId, accessToken) {
     this.apiBase = apiBase;
@@ -264,6 +264,37 @@ function isMovcuesSurface(element) {
   const root = element.getRootNode();
   return root instanceof ShadowRoot && isMovcuesSurface(root.host);
 }
+function editorSelection(root) {
+  var _a;
+  return ((_a = root.getSelection) == null ? void 0 : _a.call(root)) ?? window.getSelection();
+}
+function editorRange(root) {
+  const selection = editorSelection(root);
+  if (!selection) return null;
+  const composed = selection;
+  if (composed.getComposedRanges) {
+    try {
+      const value = composed.getComposedRanges({ shadowRoots: [root] })[0];
+      if (value && root.contains(value.startContainer) && root.contains(value.endContainer)) {
+        const range = document.createRange();
+        range.setStart(value.startContainer, value.startOffset);
+        range.setEnd(value.endContainer, value.endOffset);
+        return range;
+      }
+    } catch {
+    }
+  }
+  return selection.rangeCount ? selection.getRangeAt(0) : null;
+}
+function setEditorRange(root, range) {
+  const selection = editorSelection(root);
+  if (!selection) return;
+  if (selection.setBaseAndExtent) selection.setBaseAndExtent(range.startContainer, range.startOffset, range.endContainer, range.endOffset);
+  else {
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+}
 const SELECTABLE = "[data-movcues-content],[data-movcues-action-id],img";
 const MAX_HISTORY_BYTES = 2e6;
 function componentPlainText(element) {
@@ -405,9 +436,7 @@ class OnsiteContentEditor {
         keyEvent.preventDefault();
         const range = document.createRange();
         range.selectNodeContents(this.selected);
-        const selection = this.getSelection();
-        selection == null ? void 0 : selection.removeAllRanges();
-        selection == null ? void 0 : selection.addRange(range);
+        setEditorRange(this.root, range);
         this.savedRange = range.cloneRange();
         return;
       }
@@ -444,26 +473,23 @@ class OnsiteContentEditor {
       const paste = event;
       const text = (_a = paste.clipboardData) == null ? void 0 : _a.getData("text/plain");
       if (text === void 0) return;
+      const range = editorRange(this.root);
+      if (!range || !((_b = this.selected) == null ? void 0 : _b.contains(range.commonAncestorContainer))) return;
       paste.preventDefault();
-      const selection = this.getSelection();
-      if (!(selection == null ? void 0 : selection.rangeCount)) return;
-      const range = selection.getRangeAt(0);
-      if (!((_b = this.selected) == null ? void 0 : _b.contains(range.commonAncestorContainer))) return;
       this.beforeOperation();
       range.deleteContents();
       const node = document.createTextNode(text);
       range.insertNode(node);
       range.setStartAfter(node);
       range.collapse(true);
-      selection.removeAllRanges();
-      selection.addRange(range);
+      setEditorRange(this.root, range);
       this.savedRange = range.cloneRange();
       this.commit();
     };
     this.rememberSelection = () => {
       var _a;
-      const selection = this.getSelection();
-      if ((selection == null ? void 0 : selection.rangeCount) && ((_a = this.selected) == null ? void 0 : _a.contains(selection.getRangeAt(0).commonAncestorContainer))) this.savedRange = selection.getRangeAt(0).cloneRange();
+      const range = editorRange(this.root);
+      if (range && ((_a = this.selected) == null ? void 0 : _a.contains(range.commonAncestorContainer))) this.savedRange = range.cloneRange();
     };
     this.scheduleOutline = () => {
       cancelAnimationFrame(this.frame);
@@ -573,8 +599,7 @@ class OnsiteContentEditor {
   applyLink(url) {
     var _a, _b, _c, _d;
     if (this.composing || !this.selected || this.selectionKind(this.selected) !== "text" || !builderLinkUrlIsSafe(url) || !this.restoreSelection()) return false;
-    const selection = this.getSelection();
-    const range = (selection == null ? void 0 : selection.rangeCount) ? selection.getRangeAt(0) : null;
+    const range = editorRange(this.root);
     if (!range || range.collapsed || !((_a = this.selected) == null ? void 0 : _a.contains(range.commonAncestorContainer))) return false;
     if (((_b = this.selected) == null ? void 0 : _b.closest("a")) || ((_c = range.startContainer.parentElement) == null ? void 0 : _c.closest("a")) || ((_d = range.endContainer.parentElement) == null ? void 0 : _d.closest("a")) || range.cloneContents().querySelector("a")) return false;
     this.beforeOperation();
@@ -586,9 +611,8 @@ class OnsiteContentEditor {
     }
     anchor.append(range.extractContents());
     range.insertNode(anchor);
-    selection == null ? void 0 : selection.removeAllRanges();
     range.selectNodeContents(anchor);
-    selection == null ? void 0 : selection.addRange(range);
+    setEditorRange(this.root, range);
     this.savedRange = range.cloneRange();
     this.commit();
     return true;
@@ -714,10 +738,6 @@ class OnsiteContentEditor {
     (_b = this.selected) == null ? void 0 : _b.removeAttribute("spellcheck");
     this.emitSelection();
   }
-  getSelection() {
-    var _a, _b;
-    return ((_b = (_a = this.root).getSelection) == null ? void 0 : _b.call(_a)) ?? window.getSelection();
-  }
   restoreSelection() {
     var _a;
     if (!this.savedRange || !((_a = this.selected) == null ? void 0 : _a.contains(this.savedRange.commonAncestorContainer))) {
@@ -725,16 +745,13 @@ class OnsiteContentEditor {
       return false;
     }
     this.selected.focus({ preventScroll: true });
-    const selection = this.getSelection();
-    selection == null ? void 0 : selection.removeAllRanges();
-    selection == null ? void 0 : selection.addRange(this.savedRange);
+    setEditorRange(this.root, this.savedRange);
     return true;
   }
   wrapSelection(tag) {
     var _a;
     if (this.composing || !this.restoreSelection()) return;
-    const selection = this.getSelection();
-    const range = (selection == null ? void 0 : selection.rangeCount) ? selection.getRangeAt(0) : null;
+    const range = editorRange(this.root);
     if (!range || range.collapsed || !((_a = this.selected) == null ? void 0 : _a.contains(range.commonAncestorContainer))) return;
     if (range.cloneContents().querySelector("ul,ol,li,div,p,button,img")) return;
     this.beforeOperation();
@@ -742,8 +759,7 @@ class OnsiteContentEditor {
     wrapper.append(range.extractContents());
     range.insertNode(wrapper);
     range.selectNodeContents(wrapper);
-    selection == null ? void 0 : selection.removeAllRanges();
-    selection == null ? void 0 : selection.addRange(range);
+    setEditorRange(this.root, range);
     this.savedRange = range.cloneRange();
     this.commit();
   }
@@ -851,9 +867,8 @@ class OnsiteContentEditor {
     if (current) Object.assign(current, this.selectionState());
   }
   selectionOffsets() {
-    const selection = this.getSelection();
-    if (!this.selected || !(selection == null ? void 0 : selection.rangeCount) || !this.selected.contains(selection.getRangeAt(0).commonAncestorContainer)) return { start: 0, end: 0 };
-    const range = selection.getRangeAt(0);
+    const range = editorRange(this.root);
+    if (!this.selected || !range || !this.selected.contains(range.commonAncestorContainer)) return { start: 0, end: 0 };
     const prefix = range.cloneRange();
     prefix.selectNodeContents(this.selected);
     prefix.setEnd(range.startContainer, range.startOffset);
@@ -883,9 +898,7 @@ class OnsiteContentEditor {
     const range = document.createRange();
     range.setStart(...locate(start));
     range.setEnd(...locate(end));
-    const selection = this.getSelection();
-    selection == null ? void 0 : selection.removeAllRanges();
-    selection == null ? void 0 : selection.addRange(range);
+    setEditorRange(this.root, range);
     this.savedRange = range.cloneRange();
   }
   pushHistory() {
@@ -1544,9 +1557,9 @@ class OnsiteCompositionEditor {
     this.savedRange = null;
     this.moveSource = null;
     this.rememberSelection = () => {
-      var _a, _b;
-      const range = ((_a = this.getTextSelection()) == null ? void 0 : _a.rangeCount) ? this.getTextSelection().getRangeAt(0) : null;
-      if (range && ((_b = this.surface) == null ? void 0 : _b.contains(range.commonAncestorContainer))) this.savedRange = range.cloneRange();
+      var _a;
+      const range = editorRange(this.root);
+      if (range && ((_a = this.surface) == null ? void 0 : _a.contains(range.commonAncestorContainer))) this.savedRange = range.cloneRange();
     };
     this.onSurfaceClick = (event) => {
       const element = event.target instanceof Element ? event.target : null;
@@ -1685,11 +1698,20 @@ class OnsiteCompositionEditor {
       this.scheduleCompile();
     };
     this.onSurfaceKeyDown = (event) => {
+      var _a;
       if (this.composing) return;
       const target = event.target instanceof HTMLElement ? event.target : null;
       if (event.key === "Escape") {
         this.cancelMove();
         if (target == null ? void 0 : target.isContentEditable) target.blur();
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && (target == null ? void 0 : target.isContentEditable)) {
+        event.preventDefault();
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        setEditorRange(this.root, range);
+        this.savedRange = range.cloneRange();
+        return;
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
@@ -1704,6 +1726,13 @@ class OnsiteCompositionEditor {
         return;
       }
       if (target == null ? void 0 : target.isContentEditable) return;
+      if (this.moveSource && event.key === "Tab" && (target == null ? void 0 : target.hasAttribute("data-movcues-node-id"))) {
+        const destinations = this.moveDestinations();
+        const index = destinations.indexOf(target);
+        (_a = destinations[(index + (event.shiftKey ? -1 : 1) + destinations.length) % destinations.length]) == null ? void 0 : _a.focus({ preventScroll: true });
+        event.preventDefault();
+        return;
+      }
       if (event.key === "Enter" && (target == null ? void 0 : target.matches("[data-movcues-node-id]"))) {
         event.preventDefault();
         if (this.moveSource) this.moveTo(target.dataset.movcuesNodeId);
@@ -1725,22 +1754,20 @@ class OnsiteCompositionEditor {
     };
     this.onPaste = (event) => {
       const target = event.target instanceof HTMLElement ? event.target.closest('[contenteditable="true"]') : null;
-      const selection = this.getTextSelection();
-      if (!target || !(selection == null ? void 0 : selection.rangeCount) || !event.clipboardData) return;
-      const range = selection.getRangeAt(0);
-      if (!target.contains(range.commonAncestorContainer)) return;
+      if (!target || !event.clipboardData) return;
+      const range = editorRange(this.root);
+      if (!range || !target.contains(range.commonAncestorContainer)) return;
       event.preventDefault();
       const text = document.createTextNode(event.clipboardData.getData("text/plain"));
       range.deleteContents();
       range.insertNode(text);
       range.setStartAfter(text);
       range.collapse(true);
-      selection.removeAllRanges();
-      selection.addRange(range);
+      setEditorRange(this.root, range);
       target.dispatchEvent(new Event("input", { bubbles: true }));
     };
     this.onToolbarClick = (event) => {
-      var _a, _b;
+      var _a, _b, _c;
       const button = event.target instanceof Element ? event.target.closest("button[data-command]") : null;
       if (!button || button.disabled) return;
       event.preventDefault();
@@ -1763,6 +1790,7 @@ class OnsiteCompositionEditor {
           (_b = this.surface) == null ? void 0 : _b.setAttribute("data-movcues-moving", "");
           button.setAttribute("aria-pressed", "true");
           button.title = "Choose a destination cell, or press Escape to cancel";
+          if (event.detail === 0) (_c = this.moveDestinations()[0]) == null ? void 0 : _c.focus({ preventScroll: true });
         }
       }
     };
@@ -2261,12 +2289,10 @@ class OnsiteCompositionEditor {
     const element = (_a = this.surface) == null ? void 0 : _a.querySelector(`[data-movcues-block-id="${block.id}"]`);
     if (!element) return false;
     if (!this.beforeTransaction()) return false;
-    const selection = this.getTextSelection();
     if (this.savedRange && element.contains(this.savedRange.commonAncestorContainer)) {
-      selection == null ? void 0 : selection.removeAllRanges();
-      selection == null ? void 0 : selection.addRange(this.savedRange);
+      setEditorRange(this.root, this.savedRange);
     }
-    const range = (selection == null ? void 0 : selection.rangeCount) ? selection.getRangeAt(0) : null;
+    const range = editorRange(this.root);
     const selectedInside = range && element.contains(range.commonAncestorContainer) && !range.collapsed;
     if (tag === "a" && (selectedInside ? (range == null ? void 0 : range.cloneContents().querySelector("a")) || ((_b = range == null ? void 0 : range.startContainer.parentElement) == null ? void 0 : _b.closest("a")) || ((_c = range == null ? void 0 : range.endContainer.parentElement) == null ? void 0 : _c.closest("a")) : element.querySelector("a"))) return false;
     if (selectedInside && range) {
@@ -2298,10 +2324,6 @@ class OnsiteCompositionEditor {
     this.callbacks.onChange();
     this.positionTools();
     return true;
-  }
-  getTextSelection() {
-    var _a, _b;
-    return ((_b = (_a = this.root).getSelection) == null ? void 0 : _b.call(_a)) ?? window.getSelection();
   }
   select(selection) {
     var _a, _b, _c, _d;
@@ -2445,6 +2467,11 @@ class OnsiteCompositionEditor {
     const parent = parentCell(this.document, target.dataset.movcuesNodeId);
     return (parent == null ? void 0 : parent.direction) === "row" ? event.clientX < rect.left + rect.width / 2 : event.clientY < rect.top + rect.height / 2;
   }
+  moveDestinations() {
+    var _a;
+    const source = this.moveSource ? findCell(this.document, this.moveSource) : null;
+    return source ? Array.from(((_a = this.surface) == null ? void 0 : _a.querySelectorAll("[data-movcues-node-id]")) ?? []).filter((cell) => cell.dataset.movcuesNodeId !== this.document.root.id && !findCell({ ...this.document, root: source }, cell.dataset.movcuesNodeId)) : [];
+  }
   openPalette(anchor, insertion = null) {
     var _a, _b, _c;
     this.closePalette();
@@ -2475,7 +2502,7 @@ class OnsiteCompositionEditor {
     }
   }
   updateToolPositions() {
-    var _a, _b;
+    var _a, _b, _c;
     const cell = this.getSelectedCell();
     const target = cell ? (_a = this.surface) == null ? void 0 : _a.querySelector(`[data-movcues-node-id="${cell.id}"]`) : null;
     const widget = (_b = this.surface) == null ? void 0 : _b.querySelector(".movcues-widget");
@@ -2503,10 +2530,12 @@ class OnsiteCompositionEditor {
     const widgetRect = widget.getBoundingClientRect();
     const point = placeOutside(widgetRect, toolbarRect, bounds);
     this.toolbar.style.transform = `translate(${point.left}px,${point.top}px)`;
+    const blockRect = (cell == null ? void 0 : cell.block) ? (_c = target.querySelector("[data-movcues-block-id]")) == null ? void 0 : _c.getBoundingClientRect() : null;
+    const edges = { left: Math.min(rect.left, (blockRect == null ? void 0 : blockRect.left) ?? rect.left), right: Math.max(rect.right, (blockRect == null ? void 0 : blockRect.right) ?? rect.right), top: Math.min(rect.top, (blockRect == null ? void 0 : blockRect.top) ?? rect.top), bottom: Math.max(rect.bottom, (blockRect == null ? void 0 : blockRect.bottom) ?? rect.bottom) };
     for (const button of this.edgeButtons) {
       const edge = button.dataset.movcuesInsertEdge;
-      const x = edge === "left" ? rect.left : edge === "right" ? rect.right : rect.left + rect.width / 2;
-      const y = edge === "top" ? rect.top : edge === "bottom" ? rect.bottom : rect.top + rect.height / 2;
+      const x = edge === "left" ? edges.left - 16 : edge === "right" ? edges.right + 16 : (edges.left + edges.right) / 2;
+      const y = edge === "top" ? edges.top - 16 : edge === "bottom" ? edges.bottom + 16 : (edges.top + edges.bottom) / 2;
       button.style.transform = `translate(${Math.max(2, Math.min(innerWidth - 26, x - 12))}px,${Math.max(2, Math.min(innerHeight - 26, y - 12))}px)`;
     }
     if (!this.palette.hidden && this.paletteAnchor) {
@@ -2829,7 +2858,7 @@ class EditorModeController {
       var _a2;
       return (_a2 = this.root.querySelector('[data-inspector="step"]')) == null ? void 0 : _a2.append(actions);
     });
-    document.documentElement.appendChild(this.host);
+    (document.body ?? document.documentElement).appendChild(this.host);
     this.bindPanel();
     this.syncPanel();
     this.applyMode();
@@ -2860,7 +2889,7 @@ class EditorModeController {
       </div>
       ${guideMarkup}
       <aside aria-label="Contextual inspector"><main>
-        <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled." : "Preview tests this step only. Links and external actions are disabled."}</p>
+        <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         <section class="section composition-inspector" data-composition-inspector hidden>
           <div class="content-heading"><div><div class="eyebrow">Inspector</div><strong data-composition-label>Step</strong></div><button type="button" class="secondary-button compact" data-select-step>Step</button></div>
@@ -4000,6 +4029,7 @@ class EditorModeController {
     const builder = this.currentBuilder();
     const content = this.currentContent();
     if (!(host == null ? void 0 : host.shadowRoot) || !builder || !content) return;
+    if (document.body && !document.body.contains(host)) document.body.appendChild(host);
     (_b = this.contentEditor) == null ? void 0 : _b.destroy();
     (_c = this.compositionEditor) == null ? void 0 : _c.destroy();
     try {
@@ -4532,4 +4562,4 @@ const GUIDE_STYLE = `.guide-behavior{display:grid;gap:8px;border-top:1px solid #
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-yWn5BnpS.js.map
+//# sourceMappingURL=EditorModeController-CP8-RR2f.js.map

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createAnalytics } from "../src/module";
 
 /**
@@ -13,9 +13,15 @@ import { createAnalytics } from "../src/module";
 describe("createAnalytics() single-instance guarantee", () => {
   let instances: ReturnType<typeof createAnalytics>[] = [];
 
+  beforeEach(() => {
+    // Instance/listener tests must not contact the SDK's default API endpoint.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) }));
+  });
+
   afterEach(() => {
     for (const a of instances) a.destroy();
     instances = [];
+    vi.unstubAllGlobals();
   });
 
   function make(siteId = "site_1") {

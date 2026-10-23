@@ -1,3 +1,4 @@
+import { editorRange, setEditorRange } from "./EditorSelection";
 import type { ExperienceContent, WidgetBuilderState, WidgetType } from "../types";
 import {
   applyOnsiteDocument,
@@ -278,9 +279,9 @@ export class OnsiteCompositionEditor {
   private wrapSelection(tag: "strong" | "em" | "u" | "a", href?: string): boolean {
     if (this.composing) return false;
     const block = this.getSelectedBlock(); if (!block || (block.type !== "heading" && block.type !== "text")) return false; const element = this.surface?.querySelector<HTMLElement>(`[data-movcues-block-id="${block.id}"]`); if (!element) return false;
-    if (!this.beforeTransaction()) return false; const selection = this.getTextSelection();
-    if (this.savedRange && element.contains(this.savedRange.commonAncestorContainer)) { selection?.removeAllRanges(); selection?.addRange(this.savedRange); }
-    const range = selection?.rangeCount ? selection.getRangeAt(0) : null; const selectedInside = range && element.contains(range.commonAncestorContainer) && !range.collapsed;
+    if (!this.beforeTransaction()) return false;
+    if (this.savedRange && element.contains(this.savedRange.commonAncestorContainer)) { setEditorRange(this.root, this.savedRange); }
+    const range = editorRange(this.root); const selectedInside = range && element.contains(range.commonAncestorContainer) && !range.collapsed;
     if (tag === "a" && (selectedInside ? range?.cloneContents().querySelector("a") || range?.startContainer.parentElement?.closest("a") || range?.endContainer.parentElement?.closest("a") : element.querySelector("a"))) return false;
     if (selectedInside && range) { const wrapper = document.createElement(tag); if (tag === "a" && href) { wrapper.setAttribute("href", href); if (/^https?:\/\//i.test(href)) { wrapper.setAttribute("target", "_blank"); wrapper.setAttribute("rel", "noopener noreferrer"); } } try { range.surroundContents(wrapper); } catch { wrapper.append(range.extractContents()); range.insertNode(wrapper); } block.html = sanitizeRichText(element.innerHTML); }
     else { const open = tag === "a" ? `<a href="${escapeHtmlAttribute(href ?? "")}"${/^https?:\/\//i.test(href ?? "") ? ' target="_blank" rel="noopener noreferrer"' : ""}>` : `<${tag}>`; block.html = `${open}${block.html}</${tag}>`; }
@@ -289,8 +290,7 @@ export class OnsiteCompositionEditor {
     this.rememberSelection(); this.flush(); this.pushHistory(); this.callbacks.onChange(); this.positionTools(); return true;
   }
 
-  private getTextSelection(): Selection | null { return (this.root as ShadowRoot & { getSelection?: () => Selection | null }).getSelection?.() ?? window.getSelection(); }
-  rememberSelection = (): void => { const range = this.getTextSelection()?.rangeCount ? this.getTextSelection()!.getRangeAt(0) : null; if (range && this.surface?.contains(range.commonAncestorContainer)) this.savedRange = range.cloneRange(); };
+  rememberSelection = (): void => { const range = editorRange(this.root); if (range && this.surface?.contains(range.commonAncestorContainer)) this.savedRange = range.cloneRange(); };
 
   private select(selection: CompositionSelection): void {
     this.closePalette();
@@ -412,16 +412,29 @@ export class OnsiteCompositionEditor {
     if (this.composing) return;
     const target = event.target instanceof HTMLElement ? event.target : null;
     if (event.key === "Escape") { this.cancelMove(); if (target?.isContentEditable) target.blur(); }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && target?.isContentEditable) {
+      event.preventDefault(); const range = document.createRange(); range.selectNodeContents(target);
+      setEditorRange(this.root, range); this.savedRange = range.cloneRange(); return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.stopImmediatePropagation(); event.shiftKey ? this.redo() : this.undo(); return; }
     if ((event.ctrlKey || event.metaKey) && ["b", "i", "u"].includes(event.key.toLowerCase())) { event.preventDefault(); this.rememberSelection(); this.formatInline(event.key.toLowerCase() === "b" ? "strong" : event.key.toLowerCase() === "i" ? "em" : "u"); return; }
     if (target?.isContentEditable) return;
+    if (this.moveSource && event.key === "Tab" && target?.hasAttribute("data-movcues-node-id")) {
+      const destinations = this.moveDestinations(); const index = destinations.indexOf(target);
+      destinations[(index + (event.shiftKey ? -1 : 1) + destinations.length) % destinations.length]?.focus({ preventScroll: true }); event.preventDefault(); return;
+    }
     if (event.key === "Enter" && target?.matches("[data-movcues-node-id]")) { event.preventDefault(); if (this.moveSource) this.moveTo(target.dataset.movcuesNodeId!); else target.click(); }
     if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) { event.preventDefault(); this.move(event.key === "ArrowUp" ? -1 : 1); }
     else if (event.ctrlKey || event.metaKey) { if (event.key === "ArrowUp") { this.selectParent(); event.preventDefault(); } if (event.key === "ArrowDown") { this.selectChild(); event.preventDefault(); } }
   };
-  private onPaste = (event: ClipboardEvent): void => { const target = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[contenteditable="true"]') : null; const selection = this.getTextSelection(); if (!target || !selection?.rangeCount || !event.clipboardData) return; const range = selection.getRangeAt(0); if (!target.contains(range.commonAncestorContainer)) return; event.preventDefault(); const text = document.createTextNode(event.clipboardData.getData("text/plain")); range.deleteContents(); range.insertNode(text); range.setStartAfter(text); range.collapse(true); selection.removeAllRanges(); selection.addRange(range); target.dispatchEvent(new Event("input", { bubbles: true })); };
+  private onPaste = (event: ClipboardEvent): void => { const target = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[contenteditable="true"]') : null; if (!target || !event.clipboardData) return; const range = editorRange(this.root); if (!range || !target.contains(range.commonAncestorContainer)) return; event.preventDefault(); const text = document.createTextNode(event.clipboardData.getData("text/plain")); range.deleteContents(); range.insertNode(text); range.setStartAfter(text); range.collapse(true); setEditorRange(this.root, range); target.dispatchEvent(new Event("input", { bubbles: true })); };
 
-  private onToolbarClick = (event: Event): void => { const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-command]") : null; if (!button || button.disabled) return; event.preventDefault(); event.stopPropagation(); const command = button.dataset.command; if (command === "add") { if (this.palette.hidden) this.openPalette(button); else this.closePalette(); } else if (command === "columns") this.split("row"); else if (command === "rows") this.split("column"); else if (command === "parent") this.selectParent(); else if (command === "duplicate") this.duplicate(); else if (command === "delete") this.remove(); else if (command === "move-up") this.move(-1); else if (command === "move-down") this.move(1); else if (command === "move") { if (this.moveSource) this.cancelMove(); else { this.moveSource = this.getSelectedCell()?.id ?? null; this.surface?.setAttribute("data-movcues-moving", ""); button.setAttribute("aria-pressed", "true"); button.title = "Choose a destination cell, or press Escape to cancel"; } } };
+  private moveDestinations(): HTMLElement[] {
+    const source = this.moveSource ? findCell(this.document, this.moveSource) : null;
+    return source ? Array.from(this.surface?.querySelectorAll<HTMLElement>("[data-movcues-node-id]") ?? []).filter(cell => cell.dataset.movcuesNodeId !== this.document.root.id && !findCell({ ...this.document, root: source }, cell.dataset.movcuesNodeId!)) : [];
+  }
+
+  private onToolbarClick = (event: Event): void => { const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-command]") : null; if (!button || button.disabled) return; event.preventDefault(); event.stopPropagation(); const command = button.dataset.command; if (command === "add") { if (this.palette.hidden) this.openPalette(button); else this.closePalette(); } else if (command === "columns") this.split("row"); else if (command === "rows") this.split("column"); else if (command === "parent") this.selectParent(); else if (command === "duplicate") this.duplicate(); else if (command === "delete") this.remove(); else if (command === "move-up") this.move(-1); else if (command === "move-down") this.move(1); else if (command === "move") { if (this.moveSource) this.cancelMove(); else { this.moveSource = this.getSelectedCell()?.id ?? null; this.surface?.setAttribute("data-movcues-moving", ""); button.setAttribute("aria-pressed", "true"); button.title = "Choose a destination cell, or press Escape to cancel"; if ((event as MouseEvent).detail === 0) this.moveDestinations()[0]?.focus({ preventScroll: true }); } } };
   private onPaletteClick = (event: Event): void => {
     const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-insert-block]") : null; if (!button) return;
     event.preventDefault(); event.stopPropagation();
@@ -475,10 +488,14 @@ export class OnsiteCompositionEditor {
     const toolbarRect = this.toolbar.getBoundingClientRect(); const widgetRect = widget.getBoundingClientRect();
     const point = placeOutside(widgetRect, toolbarRect, bounds);
     this.toolbar.style.transform = `translate(${point.left}px,${point.top}px)`;
+    // A constrained leaf can be shorter than its text. Keep insertion buttons
+    // outside both boxes so selecting text never moves a button under the caret.
+    const blockRect = cell?.block ? target.querySelector<HTMLElement>("[data-movcues-block-id]")?.getBoundingClientRect() : null;
+    const edges = { left: Math.min(rect.left, blockRect?.left ?? rect.left), right: Math.max(rect.right, blockRect?.right ?? rect.right), top: Math.min(rect.top, blockRect?.top ?? rect.top), bottom: Math.max(rect.bottom, blockRect?.bottom ?? rect.bottom) };
     for (const button of this.edgeButtons) {
       const edge = button.dataset.movcuesInsertEdge;
-      const x = edge === "left" ? rect.left : edge === "right" ? rect.right : rect.left + rect.width / 2;
-      const y = edge === "top" ? rect.top : edge === "bottom" ? rect.bottom : rect.top + rect.height / 2;
+      const x = edge === "left" ? edges.left - 16 : edge === "right" ? edges.right + 16 : (edges.left + edges.right) / 2;
+      const y = edge === "top" ? edges.top - 16 : edge === "bottom" ? edges.bottom + 16 : (edges.top + edges.bottom) / 2;
       button.style.transform = `translate(${Math.max(2, Math.min(innerWidth - 26, x - 12))}px,${Math.max(2, Math.min(innerHeight - 26, y - 12))}px)`;
     }
     if (!this.palette.hidden && this.paletteAnchor) {

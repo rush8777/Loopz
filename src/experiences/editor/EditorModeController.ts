@@ -145,7 +145,7 @@ export class EditorModeController {
     this.root.innerHTML = `<style>${STYLE}${GUIDE_STYLE}</style>${this.panelMarkup(this.draft)}`;
     if (this.guide) this.root.querySelector('[data-inspector="step"]')?.insertAdjacentHTML("beforeend", this.guideBehaviorMarkup());
     if (this.guide) this.root.querySelectorAll("[data-guide] .history-row").forEach(actions => this.root!.querySelector('[data-inspector="step"]')?.append(actions));
-    document.documentElement.appendChild(this.host);
+    (document.body ?? document.documentElement).appendChild(this.host);
 
     this.bindPanel();
     this.syncPanel();
@@ -178,7 +178,7 @@ export class EditorModeController {
       </div>
       ${guideMarkup}
       <aside aria-label="Contextual inspector"><main>
-        <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled." : "Preview tests this step only. Links and external actions are disabled."}</p>
+        <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         <section class="section composition-inspector" data-composition-inspector hidden>
           <div class="content-heading"><div><div class="eyebrow">Inspector</div><strong data-composition-label>Step</strong></div><button type="button" class="secondary-button compact" data-select-step>Step</button></div>
@@ -752,6 +752,9 @@ export class EditorModeController {
     );
     const builder = this.currentBuilder(); const content = this.currentContent();
     if (!host?.shadowRoot || !builder || !content) return;
+    // Gecko/WebKit cannot reliably edit a shadow tree mounted outside <body>.
+    // Only the authoring instance moves; visitor rendering and positioning stay intact.
+    if (document.body && !document.body.contains(host)) document.body.appendChild(host);
     this.contentEditor?.destroy(); this.compositionEditor?.destroy();
     try {
         this.compositionEditor = new OnsiteCompositionEditor(host.shadowRoot, builder, content, this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : this.draft.experience.widgetType ?? "modal", Boolean(this.guide), {

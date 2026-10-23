@@ -74,6 +74,7 @@ async function startController(page: import('@playwright/test').Page, options: {
 
 test('slow save, newer edits, mode change and repeated close preserve the newest content', async ({page}) => {
   const network=await startController(page,{delay:true});
+  expect(await page.locator("[data-movcues-experience]").evaluate(node => document.body.contains(node))).toBe(true);
   const heading=page.locator('[data-movcues-experience] h2');await heading.dblclick();await heading.press('ControlOrMeta+a');await heading.pressSequentially('First change');
   await expect.poll(network.getSaves).toBe(1);await heading.press('ControlOrMeta+a');await heading.pressSequentially('Newer change');
   await page.locator('[data-mode=navigate]').click();await page.locator('[data-close]').click();
@@ -111,7 +112,7 @@ test('anchored authoring survives scroll with the production renderer and sticky
     const top=root.querySelector<HTMLElement>('[data-movcues-target-backdrop="top"]')!;
     return{target:{left:rect.left,top:rect.top,width:rect.width,height:rect.height},highlight:{left:parseFloat(highlight.style.left),top:parseFloat(highlight.style.top),width:parseFloat(highlight.style.width),height:parseFloat(highlight.style.height)},background:top.style.background,hit:document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2)?.id};
   });
-  expect(spotlight.highlight).toEqual(spotlight.target);expect(spotlight.background).toContain('0.45');expect(spotlight.hit).toBe('anchor');
+  for (const key of ["left", "top", "width", "height"] as const) expect(spotlight.highlight[key]).toBeCloseTo(spotlight.target[key], 3);expect(spotlight.background).toContain('0.45');expect(spotlight.hit).toBe('anchor');
   const lockedScrollY=await page.evaluate(()=>scrollY);await page.mouse.wheel(0,250);await expect.poll(()=>page.evaluate(()=>scrollY)).toBe(lockedScrollY);
   await page.locator('[data-backdrop]').uncheck();await expect(page.locator('[data-movcues-experience] [data-movcues-target-backdrop]')).toHaveCount(0);
   const heading=page.locator('[data-movcues-experience] h2');await heading.dblclick();await heading.press('ControlOrMeta+a');await heading.pressSequentially('Anchored edit');
@@ -124,6 +125,25 @@ test('contextual inspector follows block, cell and step selection',async({page})
   await expect(page.locator('[data-composition-inspector]')).toBeVisible();await expect(page.locator('[data-inspector=block]')).toBeVisible();await expect(page.locator('[data-block="heading,text"]')).toBeVisible();
   await page.locator('[data-command=parent]').click();await expect(page.locator('[data-inspector=cell]')).toBeVisible();await expect(page.locator('[data-inspector=block]')).toBeHidden();
   await page.locator('[data-select-step]').click();await expect(page.locator('[data-inspector=step]')).toBeVisible();
+});
+
+test('insertion controls cannot intercept double-clicks on overflowing heading text', async ({ page }) => {
+  await startController(page);
+  const heading = page.locator('[data-movcues-experience] h2');
+  await expect(page.locator('[data-movcues-composition-toolbar]')).toHaveCount(1);
+  await heading.evaluate(element => {
+    const cell = element.closest<HTMLElement>('[data-movcues-node-id]')!;
+    cell.style.flex = '0 0 14px'; cell.style.height = '14px'; cell.style.minHeight = '0';
+  });
+  await heading.click();
+  const text = await heading.boundingBox();
+  const below = page.locator('[data-movcues-insert-edge=bottom]');
+  await expect.poll(async () => (await below.boundingBox())!.y).toBeGreaterThanOrEqual(text!.y + text!.height);
+  await heading.dblclick();
+  await expect(heading).toHaveAttribute('contenteditable', 'true');
+  await heading.press('ControlOrMeta+a'); await heading.pressSequentially('Still editing text');
+  await expect(heading).toHaveText('Still editing text');
+  await expect(page.locator('[data-movcues-block-palette]')).toBeHidden();
 });
 
 test('adding from a selected block inserts a new block instead of replacing it',async({page})=>{
@@ -256,7 +276,7 @@ for(const width of [320,360,390])test(`structured rows stack without horizontal 
 });
 
  test('long content validates before save without truncating the visible text',async({page})=>{
-  const body=page.locator('#authoring [data-movcues-content=body]');await body.dblclick();await body.fill('x'.repeat(2001));
+  const body=page.locator('#authoring [data-movcues-content=body]');await body.dblclick();await body.press('ControlOrMeta+a');await body.pressSequentially('x'.repeat(2001));
   const state=await page.evaluate(()=>{const f=(window as any).fixture;f.editor.flush();return{body:f.content.body,errors:f.editor.getValidation(),html:f.builder.html};});
   expect(state.body.length).toBe(2001);expect(state.errors.join(' ')).toContain('2000');expect(state.html).toContain('x'.repeat(2001));
 });

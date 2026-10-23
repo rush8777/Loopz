@@ -1,0 +1,36 @@
+<!doctype html><meta charset="utf-8" /><title>
+  Isolated Movcues SDK integration host</title
+><style>
+  body {
+    margin: 0;
+    font: 15px system-ui;
+  }
+  button {
+    min-height: 30px;
+  }
+  * {
+    box-sizing: border-box;
+  }
+</style>
+<div id="app"></div>
+<script type="module">
+  import { createAnalytics } from "/dist/sdk.esm.js";
+  window.guideRoutePrefix = "/integration";
+  await import("/tests/browser/.generated/guide-app.js");
+  const site =
+    new URL(location.href).searchParams.get("site") ??
+    sessionStorage.getItem("integration-site");
+  if (site) {
+    sessionStorage.setItem("integration-site", site);
+    window.analytics = createAnalytics({
+      siteId: site,
+      endpoint: "http://127.0.0.1:4310",
+      debug: false,
+      autocapture: { click: false, scroll: false, rageClick: false },
+      queue: { maxWaitMs: 100 },
+    });
+    addEventListener("guide-test-event", (event) =>
+      window.analytics.event(event.detail),
+    );
+  }
+</script>

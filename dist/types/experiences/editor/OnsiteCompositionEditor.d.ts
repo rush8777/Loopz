@@ -110,7 +110,6 @@ export declare class OnsiteCompositionEditor {
     toggleList(tag: "ul" | "ol"): boolean;
     applyLink(url: string): boolean;
     private wrapSelection;
-    private getTextSelection;
     rememberSelection: () => void;
     private select;
     private beforeTransaction;
@@ -135,6 +134,7 @@ export declare class OnsiteCompositionEditor {
     private onCompositionEnd;
     private onSurfaceKeyDown;
     private onPaste;
+    private moveDestinations;
     private onToolbarClick;
     private onPaletteClick;
     private openPalette;
