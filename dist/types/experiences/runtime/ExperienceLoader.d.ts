@@ -14,6 +14,9 @@ export declare class ExperienceLoader {
     private destroyed;
     private hasChecklistCandidates;
     private checklist;
+    private lastRoute;
+    private deliveryEpoch;
+    private finishing;
     constructor(apiBase: string, siteId: string, session: ExperienceSession, trackEvent?: ((name: string) => void) | undefined);
     evaluate(trigger?: string): Promise<void>;
     onRouteChange(): void;

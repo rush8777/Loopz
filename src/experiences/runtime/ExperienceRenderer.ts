@@ -10,6 +10,7 @@ import { BannerRenderer } from "./BannerRenderer";
 import { SurveyRenderer } from "./SurveyRenderer";
 import { LayerManager, type AppliedLayer } from "./layering/LayerManager";
 import type { BuilderAction, BuilderRenderCallbacks } from "./BuilderContent";
+import { guideInteractionTarget } from "./GuideStepLogic";
 
 export interface ExperienceRendererCallbacks {
   onVisible: () => void;
@@ -19,6 +20,7 @@ export interface ExperienceRendererCallbacks {
   onGuideAdvance?: () => void;
   onGuideBack?: () => void;
   onUnavailable?: () => void;
+  onGuideStatus?: (status: "delay" | "waiting" | "ready" | "unavailable") => void;
   onSurveyProgress?: (answers: SurveyAnswers, currentStepId: string, direction: "next" | "back") => Promise<void> | void;
   onSurveySubmit?: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
 }
@@ -30,6 +32,9 @@ export class ExperienceRenderer {
   private cleanupAdvance: (() => void) | null = null;
   private appliedLayer: AppliedLayer | null = null;
   private layerManager = new LayerManager();
+  private guideTimer = 0;
+  private visibleFrame = 0;
+  private renderGeneration = 0;
 
   render(experience: DeliveredExperience, callbacks: ExperienceRendererCallbacks, guideStepId?: string): boolean {
     this.destroy();
@@ -82,41 +87,58 @@ export class ExperienceRenderer {
   private renderGuide(experience: DeliveredExperience, definition: RuntimeGuideDefinition, callbacks: ExperienceRendererCallbacks, guideStepId?: string): boolean {
     const stepIndex = guideStepId ? definition.steps.findIndex(item => item.id === guideStepId) : 0;
     const step = definition.steps[stepIndex]; if (!step) return false;
+    const generation = this.renderGeneration; let finished = false;
+    const alive = () => generation === this.renderGeneration && !finished;
+    const once = (run: () => void) => { if (!alive()) return; finished = true; run(); };
+    const advance = () => once(() => callbacks.onGuideAdvance?.());
+    const back = () => once(() => callbacks.onGuideBack?.());
+    const dismiss = () => { if (generation !== this.renderGeneration) return; finished = true; callbacks.onDismiss(); this.destroy(); };
+    const guarded = { ...callbacks, onGuideAdvance: advance, onGuideBack: back, onDismiss: dismiss };
     const stepDesign = step.size ? { ...definition.design, size: step.size } : definition.design;
     const stepCallbacks: BuilderRenderCallbacks = {
-      onDismiss: () => { callbacks.onDismiss(); this.destroy(); },
-      onSecondary: () => { callbacks.onDismiss(); this.destroy(); },
-      onPrimary: () => {
-        const action = step.content.primaryAction; if (action) callbacks.onAction(action);
-        if ((step.advance?.type ?? "button") === "button") callbacks.onGuideAdvance?.();
-      },
-      onActionId: (action, label) => this.dispatchBuilderAction(action, label, callbacks),
+      onDismiss: dismiss, onSecondary: dismiss,
+      onPrimary: () => { if (!alive()) return; const action = step.content.primaryAction; if (action) callbacks.onAction(action); if ((step.advance?.type ?? "button") === "button") advance(); },
+      onActionId: (action, label) => { if (generation === this.renderGeneration && (!finished || !["next_step", "previous_step"].includes(action.type))) this.dispatchBuilderAction(action, label, guarded); },
+    };
+    const visible = () => {
+      if (!alive()) return; callbacks.onGuideStatus?.("ready");
+      this.visibleFrame = requestAnimationFrame(() => { this.visibleFrame = 0; if (alive()) callbacks.onVisible(); });
     };
     const addBack = (card: HTMLElement) => {
       if (stepIndex === 0) return;
-      const back = document.createElement("button"); back.className = "secondary"; back.textContent = "Back";
-      back.addEventListener("click", () => callbacks.onGuideBack?.());
-      card.querySelector("footer")?.prepend(back);
+      const button = document.createElement("button"); button.className = "secondary"; button.textContent = "Back"; button.addEventListener("click", back); card.querySelector("footer")?.prepend(button);
     };
-    if (getGuideStepPattern(step) === "modal") {
-      const root = this.root(experience.id, { layer: step.behavior.layer ?? definition.behavior?.layer }); const renderer = new ModalRenderer(); this.renderer = renderer;
-      const behavior: ExperienceBehavior = { dismissible: step.behavior.dismissible ?? true };
-      const card = renderer.render(root, step.content, stepDesign, behavior, stepCallbacks, step.builder);
-      addBack(card);
-      requestAnimationFrame(callbacks.onVisible);
-      return true;
-    }
-    const mount = (target: Element) => {
-      ensureGuideTargetInView(target);
-      const root = this.root(experience.id, { layer: step.behavior.layer ?? definition.behavior?.layer }, target); const renderer = new AnchoredCardRenderer(); this.renderer = renderer;
-      const behavior: ExperienceBehavior = { dismissible: step.behavior.dismissible ?? true, placement: step.behavior.placement, alignment: step.behavior.alignment, offset: step.behavior.offset, pointer: step.behavior.pointer, backdrop: step.behavior.backdrop, backdropOpacity: step.behavior.backdropOpacity, closeOnBackdrop: step.behavior.closeOnBackdrop };
-      const card = renderer.render(root, target, step.content, stepDesign, behavior, stepCallbacks, step.builder, "anchored_card");
-      addBack(card);
-      this.listenForAdvance(target, step.advance?.type ?? "button", step.advance?.type === "element_hover" ? step.advance.durationMs : undefined, callbacks.onGuideAdvance);
-      requestAnimationFrame(callbacks.onVisible);
+    const run = () => {
+      if (!alive()) return; this.guideTimer = 0;
+      if (getGuideStepPattern(step) === "modal") {
+        const root = this.root(experience.id, { layer: step.behavior.layer ?? definition.behavior?.layer }); const renderer = new ModalRenderer(); this.renderer = renderer;
+        const card = renderer.render(root, step.content, stepDesign, { dismissible: step.behavior.dismissible ?? true }, stepCallbacks, step.builder); addBack(card); visible(); return;
+      }
+      const missing = step.presentation?.missingTarget; const timeout = Math.max(100, Math.min(60_000, missing?.timeoutMs ?? 5000)); const deadline = Date.now() + timeout;
+      const unavailable = () => {
+        if (!alive()) return; callbacks.onGuideStatus?.("unavailable");
+        if (missing?.action === "skip") advance(); else if (missing?.action === "dismiss") dismiss(); else callbacks.onUnavailable?.();
+      };
+      const resolve = (spec: import("../types").ExperienceTarget | undefined, found: (target: Element) => void) => {
+        if (!alive()) return; const target = findTarget(spec); if (target) { found(target); return; }
+        callbacks.onGuideStatus?.("waiting");
+        this.cancelPendingTarget = waitForTarget(spec, element => { this.cancelPendingTarget = null; if (alive()) found(element); }, () => { this.cancelPendingTarget = null; unavailable(); }, Math.max(0, deadline - Date.now()));
+      };
+      resolve(step.target, target => {
+        const mount = (interaction?: Element) => {
+          if (!alive()) return; ensureGuideTargetInView(target);
+          const root = this.root(experience.id, { layer: step.behavior.layer ?? definition.behavior?.layer }, target); const renderer = new AnchoredCardRenderer(); this.renderer = renderer;
+          const behavior: ExperienceBehavior = { ...step.behavior, dismissible: step.behavior.dismissible ?? true };
+          const card = renderer.render(root, target, step.content, stepDesign, behavior, stepCallbacks, step.builder, "anchored_card"); addBack(card);
+          if (interaction) this.listenForAdvance(interaction, step.advance?.type ?? "button", step.advance?.type === "element_hover" ? step.advance.durationMs : undefined, advance);
+          visible();
+        };
+        const interaction = guideInteractionTarget(step);
+        if (interaction && interaction !== step.target) resolve(interaction, mount); else mount(interaction ? target : undefined);
+      });
     };
-    const target = findTarget(step.target);
-    if (target) mount(target); else this.cancelPendingTarget = waitForTarget(step.target, (element) => { this.cancelPendingTarget = null; mount(element); }, () => { this.cancelPendingTarget = null; callbacks.onUnavailable?.(); });
+    const delay = Math.max(0, Math.min(30_000, step.presentation?.delayMs ?? 0));
+    if (delay) { callbacks.onGuideStatus?.("delay"); this.guideTimer = window.setTimeout(run, delay); } else run();
     return true;
   }
 
@@ -155,7 +177,7 @@ export class ExperienceRenderer {
     }
   }
 
-  private clearSurface(): void { this.cleanupAdvance?.(); this.cleanupAdvance = null; this.cancelPendingTarget?.(); this.cancelPendingTarget = null; this.renderer?.destroy(); this.renderer = null; this.appliedLayer?.destroy(); this.appliedLayer = null; this.host?.remove(); this.host = null; }
+  private clearSurface(): void { this.renderGeneration++; clearTimeout(this.guideTimer); this.guideTimer = 0; cancelAnimationFrame(this.visibleFrame); this.visibleFrame = 0; this.cleanupAdvance?.(); this.cleanupAdvance = null; this.cancelPendingTarget?.(); this.cancelPendingTarget = null; this.renderer?.destroy(); this.renderer = null; this.appliedLayer?.destroy(); this.appliedLayer = null; this.host?.remove(); this.host = null; }
   destroy(): void { this.clearSurface(); }
 }
 

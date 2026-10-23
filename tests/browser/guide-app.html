@@ -1,0 +1,8 @@
+<!doctype html><meta charset="utf-8"><title>React Guide journey fixture</title><style>body{margin:0;font:15px system-ui}button{min-height:30px}*{box-sizing:border-box}</style><div id="app"></div>
+<script type="module">
+import { ExperienceLoader } from '/src/experiences/runtime/ExperienceLoader.ts';
+import { EditorModeController } from '/src/experiences/editor/EditorModeController.ts';
+import { RouteObserver } from '/src/dom/RouteObserver.ts';
+window.journey = { ExperienceLoader, Controller: EditorModeController, RouteObserver };
+await import('/tests/browser/.generated/guide-app.js');
+</script>

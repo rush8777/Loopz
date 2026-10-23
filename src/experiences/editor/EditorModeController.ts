@@ -24,6 +24,7 @@ import { ElementPicker } from "./ElementPicker";
 import { OnsiteContentEditor, type OnsiteComponentSelection } from "./OnsiteContentEditor";
 import { OnsiteCompositionEditor, type CompositionSelection } from "./OnsiteCompositionEditor";
 import { applyOnsiteDocument, cloneOnsite, createOnsiteDocument, duplicateDocument, onsiteDocumentFromBuilder, type OnsiteBlock, type OnsiteCell } from "../onsite/OnsiteDocument";
+import { guideInteractionTarget, guideStepConfigurationErrors, matchesGuideRoute } from "../runtime/GuideStepLogic";
 
 type EditorMode = "design" | "target" | "navigate" | "preview";
 type TargetStatus = "found" | "off-page" | "missing" | "unconfigured";
@@ -63,6 +64,8 @@ export class EditorModeController {
   private previewRendered = false;
   private previewGeneration = 0;
   private currentPath = "";
+  private guidePreviewComplete = false;
+  private guidePreviewEntryPath = "";
   private persistBeforePageLeave = () => this.updateContinuation();
   private protectUnsavedChanges = (event: BeforeUnloadEvent) => { if (!this.dirty && !this.saveInFlight && !this.contentEditor?.isComposing() && !this.compositionEditor?.isComposing()) return; event.preventDefault(); event.returnValue = ""; };
 
@@ -139,7 +142,8 @@ export class EditorModeController {
     this.host.dataset.movcuesEditor = "";
     this.host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647";
     this.root = this.host.attachShadow({ mode: "open" });
-    this.root.innerHTML = `<style>${STYLE}</style>${this.panelMarkup(this.draft)}`;
+    this.root.innerHTML = `<style>${STYLE}${GUIDE_STYLE}</style>${this.panelMarkup(this.draft)}`;
+    if (this.guide) this.root.querySelector('[data-inspector="step"]')?.insertAdjacentHTML("beforeend", this.guideBehaviorMarkup());
     if (this.guide) this.root.querySelectorAll("[data-guide] .history-row").forEach(actions => this.root!.querySelector('[data-inspector="step"]')?.append(actions));
     document.documentElement.appendChild(this.host);
 
@@ -150,6 +154,8 @@ export class EditorModeController {
     this.routeUnsubscribe = this.routeObserver.onChange(() => this.onRouteChange());
     this.routeObserver.start();
     window.addEventListener("pagehide", this.persistBeforePageLeave);
+    document.addEventListener("click", this.protectPreviewNavigation, true);
+    document.addEventListener("submit", this.protectPreviewSubmission, true);
     window.addEventListener("beforeunload", this.protectUnsavedChanges);
     this.configureDiagnostics();
     window.visualViewport?.addEventListener("resize", this.fitPanel);
@@ -168,10 +174,11 @@ export class EditorModeController {
         <div class="header-actions"><button type="button" data-global-undo aria-label="Undo">↶</button><button type="button" data-global-redo aria-label="Redo">↷</button><button type="button" data-save aria-label="Save draft">Save</button><button type="button" data-move-side aria-label="Move inspector to other side">⇄</button><button type="button" data-return-dashboard aria-label="Return to dashboard">↗</button><button type="button" data-minimize aria-label="Toggle inspector" aria-expanded="true">☷</button><button type="button" data-close aria-label="Close editor">×</button></div>
       </header>
         <div class="modebar"><button type="button" data-mode="design"${designDisabled}>Design</button><button type="button" data-mode="target">Target</button><button type="button" data-mode="navigate">Navigate</button><button type="button" data-mode="preview">Preview</button></div>
+        <div class="guide-preview-controls" data-guide-preview hidden><button type="button" data-preview-start>Start Guide</button><button type="button" data-preview-back aria-label="Previous preview step">←</button><button type="button" data-preview-next aria-label="Next preview step">→</button><button type="button" data-preview-reset>Reset</button><button type="button" data-preview-test hidden>Test event</button><span data-preview-step></span><small data-trigger-status role="status" aria-live="polite"></small></div>
       </div>
       ${guideMarkup}
       <aside aria-label="Contextual inspector"><main>
-        <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>Preview tests this step only. Links and external actions are disabled.</p>
+        <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled." : "Preview tests this step only. Links and external actions are disabled."}</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         <section class="section composition-inspector" data-composition-inspector hidden>
           <div class="content-heading"><div><div class="eyebrow">Inspector</div><strong data-composition-label>Step</strong></div><button type="button" class="secondary-button compact" data-select-step>Step</button></div>
@@ -205,6 +212,7 @@ export class EditorModeController {
           <div class="image-controls" data-image-controls hidden><label>Source URL<input data-image-src type="text" inputmode="url"></label><label>Alt text<input data-image-alt type="text" maxlength="500"></label><button type="button" class="secondary-button" data-apply-image>Apply image</button></div>
           <div class="history-row"><button type="button" class="secondary-button compact" data-undo disabled>Undo</button><button type="button" class="secondary-button compact" data-redo disabled>Redo</button></div>
         </section>
+        <div class="section eyebrow" data-step-only data-step-appearance>Step appearance</div>
         <section class="section" data-step-only data-for="target">
           <div class="eyebrow">Target</div><strong class="truncate" data-target-label>Not selected</strong><div class="reliability" data-reliability></div>
           <button class="secondary-button" type="button" data-pick>Reselect target</button>
@@ -258,7 +266,7 @@ export class EditorModeController {
     root.querySelector<HTMLButtonElement>("[data-reload-draft]")?.addEventListener("click", () => { if (window.confirm("Reloading discards local edits. Copy / Export them first if you need them. Reload latest?")) { this.recoveryDraft = null; window.location.reload(); } });
     root.querySelector<HTMLButtonElement>("[data-export-draft]")?.addEventListener("click", () => this.exportRecovery());
     root.querySelector<HTMLButtonElement>("[data-discard-draft]")?.addEventListener("click", () => { if (window.confirm("Discard unsaved edits and close?")) { this.recoveryDraft = null; this.destroy(); } });
-    root.querySelector<HTMLButtonElement>("[data-reset-preview]")?.addEventListener("click", () => this.renderPreview());
+    root.querySelector<HTMLButtonElement>("[data-reset-preview]")?.addEventListener("click", () => this.guide ? this.startGuidePreview() : this.renderPreview());
     root.querySelector<HTMLButtonElement>("[data-global-undo]")?.addEventListener("click", () => { this.compositionEditor?.undo(); this.contentEditor?.undo(); this.syncContentInspector(); });
     root.querySelector<HTMLButtonElement>("[data-global-redo]")?.addEventListener("click", () => { this.compositionEditor?.redo(); this.contentEditor?.redo(); this.syncContentInspector(); });
     root.querySelector<HTMLButtonElement>("[data-move-side]")?.addEventListener("click", () => root.querySelector("aside")?.classList.toggle("left-side"));
@@ -288,7 +296,7 @@ export class EditorModeController {
     });
     this.bindDrag();
 
-    this.bindCompositionInspector();
+    this.bindCompositionInspector(); this.bindGuideBehavior();
 
     this.onSelect("[data-alignment]", value => { this.currentBehavior().alignment = value as NonNullable<ExperienceBehavior["alignment"]>; });
     this.onSelect("[data-layer-mode]", value => {
@@ -364,8 +372,105 @@ export class EditorModeController {
     root.querySelector<HTMLButtonElement>("[data-v2-redo]")?.addEventListener("click", () => this.compositionEditor?.redo());
   }
 
+  private guideBehaviorMarkup(): string {
+    return `<div class="guide-behavior"><div class="eyebrow">Step behavior</div>
+      <label>Advance when<select data-guide-trigger aria-label="Advance when"><option value="button">Guide button</option><option value="element_click">Website element click</option><option value="element_hover">Website element hover</option><option value="custom_event">Custom event</option><option value="route">Route change</option></select></label>
+      <p class="muted" data-guide-trigger-help></p>
+      <div data-guide-config="element"><label class="check"><input type="checkbox" data-guide-use-position> Use the positioning element</label><strong class="truncate" data-guide-interaction-label></strong><p class="muted" data-guide-interaction-status role="status"></p><button type="button" class="secondary-button" data-guide-pick-interaction>Select website element</button></div>
+      <label data-guide-config="hover">Hover duration<div class="number"><input type="number" min="100" max="60000" step="100" data-guide-hover aria-label="Hover duration"><span>ms</span></div></label>
+      <label data-guide-config="event">Event name<input type="text" maxlength="200" placeholder="e.g. project_created" data-guide-event aria-label="Guide event name"></label>
+      <div data-guide-config="route"><label>Page matches<select data-guide-route-operator aria-label="Guide route comparison"><option value="equals">Exactly</option><option value="starts_with">Starts with</option><option value="ends_with">Ends with</option><option value="contains">Contains</option><option value="matches_pattern">Wildcard pattern</option></select></label><label>Page path<input type="text" maxlength="500" data-guide-route placeholder="/projects" aria-label="Guide route path"></label><p class="muted" data-guide-route-extra>Existing additional page rules are preserved.</p></div>
+      <label>Show after<div class="number"><input type="number" min="0" max="30000" step="100" data-guide-delay aria-label="Presentation delay"><span>ms</span></div></label>
+      <div data-guide-missing><label>Missing target<select data-guide-missing-action aria-label="Missing-target behavior"><option value="wait">Wait for target</option><option value="skip">Skip to next step</option><option value="dismiss">Dismiss Guide</option></select></label><label>Wait up to<div class="number"><input type="number" min="100" max="60000" step="100" data-guide-timeout aria-label="Target wait timeout"><span>ms</span></div></label><p class="muted">Wait pauses this Guide at the timeout. Navigation or reopening retries discovery.</p></div>
+      <label class="check"><input type="checkbox" data-guide-dismissible> Allow visitors to dismiss</label>
+    </div>`;
+  }
+
+  private bindGuideBehavior(): void {
+    if (!this.guide || !this.root) return;
+    const change = (selector: string, run: (value: string) => void) => this.root!.querySelector<HTMLInputElement | HTMLSelectElement>(selector)?.addEventListener("change", event => { run((event.currentTarget as HTMLInputElement).value); this.changed(); });
+    const bounded = (value: string, min: number, max: number, fallback: number) => Math.max(min, Math.min(max, Math.round(numberValue(value, fallback))));
+    change("[data-guide-trigger]", value => {
+      const step = this.guide!.steps[this.stepIndex]; if ((value === "element_click" || value === "element_hover") && !guideStepRequiresTarget(step)) return;
+      const old = step.advance; const target = old?.type === "element_click" || old?.type === "element_hover" ? old.target : undefined;
+      step.advance = value === "custom_event" ? { type: value, eventName: old?.type === value ? old.eventName : "" } : value === "route" ? { type: value, pageRules: old?.type === value ? old.pageRules : [{ id: editorId("rule"), kind: "include", operator: "equals", value: currentPagePath() }] } : value === "element_hover" ? { type: value, durationMs: old?.type === value ? old.durationMs : 500, ...(target ? { target } : {}) } : value === "element_click" ? { type: value, ...(target ? { target } : {}) } : { type: "button" };
+    });
+    change("[data-guide-hover]", value => { const advance = this.guide!.steps[this.stepIndex].advance; if (advance?.type === "element_hover") advance.durationMs = bounded(value, 100, 60_000, 500); });
+    change("[data-guide-event]", value => { const advance = this.guide!.steps[this.stepIndex].advance; if (advance?.type === "custom_event") advance.eventName = value.trim(); });
+    const route = () => { const advance = this.guide!.steps[this.stepIndex].advance; return advance?.type === "route" ? advance.pageRules.find(rule => rule.kind === "include") : undefined; };
+    change("[data-guide-route]", value => { const rule = route(); if (rule) rule.value = value.trim(); });
+    change("[data-guide-route-operator]", value => { const rule = route(); if (rule) rule.operator = value as PageRule["operator"]; });
+    change("[data-guide-delay]", value => { const step = this.guide!.steps[this.stepIndex]; step.presentation = { ...step.presentation, delayMs: bounded(value, 0, 30_000, 0) }; });
+    const missing = () => { const step = this.guide!.steps[this.stepIndex]; return step.presentation = { ...step.presentation, missingTarget: step.presentation?.missingTarget ?? { action: "wait", timeoutMs: 5000 } }; };
+    change("[data-guide-missing-action]", value => { missing().missingTarget!.action = value as "wait" | "skip" | "dismiss"; });
+    change("[data-guide-timeout]", value => { missing().missingTarget!.timeoutMs = bounded(value, 100, 60_000, 5000); });
+    this.root.querySelector<HTMLInputElement>("[data-guide-use-position]")?.addEventListener("change", event => { const advance = this.guide!.steps[this.stepIndex].advance; if ((event.currentTarget as HTMLInputElement).checked && (advance?.type === "element_click" || advance?.type === "element_hover")) { delete advance.target; this.changed(); } else this.pickGuideInteraction(); });
+    this.root.querySelector("[data-guide-pick-interaction]")?.addEventListener("click", () => this.pickGuideInteraction());
+    this.root.querySelector<HTMLInputElement>("[data-guide-dismissible]")?.addEventListener("change", event => { this.guide!.steps[this.stepIndex].behavior.dismissible = (event.currentTarget as HTMLInputElement).checked; this.changed(); });
+    this.root.querySelector("[data-preview-start]")?.addEventListener("click", () => this.startGuidePreview());
+    this.root.querySelector("[data-preview-reset]")?.addEventListener("click", () => this.startGuidePreview());
+    this.root.querySelector("[data-preview-next]")?.addEventListener("click", () => this.advanceGuidePreview(1));
+    this.root.querySelector("[data-preview-back]")?.addEventListener("click", () => this.advanceGuidePreview(-1));
+    this.root.querySelector("[data-preview-test]")?.addEventListener("click", () => { const advance = this.guide?.steps[this.stepIndex].advance; if (this.mode === "preview" && !this.guidePreviewComplete && (advance?.type === "custom_event" || advance?.type === "route")) this.advanceGuidePreview(1); });
+  }
+
+  private pickGuideInteraction(): void {
+    const step = this.guide?.steps[this.stepIndex]; if (!step || !this.flushContent() || !(step.advance?.type === "element_click" || step.advance?.type === "element_hover")) return;
+    const generation = ++this.selectionGeneration; this.picker.cancel();
+    this.contentEditor?.destroy(); this.contentEditor = null; this.compositionEditor?.destroy(); this.compositionEditor = null; this.previewGeneration++; this.preview.destroy(); this.previewRendered = false;
+    this.setText("[data-mode-hint]", "Select the website element that advances this step. Its positioning target stays unchanged. Escape cancels.");
+    void this.picker.pick().then(target => {
+      if (generation !== this.selectionGeneration || this.guide?.steps[this.stepIndex]?.id !== step.id) return;
+      if (target && (step.advance?.type === "element_click" || step.advance?.type === "element_hover")) { step.advance.target = { ...target, targetContext: { pagePath: currentPagePath() } }; this.changed(); }
+      else { this.renderPreview(); this.syncPanel(); }
+    });
+  }
+
+  private syncGuideBehavior(): void {
+    if (!this.root) return;
+    const controls = this.root.querySelector<HTMLElement>("[data-guide-preview]"); if (controls) controls.hidden = !this.guide || this.mode !== "preview";
+    if (!this.guide) return;
+    const step = this.guide.steps[this.stepIndex]; const advance = step.advance; const type = advance?.type ?? "button"; const anchored = guideStepRequiresTarget(step);
+    this.setValue("[data-guide-trigger]", type);
+    this.root.querySelectorAll<HTMLOptionElement>('[data-guide-trigger] option').forEach(option => { option.disabled = !anchored && ["element_click", "element_hover"].includes(option.value); });
+    this.setText("[data-guide-trigger-help]", type === "button" ? "Buttons configured as Next step advance this Guide. Website click and hover triggers are available on Anchored Cards." : type === "element_click" ? "A click on the selected website element advances once; the normal click still works." : type === "element_hover" ? "Keep the pointer over the selected element for the specified duration." : type === "custom_event" ? "Advance when the SDK receives this exact event name." : "Advance on a future navigation matching this path. Use * for wildcard patterns.");
+    this.root.querySelectorAll<HTMLElement>("[data-guide-config]").forEach(group => { const config = group.dataset.guideConfig; group.hidden = config === "element" ? !["element_click", "element_hover"].includes(type) : config === "hover" ? type !== "element_hover" : config === "event" ? type !== "custom_event" : type !== "route"; });
+    const target = guideInteractionTarget(step); const hasTarget = advance?.type === "element_click" || advance?.type === "element_hover" ? Boolean(advance.target) : false;
+    this.setChecked("[data-guide-use-position]", !hasTarget); this.setText("[data-guide-interaction-label]", target?.label ?? target?.primarySelector ?? "No element selected");
+    let count = 0; if (target) try { count = document.querySelectorAll(target.primarySelector).length; } catch { /* Invalid selectors remain a warning, never executable input. */ }
+    this.setText("[data-guide-interaction-status]", target ? `${capitalize(target.reliability)} selector · ${count} primary matches · ${this.targetStatus(target) === "found" ? "Found" : "Missing or on another page"}` : "Select an element or configure a positioning target first.");
+    this.setValue("[data-guide-hover]", String(advance?.type === "element_hover" ? advance.durationMs ?? 500 : 500)); this.setValue("[data-guide-event]", advance?.type === "custom_event" ? advance.eventName : "");
+    const rule = advance?.type === "route" ? advance.pageRules.find(item => item.kind === "include") : undefined;
+    this.setValue("[data-guide-route]", rule?.value ?? ""); this.setValue("[data-guide-route-operator]", rule?.operator ?? "equals");
+    this.root.querySelector<HTMLElement>("[data-guide-route-extra]")!.hidden = advance?.type !== "route" || advance.pageRules.length <= 1;
+    this.setValue("[data-guide-delay]", String(step.presentation?.delayMs ?? 0)); this.setValue("[data-guide-missing-action]", step.presentation?.missingTarget?.action ?? "wait"); this.setValue("[data-guide-timeout]", String(step.presentation?.missingTarget?.timeoutMs ?? 5000));
+    this.root.querySelector<HTMLElement>("[data-guide-missing]")!.hidden = !anchored; this.setChecked("[data-guide-dismissible]", step.behavior.dismissible ?? true);
+    this.setText("[data-preview-step]", `${this.guidePreviewComplete ? "Complete · " : ""}${this.stepIndex + 1}/${this.guide.steps.length}`);
+    this.root.querySelector<HTMLButtonElement>("[data-preview-back]")!.disabled = this.stepIndex === 0;
+    this.root.querySelector<HTMLButtonElement>("[data-preview-next]")!.disabled = this.guidePreviewComplete;
+    const test = this.root.querySelector<HTMLButtonElement>("[data-preview-test]")!; test.hidden = !["custom_event", "route"].includes(type) || this.guidePreviewComplete; test.textContent = type === "route" ? "Simulate match" : "Test event";
+  }
+
+  private previewTriggerHint(): string {
+    const advance = this.guide?.steps[this.stepIndex].advance;
+    return this.guidePreviewComplete ? "Guide preview complete. Reset to start again." : advance?.type === "custom_event" ? `Waiting for “${advance.eventName}”. Test event is preview-only.` : advance?.type === "route" ? "Waiting for matching navigation. Simulate match does not navigate." : advance?.type === "element_click" ? "Click the configured website element." : advance?.type === "element_hover" ? "Hover over the configured website element." : "Click a Next step button.";
+  }
+
+  private startGuidePreview(): void {
+    if (!this.guide || !this.flushContent()) return;
+    this.guidePreviewComplete = false; this.stepIndex = 0;
+    if (this.mode !== "preview") this.setMode("preview"); else { this.renderPreview(); this.syncPanel(); }
+  }
+
+  private advanceGuidePreview(delta: -1 | 1): void {
+    if (!this.guide || this.mode !== "preview" || this.guidePreviewComplete && delta > 0) return;
+    if (this.stepIndex + delta >= this.guide.steps.length) { this.guidePreviewComplete = true; this.previewGeneration++; this.preview.destroy(); this.previewRendered = false; this.syncGuideBehavior(); this.setText("[data-trigger-status]", this.previewTriggerHint()); return; }
+    this.guidePreviewComplete = false; this.switchStep(this.stepIndex + delta);
+  }
+
   private addGuideStep(pattern: "modal" | "anchored_card"): void {
     if (!this.guide || !this.flushContent()) return;
+    if (this.guide.steps.length >= 20) { this.showValidation(["A Guide can contain up to 20 steps."]); return; }
     const document = createOnsiteDocument(true); const builder: WidgetBuilderState = { version: 1, projectData: {}, html: "", css: "" }; const compiled = applyOnsiteDocument(builder, document, pattern);
     const step = { id: editorId("step"), label: pattern === "modal" ? "Modal step" : "Anchored step", pattern, content: compiled.content, builder, advance: { type: "button" as const }, behavior: pattern === "modal" ? { dismissible: true } : { placement: "auto" as const, alignment: "center" as const, offset: 8, pointer: { enabled: true, size: 10 }, dismissible: true } };
     this.guide.steps.splice(this.stepIndex + 1, 0, step); this.stepIndex++; this.changed(); this.refreshStepBar();
@@ -440,7 +545,7 @@ export class EditorModeController {
     this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
     this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
     if (this.dirty) void this.persist();
-    this.mode = mode;
+    this.mode = mode; this.guidePreviewComplete = false;
     this.configureDiagnostics();
     this.updateContinuation();
     this.applyMode();
@@ -498,7 +603,7 @@ export class EditorModeController {
     }
     const errors = this.contentEditor?.getValidation() ?? [];
     if (this.compositionEditor && !this.compositionEditor.flush()) { const compositionErrors = this.compositionEditor.getValidation(); this.showValidation(compositionErrors); return false; }
-    const allErrors = [...errors, ...(this.compositionEditor?.getValidation() ?? [])];
+    const allErrors = [...errors, ...(this.compositionEditor?.getValidation() ?? []), ...(this.guide?.steps.flatMap(guideStepConfigurationErrors) ?? [])];
     this.showValidation(allErrors); return !allErrors.length;
   }
 
@@ -599,21 +704,22 @@ export class EditorModeController {
     if (!this.definition || !this.draft || this.mode === "navigate" || this.saveState === "expired") return;
     if (!this.flushContent()) return;
     const generation = ++this.previewGeneration;
+    if (this.mode === "preview" && this.guide) this.guidePreviewEntryPath = currentPagePath();
     this.previewRendered = false;
     this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
     this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
-    const definition = this.guide ? { ...this.definition, steps: [this.guide.steps[this.stepIndex]] } as EditorDefinition : this.definition;
+    const definition = this.definition;
     // Editor-only behavior overrides; production renderers and definitions stay unchanged.
     const rendered = JSON.parse(JSON.stringify(definition)) as EditorDefinition;
     if (this.mode !== "preview") {
-      if (isGuideDefinition(rendered)) rendered.steps.forEach(step => { step.behavior.dismissible = false; });
+      if (isGuideDefinition(rendered)) rendered.steps.forEach(step => { step.behavior.dismissible = false; step.advance = { type: "button" }; delete step.presentation; });
       else { rendered.behavior = { ...rendered.behavior, autoDismissMs: null, dismissible: false, closeOnBackdrop: false }; }
     }
     if (this.mode === "target") {
       if (isGuideDefinition(rendered)) rendered.steps.forEach(step => { step.behavior.backdrop = false; });
       else if (this.draft.experience.widgetType === "anchored_card") rendered.behavior.backdrop = false;
     }
-    const selectedStepId = this.survey?.steps[this.stepIndex]?.id;
+    const selectedStepId = this.guide?.steps[this.stepIndex]?.id ?? this.survey?.steps[this.stepIndex]?.id;
     this.preview.render({
       id: this.draft.experience.id,
       versionId: this.draft.version.id,
@@ -628,10 +734,11 @@ export class EditorModeController {
         const host = Array.from(document.querySelectorAll<HTMLElement>("[data-movcues-experience]")).find(element => element.dataset.movcuesExperience === this.draft?.experience.id);
         host?.shadowRoot?.addEventListener("click", event => { if ((event.target as Element)?.closest?.("a")) { event.preventDefault(); event.stopImmediatePropagation(); } }, true);
         this.previewRendered = true; if (this.mode === "design") this.attachContentEditor(); this.updateDiagnostics(); },
-      onDismiss: () => { this.previewRendered = false; this.updateDiagnostics(); },
+      onDismiss: () => { this.previewRendered = false; this.setText("[data-trigger-status]", "Preview closed. Start or Reset to try again."); this.updateDiagnostics(); },
       onAction: () => void 0,
-      onGuideAdvance: () => { if (this.mode === "preview" && this.guide && this.stepIndex < this.guide.steps.length - 1) this.switchStep(this.stepIndex + 1); },
-      onGuideBack: () => { if (this.mode === "preview" && this.guide && this.stepIndex > 0) this.switchStep(this.stepIndex - 1); },
+      onGuideAdvance: () => { if (this.mode === "preview" && this.guide) this.advanceGuidePreview(1); },
+      onGuideBack: () => { if (this.mode === "preview" && this.guide) this.advanceGuidePreview(-1); },
+      onGuideStatus: status => { if (generation === this.previewGeneration && this.mode === "preview") this.setText("[data-trigger-status]", status === "delay" ? "Waiting for presentation delay…" : status === "waiting" ? "Waiting for a website element…" : status === "unavailable" ? "Target missing; use Next, Reset or reselect the target." : this.previewTriggerHint()); },
       onComplete: () => { this.previewRendered = false; this.updateDiagnostics(); },
       onUnavailable: () => { this.previewRendered = false; this.updateDiagnostics(); },
     }, selectedStepId);
@@ -706,7 +813,7 @@ export class EditorModeController {
   private syncCompositionInspector(): void {
     if (!this.root) return; const editor = this.compositionEditor; const selection = this.compositionSelection; const inspector = this.root.querySelector<HTMLElement>("[data-composition-inspector]"); if (!inspector) return;
     inspector.hidden = this.mode !== "design" || !editor || !selection; this.root.querySelector<HTMLElement>("[data-content-inspector]")!.hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
-    if (!editor || !selection) return; this.setText("[data-composition-label]", selection.label);
+    if (!editor || !selection) return; if (selection.kind === "step") this.syncGuideBehavior(); this.setText("[data-composition-label]", selection.label);
     this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { if (selection.kind !== "step") group.hidden = true; });
     if (selection.kind === "step") this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { group.hidden = group.hasAttribute("data-for") ? !this.isTargetedType() : group.hasAttribute("data-step-summary") ? !this.guide : group.hasAttribute("data-placement-section") ? Boolean(this.guide && getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal") : false; });
     const stepName = this.root.querySelector<HTMLInputElement>("[data-step-name]")?.closest("label"); if (stepName) stepName.hidden = !this.guide;
@@ -726,6 +833,7 @@ export class EditorModeController {
 
   private syncPanel(): void {
     if (!this.root || !this.definition || !this.draft) return;
+    this.syncGuideBehavior();
     const reset = this.root.querySelector<HTMLElement>("[data-reset-preview]"); if (reset) reset.hidden = this.mode !== "preview";
     const limit = this.root.querySelector<HTMLElement>("[data-preview-limit]"); if (limit) limit.hidden = this.mode !== "preview";
     const behavior = this.currentBehavior();
@@ -874,7 +982,11 @@ export class EditorModeController {
     if (notice) notice.hidden = false;
     this.setText("[data-route-change]", `${previous} → ${next}`);
     this.updateDiagnostics();
-    if (this.mode !== "navigate") { this.renderPreview(); if (this.mode === "target") this.startPicker(); }
+    if (this.mode === "preview" && this.guide && !this.guidePreviewComplete) {
+      const advance = this.guide.steps[this.stepIndex].advance;
+      if (next !== this.guidePreviewEntryPath && advance?.type === "route" && matchesGuideRoute(next, advance.pageRules)) { this.advanceGuidePreview(1); return; }
+    }
+    if (this.mode !== "navigate" && !this.guidePreviewComplete) { this.renderPreview(); if (this.mode === "target") this.startPicker(); }
   }
 
   private currentTarget(): ExperienceTarget | undefined {
@@ -932,8 +1044,27 @@ export class EditorModeController {
     return this.guide ? guideStepRequiresTarget(this.guide.steps[this.stepIndex]) : type === "anchored_card" || type === "hotspot";
   }
 
+  private protectPreviewSubmission = (event: Event): void => {
+    if (this.mode !== "preview") return;
+    event.preventDefault();
+    this.setText("[data-trigger-status]", "Form submission is disabled in preview. Use Next to continue safely.");
+  };
+
+  private protectPreviewNavigation = (event: MouseEvent): void => {
+    if (this.mode !== "preview") return;
+    const link = event.composedPath().find(node => node instanceof HTMLAnchorElement) as HTMLAnchorElement | undefined;
+    if (!link) return;
+    try {
+      const url = new URL(link.href, location.href);
+      if (url.origin !== location.origin || !["http:", "https:"].includes(url.protocol) || link.target === "_blank" || link.hasAttribute("download")) {
+        event.preventDefault();
+        this.setText("[data-trigger-status]", "External navigation is disabled in preview. Use Next to continue safely.");
+      }
+    } catch { event.preventDefault(); }
+  };
+
   private setText(selector: string, value: string): void { const element = this.root?.querySelector<HTMLElement>(selector); if (element) element.textContent = value; }
-  private setValue(selector: string, value: string): void { const element = this.root?.querySelector<HTMLInputElement | HTMLSelectElement>(selector); if (element) element.value = value; }
+  private setValue(selector: string, value: string): void { const element = this.root?.querySelector<HTMLInputElement | HTMLSelectElement>(selector); if (element && element !== this.root?.activeElement) element.value = value; }
   private setChecked(selector: string, value: boolean): void { const element = this.root?.querySelector<HTMLInputElement>(selector); if (element) element.checked = value; }
 
   destroy(): void { this.teardown(true); }
@@ -948,6 +1079,8 @@ export class EditorModeController {
     this.routeUnsubscribe?.(); this.routeUnsubscribe = null;
     this.routeObserver.stop();
     window.removeEventListener("pagehide", this.persistBeforePageLeave);
+    document.removeEventListener("click", this.protectPreviewNavigation, true);
+    document.removeEventListener("submit", this.protectPreviewSubmission, true);
     window.removeEventListener("beforeunload", this.protectUnsavedChanges);
     window.removeEventListener("resize", this.fitPanel);
     window.visualViewport?.removeEventListener("resize", this.fitPanel);
@@ -1005,3 +1138,5 @@ const STYLE = `${BASE_STYLE}
 @media(max-width:800px){.editor-toolbar{width:min(350px,calc(100vw - 8px))}aside{width:min(300px,calc(100vw - 8px))}}
 @media(max-width:480px){.editor-toolbar{left:4px;top:4px;transform:none}.header-copy strong{font-size:10px}.header-copy small{font-size:9px}.header-actions [data-return-dashboard],.header-actions [data-move-side]{display:none}aside{width:calc(100vw - 8px)}.step-navigator{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:calc(100vw - 8px);box-shadow:0 4px 14px rgba(15,23,42,.12)}.step-navigator>.history-row{display:none}.step-navigator .content-heading{display:none}}
 `;
+
+const GUIDE_STYLE = `.guide-behavior{display:grid;gap:8px;border-top:1px solid #eef0f3;padding-top:10px;margin-top:8px}.guide-behavior [data-guide-config],.guide-behavior [data-guide-missing]{display:grid;gap:7px}.guide-behavior .muted{margin:0;overflow-wrap:anywhere}.guide-preview-controls{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:5px 7px;border-top:1px solid #eef0f3}.guide-preview-controls button{border:1px solid #d7dce3;border-radius:5px;background:#fff;color:#334155;padding:4px 6px;font:11px ui-sans-serif,system-ui;cursor:pointer}.guide-preview-controls small{flex-basis:100%;color:#64748b;font-size:10px}.guide-preview-controls button:disabled{opacity:.4}.guide-preview-controls span{font-size:10px;margin-left:auto}`;

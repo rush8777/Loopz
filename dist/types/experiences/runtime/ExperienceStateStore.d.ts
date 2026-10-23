@@ -12,6 +12,10 @@ export interface GuideProgress {
         sourceItemId: string;
     };
     navigationAttempted?: boolean;
+    shownRequested?: boolean;
+    seenStepIds?: string[];
+    completedStepIds?: string[];
+    routePath?: string;
 }
 export declare class ExperienceStateStore {
     hasEver(id: string): boolean;

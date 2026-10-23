@@ -10,6 +10,10 @@ export interface GuideProgress {
   impressionId?: string;
   launchContext?: { source: "api" } | { source: "checklist"; sourceExperienceId: string; sourceItemId: string };
   navigationAttempted?: boolean;
+  shownRequested?: boolean;
+  seenStepIds?: string[];
+  completedStepIds?: string[];
+  routePath?: string;
 }
 
 function read(storage: Storage, key: string): Set<string> {

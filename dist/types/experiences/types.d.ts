@@ -142,9 +142,11 @@ export type GuideAdvance = {
     type: "button";
 } | {
     type: "element_click";
+    target?: ExperienceTarget;
 } | {
     type: "element_hover";
     durationMs?: number;
+    target?: ExperienceTarget;
 } | {
     type: "custom_event";
     eventName: string;
@@ -152,6 +154,13 @@ export type GuideAdvance = {
     type: "route";
     pageRules: PageRule[];
 };
+export interface GuidePresentation {
+    delayMs?: number;
+    missingTarget?: {
+        action: "wait" | "skip" | "dismiss";
+        timeoutMs: number;
+    };
+}
 export type GuideStepPattern = "anchored_card" | "modal";
 export interface GuideStep {
     id: string;
@@ -161,6 +170,7 @@ export interface GuideStep {
     builder?: WidgetBuilderState;
     size?: ExperienceSize;
     advance?: GuideAdvance;
+    presentation?: GuidePresentation;
     target?: ExperienceTarget;
     behavior: Pick<ExperienceBehavior, "placement" | "alignment" | "offset" | "pointer" | "dismissible" | "layer" | "backdrop" | "backdropOpacity" | "closeOnBackdrop">;
 }

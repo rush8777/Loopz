@@ -35,6 +35,8 @@ export declare class EditorModeController {
     private previewRendered;
     private previewGeneration;
     private currentPath;
+    private guidePreviewComplete;
+    private guidePreviewEntryPath;
     private persistBeforePageLeave;
     private protectUnsavedChanges;
     constructor(apiBase: string);
@@ -46,6 +48,13 @@ export declare class EditorModeController {
     private stepButtons;
     private bindPanel;
     private bindCompositionInspector;
+    private guideBehaviorMarkup;
+    private bindGuideBehavior;
+    private pickGuideInteraction;
+    private syncGuideBehavior;
+    private previewTriggerHint;
+    private startGuidePreview;
+    private advanceGuidePreview;
     private addGuideStep;
     private duplicateGuideStep;
     private deleteGuideStep;
@@ -92,6 +101,8 @@ export declare class EditorModeController {
     private setTarget;
     private updateContinuation;
     private isTargetedType;
+    private protectPreviewSubmission;
+    private protectPreviewNavigation;
     private setText;
     private setValue;
     private setChecked;
