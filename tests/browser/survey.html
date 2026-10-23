@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><title>Survey compatibility fixture</title><style>body{font:14px system-ui;margin:0}#survey{display:block}</style><div id="survey"></div>
+<script type="module">
+import {SurveyRenderer} from '/src/experiences/runtime/SurveyRenderer.ts';
+import {applyOnsiteDocument} from '/src/experiences/onsite/OnsiteDocument.ts';
+import fixture from '/tests/fixtures/survey-v3.json';
+const root=document.querySelector('#survey').attachShadow({mode:'open'});root.append(document.createElement('style'));
+const f=structuredClone(fixture);f.questions.forEach(q=>q.required=true);
+const builder={version:1,html:'',css:'',projectData:{}};
+const {content}=applyOnsiteDocument(builder,f.document,'survey',f);
+if(new URL(location.href).searchParams.has('legacy'))builder.projectData={pages:[{id:'legacy'}]};
+const survey={allowBack:true,showProgress:true,submitLabel:f.submitLabel,steps:[{id:'all',content,builder,questions:f.questions}]};
+const renderer=new SurveyRenderer();window.surveyFixture={submitted:[],attempts:0,fail:true,renderer,root};
+renderer.render(root,content,{width:'md',theme:{background:'#fff',foreground:'#111',primary:'#2563eb',borderRadius:'md'}},{dismissible:true,backdrop:true},survey,{onDismiss(){},onProgress(){},async onSubmit(answers){window.surveyFixture.attempts++;await new Promise(r=>setTimeout(r,60));if(window.surveyFixture.fail)throw new Error('offline');window.surveyFixture.submitted.push(answers);}});
+</script>

@@ -1,5 +1,1013 @@
 (function() {
   "use strict";
+  const QUESTION_TYPES = ["single_choice", "multiple_choice", "short_text", "long_text", "rating", "nps"];
+  function surveyQuestionMarkup(question, blockId) {
+    const label = escape$1(question.label);
+    let controls;
+    if (question.type === "short_text" || question.type === "long_text") {
+      const attrs = `class="movcues-survey-input" data-movcues-question-input aria-label="${label}" placeholder="${escape$1(question.placeholder ?? "")}" maxlength="${question.maxLength ?? 1e4}"${question.required ? ' aria-required="true"' : ""}`;
+      controls = question.type === "short_text" ? `<input type="text" ${attrs}>` : `<textarea ${attrs}></textarea>`;
+    } else {
+      const options = question.type === "rating" || question.type === "nps" ? Array.from({ length: question.type === "nps" ? 11 : question.max - question.min + 1 }, (_, index) => {
+        const value = String(index + (question.type === "nps" ? 0 : question.min));
+        return { id: value, label: value };
+      }) : question.options;
+      controls = `<div class="movcues-survey-options">${options.map((option) => `<button type="button" class="movcues-survey-option" data-movcues-option-id="${escape$1(option.id)}" aria-pressed="false">${escape$1(option.label)}</button>`).join("")}</div>`;
+    }
+    return `<div class="movcues-block movcues-survey-question" data-movcues-block-id="${escape$1(blockId)}" data-movcues-question-id="${escape$1(question.id)}" data-movcues-question-type="${question.type}"><p class="movcues-survey-question__label">${label}${question.required ? " *" : ""}</p>${controls}</div>`;
+  }
+  function surveyControlsMarkup(blockId, label) {
+    return `<div class="movcues-block movcues-survey-footer" data-movcues-block-id="${escape$1(blockId)}" data-movcues-survey-controls="onsite"><div data-movcues-survey-progress><span>Progress</span><span data-movcues-survey-progress-bar></span></div><p class="movcues-survey-validation" role="alert"></p><div class="movcues-survey-actions"><button type="button" data-movcues-survey-action="back">Back</button><button type="button" data-movcues-survey-action="next">Next</button><button type="button" data-movcues-survey-action="submit">${escape$1(label)}</button></div></div>`;
+  }
+  const SURVEY_CELL_CSS = ".movcues-widget .movcues-survey-question__label{margin:0 0 8px;font-weight:600}.movcues-widget .movcues-survey-options{display:flex;flex-wrap:wrap;gap:6px}.movcues-widget .movcues-survey-option,.movcues-widget [data-movcues-survey-action]{min-height:36px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:inherit;padding:8px 12px;font:inherit;cursor:pointer}.movcues-widget .movcues-survey-option.is-selected{border-color:var(--movcues-primary);background:color-mix(in srgb,var(--movcues-primary) 12%,white)}.movcues-widget .movcues-survey-input{box-sizing:border-box;width:100%;min-width:0;min-height:36px;border:1px solid #cbd5e1;border-radius:6px;padding:8px;font:inherit}.movcues-widget textarea.movcues-survey-input{min-height:84px;resize:vertical}.movcues-widget .movcues-survey-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}.movcues-widget .movcues-survey-footer{width:100%}.movcues-widget [data-movcues-survey-progress]{font-size:12px;margin-bottom:8px}.movcues-widget [data-movcues-survey-progress-bar]{display:block;height:3px;background:var(--movcues-primary);margin-top:5px}.movcues-widget .movcues-survey-validation{color:#b91c1c;font-size:12px}.movcues-widget .movcues-survey-question.has-error{outline:2px solid #dc2626;outline-offset:4px}";
+  function surveyQuestionErrors(questions) {
+    var _a, _b, _c;
+    if (!Array.isArray(questions) || questions.length > 20) return ["A Survey step supports at most 20 questions."];
+    const errors = [], ids = /* @__PURE__ */ new Set();
+    for (const question of questions) {
+      if (!question || !QUESTION_TYPES.includes(question.type)) {
+        errors.push("Unsupported Survey question type.");
+        continue;
+      }
+      if (!question.id || question.id.length > 64 || ids.has(question.id)) errors.push("Question IDs must be unique and contain 1–64 characters.");
+      ids.add(question.id);
+      if (!((_a = question.label) == null ? void 0 : _a.trim()) || question.label.length > 500) errors.push("Question labels must contain 1–500 characters.");
+      if (question.required !== void 0 && typeof question.required !== "boolean") errors.push("Required must be a boolean.");
+      if (question.type === "single_choice" || question.type === "multiple_choice") {
+        if (!Array.isArray(question.options) || !question.options.length || question.options.length > 20) errors.push("Choice questions need 1–20 options.");
+        else {
+          const optionIds = /* @__PURE__ */ new Set();
+          for (const option of question.options) {
+            if (!option.id || option.id.length > 64 || optionIds.has(option.id) || !((_b = option.label) == null ? void 0 : _b.trim()) || option.label.length > 200) errors.push("Options need unique IDs and nonempty labels (up to 200 characters).");
+            optionIds.add(option.id);
+          }
+        }
+      } else if (question.type === "rating" && (!Number.isInteger(question.min) || !Number.isInteger(question.max) || question.min < 0 || question.max > 100 || question.max <= question.min || question.max - question.min > 20)) errors.push("Rating needs an ascending range of at most 21 values between 0 and 100.");
+      else if ((question.type === "short_text" || question.type === "long_text") && (question.maxLength !== void 0 && (!Number.isInteger(question.maxLength) || question.maxLength < 1 || question.maxLength > 1e4) || (((_c = question.placeholder) == null ? void 0 : _c.length) ?? 0) > 500)) errors.push("Text limit must be 1–10,000 and placeholder at most 500 characters.");
+    }
+    return errors;
+  }
+  function escape$1(value) {
+    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  const BUILDER_ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "HEADER", "H1", "H2", "H3", "H4", "P", "SPAN", "BR", "BUTTON", "IMG", "HR", "LABEL", "STRONG", "EM", "U", "A", "UL", "OL", "LI"]);
+  const BUILDER_SURVEY_INPUT_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA"]);
+  const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "aria-required", "alt", "src", "href", "target", "rel", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-document-version", "data-movcues-node-id", "data-movcues-block-id", "data-movcues-sizing", "data-movcues-responsive-stack", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
+  const BUILDER_BLOCKED_TAGS = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO|SOURCE)$/i;
+  const BUILDER_UNSAFE_CSS = /@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i;
+  function builderImageUrlIsSafe(value) {
+    return !value || !/[\u0000-\u0020\u007f]/.test(value) && /^(https?:\/\/|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(value);
+  }
+  function builderLinkUrlIsSafe(value) {
+    return !/[\u0000-\u001f\u007f]/.test(value) && /^(https?:\/\/|mailto:|tel:|\/|#|\?|\.\.?\/)/i.test(value.trim());
+  }
+  function builderInputTypeIsSafe(value) {
+    return ["text", "radio", "checkbox", "number"].includes(value.toLowerCase());
+  }
+  function safeScopedBuilderCss(input) {
+    const css = input.replace(/\/\*[\s\S]*?\*\//g, "").trim();
+    if (BUILDER_UNSAFE_CSS.test(css)) return null;
+    const rule = /([^{}]+)\{/g;
+    let match;
+    while ((match = rule.exec(css)) !== null) {
+      const prelude = match[1].trim();
+      if (!prelude || prelude.startsWith("@")) continue;
+      if (prelude.split(",").some((selector) => !selector.trim().includes(".movcues-widget"))) return null;
+    }
+    return css;
+  }
+  const ONSITE_LIMITS = {
+    maxDepth: 8,
+    maxNodes: 120,
+    maxRichText: 1e4,
+    maxImageUrl: 2e3,
+    maxInlineImage: 65536,
+    maxSerializedBytes: 25e4,
+    minFixedSize: 24,
+    maxFixedSize: 1200
+  };
+  const ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{2,63}$/;
+  const COLOR_PATTERN = /^(#[0-9a-f]{3,8}|(?:rgb|hsl)a?\([0-9.,%\s-]+\)|[a-z]{1,20})$/i;
+  const SAFE_INLINE_TAGS = /* @__PURE__ */ new Set(["BR", "STRONG", "EM", "U", "A", "UL", "OL", "LI"]);
+  const ICONS = { check: "✓", star: "★", info: "ℹ", warning: "⚠", sparkles: "✦", arrow: "→", heart: "♥", rocket: "🚀" };
+  let idSequence = 0;
+  function onsiteId(prefix = "cell") {
+    idSequence = (idSequence + 1) % 65535;
+    const random = typeof crypto !== "undefined" && "getRandomValues" in crypto ? Array.from(crypto.getRandomValues(new Uint32Array(2))).map((value) => value.toString(36)).join("") : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+    return `${prefix}_${random}${idSequence.toString(36)}`.slice(0, 64);
+  }
+  function emptyCell(block) {
+    return { type: "cell", id: onsiteId("cell"), direction: "column", sizing: { mode: "flexible", weight: 1 }, align: "stretch", justify: "start", gap: 12, padding: { top: 0, right: 0, bottom: 0, left: 0 }, ...block ? { block } : {} };
+  }
+  function createBlock(type, guide = false) {
+    const id = onsiteId("block");
+    if (type === "question") throw new Error("Insert a canonical Survey question first.");
+    if (type === "survey_controls") return { id, type };
+    if (type === "heading") return { id, type, html: "A clear heading", level: 2, fontSize: 24, weight: 600, lineHeight: 1.25 };
+    if (type === "text") return { id, type, html: "Add supporting text for your visitors.", fontSize: 15, weight: 400, lineHeight: 1.5 };
+    if (type === "button") return { id, type, label: guide ? "Next" : "Got it", action: { id: onsiteId("action"), type: guide ? "next_step" : "dismiss" }, variant: "primary", radius: 8, paddingX: 16, paddingY: 9, width: "hug", align: "right" };
+    if (type === "image") return { id, type, src: "", alt: "", fit: "cover", width: 100, radius: 8, align: "center" };
+    if (type === "divider") return { id, type, orientation: "horizontal", thickness: 1, color: "#dbe2ea" };
+    if (type === "spacer") return { id, type, size: 24 };
+    return { id, type: "icon", icon: "sparkles", size: 28, color: "#2563eb", align: "center" };
+  }
+  function createOnsiteDocument(guide = false) {
+    const heading = emptyCell(createBlock("heading", guide));
+    const text = emptyCell(createBlock("text", guide));
+    const button = emptyCell(createBlock("button", guide));
+    return { schemaVersion: 2, id: onsiteId("document"), root: { ...emptyCell(), direction: "column", gap: 12, padding: { top: 20, right: 20, bottom: 20, left: 20 }, children: [heading, text, button] } };
+  }
+  function createOnsiteSurveyDocument(questions, content) {
+    const document2 = createOnsiteDocument();
+    document2.schemaVersion = 3;
+    const heading = document2.root.children[0].block;
+    if (heading.type === "heading" && content) heading.html = escapeText$2(content.heading);
+    const body = document2.root.children[1].block;
+    if (body.type === "text" && content) body.html = escapeText$2(content.body);
+    document2.root.children = [...document2.root.children.slice(0, 2), ...questions.map((question) => emptyCell({ id: onsiteId("block"), type: "question", questionId: question.id, fontSize: 14 })), emptyCell(createBlock("survey_controls"))];
+    document2.root.children.forEach((cell) => {
+      cell.sizing = { mode: "hug" };
+    });
+    return document2;
+  }
+  function validateOnsiteSurveyDocument(document2, context) {
+    const errors = surveyQuestionErrors(context.questions), counts = /* @__PURE__ */ new Map();
+    const known = new Set(context.questions.map((question) => question.id));
+    const blocks = listBlocks(document2.root);
+    for (const block of blocks) if (block.type === "question") {
+      counts.set(block.questionId, (counts.get(block.questionId) ?? 0) + 1);
+      if (!known.has(block.questionId)) errors.push(`Orphaned question reference: ${block.questionId}.`);
+    }
+    for (const question of context.questions) if (counts.get(question.id) !== 1) errors.push(`Question ${question.id} must be referenced exactly once.`);
+    if (blocks.filter((block) => block.type === "survey_controls").length !== 1) errors.push("Survey cells need exactly one navigation/progress block.");
+    return errors;
+  }
+  function duplicateSurveyCell(document2, questions, id) {
+    const candidate = cloneOnsite(document2), nextQuestions = cloneOnsite(questions);
+    const cellId = duplicateCell(candidate, id);
+    if (!cellId) return null;
+    for (const block of listBlocks(findCell(candidate, cellId))) if (block.type === "question") {
+      const source = questions.find((question) => question.id === block.questionId);
+      if (!source) return null;
+      const copy = cloneOnsite(source);
+      copy.id = onsiteId("question");
+      if (copy.type === "single_choice" || copy.type === "multiple_choice") copy.options.forEach((option) => {
+        option.id = onsiteId("option");
+      });
+      block.questionId = copy.id;
+      nextQuestions.push(copy);
+    }
+    if (!validateOnsiteDocument(candidate).valid || validateOnsiteSurveyDocument(candidate, { questions: nextQuestions }).length) return null;
+    return { document: candidate, questions: nextQuestions, cellId };
+  }
+  function onsiteDocumentFromBuilder(builder) {
+    var _a;
+    const movcues = (_a = builder == null ? void 0 : builder.projectData) == null ? void 0 : _a.movcues;
+    if (!movcues || typeof movcues !== "object") return null;
+    const document2 = movcues.onsiteDocument;
+    return isOnsiteDocument(document2) ? document2 : null;
+  }
+  function applyOnsiteDocument(builder, document2, widgetType, survey) {
+    const compiled = compileOnsiteDocument(document2, widgetType, survey);
+    builder.version = 1;
+    builder.projectData = { ...builder.projectData, movcues: { ...asRecord(builder.projectData.movcues), authoringSurface: "onsite", schemaVersion: document2.schemaVersion, onsiteDocument: document2, actionBindings: compiled.actionBindings } };
+    builder.html = compiled.html;
+    builder.css = compiled.css;
+    return compiled;
+  }
+  function compileOnsiteDocument(document2, widgetType, survey) {
+    var _a;
+    const validation = validateOnsiteDocument(document2);
+    if (!validation.valid) throw new Error(validation.errors.join(" "));
+    if (document2.schemaVersion === 3) {
+      if (widgetType !== "survey" || !survey) throw new Error("Version 3 requires a Survey question context.");
+      const errors = validateOnsiteSurveyDocument(document2, survey);
+      if (errors.length) throw new Error(errors.join(" "));
+    } else if (survey) throw new Error("Survey cells require document version 3.");
+    const css = [
+      ".movcues-widget{box-sizing:border-box;width:100%;max-width:100%;min-width:0;overflow-wrap:anywhere;background:var(--movcues-bg);color:var(--movcues-fg)}",
+      ".movcues-widget *{box-sizing:border-box}",
+      ".movcues-widget .movcues-cell{display:flex;min-width:0;max-width:100%}",
+      ".movcues-widget .movcues-block{min-width:0;max-width:100%;margin:0}",
+      ".movcues-widget .movcues-block img{display:block;max-width:100%}",
+      ".movcues-widget .movcues-button{border:0;font:600 14px/1.2 ui-sans-serif,system-ui,sans-serif;cursor:pointer}",
+      ".movcues-widget .movcues-button--primary{background:var(--movcues-primary);color:#fff}",
+      ".movcues-widget .movcues-button--secondary{background:transparent;color:inherit}",
+      ".movcues-widget .movcues-button--outline{background:transparent;color:inherit;border:1px solid currentColor}",
+      ".movcues-widget .movcues-block--full{width:100%}"
+    ];
+    if (document2.schemaVersion === 3) css.push(SURVEY_CELL_CSS);
+    const html = renderCell(document2.root, css, 0, survey);
+    css.push('@media(max-width:480px){.movcues-widget [data-movcues-responsive-stack="true"]{flex-direction:column!important}.movcues-widget [data-movcues-sizing="fixed"]{max-width:100%!important}.movcues-widget .movcues-button{min-height:40px}.movcues-widget img{height:auto!important}}');
+    const blocks = listBlocks(document2.root);
+    const firstHeading = blocks.find((block) => block.type === "heading");
+    const text = blocks.filter((block) => block.type === "text").map((block) => richTextToPlain(block.html)).join("\n").slice(0, 2e3);
+    const actions = blocks.filter((block) => block.type === "button");
+    const actionBindings = Object.fromEntries(actions.map((block) => [block.action.id, block.action]));
+    const legacy = actions.slice(0, 2).map((block) => ({ label: block.label, type: block.action.type === "previous_step" ? "dismiss" : block.action.type, ..."url" in block.action ? { url: block.action.url } : {}, ..."eventName" in block.action ? { eventName: block.action.eventName } : {} }));
+    const content = {
+      heading: firstHeading ? richTextToPlain(firstHeading.html).slice(0, 160) : "",
+      body: text,
+      ...legacy[0] ? { primaryAction: legacy[0] } : {},
+      ...((_a = legacy[1]) == null ? void 0 : _a.type) === "dismiss" ? { secondaryAction: { label: legacy[1].label, type: "dismiss" } } : {}
+    };
+    return { html: `<section class="movcues-widget movcues-widget--${escapeAttribute(widgetType)}" data-movcues-widget-type="${escapeAttribute(widgetType)}" data-movcues-document-version="${document2.schemaVersion}">${html}</section>`, css: css.join(""), content, actionBindings };
+  }
+  function renderCell(cell, css, depth, survey) {
+    var _a;
+    const selector = `.movcues-widget [data-movcues-node-id="${cell.id}"]`;
+    const sizing = cell.sizing.mode === "flexible" ? `flex:${round(cell.sizing.weight)} 1 0` : cell.sizing.mode === "hug" ? "flex:0 0 auto" : `flex:0 1 ${cell.sizing.value}px`;
+    const style = cell.style ?? {};
+    css.push(`${selector}{${sizing};flex-direction:${cell.direction};align-items:${cell.align};justify-content:${cell.justify};gap:${cell.gap}px;padding:${cell.padding.top}px ${cell.padding.right}px ${cell.padding.bottom}px ${cell.padding.left}px;${style.background ? `background:${style.background};` : ""}${style.borderWidth ? `border:${style.borderWidth}px solid ${style.borderColor ?? "#dbe2ea"};` : ""}${style.borderRadius ? `border-radius:${style.borderRadius}px;` : ""}}`);
+    const children = ((_a = cell.children) == null ? void 0 : _a.map((child) => renderCell(child, css, depth + 1, survey)).join("")) ?? (cell.block ? renderBlock(cell.block, css, survey) : "");
+    return `<div class="movcues-cell" data-movcues-node-id="${cell.id}" data-movcues-sizing="${cell.sizing.mode}"${cell.responsiveStack ? ' data-movcues-responsive-stack="true"' : ""}>${children}</div>`;
+  }
+  function renderBlock(block, css, survey) {
+    const selector = `.movcues-widget [data-movcues-block-id="${block.id}"]`;
+    const align = block.align ?? "left";
+    if (block.type === "question") {
+      css.push(`${selector}{font:${block.fontSize}px/1.5 ui-sans-serif,system-ui,sans-serif;text-align:${align};${block.color ? `color:${block.color};` : ""}}`);
+      return surveyQuestionMarkup(survey.questions.find((question) => question.id === block.questionId), block.id);
+    }
+    if (block.type === "survey_controls") return surveyControlsMarkup(block.id, (survey == null ? void 0 : survey.submitLabel) ?? "Submit");
+    if (block.type === "heading") {
+      css.push(`${selector}{font:${block.weight} ${block.fontSize}px/${block.lineHeight ?? 1.25} ui-sans-serif,system-ui,sans-serif;text-align:${align};${block.color ? `color:${block.color};` : ""}}`);
+      return `<h${block.level} class="movcues-block movcues-heading" data-movcues-block-id="${block.id}" data-movcues-content="heading">${sanitizeRichText(block.html)}</h${block.level}>`;
+    }
+    if (block.type === "text") {
+      css.push(`${selector}{font:${block.weight} ${block.fontSize}px/${block.lineHeight ?? 1.5} ui-sans-serif,system-ui,sans-serif;text-align:${align};white-space:pre-wrap;${block.color ? `color:${block.color};` : ""}}`);
+      return `<div class="movcues-block movcues-text" data-movcues-block-id="${block.id}" data-movcues-content="body">${sanitizeRichText(block.html)}</div>`;
+    }
+    if (block.type === "button") {
+      css.push(`${selector}{align-self:${align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center"};padding:${block.paddingY}px ${block.paddingX}px;border-radius:${block.radius}px;${block.width === "full" ? "width:100%;" : ""}${block.background ? `background:${block.background};` : ""}${block.color ? `color:${block.color};` : ""}}`);
+      return `<button type="button" class="movcues-block movcues-button movcues-button--${block.variant}${block.width === "full" ? " movcues-block--full" : ""}" data-movcues-block-id="${block.id}" data-movcues-action-id="${block.action.id}">${escapeText$2(block.label)}</button>`;
+    }
+    if (block.type === "image") {
+      css.push(`${selector}{align-self:${align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center"};width:${block.width}%;${block.height ? `height:${block.height}px;` : "height:auto;"}object-fit:${block.fit};border-radius:${block.radius}px}`);
+      return `<img class="movcues-block movcues-image" data-movcues-block-id="${block.id}" src="${escapeAttribute(block.src)}" alt="${escapeAttribute(block.alt)}">`;
+    }
+    if (block.type === "divider") {
+      css.push(`${selector}{align-self:stretch;${block.orientation === "horizontal" ? `width:100%;height:${block.thickness}px` : `width:${block.thickness}px;min-height:24px`};border:0;background:${block.color}}`);
+      return `<hr class="movcues-block movcues-divider" data-movcues-block-id="${block.id}">`;
+    }
+    if (block.type === "spacer") {
+      css.push(`${selector}{flex:0 0 ${block.size}px;width:${block.size}px;height:${block.size}px}`);
+      return `<div class="movcues-block movcues-spacer" data-movcues-block-id="${block.id}" aria-hidden="true"></div>`;
+    }
+    css.push(`${selector}{align-self:${align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center"};font-size:${block.size}px;line-height:1;${block.color ? `color:${block.color};` : ""}}`);
+    return `<span class="movcues-block movcues-icon" data-movcues-block-id="${block.id}" role="img" aria-label="${block.icon}">${ICONS[block.icon]}</span>`;
+  }
+  function validateOnsiteDocument(value) {
+    const errors = [];
+    if (!isOnsiteDocumentShape(value)) return { valid: false, errors: ["On-site document must use schemaVersion 2 or 3 and contain one root cell."] };
+    unexpectedKeys(value, ["schemaVersion", "id", "root"], "Document", errors);
+    const ids = /* @__PURE__ */ new Set();
+    const seen = /* @__PURE__ */ new Set();
+    let count = 0;
+    const addId = (id, path) => {
+      if (typeof id !== "string" || !ID_PATTERN.test(id)) errors.push(`${path} has an invalid ID.`);
+      else if (ids.has(id)) errors.push(`${path} reuses ID ${id}.`);
+      else ids.add(id);
+    };
+    const number = (input, min, max, path) => {
+      if (typeof input !== "number" || !Number.isFinite(input) || input < min || input > max) errors.push(`${path} must be between ${min} and ${max}.`);
+    };
+    addId(value.id, "Document");
+    const visit = (cell, depth, path) => {
+      var _a, _b, _c, _d;
+      if (!cell || typeof cell !== "object") {
+        errors.push(`${path} must be a cell object.`);
+        return;
+      }
+      if (seen.has(cell)) {
+        errors.push(`${path} creates a cycle or duplicate reference.`);
+        return;
+      }
+      seen.add(cell);
+      count++;
+      addId(cell.id, path);
+      unexpectedKeys(cell, ["type", "id", "direction", "sizing", "align", "justify", "gap", "padding", "responsiveStack", "style", "children", "block"], path, errors);
+      if (depth > ONSITE_LIMITS.maxDepth) errors.push(`${path} exceeds maximum nesting depth ${ONSITE_LIMITS.maxDepth}.`);
+      if (!["row", "column"].includes(cell.direction)) errors.push(`${path} has an invalid direction.`);
+      if (!["start", "center", "end", "stretch"].includes(cell.align)) errors.push(`${path} has an invalid alignment.`);
+      if (!["start", "center", "end", "space-between"].includes(cell.justify)) errors.push(`${path} has an invalid distribution.`);
+      if (cell.responsiveStack !== void 0 && typeof cell.responsiveStack !== "boolean") errors.push(`${path} responsiveStack must be a boolean.`);
+      number(cell.gap, 0, 96, `${path} gap`);
+      for (const side of ["top", "right", "bottom", "left"]) number((_a = cell.padding) == null ? void 0 : _a[side], 0, 128, `${path} padding ${side}`);
+      if (((_b = cell.sizing) == null ? void 0 : _b.mode) === "flexible") number(cell.sizing.weight, 0.1, 20, `${path} flexible weight`);
+      else if (((_c = cell.sizing) == null ? void 0 : _c.mode) === "fixed") number(cell.sizing.value, ONSITE_LIMITS.minFixedSize, ONSITE_LIMITS.maxFixedSize, `${path} fixed size`);
+      else if (((_d = cell.sizing) == null ? void 0 : _d.mode) !== "hug") errors.push(`${path} has an invalid sizing mode.`);
+      if (cell.sizing && typeof cell.sizing === "object") unexpectedKeys(cell.sizing, cell.sizing.mode === "flexible" ? ["mode", "weight"] : cell.sizing.mode === "fixed" ? ["mode", "value"] : ["mode"], `${path} sizing`, errors);
+      if (cell.style) {
+        unexpectedKeys(cell.style, ["background", "borderColor", "borderWidth", "borderRadius"], `${path} style`, errors);
+        if (cell.style.background && !COLOR_PATTERN.test(cell.style.background)) errors.push(`${path} background is not supported.`);
+        if (cell.style.borderColor && !COLOR_PATTERN.test(cell.style.borderColor)) errors.push(`${path} border color is not supported.`);
+        if (cell.style.borderWidth !== void 0) number(cell.style.borderWidth, 0, 16, `${path} border width`);
+        if (cell.style.borderRadius !== void 0) number(cell.style.borderRadius, 0, 100, `${path} border radius`);
+      }
+      if (cell.children && cell.block) errors.push(`${path} cannot contain both children and a block.`);
+      if (cell.children) {
+        if (!cell.children.length) errors.push(`${path} cannot contain an empty children list.`);
+        cell.children.forEach((child, index) => visit(child, depth + 1, `${path} > cell ${index + 1}`));
+      }
+      if (cell.block && value.schemaVersion === 2 && ["question", "survey_controls"].includes(cell.block.type)) errors.push("Survey blocks require schemaVersion 3.");
+      if (cell.block) validateBlock(cell.block, `${path} block`, addId, number, errors);
+    };
+    try {
+      visit(value.root, 1, "Root cell");
+    } catch {
+      errors.push("Document contains malformed cell or block values.");
+    }
+    if (count > ONSITE_LIMITS.maxNodes) errors.push(`Document has ${count} cells; maximum is ${ONSITE_LIMITS.maxNodes}.`);
+    try {
+      if (new TextEncoder().encode(JSON.stringify(value)).byteLength > ONSITE_LIMITS.maxSerializedBytes) errors.push(`Document exceeds ${ONSITE_LIMITS.maxSerializedBytes} serialized bytes.`);
+    } catch {
+      errors.push("Document cannot be serialized.");
+    }
+    return { valid: errors.length === 0, errors };
+  }
+  function validateBlock(block, path, addId, number, errors) {
+    var _a, _b, _c, _d, _e;
+    addId(block.id, path);
+    const base = ["id", "type", "align"];
+    const keys = { question: [...base, "questionId", "fontSize", "color"], survey_controls: base, heading: [...base, "html", "level", "fontSize", "weight", "color", "lineHeight"], text: [...base, "html", "fontSize", "weight", "color", "lineHeight"], button: [...base, "label", "action", "variant", "background", "color", "radius", "paddingX", "paddingY", "width"], image: [...base, "src", "alt", "fit", "width", "height", "radius"], divider: [...base, "orientation", "thickness", "color"], spacer: [...base, "size"], icon: [...base, "icon", "size", "color"] };
+    if (!Object.prototype.hasOwnProperty.call(keys, block.type)) {
+      errors.push(`${path} has an unsupported block type.`);
+      return;
+    }
+    unexpectedKeys(block, keys[block.type], path, errors);
+    if (block.align !== void 0 && !["left", "center", "right"].includes(block.align)) errors.push(`${path} has an invalid alignment.`);
+    if (block.type === "question") {
+      if (typeof block.questionId !== "string" || !block.questionId.trim() || block.questionId.length > 64) errors.push(`${path} must reference a stable question ID.`);
+      number(block.fontSize, 10, 36, `${path} font size`);
+    } else if (block.type === "heading" || block.type === "text") {
+      if (typeof block.html !== "string" || block.html.length > ONSITE_LIMITS.maxRichText || sanitizeRichText(block.html) !== block.html) errors.push(`${path} contains unsupported or unsafe rich text.`);
+      number(block.fontSize, 10, 72, `${path} font size`);
+      number(block.lineHeight ?? 1.4, 0.9, 3, `${path} line height`);
+      if (![400, 500, 600, 700].includes(block.weight)) errors.push(`${path} has an invalid font weight.`);
+      if (block.type === "heading" && ![1, 2, 3, 4].includes(block.level)) errors.push(`${path} has an invalid heading level.`);
+    } else if (block.type === "button") {
+      if (!((_a = block.label) == null ? void 0 : _a.trim()) || block.label.length > 80) errors.push(`${path} label must contain 1–80 characters.`);
+      addId((_b = block.action) == null ? void 0 : _b.id, `${path} action`);
+      if (!block.action || !["next_step", "previous_step", "dismiss", "open_url", "track_event"].includes(block.action.type)) errors.push(`${path} has an invalid action.`);
+      else unexpectedKeys(block.action, block.action.type === "open_url" ? ["id", "type", "url"] : block.action.type === "track_event" ? ["id", "type", "eventName"] : ["id", "type"], `${path} action`, errors);
+      if (((_c = block.action) == null ? void 0 : _c.type) === "open_url" && (!builderLinkUrlIsSafe(block.action.url) || !/^https?:\/\//i.test(block.action.url))) errors.push(`${path} URL must use HTTP(S).`);
+      if (((_d = block.action) == null ? void 0 : _d.type) === "track_event" && (!((_e = block.action.eventName) == null ? void 0 : _e.trim()) || block.action.eventName.length > 200)) errors.push(`${path} custom event must contain 1–200 characters.`);
+      if (!["primary", "secondary", "outline"].includes(block.variant)) errors.push(`${path} has an invalid variant.`);
+      if (!["hug", "full"].includes(block.width)) errors.push(`${path} has an invalid width behavior.`);
+      number(block.radius, 0, 48, `${path} radius`);
+      number(block.paddingX, 4, 48, `${path} horizontal padding`);
+      number(block.paddingY, 4, 32, `${path} vertical padding`);
+    } else if (block.type === "image") {
+      if (!onsiteImageSourceIsSafe(block.src)) errors.push(`${path} image must use a safe URL (up to 2,000 characters) or a small PNG, JPEG, WebP or GIF image (up to 64 KB encoded).`);
+      if (block.alt.length > 500) errors.push(`${path} alt text exceeds 500 characters.`);
+      if (!["contain", "cover"].includes(block.fit)) errors.push(`${path} has an invalid image fit.`);
+      number(block.width, 1, 100, `${path} width`);
+      if (block.height !== void 0) number(block.height, 24, 1200, `${path} height`);
+      number(block.radius, 0, 100, `${path} radius`);
+    } else if (block.type === "divider") {
+      if (!["horizontal", "vertical"].includes(block.orientation)) errors.push(`${path} has an invalid divider orientation.`);
+      number(block.thickness, 1, 16, `${path} thickness`);
+    } else if (block.type === "spacer") number(block.size, 4, 240, `${path} size`);
+    else if (block.type === "icon") {
+      if (!(block.icon in ICONS)) errors.push(`${path} icon is not supported.`);
+      number(block.size, 12, 96, `${path} size`);
+    }
+    if ("color" in block && block.color && !COLOR_PATTERN.test(block.color)) errors.push(`${path} color is not supported.`);
+  }
+  function onsiteImageSourceIsSafe(src) {
+    if (typeof src !== "string") return false;
+    if (!/^data:/i.test(src)) return src.length <= ONSITE_LIMITS.maxImageUrl && builderImageUrlIsSafe(src);
+    if (src.length > ONSITE_LIMITS.maxInlineImage) return false;
+    const match = /^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$/i.exec(src);
+    if (!match || match[2].length % 4 !== 0) return false;
+    try {
+      const bytes = atob(match[2]);
+      switch (match[1].toLowerCase()) {
+        case "png":
+          return bytes.startsWith("PNG\r\n\n");
+        case "jpeg":
+          return bytes.startsWith("ÿØÿ");
+        case "webp":
+          return bytes.startsWith("RIFF") && bytes.slice(8, 12) === "WEBP";
+        case "gif":
+          return bytes.startsWith("GIF87a") || bytes.startsWith("GIF89a");
+      }
+    } catch {
+    }
+    return false;
+  }
+  function unexpectedKeys(value, allowed, path, errors) {
+    const extra = Object.keys(value).filter((key) => !allowed.includes(key));
+    if (extra.length) errors.push(`${path} contains unsupported fields: ${extra.join(", ")}.`);
+  }
+  function findCell(document2, id) {
+    let found = null;
+    walkCells(document2.root, (cell) => {
+      if (cell.id === id) found = cell;
+    });
+    return found;
+  }
+  function findBlock(document2, id) {
+    let found = null;
+    walkCells(document2.root, (cell) => {
+      var _a;
+      if (((_a = cell.block) == null ? void 0 : _a.id) === id) found = cell.block;
+    });
+    return found;
+  }
+  function parentCell(document2, id) {
+    let found = null;
+    walkCells(document2.root, (cell) => {
+      var _a;
+      if ((_a = cell.children) == null ? void 0 : _a.some((child) => child.id === id)) found = cell;
+    });
+    return found;
+  }
+  function listBlocks(cell) {
+    const blocks = [];
+    walkCells(cell, (item) => {
+      if (item.block) blocks.push(item.block);
+    });
+    return blocks;
+  }
+  function walkCells(cell, visit) {
+    var _a;
+    visit(cell);
+    (_a = cell.children) == null ? void 0 : _a.forEach((child) => walkCells(child, visit));
+  }
+  function splitCell(document2, cellId, direction) {
+    const cell = findCell(document2, cellId);
+    if (!cell || cell.children) return null;
+    const preserved = emptyCell(cell.block);
+    const added = emptyCell();
+    delete cell.block;
+    cell.children = [preserved, added];
+    cell.direction = direction;
+    cell.responsiveStack = direction === "row";
+    return added.id;
+  }
+  function insertEdgeCell(document2, edge) {
+    const wanted = edge === "left" || edge === "right" ? "row" : "column";
+    const added = emptyCell();
+    if (document2.root.children && document2.root.direction === wanted && !document2.root.block) document2.root.children[edge === "top" || edge === "left" ? "unshift" : "push"](added);
+    else {
+      const old = structuredCloneSafe(document2.root);
+      old.id = onsiteId("cell");
+      document2.root = { ...emptyCell(), id: document2.root.id, direction: wanted, responsiveStack: wanted === "row", children: edge === "top" || edge === "left" ? [added, old] : [old, added] };
+    }
+    return added.id;
+  }
+  function insertAdjacentCell(document2, cellId, edge) {
+    const cell = findCell(document2, cellId);
+    if (!cell) return null;
+    if (cell === document2.root) return insertEdgeCell(document2, edge);
+    const parent = parentCell(document2, cellId);
+    if (!(parent == null ? void 0 : parent.children)) return null;
+    const direction = edge === "left" || edge === "right" ? "row" : "column";
+    const before = edge === "top" || edge === "left";
+    const index = parent.children.indexOf(cell);
+    const added = emptyCell();
+    if (parent.direction === direction) parent.children.splice(index + (before ? 0 : 1), 0, added);
+    else {
+      const group = { ...emptyCell(), direction, sizing: cloneOnsite(cell.sizing), gap: parent.gap, responsiveStack: direction === "row", children: before ? [added, cell] : [cell, added] };
+      cell.sizing = { mode: "flexible", weight: 1 };
+      parent.children.splice(index, 1, group);
+    }
+    return added.id;
+  }
+  function removeCell(document2, id) {
+    const parent = parentCell(document2, id);
+    if (!(parent == null ? void 0 : parent.children) || parent.children.length <= 1) {
+      const cell = findCell(document2, id);
+      if (!cell || cell === document2.root) return false;
+      delete cell.block;
+      return true;
+    }
+    parent.children = parent.children.filter((child) => child.id !== id);
+    if (parent.children.length === 1) collapseSingleChild(parent);
+    return true;
+  }
+  function moveCell(document2, id, delta) {
+    const parent = parentCell(document2, id);
+    if (!(parent == null ? void 0 : parent.children)) return false;
+    const index = parent.children.findIndex((child) => child.id === id);
+    const next = index + delta;
+    if (index < 0 || next < 0 || next >= parent.children.length) return false;
+    [parent.children[index], parent.children[next]] = [parent.children[next], parent.children[index]];
+    return true;
+  }
+  function resizeSiblings(document2, firstId, secondId, firstWeight) {
+    const parent = parentCell(document2, firstId);
+    if (!(parent == null ? void 0 : parent.children) || parent !== parentCell(document2, secondId)) return false;
+    const a = parent.children.find((child) => child.id === firstId);
+    const b = parent.children.find((child) => child.id === secondId);
+    if (!a || !b) return false;
+    const bounded2 = Math.max(0.1, Math.min(1.9, Math.round(firstWeight * 20) / 20));
+    a.sizing = { mode: "flexible", weight: bounded2 };
+    b.sizing = { mode: "flexible", weight: 2 - bounded2 };
+    return true;
+  }
+  function duplicateCell(document2, id) {
+    const source = findCell(document2, id);
+    const parent = parentCell(document2, id);
+    if (!source || !(parent == null ? void 0 : parent.children)) return null;
+    const copy = structuredCloneSafe(source);
+    regenerateIds(copy);
+    const index = parent.children.findIndex((child) => child.id === id);
+    parent.children.splice(index + 1, 0, copy);
+    return copy.id;
+  }
+  function regenerateIds(cell) {
+    var _a;
+    cell.id = onsiteId("cell");
+    if (cell.block) {
+      cell.block.id = onsiteId("block");
+      if (cell.block.type === "button") cell.block.action.id = onsiteId("action");
+    }
+    (_a = cell.children) == null ? void 0 : _a.forEach(regenerateIds);
+  }
+  function collapseSingleChild(cell) {
+    var _a;
+    const child = (_a = cell.children) == null ? void 0 : _a[0];
+    if (!child) return;
+    const id = cell.id;
+    Object.assign(cell, child, { id });
+  }
+  function duplicateDocument(document2) {
+    const copy = structuredCloneSafe(document2);
+    copy.id = onsiteId("document");
+    regenerateIds(copy.root);
+    return copy;
+  }
+  function cloneOnsite(value) {
+    return structuredCloneSafe(value);
+  }
+  function structuredCloneSafe(value) {
+    return typeof structuredClone === "function" ? structuredClone(value) : JSON.parse(JSON.stringify(value));
+  }
+  function migrateV1Builder(builder, content, widgetType, guide = false) {
+    var _a;
+    if (onsiteDocumentFromBuilder(builder)) return onsiteDocumentFromBuilder(builder);
+    if (typeof document === "undefined") return null;
+    const template = document.createElement("template");
+    template.innerHTML = builder.html;
+    const root = template.content.querySelector(".movcues-widget");
+    if (!root) return null;
+    const known = root.querySelectorAll("[data-movcues-content],[data-movcues-action-id],img");
+    if (!known.length || root.querySelector("[data-movcues-question-id],[data-movcues-checklist-role]")) return null;
+    const compatibility = root.cloneNode(true);
+    compatibility.querySelectorAll("[data-movcues-content],[data-movcues-action-id],img").forEach((element) => element.remove());
+    compatibility.querySelectorAll("*").forEach((element) => {
+      var _a2;
+      if (!((_a2 = element.textContent) == null ? void 0 : _a2.trim()) && !element.children.length) element.remove();
+    });
+    if (((_a = compatibility.textContent) == null ? void 0 : _a.trim()) || compatibility.children.length) return null;
+    const cells = [];
+    const alignment = (element) => element.classList.contains("movcues-align-center") ? "center" : element.classList.contains("movcues-align-right") ? "right" : element.classList.contains("movcues-align-left") ? "left" : void 0;
+    const heading = root.querySelector('[data-movcues-content="heading"]');
+    if (heading) {
+      const block = createBlock("heading", guide);
+      block.html = sanitizeRichText(heading.innerHTML);
+      block.align = alignment(heading);
+      cells.push(emptyCell(block));
+    }
+    const body = root.querySelector('[data-movcues-content="body"]');
+    if (body) {
+      const block = createBlock("text", guide);
+      block.html = sanitizeRichText(body.innerHTML);
+      block.align = alignment(body);
+      cells.push(emptyCell(block));
+    }
+    root.querySelectorAll("img").forEach((image) => {
+      const block = createBlock("image", guide);
+      block.src = image.getAttribute("src") ?? "";
+      block.alt = image.getAttribute("alt") ?? "";
+      cells.push(emptyCell(block));
+    });
+    for (const [marker, fallback] of [["secondary", content.secondaryAction], ["primary", content.primaryAction]]) {
+      const button = root.querySelector(`[data-movcues-action-id="${marker}"]`);
+      if (!button || !fallback) continue;
+      const block = createBlock("button", guide);
+      block.label = fallback.label;
+      block.variant = marker === "primary" ? "primary" : "secondary";
+      block.action = { id: onsiteId("action"), ...fallback.type === "open_url" && fallback.url ? { type: "open_url", url: fallback.url } : fallback.type === "track_event" && fallback.eventName ? { type: "track_event", eventName: fallback.eventName } : { type: fallback.type === "next_step" ? "next_step" : "dismiss" } };
+      cells.push(emptyCell(block));
+    }
+    if (!cells.length) return null;
+    const migrated = { schemaVersion: 2, id: onsiteId("document"), root: { ...emptyCell(), direction: "column", gap: 12, padding: { top: 20, right: 20, bottom: 20, left: 20 }, children: cells } };
+    applyOnsiteDocument(builder, migrated, widgetType);
+    return migrated;
+  }
+  function sanitizeRichText(input) {
+    if (typeof document === "undefined") return sanitizeRichTextWithoutDom(input);
+    const template = document.createElement("template");
+    template.innerHTML = input;
+    for (const element of Array.from(template.content.querySelectorAll("*"))) {
+      if (!SAFE_INLINE_TAGS.has(element.tagName)) {
+        element.replaceWith(...Array.from(element.childNodes));
+        continue;
+      }
+      for (const attribute of Array.from(element.attributes)) if (!(element.tagName === "A" && ["href", "target", "rel"].includes(attribute.name))) element.removeAttribute(attribute.name);
+      if (element.tagName === "A") {
+        const href = element.getAttribute("href") ?? "";
+        if (!builderLinkUrlIsSafe(href)) element.removeAttribute("href");
+        const target = element.getAttribute("target");
+        if (target && !["_blank", "_self"].includes(target)) element.removeAttribute("target");
+        if (target === "_blank") element.setAttribute("rel", "noopener noreferrer");
+      }
+    }
+    return template.innerHTML;
+  }
+  function sanitizeRichTextWithoutDom(input) {
+    return input.replace(/<(?!\/?(?:br|strong|em|u|a|ul|ol|li)(?:\s|>|\/))/gi, "&lt;").replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi, "").replace(/javascript\s*:/gi, "");
+  }
+  function richTextToPlain(input) {
+    if (typeof document === "undefined") return input.replace(/<br\s*\/?>/gi, "\n").replace(/<\/li>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim();
+    const template = document.createElement("template");
+    template.innerHTML = input;
+    const read = (node) => {
+      if (node.nodeType === 3) return node.textContent ?? "";
+      let value = "";
+      for (const child of Array.from(node.childNodes)) {
+        if (child instanceof HTMLElement && child.tagName === "BR") value += "\n";
+        else {
+          value += read(child);
+          if (child instanceof HTMLElement && child.tagName === "LI") value += "\n";
+        }
+      }
+      return value;
+    };
+    return read(template.content).trim();
+  }
+  function isOnsiteDocument(value) {
+    return isOnsiteDocumentShape(value) && validateOnsiteDocument(value).valid;
+  }
+  function isOnsiteDocumentShape(value) {
+    return !!value && typeof value === "object" && [2, 3].includes(value.schemaVersion) && !!value.root && value.root.type === "cell";
+  }
+  function asRecord(value) {
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }
+  function escapeText$2(value) {
+    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function escapeAttribute(value) {
+    return escapeText$2(value).replace(/"/g, "&quot;");
+  }
+  function round(value) {
+    return String(Math.round(value * 100) / 100);
+  }
+  function nextSurveyStep(survey, index, answers) {
+    var _a, _b;
+    const step = survey.steps[index];
+    if (!step) return null;
+    const rule = (_a = step.branching) == null ? void 0 : _a.rules.find((rule2) => matches(rule2, answers[rule2.questionId]));
+    const destination = (rule == null ? void 0 : rule.nextStepId) ?? ((_b = step.branching) == null ? void 0 : _b.defaultNextStepId);
+    if (destination === "submit") return null;
+    const next = destination ? survey.steps.findIndex((step2) => step2.id === destination) : index + 1;
+    return next > index && next < survey.steps.length ? next : null;
+  }
+  function surveyPath(survey, answers) {
+    const path = [];
+    let index = survey.steps.length ? 0 : null;
+    while (index !== null && path.length < survey.steps.length) {
+      path.push(index);
+      index = nextSurveyStep(survey, index, answers);
+    }
+    return path;
+  }
+  function answersOnSurveyPath(survey, answers) {
+    const ids = new Set(surveyPath(survey, answers).flatMap((index) => survey.steps[index].questions.map((question) => question.id)));
+    return Object.fromEntries(Object.entries(answers).filter(([id]) => ids.has(id)));
+  }
+  function surveyBranchErrors(survey) {
+    const errors = [];
+    survey.steps.forEach((step, index) => {
+      if (!step.branching) return;
+      const forward = (id) => id === void 0 || id === "submit" || survey.steps.findIndex((step2) => step2.id === id) > index;
+      if (!forward(step.branching.defaultNextStepId)) errors.push("Survey navigation must target a later step or Submit.");
+      if (!Array.isArray(step.branching.rules) || step.branching.rules.length > 10) {
+        errors.push("A Survey step supports at most 10 branch rules.");
+        return;
+      }
+      for (const rule of step.branching.rules) {
+        const question = step.questions.find((question2) => question2.id === rule.questionId);
+        if (!question || !forward(rule.nextStepId) || !rule.nextStepId) {
+          errors.push("A branch must use a question on its own step and a forward destination.");
+          continue;
+        }
+        if (rule.operator === "answered") {
+          if (rule.value !== void 0) errors.push("Answered conditions do not use a comparison value.");
+          continue;
+        }
+        const choice = question.type === "single_choice" || question.type === "multiple_choice";
+        const numeric = question.type === "rating" || question.type === "nps";
+        if (rule.operator === "includes") {
+          if (question.type !== "multiple_choice" || typeof rule.value !== "string" || !question.options.some((option) => option.id === rule.value)) errors.push("Includes needs an existing multiple-choice option.");
+        } else if (rule.operator === "gte" || rule.operator === "lte") {
+          if (!numeric || typeof rule.value !== "number" || !Number.isInteger(rule.value) || rule.value < (question.type === "nps" ? 0 : question.min) || rule.value > (question.type === "nps" ? 10 : question.max)) errors.push("Numeric conditions need a value in the question range.");
+        } else if (rule.operator === "equals" || rule.operator === "not_equals") {
+          if (question.type === "multiple_choice" || (numeric ? typeof rule.value !== "number" || !Number.isInteger(rule.value) || rule.value < (question.type === "nps" ? 0 : question.min) || rule.value > (question.type === "nps" ? 10 : question.max) : typeof rule.value !== "string") || choice && !question.options.some((option) => option.id === rule.value)) errors.push("Comparison value must match the question type and options.");
+        } else errors.push("Unsupported Survey branch operator.");
+      }
+    });
+    return errors;
+  }
+  function matches(rule, answer) {
+    if (rule.operator === "answered") return answer !== void 0 && answer !== "" && (!Array.isArray(answer) || answer.length > 0);
+    if (rule.operator === "equals") return answer === rule.value;
+    if (rule.operator === "not_equals") return answer !== void 0 && answer !== rule.value;
+    if (rule.operator === "includes") return Array.isArray(answer) && typeof rule.value === "string" && answer.includes(rule.value);
+    if (rule.operator === "gte") return typeof answer === "number" && typeof rule.value === "number" && answer >= rule.value;
+    if (rule.operator === "lte") return typeof answer === "number" && typeof rule.value === "number" && answer <= rule.value;
+    return false;
+  }
+  function newSurveyQuestion(type) {
+    const base = { id: onsiteId("question"), label: "Your question", required: false };
+    if (type === "single_choice" || type === "multiple_choice") return { ...base, type, options: [{ id: onsiteId("option"), label: "Yes" }, { id: onsiteId("option"), label: "No" }] };
+    if (type === "short_text" || type === "long_text") return { ...base, type, placeholder: "", maxLength: type === "short_text" ? 200 : 2e3 };
+    if (type === "rating") return { ...base, type, min: 1, max: 5 };
+    return { ...base, type: "nps" };
+  }
+  function newSurveyStep(submitLabel) {
+    const step = { id: onsiteId("step"), content: { heading: "New Survey step", body: "" }, questions: [], builder: { version: 1, html: "", css: "", projectData: {} } };
+    step.content = applyOnsiteDocument(step.builder, createOnsiteSurveyDocument(step.questions, step.content), "survey", { questions: step.questions, submitLabel }).content;
+    return step;
+  }
+  function duplicateSurveyStep(source, submitLabel) {
+    var _a;
+    const copy = cloneOnsite(source);
+    copy.id = onsiteId("step");
+    const questions = /* @__PURE__ */ new Map(), options = /* @__PURE__ */ new Map();
+    copy.questions.forEach((question) => {
+      const old = question.id;
+      question.id = onsiteId("question");
+      questions.set(old, question.id);
+      if ("options" in question) question.options.forEach((option) => {
+        const old2 = option.id;
+        option.id = onsiteId("option");
+        options.set(`${question.id}:${old2}`, option.id);
+      });
+    });
+    (_a = copy.branching) == null ? void 0 : _a.rules.forEach((rule) => {
+      rule.questionId = questions.get(rule.questionId);
+      const key = `${rule.questionId}:${rule.value}`;
+      if (typeof rule.value === "string" && options.has(key)) rule.value = options.get(key);
+    });
+    const document2 = onsiteDocumentFromBuilder(copy.builder);
+    if (!document2 || !copy.builder) throw new Error("This Survey step is not an on-site document.");
+    const duplicated = duplicateDocument(document2);
+    listBlocks(duplicated.root).forEach((block) => {
+      if (block.type === "question") block.questionId = questions.get(block.questionId);
+    });
+    copy.content = applyOnsiteDocument(copy.builder, duplicated, "survey", { questions: copy.questions, submitLabel }).content;
+    return copy;
+  }
+  const LABELS = { single_choice: "Single choice", multiple_choice: "Multiple choice", short_text: "Short text", long_text: "Long text", rating: "Rating", nps: "NPS" };
+  class SurveyEditor {
+    constructor(root, survey, options) {
+      var _a, _b, _c;
+      this.root = root;
+      this.survey = survey;
+      this.options = options;
+      this.questionHost = document.createElement("div");
+      this.stepHost = document.createElement("div");
+      this.dock = document.createElement("div");
+      this.style = document.createElement("style");
+      this.onChange = (event) => {
+        const input = event.target;
+        if (!input.dataset || !this.options.canEdit()) return;
+        const composer = this.options.composer(), step = this.survey.steps[this.options.index()], question = composer == null ? void 0 : composer.getSelectedQuestion();
+        if (input.matches("[data-survey-default-next],[data-rule-question],[data-rule-operator],[data-rule-value],[data-rule-next]")) {
+          const branching = cloneOnsite(step.branching ?? { rules: [] });
+          if (input.matches("[data-survey-default-next]")) branching.defaultNextStepId = input.value || void 0;
+          else {
+            const index = Number(input.closest("[data-survey-rule]").dataset.surveyRule), rule = branching.rules[index];
+            if (input.matches("[data-rule-question]")) Object.assign(rule, this.defaultRule(step.questions.find((question2) => question2.id === input.value)));
+            if (input.matches("[data-rule-operator]")) {
+              rule.operator = input.value;
+              if (rule.operator === "answered") delete rule.value;
+              else if (rule.value === void 0) rule.value = this.defaultRule(step.questions.find((question2) => question2.id === rule.questionId)).value;
+            }
+            if (input.matches("[data-rule-next]")) rule.nextStepId = input.value;
+            if (input.matches("[data-rule-value]")) {
+              const question2 = step.questions.find((question3) => question3.id === rule.questionId);
+              rule.value = question2.type === "rating" || question2.type === "nps" ? Number(input.value) : input.value;
+            }
+          }
+          composer == null ? void 0 : composer.updateBranching(branching);
+          this.sync();
+          return;
+        }
+        if (input.matches("[data-survey-allow-back],[data-survey-show-progress],[data-survey-submit-label]")) {
+          if (!this.options.flush()) return;
+          if (input.matches("[data-survey-submit-label]") && !input.value.trim()) {
+            this.options.error(["Submit label cannot be empty."]);
+            return;
+          }
+          this.survey.allowBack = this.root.querySelector("[data-survey-allow-back]").checked;
+          this.survey.showProgress = this.root.querySelector("[data-survey-show-progress]").checked;
+          this.survey.submitLabel = this.root.querySelector("[data-survey-submit-label]").value.trim();
+          this.recompile();
+          composer == null ? void 0 : composer.refreshSurvey();
+          this.options.changed();
+          return;
+        }
+        if (input.matches("[data-survey-step-heading]")) {
+          composer == null ? void 0 : composer.updateStepHeading(input.value);
+          this.sync();
+          return;
+        }
+        if (!question || !composer || !this.questionHost.contains(input)) return;
+        if (input.matches("[data-survey-font-size]")) {
+          composer.updateBlock({ fontSize: Number(input.value) });
+          return;
+        }
+        if (input.matches("[data-survey-question-color]")) {
+          composer.updateBlock({ color: input.value });
+          return;
+        }
+        const next = cloneOnsite(question);
+        const value = input.matches("[data-survey-question-type]") ? { ...newSurveyQuestion(input.value), id: question.id, label: question.label, required: question.required } : next;
+        if (input.matches("[data-survey-question-label]")) value.label = input.value;
+        if (input.matches("[data-survey-question-required]")) value.required = input.checked;
+        if ("options" in value && input.matches("[data-survey-options]")) {
+          const existing = value.options;
+          value.options = input.value.split("\n").map((label, index) => {
+            var _a2;
+            return { id: ((_a2 = existing[index]) == null ? void 0 : _a2.id) ?? onsiteId("option"), label };
+          });
+        }
+        if (value.type === "short_text" || value.type === "long_text") {
+          if (input.matches("[data-survey-placeholder]")) value.placeholder = input.value;
+          if (input.matches("[data-survey-max-length]")) value.maxLength = Number(input.value);
+        }
+        if (value.type === "rating") {
+          if (input.matches("[data-survey-rating-min]")) value.min = Number(input.value);
+          if (input.matches("[data-survey-rating-max]")) value.max = Number(input.value);
+        }
+        composer.updateQuestion(value);
+        this.sync();
+      };
+      this.onClick = (event) => {
+        var _a2;
+        const target = event.target instanceof Element ? event.target.closest("button") : null;
+        if (!target || !this.options.canEdit()) return;
+        const step = this.survey.steps[this.options.index()], composer = this.options.composer();
+        if (target.matches("[data-survey-add-rule]")) {
+          if (!step.questions.length) return;
+          composer == null ? void 0 : composer.updateBranching({ ...step.branching, rules: [...((_a2 = step.branching) == null ? void 0 : _a2.rules) ?? [], this.defaultRule(step.questions[0])] });
+          this.sync();
+          return;
+        }
+        if (target.matches("[data-survey-remove-rule]")) {
+          composer == null ? void 0 : composer.updateBranching({ ...step.branching, rules: step.branching.rules.filter((_, index2) => index2 !== Number(target.dataset.surveyRemoveRule)) });
+          this.sync();
+          return;
+        }
+        if (!this.dock.contains(target) || !this.options.flush()) return;
+        let index = this.options.index();
+        const steps = cloneOnsite(this.survey.steps);
+        if (target.matches("[data-survey-add-step]")) {
+          if (steps.length >= 20) return;
+          steps.push(newSurveyStep(this.survey.submitLabel));
+          index = steps.length - 1;
+        }
+        if (target.matches("[data-survey-duplicate-step]")) {
+          if (steps.length >= 20) return;
+          steps.splice(index + 1, 0, duplicateSurveyStep(steps[index], this.survey.submitLabel));
+          index++;
+        }
+        if (target.matches("[data-survey-move]")) {
+          const next = index + Number(target.dataset.surveyMove);
+          if (next < 0 || next >= steps.length) return;
+          [steps[index], steps[next]] = [steps[next], steps[index]];
+          index = next;
+        }
+        if (target.matches("[data-survey-delete-step]")) {
+          if (steps.length === 1) return;
+          const removed = steps.splice(index, 1)[0].id;
+          index = Math.min(index, steps.length - 1);
+          steps.forEach((step2) => {
+            if (step2.branching) {
+              step2.branching.rules = step2.branching.rules.filter((rule) => rule.nextStepId !== removed);
+              if (step2.branching.defaultNextStepId === removed) delete step2.branching.defaultNextStepId;
+            }
+          });
+        }
+        const errors = surveyBranchErrors({ ...this.survey, steps });
+        if (errors.length) {
+          this.options.error(errors);
+          return;
+        }
+        this.survey.steps = steps;
+        this.dock.querySelector("details").open = false;
+        this.options.stepsChanged(index);
+      };
+      this.questionHost.dataset.block = "question";
+      this.questionHost.hidden = true;
+      this.questionHost.innerHTML = `<label>Question type<select data-survey-question-type>${QUESTION_TYPES.map((type) => `<option value="${type}">${LABELS[type]}</option>`).join("")}</select></label><label>Question label<input data-survey-question-label aria-label="Question label" maxlength="500"></label><label class="check"><input type="checkbox" data-survey-question-required> Required</label><label data-question-options>Choices (one per line)<textarea data-survey-options rows="4" maxlength="4000"></textarea></label><div data-question-text><label>Placeholder<input data-survey-placeholder maxlength="500"></label><label>Answer length limit<input type="number" data-survey-max-length min="1" max="10000"></label></div><div data-question-rating><label>Minimum<input type="number" data-survey-rating-min min="0" max="99"></label><label>Maximum<input type="number" data-survey-rating-max min="1" max="100"></label></div><label>Question font size<input data-survey-font-size type="number" min="10" max="36"></label><label>Question color<input data-survey-question-color type="color"></label>`;
+      this.stepHost.dataset.surveyStepInspector = "";
+      this.stepHost.innerHTML = '<label>Survey step heading<input data-survey-step-heading maxlength="160"></label><label class="check"><input type="checkbox" data-survey-allow-back> Allow Back</label><label class="check"><input type="checkbox" data-survey-show-progress> Show progress</label><label>Submit label<input data-survey-submit-label maxlength="80"></label><details data-survey-branch-section><summary>After this step</summary><label>Default next step<select data-survey-default-next></select></label><div data-survey-rules></div><button type="button" class="secondary-button" data-survey-add-rule>Add answer rule</button><small>First matching rule wins. Destinations can only move forward.</small></details>';
+      this.dock.dataset.surveyDock = "";
+      this.dock.innerHTML = '<button type="button" class="secondary-button compact" data-survey-add-step aria-label="Add Survey step">＋</button><details><summary aria-label="Survey step actions">⋯</summary><div><button type="button" data-survey-duplicate-step>Duplicate step</button><button type="button" data-survey-move="-1">Move step earlier</button><button type="button" data-survey-move="1">Move step later</button><button type="button" data-survey-delete-step>Delete step</button></div></details>';
+      this.style.textContent = "[data-survey-step-inspector],[data-block=question]{display:grid;gap:8px}[data-survey-options]{box-sizing:border-box;width:100%;border:1px solid #d7dce3;border-radius:6px;padding:7px;font:12px/1.5 ui-sans-serif,system-ui}[data-survey-branch-section]>summary{cursor:pointer;font-weight:600;margin:4px 0 8px}[data-survey-rule]{display:grid;grid-template-columns:minmax(0,1fr);gap:5px;padding:8px 0;border-top:1px solid #e5e7eb}[data-survey-step-inspector] small{display:block;color:#64748b;font-size:11px;margin-top:6px}.step-navigator>[data-survey-dock]{display:flex;flex:none;gap:4px;align-items:center}[data-survey-dock][hidden]{display:none!important}[data-survey-dock] details>summary{list-style:none;cursor:pointer;border:1px solid #d7dce3;border-radius:6px;padding:3px 7px}[data-survey-dock] details>div{position:absolute;bottom:calc(100% + 6px);right:4px;display:grid;gap:4px;min-width:150px;padding:6px;background:#fff;border:1px solid #d7dce3;border-radius:8px;box-shadow:0 4px 18px #0f172a20}[data-survey-dock] details button{border:0;background:#fff;padding:7px;text-align:left;font:12px ui-sans-serif,system-ui;cursor:pointer}";
+      (_a = root.querySelector("[data-inspector=block]")) == null ? void 0 : _a.append(this.questionHost);
+      (_b = root.querySelector("[data-inspector=step]")) == null ? void 0 : _b.append(this.stepHost);
+      (_c = root.querySelector("[data-guide]")) == null ? void 0 : _c.append(this.dock);
+      root.append(this.style);
+      root.addEventListener("change", this.onChange);
+      root.addEventListener("click", this.onClick);
+    }
+    sync() {
+      var _a, _b, _c;
+      const step = this.survey.steps[this.options.index()], composer = this.options.composer();
+      if (!step) return;
+      this.dock.hidden = !this.options.canEdit();
+      this.value("[data-survey-step-heading]", step.content.heading);
+      this.check("[data-survey-allow-back]", this.survey.allowBack);
+      this.check("[data-survey-show-progress]", this.survey.showProgress);
+      this.value("[data-survey-submit-label]", this.survey.submitLabel);
+      this.root.querySelectorAll("[data-step] small").forEach((label, index) => {
+        if (this.survey.steps[index]) label.textContent = this.survey.steps[index].content.heading || `Step ${index + 1}`;
+      });
+      const question = composer == null ? void 0 : composer.getSelectedQuestion();
+      this.questionHost.hidden = !question;
+      if (question) {
+        this.value("[data-survey-question-type]", question.type);
+        this.value("[data-survey-question-label]", question.label);
+        this.check("[data-survey-question-required]", Boolean(question.required));
+        this.questionHost.querySelector("[data-question-options]").hidden = !("options" in question);
+        this.questionHost.querySelector("[data-question-text]").hidden = !["short_text", "long_text"].includes(question.type);
+        this.questionHost.querySelector("[data-question-rating]").hidden = question.type !== "rating";
+        if ("options" in question) this.value("[data-survey-options]", question.options.map((option) => option.label).join("\n"));
+        if (question.type === "short_text" || question.type === "long_text") {
+          this.value("[data-survey-placeholder]", question.placeholder ?? "");
+          this.value("[data-survey-max-length]", String(question.maxLength ?? 1e4));
+        }
+        if (question.type === "rating") {
+          this.value("[data-survey-rating-min]", String(question.min));
+          this.value("[data-survey-rating-max]", String(question.max));
+        }
+        const block = composer == null ? void 0 : composer.getSelectedBlock();
+        if ((block == null ? void 0 : block.type) === "question") {
+          this.value("[data-survey-font-size]", String(block.fontSize));
+          this.value("[data-survey-question-color]", block.color ?? "#111827");
+        }
+      }
+      const select = this.root.querySelector("[data-survey-default-next]");
+      const choices = this.destinations();
+      const markup = '<option value="">Next in order</option>' + choices;
+      if (select.innerHTML !== markup) select.innerHTML = markup;
+      this.value("[data-survey-default-next]", ((_a = step.branching) == null ? void 0 : _a.defaultNextStepId) ?? "");
+      const rules = this.root.querySelector("[data-survey-rules]");
+      const signature = JSON.stringify([step.id, step.questions, step.branching, this.survey.steps.map((step2) => [step2.id, step2.content.heading])]);
+      if (rules.dataset.signature !== signature) {
+        rules.dataset.signature = signature;
+        rules.innerHTML = (((_b = step.branching) == null ? void 0 : _b.rules) ?? []).map((rule, index) => this.ruleMarkup(rule, index)).join("");
+      }
+      this.root.querySelector("[data-survey-add-rule]").disabled = !step.questions.length || (((_c = step.branching) == null ? void 0 : _c.rules.length) ?? 0) >= 10;
+    }
+    destinations() {
+      return this.survey.steps.slice(this.options.index() + 1).map((step, offset) => `<option value="${escape(step.id)}">${this.options.index() + offset + 2}. ${escape(step.content.heading || "Survey step")}</option>`).join("") + '<option value="submit">Submit Survey</option>';
+    }
+    ruleMarkup(rule, index) {
+      const questions = this.survey.steps[this.options.index()].questions, question = questions.find((question2) => question2.id === rule.questionId);
+      const operators = (question == null ? void 0 : question.type) === "multiple_choice" ? [["includes", "includes"], ["answered", "has an answer"]] : (question == null ? void 0 : question.type) === "rating" || (question == null ? void 0 : question.type) === "nps" ? [["equals", "equals"], ["not_equals", "does not equal"], ["gte", "is at least"], ["lte", "is at most"], ["answered", "has an answer"]] : [["equals", "equals"], ["not_equals", "does not equal"], ["answered", "has an answer"]];
+      const value = rule.operator === "answered" ? "" : question && "options" in question ? `<label>Answer<select data-rule-value>${question.options.map((option) => `<option value="${escape(option.id)}"${rule.value === option.id ? " selected" : ""}>${escape(option.label)}</option>`).join("")}</select></label>` : `<label>Answer<input data-rule-value value="${escape(String(rule.value ?? ""))}"${(question == null ? void 0 : question.type) === "rating" || (question == null ? void 0 : question.type) === "nps" ? ' type="number"' : ""}></label>`;
+      return `<div data-survey-rule="${index}"><label>Question<select data-rule-question>${questions.map((question2) => `<option value="${escape(question2.id)}"${question2.id === rule.questionId ? " selected" : ""}>${escape(question2.label)}</option>`).join("")}</select></label><label>Condition<select data-rule-operator>${operators.map(([key, label]) => `<option value="${key}"${key === rule.operator ? " selected" : ""}>${label}</option>`).join("")}</select></label>${value}<label>Go to<select data-rule-next>${this.destinations().replace(`value="${escape(rule.nextStepId)}"`, `value="${escape(rule.nextStepId)}" selected`)}</select></label><button class="secondary-button compact" type="button" data-survey-remove-rule="${index}">Remove rule</button></div>`;
+    }
+    defaultRule(question) {
+      var _a;
+      return { questionId: question.id, operator: question.type === "multiple_choice" ? "includes" : "equals", value: "options" in question ? question.options[0].id : question.type === "rating" ? question.min : question.type === "nps" ? 0 : "", nextStepId: ((_a = this.survey.steps[this.options.index() + 1]) == null ? void 0 : _a.id) ?? "submit" };
+    }
+    recompile() {
+      this.survey.steps.forEach((step) => {
+        const doc = onsiteDocumentFromBuilder(step.builder);
+        if (doc && step.builder) Object.assign(step.content, applyOnsiteDocument(step.builder, doc, "survey", { questions: step.questions, submitLabel: this.survey.submitLabel }).content);
+      });
+    }
+    value(selector, value) {
+      const input = this.root.querySelector(selector);
+      if (input && this.root.activeElement !== input) input.value = value;
+    }
+    check(selector, value) {
+      const input = this.root.querySelector(selector);
+      if (input) input.checked = value;
+    }
+    destroy() {
+      this.root.removeEventListener("change", this.onChange);
+      this.root.removeEventListener("click", this.onClick);
+      this.questionHost.remove();
+      this.stepHost.remove();
+      this.dock.remove();
+      this.style.remove();
+    }
+  }
+  function escape(value) {
+    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
   function getGuideStepPattern(step) {
     return step.pattern ?? "anchored_card";
   }
@@ -75,32 +1083,6 @@
         }
       }, 0);
     }
-  }
-  const BUILDER_ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "HEADER", "H1", "H2", "H3", "H4", "P", "SPAN", "BR", "BUTTON", "IMG", "HR", "LABEL", "STRONG", "EM", "U", "A", "UL", "OL", "LI"]);
-  const BUILDER_SURVEY_INPUT_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA"]);
-  const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "href", "target", "rel", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-document-version", "data-movcues-node-id", "data-movcues-block-id", "data-movcues-sizing", "data-movcues-responsive-stack", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
-  const BUILDER_BLOCKED_TAGS = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO|SOURCE)$/i;
-  const BUILDER_UNSAFE_CSS = /@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i;
-  function builderImageUrlIsSafe(value) {
-    return !value || !/[\u0000-\u0020\u007f]/.test(value) && /^(https?:\/\/|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(value);
-  }
-  function builderLinkUrlIsSafe(value) {
-    return !/[\u0000-\u001f\u007f]/.test(value) && /^(https?:\/\/|mailto:|tel:|\/|#|\?|\.\.?\/)/i.test(value.trim());
-  }
-  function builderInputTypeIsSafe(value) {
-    return ["text", "radio", "checkbox", "number"].includes(value.toLowerCase());
-  }
-  function safeScopedBuilderCss(input) {
-    const css = input.replace(/\/\*[\s\S]*?\*\//g, "").trim();
-    if (BUILDER_UNSAFE_CSS.test(css)) return null;
-    const rule = /([^{}]+)\{/g;
-    let match;
-    while ((match = rule.exec(css)) !== null) {
-      const prelude = match[1].trim();
-      if (!prelude || prelude.startsWith("@")) continue;
-      if (prelude.split(",").some((selector) => !selector.trim().includes(".movcues-widget"))) return null;
-    }
-    return css;
   }
   function mountBuilderContent(root, card, builder, callbacks, allowSurveyInputs = false) {
     const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
@@ -373,8 +1355,8 @@ ${ISOLATION_CSS}`;
     if (!target) return null;
     for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
       try {
-        const matches = document.querySelectorAll(selector);
-        if (matches.length === 1) return matches[0];
+        const matches2 = document.querySelectorAll(selector);
+        if (matches2.length === 1) return matches2[0];
       } catch {
       }
     }
@@ -443,9 +1425,9 @@ ${ISOLATION_CSS}`;
     const mountedBuilder = Boolean(builder && mountBuilderContent(root, card, builder, callbacks, widgetType === "survey"));
     if (mountedBuilder && widgetType) applyBuilderSizeContent(card, widgetType, design);
     if (!mountedBuilder) {
-      const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText$2(content.primaryAction.label)}</button>` : "";
-      const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText$2(content.secondaryAction.label)}</button>` : "";
-      card.insertAdjacentHTML("beforeend", `<div class="legacy-content"><h2>${escapeText$2(content.heading)}</h2><p>${escapeText$2(content.body)}</p><footer>${secondary}${primary}</footer></div>`);
+      const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText$1(content.primaryAction.label)}</button>` : "";
+      const secondary = content.secondaryAction ? `<button class="secondary" data-secondary>${escapeText$1(content.secondaryAction.label)}</button>` : "";
+      card.insertAdjacentHTML("beforeend", `<div class="legacy-content"><h2>${escapeText$1(content.heading)}</h2><p>${escapeText$1(content.body)}</p><footer>${secondary}${primary}</footer></div>`);
       (_a = card.querySelector("[data-primary]")) == null ? void 0 : _a.addEventListener("click", callbacks.onPrimary);
       (_b = card.querySelector("[data-secondary]")) == null ? void 0 : _b.addEventListener("click", callbacks.onSecondary);
     }
@@ -677,7 +1659,7 @@ ${ISOLATION_CSS}`;
   function intersectsViewport(rect) {
     return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
   }
-  function escapeText$2(value) {
+  function escapeText$1(value) {
     const span = document.createElement("span");
     span.textContent = value;
     return span.innerHTML;
@@ -870,7 +1852,15 @@ ${ISOLATION_CSS}`;
       this.stepIndex = 0;
       this.answers = {};
       this.root = null;
-      this.submitting = false;
+      this.busy = false;
+      this.completed = false;
+      this.generation = 0;
+      this.retry = null;
+      this.dismiss = () => {
+        if (!this.busy) void this.run(async () => {
+          await this.callbacks.onDismiss();
+        });
+      };
     }
     render(root, content, design, behavior, survey, callbacks, requestedStepId) {
       if (!survey.steps.length) return null;
@@ -882,10 +1872,24 @@ ${ISOLATION_CSS}`;
       this.callbacks = callbacks;
       const requested = requestedStepId ? survey.steps.findIndex((step) => step.id === requestedStepId) : -1;
       this.stepIndex = requested >= 0 ? requested : 0;
-      return this.renderStep();
+      this.generation++;
+      this.completed = false;
+      this.answers = {};
+      this.busy = false;
+      this.retry = null;
+      const card = this.renderStep();
+      if (callbacks.onLoad) void this.run(async (isCurrent) => {
+        const saved = await callbacks.onLoad();
+        if (!isCurrent()) return;
+        this.answers = saved.answers;
+        const index = survey.steps.findIndex((step) => step.id === saved.currentStepId);
+        if (index >= 0) this.stepIndex = index;
+        if (!saved.closed) this.renderStep();
+      });
+      return card;
     }
     renderStep() {
-      var _a, _b, _c;
+      var _a, _b, _c, _d;
       const root = this.root;
       const step = this.survey.steps[this.stepIndex];
       (_b = (_a = this.callbacks).onStepChange) == null ? void 0 : _b.call(_a, step.id);
@@ -895,7 +1899,7 @@ ${ISOLATION_CSS}`;
       });
       const content = { heading: step.content.heading || this.content.heading, body: step.content.body || this.content.body };
       const stepDesign = step.size ? { ...this.design, size: step.size } : this.design;
-      const card = this.modal.render(root, content, stepDesign, this.behavior, { onDismiss: this.callbacks.onDismiss, onPrimary: this.callbacks.onDismiss, onSecondary: this.callbacks.onDismiss }, step.builder, "survey");
+      const card = this.modal.render(root, content, stepDesign, this.behavior, { onDismiss: this.dismiss, onPrimary: this.dismiss, onSecondary: this.dismiss }, step.builder, "survey");
       let surface = card.querySelector(".movcues-widget");
       if (!surface) {
         (_c = card.querySelector(".legacy-content")) == null ? void 0 : _c.remove();
@@ -905,21 +1909,27 @@ ${ISOLATION_CSS}`;
       }
       surface.dataset.movcuesSurveyStepId = step.id;
       this.syncQuestions(surface, step.questions);
+      if (!surface.querySelector(".movcues-survey-validation")) {
+        const status = document.createElement("p");
+        status.className = "movcues-survey-validation";
+        surface.append(status);
+      }
+      (_d = surface.querySelector(".movcues-survey-validation")) == null ? void 0 : _d.setAttribute("role", "alert");
       this.syncNavigation(surface);
       return card;
     }
     syncQuestions(surface, questions) {
-      var _a;
       const ids = new Set(questions.map((question) => question.id));
       surface.querySelectorAll("[data-movcues-question-id]").forEach((node) => {
         if (!ids.has(node.dataset.movcuesQuestionId ?? "")) node.remove();
       });
-      let navigation = ((_a = surface.querySelector("[data-movcues-survey-action]")) == null ? void 0 : _a.parentElement) ?? null;
+      let navigation = surface.querySelector("[data-movcues-survey-action]");
+      while (navigation && navigation.parentElement !== surface) navigation = navigation.parentElement;
       for (const question of questions) {
-        const matches = Array.from(surface.querySelectorAll(`[data-movcues-question-id="${cssEscape(question.id)}"]`));
-        matches.slice(1).forEach((node2) => node2.remove());
-        const node = matches[0] ?? createQuestionNode(question);
-        if (!matches[0]) surface.insertBefore(node, navigation);
+        const matches2 = Array.from(surface.querySelectorAll(`[data-movcues-question-id="${cssEscape(question.id)}"]`));
+        matches2.slice(1).forEach((node2) => node2.remove());
+        const node = matches2[0] ?? createQuestionNode(question);
+        if (!matches2[0]) surface.insertBefore(node, navigation);
         node.dataset.movcuesQuestionType = question.type;
         node.classList.add("movcues-survey-question", `movcues-survey-question--${question.type}`);
         this.bindQuestion(node, question);
@@ -957,12 +1967,15 @@ ${ISOLATION_CSS}`;
           };
           update();
           control.onclick = () => {
+            var _a2, _b;
             if (!allowed.includes(optionId)) return;
             if (question.type === "multiple_choice") {
               const current = Array.isArray(this.answers[question.id]) ? this.answers[question.id] : [];
               this.answers[question.id] = current.includes(optionId) ? current.filter((value) => value !== optionId) : [...current, optionId];
             } else this.answers[question.id] = question.type === "rating" || question.type === "nps" ? Number(optionId) : optionId;
+            (_b = (_a2 = this.callbacks).onAnswersChange) == null ? void 0 : _b.call(_a2, { ...this.answers });
             node.classList.remove("has-error");
+            this.syncNavigation(this.root.querySelector(".movcues-widget"));
             controls.forEach((item) => {
               const value = item.dataset.movcuesOptionId;
               const answer = this.answers[question.id];
@@ -985,12 +1998,17 @@ ${ISOLATION_CSS}`;
       input.placeholder = question.placeholder ?? "";
       if (question.maxLength) input.maxLength = question.maxLength;
       input.oninput = () => {
+        var _a2, _b;
         this.answers[question.id] = input.value.slice(0, question.maxLength ?? 1e4);
         node.classList.remove("has-error");
+        (_b = (_a2 = this.callbacks).onAnswersChange) == null ? void 0 : _b.call(_a2, { ...this.answers });
+        this.syncNavigation(this.root.querySelector(".movcues-widget"));
       };
     }
     syncNavigation(surface) {
-      const final = this.stepIndex === this.survey.steps.length - 1;
+      const nextIndex = nextSurveyStep(this.survey, this.stepIndex, this.answers);
+      const final = nextIndex === null;
+      const path = surveyPath(this.survey, this.answers), previousIndex = path[path.indexOf(this.stepIndex) - 1];
       const step = this.survey.steps[this.stepIndex];
       const buttons = Array.from(surface.querySelectorAll("[data-movcues-survey-action]"));
       const back = buttons.filter((button) => button.dataset.movcuesSurveyAction === "back");
@@ -998,57 +2016,89 @@ ${ISOLATION_CSS}`;
       const submit = buttons.filter((button) => button.dataset.movcuesSurveyAction === "submit");
       const legacyControls = Boolean(surface.querySelector("[data-movcues-survey-controls]"));
       for (const button of back) {
-        button.hidden = !this.survey.allowBack || this.stepIndex === 0;
+        button.hidden = !this.survey.allowBack || previousIndex === void 0;
         button.onclick = () => {
-          if (!this.survey.allowBack || this.stepIndex === 0) return;
-          void this.callbacks.onProgress({ ...this.answers }, step.id, "back");
-          this.stepIndex--;
-          this.renderStep();
+          if (this.busy || this.completed || !this.survey.allowBack || previousIndex === void 0) return;
+          void this.run(async (isCurrent) => {
+            await this.callbacks.onProgress({ ...this.answers }, step.id, "back", this.survey.steps[previousIndex].id);
+            if (!isCurrent()) return;
+            this.stepIndex = previousIndex;
+            this.renderStep();
+          });
         };
       }
       for (const button of next) {
         button.hidden = final;
-        button.onclick = async () => {
-          if (!this.validateStep()) return;
-          this.setDisabled(next, true);
-          try {
-            await this.callbacks.onProgress({ ...this.answers }, step.id, "next");
-            this.stepIndex++;
+        button.onclick = () => {
+          if (this.busy || this.completed || nextIndex === null || !this.validateStep()) return;
+          void this.run(async (isCurrent) => {
+            this.answers = answersOnSurveyPath(this.survey, this.answers);
+            await this.callbacks.onProgress({ ...this.answers }, step.id, "next", this.survey.steps[nextIndex].id);
+            if (!isCurrent()) return;
+            this.stepIndex = nextIndex;
             this.renderStep();
-          } finally {
-            this.setDisabled(next, false);
-          }
+          });
         };
       }
       for (const button of submit) {
         button.hidden = !final;
         if (legacyControls) button.textContent = this.survey.submitLabel;
-        button.onclick = async () => {
-          if (this.submitting || !this.validateAll()) return;
-          this.submitting = true;
-          this.setDisabled(submit, true);
-          try {
+        button.onclick = () => {
+          if (this.busy || this.completed || !this.validateAll()) return;
+          void this.run(async (isCurrent) => {
+            this.answers = answersOnSurveyPath(this.survey, this.answers);
             await this.callbacks.onSubmit({ ...this.answers }, step.id);
-          } finally {
-            this.submitting = false;
-            this.setDisabled(submit, false);
-          }
+            if (isCurrent()) this.completed = true;
+          });
         };
       }
       this.syncProgress(surface);
     }
-    setDisabled(buttons, disabled) {
-      buttons.forEach((button) => {
-        if (button.isConnected) button.disabled = disabled;
+    async run(operation) {
+      var _a;
+      if (this.busy || !this.root) return;
+      const generation = this.generation;
+      this.busy = true;
+      this.retry = operation;
+      this.setBusy(true);
+      (_a = this.root.querySelector("[data-movcues-survey-retry]")) == null ? void 0 : _a.remove();
+      try {
+        await operation(() => generation === this.generation && Boolean(this.root));
+        if (generation === this.generation) this.retry = null;
+      } catch {
+        if (generation !== this.generation || !this.root) return;
+        const status = this.root.querySelector(".movcues-survey-validation");
+        if (status) {
+          status.textContent = "Couldn't save your answers. They are still here. Try again.";
+          const retry = document.createElement("button");
+          retry.type = "button";
+          retry.dataset.movcuesSurveyRetry = "";
+          retry.textContent = "Retry";
+          retry.onclick = () => {
+            if (this.retry) void this.run(this.retry);
+          };
+          status.append(" ", retry);
+        }
+      } finally {
+        if (generation === this.generation) {
+          this.busy = false;
+          this.setBusy(false);
+        }
+      }
+    }
+    setBusy(value) {
+      var _a;
+      (_a = this.root) == null ? void 0 : _a.querySelectorAll("[data-movcues-survey-action],[data-movcues-option-id],[data-movcues-question-input]").forEach((control) => {
+        control.disabled = value || this.completed;
       });
     }
     syncProgress(surface) {
       const progress = surface.querySelector("[data-movcues-survey-progress]");
       if (progress) progress.hidden = !this.survey.showProgress;
       const progressLabel = progress == null ? void 0 : progress.querySelector("span:not([data-movcues-survey-progress-bar])");
-      if (progressLabel && !progressLabel.querySelector("[data-movcues-survey-progress-bar]")) progressLabel.textContent = `Step ${this.stepIndex + 1} of ${this.survey.steps.length}`;
+      if (progressLabel && !progressLabel.querySelector("[data-movcues-survey-progress-bar]")) progressLabel.textContent = `Step ${surveyPath(this.survey, this.answers).indexOf(this.stepIndex) + 1} of ${surveyPath(this.survey, this.answers).length}`;
       const bar = surface.querySelector("[data-movcues-survey-progress-bar]");
-      if (bar) bar.style.width = `${(this.stepIndex + 1) / this.survey.steps.length * 100}%`;
+      if (bar) bar.style.width = `${(surveyPath(this.survey, this.answers).indexOf(this.stepIndex) + 1) / surveyPath(this.survey, this.answers).length * 100}%`;
     }
     validateStep() {
       return this.validateQuestions(this.survey.steps[this.stepIndex].questions);
@@ -1056,7 +2106,8 @@ ${ISOLATION_CSS}`;
     validateAll() {
       let valid = true;
       let currentValid = true;
-      for (const step of this.survey.steps) {
+      for (const index of surveyPath(this.survey, this.answers)) {
+        const step = this.survey.steps[index];
         const stepValid = this.validateQuestions(step.questions, step === this.survey.steps[this.stepIndex]);
         if (step === this.survey.steps[this.stepIndex]) currentValid = stepValid;
         if (!stepValid) valid = false;
@@ -1080,8 +2131,10 @@ ${ISOLATION_CSS}`;
       return missing.length === 0;
     }
     destroy() {
+      this.generation++;
       this.modal.destroy();
       this.root = null;
+      this.retry = null;
     }
   }
   function createQuestionNode(question) {
@@ -1223,8 +2276,8 @@ ${ISOLATION_CSS}`;
   function findUniqueTarget(target) {
     for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
       try {
-        const matches = document.querySelectorAll(selector);
-        if (matches.length === 1) return matches[0];
+        const matches2 = document.querySelectorAll(selector);
+        if (matches2.length === 1) return matches2[0];
       } catch {
       }
     }
@@ -1345,9 +2398,9 @@ ${ISOLATION_CSS}`;
         const root = this.root(experience.id, { ...definition.behavior, layer: ((_a = selectedStep == null ? void 0 : selectedStep.behavior) == null ? void 0 : _a.layer) ?? definition.behavior.layer });
         const renderer = new SurveyRenderer();
         this.renderer = renderer;
-        renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId, direction) => {
+        renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onLoad: callbacks.onSurveyLoad, onAnswersChange: callbacks.onSurveyAnswersChange, onProgress: (answers, stepId, direction, destinationStepId) => {
           var _a2;
-          return (_a2 = callbacks.onSurveyProgress) == null ? void 0 : _a2.call(callbacks, answers, stepId, direction);
+          return (_a2 = callbacks.onSurveyProgress) == null ? void 0 : _a2.call(callbacks, answers, stepId, direction, destinationStepId);
         }, onSubmit: (answers, stepId) => {
           var _a2;
           return (_a2 = callbacks.onSurveySubmit) == null ? void 0 : _a2.call(callbacks, answers, stepId);
@@ -1860,8 +2913,8 @@ ${ISOLATION_CSS}`;
   }
   function uniquelyMatches(selector, selected) {
     try {
-      const matches = document.querySelectorAll(selector);
-      return matches.length === 1 && matches[0] === selected;
+      const matches2 = document.querySelectorAll(selector);
+      return matches2.length === 1 && matches2[0] === selected;
     } catch {
       return false;
     }
@@ -2661,528 +3714,6 @@ ${ISOLATION_CSS}`;
       Object.assign(this.outline.style, { left: `${rect.left - 2}px`, top: `${rect.top - 2}px`, width: `${rect.width + 4}px`, height: `${rect.height + 4}px` });
     }
   }
-  const ONSITE_LIMITS = {
-    maxDepth: 8,
-    maxNodes: 120,
-    maxRichText: 1e4,
-    maxImageUrl: 2e3,
-    maxInlineImage: 65536,
-    maxSerializedBytes: 25e4,
-    minFixedSize: 24,
-    maxFixedSize: 1200
-  };
-  const ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{2,63}$/;
-  const COLOR_PATTERN = /^(#[0-9a-f]{3,8}|(?:rgb|hsl)a?\([0-9.,%\s-]+\)|[a-z]{1,20})$/i;
-  const SAFE_INLINE_TAGS = /* @__PURE__ */ new Set(["BR", "STRONG", "EM", "U", "A", "UL", "OL", "LI"]);
-  const ICONS = { check: "✓", star: "★", info: "ℹ", warning: "⚠", sparkles: "✦", arrow: "→", heart: "♥", rocket: "🚀" };
-  let idSequence = 0;
-  function onsiteId(prefix = "cell") {
-    idSequence = (idSequence + 1) % 65535;
-    const random = typeof crypto !== "undefined" && "getRandomValues" in crypto ? Array.from(crypto.getRandomValues(new Uint32Array(2))).map((value) => value.toString(36)).join("") : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
-    return `${prefix}_${random}${idSequence.toString(36)}`.slice(0, 64);
-  }
-  function emptyCell(block) {
-    return { type: "cell", id: onsiteId("cell"), direction: "column", sizing: { mode: "flexible", weight: 1 }, align: "stretch", justify: "start", gap: 12, padding: { top: 0, right: 0, bottom: 0, left: 0 }, ...block ? { block } : {} };
-  }
-  function createBlock(type, guide = false) {
-    const id = onsiteId("block");
-    if (type === "heading") return { id, type, html: "A clear heading", level: 2, fontSize: 24, weight: 600, lineHeight: 1.25 };
-    if (type === "text") return { id, type, html: "Add supporting text for your visitors.", fontSize: 15, weight: 400, lineHeight: 1.5 };
-    if (type === "button") return { id, type, label: guide ? "Next" : "Got it", action: { id: onsiteId("action"), type: guide ? "next_step" : "dismiss" }, variant: "primary", radius: 8, paddingX: 16, paddingY: 9, width: "hug", align: "right" };
-    if (type === "image") return { id, type, src: "", alt: "", fit: "cover", width: 100, radius: 8, align: "center" };
-    if (type === "divider") return { id, type, orientation: "horizontal", thickness: 1, color: "#dbe2ea" };
-    if (type === "spacer") return { id, type, size: 24 };
-    return { id, type: "icon", icon: "sparkles", size: 28, color: "#2563eb", align: "center" };
-  }
-  function createOnsiteDocument(guide = false) {
-    const heading = emptyCell(createBlock("heading", guide));
-    const text = emptyCell(createBlock("text", guide));
-    const button = emptyCell(createBlock("button", guide));
-    return { schemaVersion: 2, id: onsiteId("document"), root: { ...emptyCell(), direction: "column", gap: 12, padding: { top: 20, right: 20, bottom: 20, left: 20 }, children: [heading, text, button] } };
-  }
-  function onsiteDocumentFromBuilder(builder) {
-    var _a;
-    const movcues = (_a = builder == null ? void 0 : builder.projectData) == null ? void 0 : _a.movcues;
-    if (!movcues || typeof movcues !== "object") return null;
-    const document2 = movcues.onsiteDocument;
-    return isOnsiteDocument(document2) ? document2 : null;
-  }
-  function applyOnsiteDocument(builder, document2, widgetType) {
-    const compiled = compileOnsiteDocument(document2, widgetType);
-    builder.version = 1;
-    builder.projectData = { ...builder.projectData, movcues: { ...asRecord(builder.projectData.movcues), authoringSurface: "onsite", schemaVersion: 2, onsiteDocument: document2, actionBindings: compiled.actionBindings } };
-    builder.html = compiled.html;
-    builder.css = compiled.css;
-    return compiled;
-  }
-  function compileOnsiteDocument(document2, widgetType) {
-    var _a;
-    const validation = validateOnsiteDocument(document2);
-    if (!validation.valid) throw new Error(validation.errors.join(" "));
-    const css = [
-      ".movcues-widget{box-sizing:border-box;width:100%;max-width:100%;min-width:0;overflow-wrap:anywhere;background:var(--movcues-bg);color:var(--movcues-fg)}",
-      ".movcues-widget *{box-sizing:border-box}",
-      ".movcues-widget .movcues-cell{display:flex;min-width:0;max-width:100%}",
-      ".movcues-widget .movcues-block{min-width:0;max-width:100%;margin:0}",
-      ".movcues-widget .movcues-block img{display:block;max-width:100%}",
-      ".movcues-widget .movcues-button{border:0;font:600 14px/1.2 ui-sans-serif,system-ui,sans-serif;cursor:pointer}",
-      ".movcues-widget .movcues-button--primary{background:var(--movcues-primary);color:#fff}",
-      ".movcues-widget .movcues-button--secondary{background:transparent;color:inherit}",
-      ".movcues-widget .movcues-button--outline{background:transparent;color:inherit;border:1px solid currentColor}",
-      ".movcues-widget .movcues-block--full{width:100%}"
-    ];
-    const html = renderCell(document2.root, css);
-    css.push('@media(max-width:480px){.movcues-widget [data-movcues-responsive-stack="true"]{flex-direction:column!important}.movcues-widget [data-movcues-sizing="fixed"]{max-width:100%!important}.movcues-widget .movcues-button{min-height:40px}.movcues-widget img{height:auto!important}}');
-    const blocks = listBlocks(document2.root);
-    const firstHeading = blocks.find((block) => block.type === "heading");
-    const text = blocks.filter((block) => block.type === "text").map((block) => richTextToPlain(block.html)).join("\n").slice(0, 2e3);
-    const actions = blocks.filter((block) => block.type === "button");
-    const actionBindings = Object.fromEntries(actions.map((block) => [block.action.id, block.action]));
-    const legacy = actions.slice(0, 2).map((block) => ({ label: block.label, type: block.action.type === "previous_step" ? "dismiss" : block.action.type, ..."url" in block.action ? { url: block.action.url } : {}, ..."eventName" in block.action ? { eventName: block.action.eventName } : {} }));
-    const content = {
-      heading: firstHeading ? richTextToPlain(firstHeading.html).slice(0, 160) : "",
-      body: text,
-      ...legacy[0] ? { primaryAction: legacy[0] } : {},
-      ...((_a = legacy[1]) == null ? void 0 : _a.type) === "dismiss" ? { secondaryAction: { label: legacy[1].label, type: "dismiss" } } : {}
-    };
-    return { html: `<section class="movcues-widget movcues-widget--${escapeAttribute(widgetType)}" data-movcues-widget-type="${escapeAttribute(widgetType)}" data-movcues-document-version="2">${html}</section>`, css: css.join(""), content, actionBindings };
-  }
-  function renderCell(cell, css, depth) {
-    var _a;
-    const selector = `.movcues-widget [data-movcues-node-id="${cell.id}"]`;
-    const sizing = cell.sizing.mode === "flexible" ? `flex:${round(cell.sizing.weight)} 1 0` : cell.sizing.mode === "hug" ? "flex:0 0 auto" : `flex:0 1 ${cell.sizing.value}px`;
-    const style = cell.style ?? {};
-    css.push(`${selector}{${sizing};flex-direction:${cell.direction};align-items:${cell.align};justify-content:${cell.justify};gap:${cell.gap}px;padding:${cell.padding.top}px ${cell.padding.right}px ${cell.padding.bottom}px ${cell.padding.left}px;${style.background ? `background:${style.background};` : ""}${style.borderWidth ? `border:${style.borderWidth}px solid ${style.borderColor ?? "#dbe2ea"};` : ""}${style.borderRadius ? `border-radius:${style.borderRadius}px;` : ""}}`);
-    const children = ((_a = cell.children) == null ? void 0 : _a.map((child) => renderCell(child, css)).join("")) ?? (cell.block ? renderBlock(cell.block, css) : "");
-    return `<div class="movcues-cell" data-movcues-node-id="${cell.id}" data-movcues-sizing="${cell.sizing.mode}"${cell.responsiveStack ? ' data-movcues-responsive-stack="true"' : ""}>${children}</div>`;
-  }
-  function renderBlock(block, css) {
-    const selector = `.movcues-widget [data-movcues-block-id="${block.id}"]`;
-    const align = block.align ?? "left";
-    if (block.type === "heading") {
-      css.push(`${selector}{font:${block.weight} ${block.fontSize}px/${block.lineHeight ?? 1.25} ui-sans-serif,system-ui,sans-serif;text-align:${align};${block.color ? `color:${block.color};` : ""}}`);
-      return `<h${block.level} class="movcues-block movcues-heading" data-movcues-block-id="${block.id}" data-movcues-content="heading">${sanitizeRichText(block.html)}</h${block.level}>`;
-    }
-    if (block.type === "text") {
-      css.push(`${selector}{font:${block.weight} ${block.fontSize}px/${block.lineHeight ?? 1.5} ui-sans-serif,system-ui,sans-serif;text-align:${align};white-space:pre-wrap;${block.color ? `color:${block.color};` : ""}}`);
-      return `<div class="movcues-block movcues-text" data-movcues-block-id="${block.id}" data-movcues-content="body">${sanitizeRichText(block.html)}</div>`;
-    }
-    if (block.type === "button") {
-      css.push(`${selector}{align-self:${align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center"};padding:${block.paddingY}px ${block.paddingX}px;border-radius:${block.radius}px;${block.width === "full" ? "width:100%;" : ""}${block.background ? `background:${block.background};` : ""}${block.color ? `color:${block.color};` : ""}}`);
-      return `<button type="button" class="movcues-block movcues-button movcues-button--${block.variant}${block.width === "full" ? " movcues-block--full" : ""}" data-movcues-block-id="${block.id}" data-movcues-action-id="${block.action.id}">${escapeText$1(block.label)}</button>`;
-    }
-    if (block.type === "image") {
-      css.push(`${selector}{align-self:${align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center"};width:${block.width}%;${block.height ? `height:${block.height}px;` : "height:auto;"}object-fit:${block.fit};border-radius:${block.radius}px}`);
-      return `<img class="movcues-block movcues-image" data-movcues-block-id="${block.id}" src="${escapeAttribute(block.src)}" alt="${escapeAttribute(block.alt)}">`;
-    }
-    if (block.type === "divider") {
-      css.push(`${selector}{align-self:stretch;${block.orientation === "horizontal" ? `width:100%;height:${block.thickness}px` : `width:${block.thickness}px;min-height:24px`};border:0;background:${block.color}}`);
-      return `<hr class="movcues-block movcues-divider" data-movcues-block-id="${block.id}">`;
-    }
-    if (block.type === "spacer") {
-      css.push(`${selector}{flex:0 0 ${block.size}px;width:${block.size}px;height:${block.size}px}`);
-      return `<div class="movcues-block movcues-spacer" data-movcues-block-id="${block.id}" aria-hidden="true"></div>`;
-    }
-    css.push(`${selector}{align-self:${align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center"};font-size:${block.size}px;line-height:1;${block.color ? `color:${block.color};` : ""}}`);
-    return `<span class="movcues-block movcues-icon" data-movcues-block-id="${block.id}" role="img" aria-label="${block.icon}">${ICONS[block.icon]}</span>`;
-  }
-  function validateOnsiteDocument(value) {
-    const errors = [];
-    if (!isOnsiteDocumentShape(value)) return { valid: false, errors: ["On-site document must use schemaVersion 2 and contain one root cell."] };
-    unexpectedKeys(value, ["schemaVersion", "id", "root"], "Document", errors);
-    const ids = /* @__PURE__ */ new Set();
-    const seen = /* @__PURE__ */ new Set();
-    let count = 0;
-    const addId = (id, path) => {
-      if (typeof id !== "string" || !ID_PATTERN.test(id)) errors.push(`${path} has an invalid ID.`);
-      else if (ids.has(id)) errors.push(`${path} reuses ID ${id}.`);
-      else ids.add(id);
-    };
-    const number = (input, min, max, path) => {
-      if (typeof input !== "number" || !Number.isFinite(input) || input < min || input > max) errors.push(`${path} must be between ${min} and ${max}.`);
-    };
-    addId(value.id, "Document");
-    const visit = (cell, depth, path) => {
-      var _a, _b, _c, _d;
-      if (!cell || typeof cell !== "object") {
-        errors.push(`${path} must be a cell object.`);
-        return;
-      }
-      if (seen.has(cell)) {
-        errors.push(`${path} creates a cycle or duplicate reference.`);
-        return;
-      }
-      seen.add(cell);
-      count++;
-      addId(cell.id, path);
-      unexpectedKeys(cell, ["type", "id", "direction", "sizing", "align", "justify", "gap", "padding", "responsiveStack", "style", "children", "block"], path, errors);
-      if (depth > ONSITE_LIMITS.maxDepth) errors.push(`${path} exceeds maximum nesting depth ${ONSITE_LIMITS.maxDepth}.`);
-      if (!["row", "column"].includes(cell.direction)) errors.push(`${path} has an invalid direction.`);
-      if (!["start", "center", "end", "stretch"].includes(cell.align)) errors.push(`${path} has an invalid alignment.`);
-      if (!["start", "center", "end", "space-between"].includes(cell.justify)) errors.push(`${path} has an invalid distribution.`);
-      if (cell.responsiveStack !== void 0 && typeof cell.responsiveStack !== "boolean") errors.push(`${path} responsiveStack must be a boolean.`);
-      number(cell.gap, 0, 96, `${path} gap`);
-      for (const side of ["top", "right", "bottom", "left"]) number((_a = cell.padding) == null ? void 0 : _a[side], 0, 128, `${path} padding ${side}`);
-      if (((_b = cell.sizing) == null ? void 0 : _b.mode) === "flexible") number(cell.sizing.weight, 0.1, 20, `${path} flexible weight`);
-      else if (((_c = cell.sizing) == null ? void 0 : _c.mode) === "fixed") number(cell.sizing.value, ONSITE_LIMITS.minFixedSize, ONSITE_LIMITS.maxFixedSize, `${path} fixed size`);
-      else if (((_d = cell.sizing) == null ? void 0 : _d.mode) !== "hug") errors.push(`${path} has an invalid sizing mode.`);
-      if (cell.sizing && typeof cell.sizing === "object") unexpectedKeys(cell.sizing, cell.sizing.mode === "flexible" ? ["mode", "weight"] : cell.sizing.mode === "fixed" ? ["mode", "value"] : ["mode"], `${path} sizing`, errors);
-      if (cell.style) {
-        unexpectedKeys(cell.style, ["background", "borderColor", "borderWidth", "borderRadius"], `${path} style`, errors);
-        if (cell.style.background && !COLOR_PATTERN.test(cell.style.background)) errors.push(`${path} background is not supported.`);
-        if (cell.style.borderColor && !COLOR_PATTERN.test(cell.style.borderColor)) errors.push(`${path} border color is not supported.`);
-        if (cell.style.borderWidth !== void 0) number(cell.style.borderWidth, 0, 16, `${path} border width`);
-        if (cell.style.borderRadius !== void 0) number(cell.style.borderRadius, 0, 100, `${path} border radius`);
-      }
-      if (cell.children && cell.block) errors.push(`${path} cannot contain both children and a block.`);
-      if (cell.children) {
-        if (!cell.children.length) errors.push(`${path} cannot contain an empty children list.`);
-        cell.children.forEach((child, index) => visit(child, depth + 1, `${path} > cell ${index + 1}`));
-      }
-      if (cell.block) validateBlock(cell.block, `${path} block`, addId, number, errors);
-    };
-    try {
-      visit(value.root, 1, "Root cell");
-    } catch {
-      errors.push("Document contains malformed cell or block values.");
-    }
-    if (count > ONSITE_LIMITS.maxNodes) errors.push(`Document has ${count} cells; maximum is ${ONSITE_LIMITS.maxNodes}.`);
-    try {
-      if (new TextEncoder().encode(JSON.stringify(value)).byteLength > ONSITE_LIMITS.maxSerializedBytes) errors.push(`Document exceeds ${ONSITE_LIMITS.maxSerializedBytes} serialized bytes.`);
-    } catch {
-      errors.push("Document cannot be serialized.");
-    }
-    return { valid: errors.length === 0, errors };
-  }
-  function validateBlock(block, path, addId, number, errors) {
-    var _a, _b, _c, _d, _e;
-    addId(block.id, path);
-    const base = ["id", "type", "align"];
-    const keys = { heading: [...base, "html", "level", "fontSize", "weight", "color", "lineHeight"], text: [...base, "html", "fontSize", "weight", "color", "lineHeight"], button: [...base, "label", "action", "variant", "background", "color", "radius", "paddingX", "paddingY", "width"], image: [...base, "src", "alt", "fit", "width", "height", "radius"], divider: [...base, "orientation", "thickness", "color"], spacer: [...base, "size"], icon: [...base, "icon", "size", "color"] };
-    if (!Object.prototype.hasOwnProperty.call(keys, block.type)) {
-      errors.push(`${path} has an unsupported block type.`);
-      return;
-    }
-    unexpectedKeys(block, keys[block.type], path, errors);
-    if (block.align !== void 0 && !["left", "center", "right"].includes(block.align)) errors.push(`${path} has an invalid alignment.`);
-    if (block.type === "heading" || block.type === "text") {
-      if (typeof block.html !== "string" || block.html.length > ONSITE_LIMITS.maxRichText || sanitizeRichText(block.html) !== block.html) errors.push(`${path} contains unsupported or unsafe rich text.`);
-      number(block.fontSize, 10, 72, `${path} font size`);
-      number(block.lineHeight ?? 1.4, 0.9, 3, `${path} line height`);
-      if (![400, 500, 600, 700].includes(block.weight)) errors.push(`${path} has an invalid font weight.`);
-      if (block.type === "heading" && ![1, 2, 3, 4].includes(block.level)) errors.push(`${path} has an invalid heading level.`);
-    } else if (block.type === "button") {
-      if (!((_a = block.label) == null ? void 0 : _a.trim()) || block.label.length > 80) errors.push(`${path} label must contain 1–80 characters.`);
-      addId((_b = block.action) == null ? void 0 : _b.id, `${path} action`);
-      if (!block.action || !["next_step", "previous_step", "dismiss", "open_url", "track_event"].includes(block.action.type)) errors.push(`${path} has an invalid action.`);
-      else unexpectedKeys(block.action, block.action.type === "open_url" ? ["id", "type", "url"] : block.action.type === "track_event" ? ["id", "type", "eventName"] : ["id", "type"], `${path} action`, errors);
-      if (((_c = block.action) == null ? void 0 : _c.type) === "open_url" && (!builderLinkUrlIsSafe(block.action.url) || !/^https?:\/\//i.test(block.action.url))) errors.push(`${path} URL must use HTTP(S).`);
-      if (((_d = block.action) == null ? void 0 : _d.type) === "track_event" && (!((_e = block.action.eventName) == null ? void 0 : _e.trim()) || block.action.eventName.length > 200)) errors.push(`${path} custom event must contain 1–200 characters.`);
-      if (!["primary", "secondary", "outline"].includes(block.variant)) errors.push(`${path} has an invalid variant.`);
-      if (!["hug", "full"].includes(block.width)) errors.push(`${path} has an invalid width behavior.`);
-      number(block.radius, 0, 48, `${path} radius`);
-      number(block.paddingX, 4, 48, `${path} horizontal padding`);
-      number(block.paddingY, 4, 32, `${path} vertical padding`);
-    } else if (block.type === "image") {
-      if (!onsiteImageSourceIsSafe(block.src)) errors.push(`${path} image must use a safe URL (up to 2,000 characters) or a small PNG, JPEG, WebP or GIF image (up to 64 KB encoded).`);
-      if (block.alt.length > 500) errors.push(`${path} alt text exceeds 500 characters.`);
-      if (!["contain", "cover"].includes(block.fit)) errors.push(`${path} has an invalid image fit.`);
-      number(block.width, 1, 100, `${path} width`);
-      if (block.height !== void 0) number(block.height, 24, 1200, `${path} height`);
-      number(block.radius, 0, 100, `${path} radius`);
-    } else if (block.type === "divider") {
-      if (!["horizontal", "vertical"].includes(block.orientation)) errors.push(`${path} has an invalid divider orientation.`);
-      number(block.thickness, 1, 16, `${path} thickness`);
-    } else if (block.type === "spacer") number(block.size, 4, 240, `${path} size`);
-    else if (block.type === "icon") {
-      if (!(block.icon in ICONS)) errors.push(`${path} icon is not supported.`);
-      number(block.size, 12, 96, `${path} size`);
-    }
-    if ("color" in block && block.color && !COLOR_PATTERN.test(block.color)) errors.push(`${path} color is not supported.`);
-  }
-  function onsiteImageSourceIsSafe(src) {
-    if (typeof src !== "string") return false;
-    if (!/^data:/i.test(src)) return src.length <= ONSITE_LIMITS.maxImageUrl && builderImageUrlIsSafe(src);
-    if (src.length > ONSITE_LIMITS.maxInlineImage) return false;
-    const match = /^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$/i.exec(src);
-    if (!match || match[2].length % 4 !== 0) return false;
-    try {
-      const bytes = atob(match[2]);
-      switch (match[1].toLowerCase()) {
-        case "png":
-          return bytes.startsWith("PNG\r\n\n");
-        case "jpeg":
-          return bytes.startsWith("ÿØÿ");
-        case "webp":
-          return bytes.startsWith("RIFF") && bytes.slice(8, 12) === "WEBP";
-        case "gif":
-          return bytes.startsWith("GIF87a") || bytes.startsWith("GIF89a");
-      }
-    } catch {
-    }
-    return false;
-  }
-  function unexpectedKeys(value, allowed, path, errors) {
-    const extra = Object.keys(value).filter((key) => !allowed.includes(key));
-    if (extra.length) errors.push(`${path} contains unsupported fields: ${extra.join(", ")}.`);
-  }
-  function findCell(document2, id) {
-    let found = null;
-    walkCells(document2.root, (cell) => {
-      if (cell.id === id) found = cell;
-    });
-    return found;
-  }
-  function findBlock(document2, id) {
-    let found = null;
-    walkCells(document2.root, (cell) => {
-      var _a;
-      if (((_a = cell.block) == null ? void 0 : _a.id) === id) found = cell.block;
-    });
-    return found;
-  }
-  function parentCell(document2, id) {
-    let found = null;
-    walkCells(document2.root, (cell) => {
-      var _a;
-      if ((_a = cell.children) == null ? void 0 : _a.some((child) => child.id === id)) found = cell;
-    });
-    return found;
-  }
-  function listBlocks(cell) {
-    const blocks = [];
-    walkCells(cell, (item) => {
-      if (item.block) blocks.push(item.block);
-    });
-    return blocks;
-  }
-  function walkCells(cell, visit) {
-    var _a;
-    visit(cell);
-    (_a = cell.children) == null ? void 0 : _a.forEach((child) => walkCells(child, visit));
-  }
-  function splitCell(document2, cellId, direction) {
-    const cell = findCell(document2, cellId);
-    if (!cell || cell.children) return null;
-    const preserved = emptyCell(cell.block);
-    const added = emptyCell();
-    delete cell.block;
-    cell.children = [preserved, added];
-    cell.direction = direction;
-    cell.responsiveStack = direction === "row";
-    return added.id;
-  }
-  function insertEdgeCell(document2, edge) {
-    const wanted = edge === "left" || edge === "right" ? "row" : "column";
-    const added = emptyCell();
-    if (document2.root.children && document2.root.direction === wanted && !document2.root.block) document2.root.children[edge === "top" || edge === "left" ? "unshift" : "push"](added);
-    else {
-      const old = structuredCloneSafe(document2.root);
-      old.id = onsiteId("cell");
-      document2.root = { ...emptyCell(), id: document2.root.id, direction: wanted, responsiveStack: wanted === "row", children: edge === "top" || edge === "left" ? [added, old] : [old, added] };
-    }
-    return added.id;
-  }
-  function insertAdjacentCell(document2, cellId, edge) {
-    const cell = findCell(document2, cellId);
-    if (!cell) return null;
-    if (cell === document2.root) return insertEdgeCell(document2, edge);
-    const parent = parentCell(document2, cellId);
-    if (!(parent == null ? void 0 : parent.children)) return null;
-    const direction = edge === "left" || edge === "right" ? "row" : "column";
-    const before = edge === "top" || edge === "left";
-    const index = parent.children.indexOf(cell);
-    const added = emptyCell();
-    if (parent.direction === direction) parent.children.splice(index + (before ? 0 : 1), 0, added);
-    else {
-      const group = { ...emptyCell(), direction, sizing: cloneOnsite(cell.sizing), gap: parent.gap, responsiveStack: direction === "row", children: before ? [added, cell] : [cell, added] };
-      cell.sizing = { mode: "flexible", weight: 1 };
-      parent.children.splice(index, 1, group);
-    }
-    return added.id;
-  }
-  function removeCell(document2, id) {
-    const parent = parentCell(document2, id);
-    if (!(parent == null ? void 0 : parent.children) || parent.children.length <= 1) {
-      const cell = findCell(document2, id);
-      if (!cell || cell === document2.root) return false;
-      delete cell.block;
-      return true;
-    }
-    parent.children = parent.children.filter((child) => child.id !== id);
-    if (parent.children.length === 1) collapseSingleChild(parent);
-    return true;
-  }
-  function moveCell(document2, id, delta) {
-    const parent = parentCell(document2, id);
-    if (!(parent == null ? void 0 : parent.children)) return false;
-    const index = parent.children.findIndex((child) => child.id === id);
-    const next = index + delta;
-    if (index < 0 || next < 0 || next >= parent.children.length) return false;
-    [parent.children[index], parent.children[next]] = [parent.children[next], parent.children[index]];
-    return true;
-  }
-  function resizeSiblings(document2, firstId, secondId, firstWeight) {
-    const parent = parentCell(document2, firstId);
-    if (!(parent == null ? void 0 : parent.children) || parent !== parentCell(document2, secondId)) return false;
-    const a = parent.children.find((child) => child.id === firstId);
-    const b = parent.children.find((child) => child.id === secondId);
-    if (!a || !b) return false;
-    const bounded2 = Math.max(0.1, Math.min(1.9, Math.round(firstWeight * 20) / 20));
-    a.sizing = { mode: "flexible", weight: bounded2 };
-    b.sizing = { mode: "flexible", weight: 2 - bounded2 };
-    return true;
-  }
-  function duplicateCell(document2, id) {
-    const source = findCell(document2, id);
-    const parent = parentCell(document2, id);
-    if (!source || !(parent == null ? void 0 : parent.children)) return null;
-    const copy = structuredCloneSafe(source);
-    regenerateIds(copy);
-    const index = parent.children.findIndex((child) => child.id === id);
-    parent.children.splice(index + 1, 0, copy);
-    return copy.id;
-  }
-  function regenerateIds(cell) {
-    var _a;
-    cell.id = onsiteId("cell");
-    if (cell.block) {
-      cell.block.id = onsiteId("block");
-      if (cell.block.type === "button") cell.block.action.id = onsiteId("action");
-    }
-    (_a = cell.children) == null ? void 0 : _a.forEach(regenerateIds);
-  }
-  function collapseSingleChild(cell) {
-    var _a;
-    const child = (_a = cell.children) == null ? void 0 : _a[0];
-    if (!child) return;
-    const id = cell.id;
-    Object.assign(cell, child, { id });
-  }
-  function duplicateDocument(document2) {
-    const copy = structuredCloneSafe(document2);
-    copy.id = onsiteId("document");
-    regenerateIds(copy.root);
-    return copy;
-  }
-  function cloneOnsite(value) {
-    return structuredCloneSafe(value);
-  }
-  function structuredCloneSafe(value) {
-    return typeof structuredClone === "function" ? structuredClone(value) : JSON.parse(JSON.stringify(value));
-  }
-  function migrateV1Builder(builder, content, widgetType, guide = false) {
-    var _a;
-    if (onsiteDocumentFromBuilder(builder)) return onsiteDocumentFromBuilder(builder);
-    if (typeof document === "undefined") return null;
-    const template = document.createElement("template");
-    template.innerHTML = builder.html;
-    const root = template.content.querySelector(".movcues-widget");
-    if (!root) return null;
-    const known = root.querySelectorAll("[data-movcues-content],[data-movcues-action-id],img");
-    if (!known.length || root.querySelector("[data-movcues-question-id],[data-movcues-checklist-role]")) return null;
-    const compatibility = root.cloneNode(true);
-    compatibility.querySelectorAll("[data-movcues-content],[data-movcues-action-id],img").forEach((element) => element.remove());
-    compatibility.querySelectorAll("*").forEach((element) => {
-      var _a2;
-      if (!((_a2 = element.textContent) == null ? void 0 : _a2.trim()) && !element.children.length) element.remove();
-    });
-    if (((_a = compatibility.textContent) == null ? void 0 : _a.trim()) || compatibility.children.length) return null;
-    const cells = [];
-    const alignment = (element) => element.classList.contains("movcues-align-center") ? "center" : element.classList.contains("movcues-align-right") ? "right" : element.classList.contains("movcues-align-left") ? "left" : void 0;
-    const heading = root.querySelector('[data-movcues-content="heading"]');
-    if (heading) {
-      const block = createBlock("heading", guide);
-      block.html = sanitizeRichText(heading.innerHTML);
-      block.align = alignment(heading);
-      cells.push(emptyCell(block));
-    }
-    const body = root.querySelector('[data-movcues-content="body"]');
-    if (body) {
-      const block = createBlock("text", guide);
-      block.html = sanitizeRichText(body.innerHTML);
-      block.align = alignment(body);
-      cells.push(emptyCell(block));
-    }
-    root.querySelectorAll("img").forEach((image) => {
-      const block = createBlock("image", guide);
-      block.src = image.getAttribute("src") ?? "";
-      block.alt = image.getAttribute("alt") ?? "";
-      cells.push(emptyCell(block));
-    });
-    for (const [marker, fallback] of [["secondary", content.secondaryAction], ["primary", content.primaryAction]]) {
-      const button = root.querySelector(`[data-movcues-action-id="${marker}"]`);
-      if (!button || !fallback) continue;
-      const block = createBlock("button", guide);
-      block.label = fallback.label;
-      block.variant = marker === "primary" ? "primary" : "secondary";
-      block.action = { id: onsiteId("action"), ...fallback.type === "open_url" && fallback.url ? { type: "open_url", url: fallback.url } : fallback.type === "track_event" && fallback.eventName ? { type: "track_event", eventName: fallback.eventName } : { type: fallback.type === "next_step" ? "next_step" : "dismiss" } };
-      cells.push(emptyCell(block));
-    }
-    if (!cells.length) return null;
-    const migrated = { schemaVersion: 2, id: onsiteId("document"), root: { ...emptyCell(), direction: "column", gap: 12, padding: { top: 20, right: 20, bottom: 20, left: 20 }, children: cells } };
-    applyOnsiteDocument(builder, migrated, widgetType);
-    return migrated;
-  }
-  function sanitizeRichText(input) {
-    if (typeof document === "undefined") return sanitizeRichTextWithoutDom(input);
-    const template = document.createElement("template");
-    template.innerHTML = input;
-    for (const element of Array.from(template.content.querySelectorAll("*"))) {
-      if (!SAFE_INLINE_TAGS.has(element.tagName)) {
-        element.replaceWith(...Array.from(element.childNodes));
-        continue;
-      }
-      for (const attribute of Array.from(element.attributes)) if (!(element.tagName === "A" && ["href", "target", "rel"].includes(attribute.name))) element.removeAttribute(attribute.name);
-      if (element.tagName === "A") {
-        const href = element.getAttribute("href") ?? "";
-        if (!builderLinkUrlIsSafe(href)) element.removeAttribute("href");
-        const target = element.getAttribute("target");
-        if (target && !["_blank", "_self"].includes(target)) element.removeAttribute("target");
-        if (target === "_blank") element.setAttribute("rel", "noopener noreferrer");
-      }
-    }
-    return template.innerHTML;
-  }
-  function sanitizeRichTextWithoutDom(input) {
-    return input.replace(/<(?!\/?(?:br|strong|em|u|a|ul|ol|li)(?:\s|>|\/))/gi, "&lt;").replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi, "").replace(/javascript\s*:/gi, "");
-  }
-  function richTextToPlain(input) {
-    if (typeof document === "undefined") return input.replace(/<br\s*\/?>/gi, "\n").replace(/<\/li>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim();
-    const template = document.createElement("template");
-    template.innerHTML = input;
-    const read = (node) => {
-      if (node.nodeType === 3) return node.textContent ?? "";
-      let value = "";
-      for (const child of Array.from(node.childNodes)) {
-        if (child instanceof HTMLElement && child.tagName === "BR") value += "\n";
-        else {
-          value += read(child);
-          if (child instanceof HTMLElement && child.tagName === "LI") value += "\n";
-        }
-      }
-      return value;
-    };
-    return read(template.content).trim();
-  }
-  function isOnsiteDocument(value) {
-    return isOnsiteDocumentShape(value) && validateOnsiteDocument(value).valid;
-  }
-  function isOnsiteDocumentShape(value) {
-    return !!value && typeof value === "object" && value.schemaVersion === 2 && !!value.root && value.root.type === "cell";
-  }
-  function asRecord(value) {
-    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  }
-  function escapeText$1(value) {
-    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
-  function escapeAttribute(value) {
-    return escapeText$1(value).replace(/"/g, "&quot;");
-  }
-  function round(value) {
-    return String(Math.round(value * 100) / 100);
-  }
   async function prepareImageFile(file) {
     if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) throw new Error("Choose a PNG, JPG or WebP image.");
     if (!file.size || file.size > 10 * 1024 * 1024) throw new Error("Choose an image smaller than 10 MB.");
@@ -3223,17 +3754,18 @@ ${ISOLATION_CSS}`;
       URL.revokeObjectURL(url);
     }
   }
-  const BLOCK_LABEL = { heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
+  const BLOCK_LABEL = { question: "Question", survey_controls: "Survey controls", heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
   const HISTORY_LIMIT = 50;
   const HISTORY_BYTES = 2e6;
   class OnsiteCompositionEditor {
-    constructor(root, builder, content, widgetType, guide, callbacks) {
+    constructor(root, builder, content, widgetType, guide, callbacks, survey) {
       this.root = root;
       this.builder = builder;
       this.content = content;
       this.widgetType = widgetType;
       this.guide = guide;
       this.callbacks = callbacks;
+      this.survey = survey;
       this.edgeButtons = [];
       this.insertion = null;
       this.paletteAnchor = null;
@@ -3496,11 +4028,11 @@ ${ISOLATION_CSS}`;
       };
       this.onPaletteClick = (event) => {
         var _a;
-        const button = event.target instanceof Element ? event.target.closest("[data-insert-block]") : null;
+        const button = event.target instanceof Element ? event.target.closest("[data-insert-block],[data-insert-question]") : null;
         if (!button) return;
         event.preventDefault();
         event.stopPropagation();
-        if (this.insertBlock(button.dataset.insertBlock, this.insertion ?? void 0)) {
+        if (button.dataset.insertQuestion ? this.insertQuestion(button.dataset.insertQuestion, this.insertion ?? void 0) : this.insertBlock(button.dataset.insertBlock, this.insertion ?? void 0)) {
           this.closePalette();
           const block = this.getSelectedBlock();
           const element = block ? (_a = this.surface) == null ? void 0 : _a.querySelector(`[data-movcues-block-id="${block.id}"]`) : null;
@@ -3636,7 +4168,8 @@ ${ISOLATION_CSS}`;
       ];
       this.toolbar.innerHTML = tools.map(([command, label, icon]) => `<button type="button" data-command="${command}" title="${label}" aria-label="${label}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></button>`).join("");
       this.toolbar.querySelector('[data-command="move"]').draggable = true;
-      this.palette.innerHTML = Object.keys(BLOCK_LABEL).map((type) => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
+      this.palette.innerHTML = Object.keys(BLOCK_LABEL).filter((type) => type !== "question" && type !== "survey_controls").map((type) => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
+      if (this.survey) this.palette.insertAdjacentHTML("beforeend", QUESTION_TYPES.map((type) => `<button type="button" data-insert-question="${type}">${{ single_choice: "Single choice", multiple_choice: "Multiple choice", short_text: "Short text", long_text: "Long text", rating: "Rating", nps: "NPS" }[type]}</button>`).join(""));
       this.root.append(this.toolbar, this.palette, this.imageInput);
       const edgeLabels = { top: "Add above", right: "Add to the right", bottom: "Add below", left: "Add to the left" };
       this.edgeButtons = ["top", "right", "bottom", "left"].map((edge) => {
@@ -3695,28 +4228,28 @@ ${ISOLATION_CSS}`;
       return this.selection.kind === "block" ? findBlock(this.document, this.selection.blockId) : null;
     }
     canUndo() {
-      return this.historyIndex > 0 || this.historyIndex >= 0 && JSON.stringify(this.document) !== JSON.stringify(this.history[this.historyIndex].document);
+      return this.historyIndex > 0 || this.historyIndex >= 0 && this.historyState() !== this.historyState(this.history[this.historyIndex]);
     }
     canRedo() {
-      return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1 && JSON.stringify(this.document) === JSON.stringify(this.history[this.historyIndex].document);
+      return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1 && this.historyState() === this.historyState(this.history[this.historyIndex]);
     }
     isComposing() {
       return this.composing;
     }
     getValidation() {
-      return validateOnsiteDocument(this.document).errors;
+      return [...validateOnsiteDocument(this.document).errors, ...this.survey ? validateOnsiteSurveyDocument(this.document, this.surveyContext()) : []];
     }
     flush() {
       if (this.composing) return false;
       clearTimeout(this.compileTimer);
       this.compileTimer = 0;
       this.repairDocumentStructure();
-      const state = JSON.stringify(this.document);
+      const state = this.historyState();
       if (state === this.compiledState) return true;
-      const validation = validateOnsiteDocument(this.document);
-      this.callbacks.onValidation(validation.errors);
-      if (!validation.valid) return false;
-      const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType);
+      const errors = this.getValidation();
+      this.callbacks.onValidation(errors);
+      if (errors.length) return false;
+      const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext());
       Object.assign(this.content, compiled.content);
       this.compiledState = state;
       return true;
@@ -3824,6 +4357,14 @@ ${ISOLATION_CSS}`;
       const cell = this.getSelectedCell();
       if (!cell || cell === this.document.root || this.composing) return false;
       if (!this.beforeTransaction()) return false;
+      if (this.survey) {
+        const duplicated = duplicateSurveyCell(this.document, this.survey.step.questions, cell.id);
+        if (!duplicated) return false;
+        this.document = duplicated.document;
+        this.survey.step.questions = duplicated.questions;
+        this.commit({ kind: "cell", label: "Duplicated cell", cellId: duplicated.cellId });
+        return true;
+      }
       const id = duplicateCell(this.document, cell.id);
       if (!id) return false;
       this.commit({ kind: "cell", label: "Duplicated cell", cellId: id });
@@ -3833,8 +4374,17 @@ ${ISOLATION_CSS}`;
       const cell = this.getSelectedCell();
       if (!cell || cell === this.document.root || this.composing) return false;
       if (!this.beforeTransaction()) return false;
+      if (this.survey && listBlocks(cell).some((block) => block.type === "survey_controls")) {
+        this.callbacks.onValidation(["Keep the Survey navigation block so visitors can continue or submit."]);
+        return false;
+      }
+      const removed = new Set(listBlocks(cell).filter((block) => block.type === "question").map((block) => block.type === "question" ? block.questionId : ""));
       const parent = parentCell(this.document, cell.id);
       if (!removeCell(this.document, cell.id)) return false;
+      if (this.survey) {
+        this.survey.step.questions = this.survey.step.questions.filter((question) => !removed.has(question.id));
+        if (this.survey.step.branching) this.survey.step.branching.rules = this.survey.step.branching.rules.filter((rule) => !removed.has(rule.questionId));
+      }
       this.commit(parent ? { kind: "cell", label: "Parent cell", cellId: parent.id } : { kind: "step", label: "Step" });
       return true;
     }
@@ -3869,6 +4419,95 @@ ${ISOLATION_CSS}`;
       this.document = candidate;
       this.cancelMove();
       this.commit(source.block ? { kind: "block", label: BLOCK_LABEL[source.block.type], cellId: source.id, blockId: source.block.id, blockType: source.block.type } : { kind: "cell", label: "Cell", cellId: source.id });
+      return true;
+    }
+    surveyContext() {
+      return this.survey ? { questions: this.survey.step.questions, submitLabel: this.survey.config.submitLabel } : void 0;
+    }
+    historyState(entry) {
+      return JSON.stringify(this.survey ? entry ? { document: entry.document, questions: entry.questions, branching: entry.branching } : { document: this.document, questions: this.survey.step.questions, branching: this.survey.step.branching } : (entry == null ? void 0 : entry.document) ?? this.document);
+    }
+    getSelectedQuestion() {
+      var _a;
+      const block = this.getSelectedBlock();
+      return (block == null ? void 0 : block.type) === "question" ? ((_a = this.survey) == null ? void 0 : _a.step.questions.find((question) => question.id === block.questionId)) ?? null : null;
+    }
+    refreshSurvey() {
+      this.compileAndPatch();
+      this.select(this.selection);
+    }
+    insertQuestion(type, insertion) {
+      if (!this.survey || !QUESTION_TYPES.includes(type) || this.survey.step.questions.length >= 20 || !this.beforeTransaction()) return false;
+      const selected = this.getSelectedCell();
+      if (!selected) return false;
+      const candidate = cloneOnsite(this.document), question = newSurveyQuestion(type);
+      const block = { id: onsiteId("block"), type: "question", questionId: question.id, fontSize: 14 };
+      let cell = findCell(candidate, selected.id);
+      if (insertion) {
+        const id = insertAdjacentCell(candidate, insertion.cellId, insertion.edge);
+        if (!id) return false;
+        cell = findCell(candidate, id);
+      } else if (cell.children) {
+        const added = emptyCell();
+        cell.children.push(added);
+        cell = added;
+      } else if (cell.block) {
+        const id = insertAdjacentCell(candidate, cell.id, "bottom");
+        if (!id) return false;
+        cell = findCell(candidate, id);
+      }
+      cell.block = block;
+      cell.sizing = { mode: "hug" };
+      const questions = [...this.survey.step.questions, question];
+      const errors = [...validateOnsiteDocument(candidate).errors, ...validateOnsiteSurveyDocument(candidate, { questions })];
+      if (errors.length) {
+        this.callbacks.onValidation(errors);
+        return false;
+      }
+      this.document = candidate;
+      this.survey.step.questions = questions;
+      this.commit({ kind: "block", label: "Question", cellId: cell.id, blockId: block.id, blockType: block.type });
+      return true;
+    }
+    updateStepHeading(label) {
+      if (!this.survey || !this.beforeTransaction()) return false;
+      const heading = listBlocks(this.document.root).find((block) => block.type === "heading");
+      if ((heading == null ? void 0 : heading.type) !== "heading") {
+        this.callbacks.onValidation(["Insert a Heading block to set the step heading."]);
+        return false;
+      }
+      heading.html = escapeHtmlAttribute(label.slice(0, 160));
+      this.commit(this.selection);
+      return true;
+    }
+    updateBranching(branching) {
+      if (!this.survey || !this.beforeTransaction()) return false;
+      const step = { ...this.survey.step, branching: cloneOnsite(branching) };
+      const errors = surveyBranchErrors({ ...this.survey.config, steps: this.survey.config.steps.map((value) => value.id === step.id ? step : value) });
+      if (errors.length) {
+        this.callbacks.onValidation(errors);
+        return false;
+      }
+      this.survey.step.branching = step.branching;
+      this.commit(this.selection);
+      return true;
+    }
+    updateQuestion(question) {
+      const current = this.getSelectedQuestion();
+      if (!this.survey || !current || current.id !== question.id || !this.beforeTransaction()) return false;
+      const questions = this.survey.step.questions.map((value) => value.id === question.id ? cloneOnsite(question) : value);
+      const errors = surveyQuestionErrors(questions);
+      if (errors.length) {
+        this.callbacks.onValidation(errors);
+        return false;
+      }
+      this.survey.step.questions = questions;
+      if (this.survey.step.branching) this.survey.step.branching.rules = this.survey.step.branching.rules.filter((rule) => {
+        if (rule.questionId !== question.id) return true;
+        const step = { ...this.survey.step, branching: { rules: [rule] } };
+        return !surveyBranchErrors({ ...this.survey.config, steps: this.survey.config.steps.map((value) => value.id === step.id ? step : value) }).length;
+      });
+      this.commit(this.selection);
       return true;
     }
     updateCell(update) {
@@ -4046,18 +4685,23 @@ ${ISOLATION_CSS}`;
     }
     commit(selection) {
       this.repairDocumentStructure();
-      const validation = validateOnsiteDocument(this.document);
+      const errors = this.getValidation();
+      const validation = { valid: !errors.length, errors };
       if (!validation.valid) {
         const previous = this.history[this.historyIndex];
         if (previous) {
           this.document = cloneOnsite(previous.document);
+          if (this.survey && previous.questions) {
+            this.survey.step.questions = cloneOnsite(previous.questions);
+            this.survey.step.branching = previous.branching ? cloneOnsite(previous.branching) : void 0;
+          }
           this.compileAndPatch();
           this.select(previous.selection);
         }
         this.callbacks.onValidation(validation.errors);
         return;
       }
-      if (JSON.stringify(this.document) === this.compiledState) {
+      if (this.historyState() === this.compiledState) {
         this.select(selection);
         return;
       }
@@ -4068,16 +4712,20 @@ ${ISOLATION_CSS}`;
       this.select(selection);
     }
     compileAndPatch() {
-      var _a, _b, _c;
-      const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType);
+      var _a, _b, _c, _d;
+      const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext());
       Object.assign(this.content, compiled.content);
-      this.compiledState = JSON.stringify(this.document);
+      this.compiledState = this.historyState();
       const template = document.createElement("template");
       template.innerHTML = compiled.html;
       (_a = this.surface) == null ? void 0 : _a.replaceChildren(...Array.from(template.content.childNodes));
       this.imagePlaceholders.clear();
+      (_b = this.surface) == null ? void 0 : _b.querySelectorAll("[data-movcues-question-input]").forEach((input) => {
+        input.readOnly = true;
+        input.tabIndex = -1;
+      });
       this.savedRange = null;
-      (_b = this.surface) == null ? void 0 : _b.querySelectorAll("[data-movcues-node-id]").forEach((cell) => {
+      (_c = this.surface) == null ? void 0 : _c.querySelectorAll("[data-movcues-node-id]").forEach((cell) => {
         cell.tabIndex = 0;
         cell.setAttribute("aria-label", "Layout cell");
         if (!cell.children.length) {
@@ -4088,7 +4736,7 @@ ${ISOLATION_CSS}`;
           cell.append(add);
         }
       });
-      (_c = this.surface) == null ? void 0 : _c.querySelectorAll('img[data-movcues-block-id][src=""]').forEach((image) => {
+      (_d = this.surface) == null ? void 0 : _d.querySelectorAll('img[data-movcues-block-id][src=""]').forEach((image) => {
         const placeholder = document.createElement("button");
         placeholder.type = "button";
         placeholder.className = image.className;
@@ -4133,10 +4781,11 @@ ${ISOLATION_CSS}`;
       return repaired;
     }
     pushHistory() {
-      const document2 = cloneOnsite(this.document);
-      const bytes = JSON.stringify(document2).length;
-      const entry = { document: document2, selection: cloneOnsite(this.selection), bytes };
-      if (this.historyIndex >= 0 && JSON.stringify(this.history[this.historyIndex].document) === JSON.stringify(document2)) return;
+      var _a;
+      const document2 = cloneOnsite(this.document), questions = this.survey ? cloneOnsite(this.survey.step.questions) : void 0, branching = ((_a = this.survey) == null ? void 0 : _a.step.branching) ? cloneOnsite(this.survey.step.branching) : void 0;
+      const bytes = this.historyState().length;
+      const entry = { document: document2, questions, branching, selection: cloneOnsite(this.selection), bytes };
+      if (this.historyIndex >= 0 && this.historyState(this.history[this.historyIndex]) === this.historyState()) return;
       if (this.historyIndex < this.history.length - 1) {
         this.historyBytes -= this.history.slice(this.historyIndex + 1).reduce((sum, item) => sum + item.bytes, 0);
         this.history.splice(this.historyIndex + 1);
@@ -4151,6 +4800,10 @@ ${ISOLATION_CSS}`;
     }
     restore(entry) {
       this.document = cloneOnsite(entry.document);
+      if (this.survey && entry.questions) {
+        this.survey.step.questions = cloneOnsite(entry.questions);
+        this.survey.step.branching = entry.branching ? cloneOnsite(entry.branching) : void 0;
+      }
       this.compileAndPatch();
       this.selection = cloneOnsite(entry.selection);
       this.callbacks.onChange();
@@ -4363,6 +5016,7 @@ ${ISOLATION_CSS}`;
 [data-movcues-composition-toolbar],[data-movcues-block-palette],[data-movcues-resize-handle],[data-movcues-insert-edge]{box-sizing:border-box;position:fixed;left:0;top:0;z-index:2147483646;pointer-events:auto;font:12px/1.2 ui-sans-serif,system-ui,sans-serif}
 [data-movcues-composition-toolbar]{display:flex;gap:1px;max-width:calc(100vw - 12px);overflow:auto;padding:3px;border:1px solid #dbe2ea;border-radius:8px;background:#fff;box-shadow:0 4px 14px rgba(15,23,42,.14)}[data-movcues-composition-toolbar] button,[data-movcues-block-palette] button{min-height:28px;padding:5px 7px;border:0;border-radius:5px;background:transparent;color:#334155;font:600 11px inherit;cursor:pointer}[data-movcues-composition-toolbar] button{flex:none;width:26px;padding:0;font-size:16px}[data-movcues-composition-toolbar] button:hover:not(:disabled),[data-movcues-block-palette] button:hover{background:#eff6ff;color:#1d4ed8}[data-movcues-composition-toolbar] button:disabled{cursor:not-allowed;opacity:.42}
 [data-movcues-composition-toolbar] svg{display:block;margin:auto}
+[data-movcues-builder-surface] [data-movcues-question-input]{pointer-events:none}
 [data-movcues-image-placeholder]{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:120px;padding:16px;border:1px dashed #94a3b8!important;background:#f8fafc;color:#64748b;font:12px/1.4 ui-sans-serif,system-ui,sans-serif;cursor:pointer;white-space:normal}[data-movcues-image-placeholder] svg{flex:none}[data-movcues-image-placeholder]:hover,[data-movcues-image-drop]{outline:2px solid #2563eb!important;outline-offset:2px;background:#eff6ff}[data-movcues-image-placeholder][aria-busy=true]{opacity:.6;cursor:wait}[data-movcues-image-file][hidden]{display:none!important}
 [data-movcues-insert-edge]{width:24px;height:24px;padding:0;border:1px solid #93c5fd;border-radius:50%;background:#fff;color:#2563eb;box-shadow:0 2px 6px rgba(15,23,42,.12);font-size:18px;cursor:pointer}[data-movcues-insert-edge]:hover,[data-movcues-insert-edge][aria-expanded=true]{background:#2563eb;color:#fff}
 [data-movcues-insertion-edge=top]{box-shadow:inset 0 3px #2563eb}[data-movcues-insertion-edge=bottom]{box-shadow:inset 0 -3px #2563eb}[data-movcues-insertion-edge=left]{box-shadow:inset 3px 0 #2563eb}[data-movcues-insertion-edge=right]{box-shadow:inset -3px 0 #2563eb}
@@ -4401,6 +5055,7 @@ ${ISOLATION_CSS}`;
       this.definition = null;
       this.guide = null;
       this.survey = null;
+      this.surveyEditor = null;
       this.stepIndex = 0;
       this.mode = "design";
       this.dirty = false;
@@ -4559,6 +5214,23 @@ ${ISOLATION_CSS}`;
         return (_a2 = this.root.querySelector('[data-inspector="step"]')) == null ? void 0 : _a2.append(actions);
       });
       (document.body ?? document.documentElement).appendChild(this.host);
+      if (this.survey && this.draft.experience.builderMode === "onsite") this.surveyEditor = new SurveyEditor(this.root, this.survey, {
+        index: () => this.stepIndex,
+        composer: () => this.compositionEditor,
+        canEdit: () => this.mode === "design" && this.saveState !== "expired",
+        flush: () => this.flushContent(),
+        changed: () => this.changed(false),
+        error: (errors) => this.showValidation(errors),
+        stepsChanged: (index) => {
+          var _a2;
+          (_a2 = this.compositionEditor) == null ? void 0 : _a2.destroy();
+          this.compositionEditor = null;
+          this.compositionSelection = null;
+          this.stepIndex = index;
+          this.changed();
+          this.refreshStepBar();
+        }
+      });
       this.bindPanel();
       this.syncPanel();
       this.applyMode();
@@ -4589,7 +5261,7 @@ ${ISOLATION_CSS}`;
       </div>
       ${guideMarkup}
       <aside aria-label="Contextual inspector"><main>
-        <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
+        <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : this.survey ? "Preview tests the full Survey. No responses, production events or progress are recorded. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         <section class="section composition-inspector" data-composition-inspector hidden>
           <div class="content-heading"><div><div class="eyebrow">Inspector</div><strong data-composition-label>Step</strong></div><button type="button" class="secondary-button compact" data-select-step>Step</button></div>
@@ -5492,7 +6164,7 @@ ${ISOLATION_CSS}`;
         this.showValidation(compositionErrors);
         return false;
       }
-      const allErrors = [...errors, ...((_b = this.compositionEditor) == null ? void 0 : _b.getValidation()) ?? [], ...((_c = this.guide) == null ? void 0 : _c.steps.flatMap(guideStepConfigurationErrors)) ?? []];
+      const allErrors = [...errors, ...((_b = this.compositionEditor) == null ? void 0 : _b.getValidation()) ?? [], ...((_c = this.guide) == null ? void 0 : _c.steps.flatMap(guideStepConfigurationErrors)) ?? [], ...this.survey ? surveyBranchErrors(this.survey) : []];
       this.showValidation(allErrors);
       return !allErrors.length;
     }
@@ -5525,7 +6197,7 @@ ${ISOLATION_CSS}`;
       const definition = JSON.parse(JSON.stringify(this.definition));
       const snapshot = ((_c = this.compositionEditor) == null ? void 0 : _c.snapshot()) ?? ((_d = this.contentEditor) == null ? void 0 : _d.snapshot());
       if (snapshot) {
-        const part = isGuideDefinition(definition) ? definition.steps[this.stepIndex] : definition;
+        const part = isGuideDefinition(definition) ? definition.steps[this.stepIndex] : definition.survey ? definition.survey.steps[this.stepIndex] : definition;
         part.builder = snapshot.builder;
         part.content = snapshot.content;
       }
@@ -5666,7 +6338,7 @@ ${ISOLATION_CSS}`;
         });
         else if (this.draft.experience.widgetType === "anchored_card") rendered.behavior.backdrop = false;
       }
-      const selectedStepId = ((_d = (_c = this.guide) == null ? void 0 : _c.steps[this.stepIndex]) == null ? void 0 : _d.id) ?? ((_f = (_e = this.survey) == null ? void 0 : _e.steps[this.stepIndex]) == null ? void 0 : _f.id);
+      const selectedStepId = ((_d = (_c = this.guide) == null ? void 0 : _c.steps[this.stepIndex]) == null ? void 0 : _d.id) ?? (this.mode === "preview" ? void 0 : (_f = (_e = this.survey) == null ? void 0 : _e.steps[this.stepIndex]) == null ? void 0 : _f.id);
       this.preview.render({
         id: this.draft.experience.id,
         versionId: this.draft.version.id,
@@ -5709,6 +6381,9 @@ ${ISOLATION_CSS}`;
         onGuideStatus: (status) => {
           if (generation === this.previewGeneration && this.mode === "preview") this.setText("[data-trigger-status]", status === "delay" ? "Waiting for presentation delay…" : status === "waiting" ? "Waiting for a website element…" : status === "unavailable" ? "Target missing; use Next, Reset or reselect the target." : this.previewTriggerHint());
         },
+        onSurveySubmit: this.mode === "preview" && this.survey ? () => {
+          this.setText("[data-preview-limit]", "Preview complete. No response or production analytics were sent. Website interactions can still run your site's JavaScript.");
+        } : void 0,
         onComplete: () => {
           this.previewRendered = false;
           this.updateDiagnostics();
@@ -5744,7 +6419,7 @@ ${ISOLATION_CSS}`;
             this.compositionSelection = selection;
             this.syncCompositionInspector();
           }
-        });
+        }, this.survey ? { config: this.survey, step: this.survey.steps[this.stepIndex] } : void 0);
         this.compositionEditor.start();
         this.syncOnsiteAnchoredPointer(host.shadowRoot, builder);
         return;
@@ -5820,7 +6495,8 @@ ${ISOLATION_CSS}`;
       if (redo) redo.disabled = !((_b = this.contentEditor) == null ? void 0 : _b.canRedo());
     }
     syncCompositionInspector() {
-      var _a, _b, _c, _d, _e;
+      var _a, _b, _c, _d, _e, _f;
+      (_a = this.surveyEditor) == null ? void 0 : _a.sync();
       if (!this.root) return;
       const editor = this.compositionEditor;
       const selection = this.compositionSelection;
@@ -5837,12 +6513,12 @@ ${ISOLATION_CSS}`;
       if (selection.kind === "step") this.root.querySelectorAll("[data-step-only]").forEach((group) => {
         group.hidden = group.hasAttribute("data-for") ? !this.isTargetedType() : group.hasAttribute("data-step-summary") ? !this.guide : group.hasAttribute("data-placement-section") ? Boolean(this.guide && getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal") : false;
       });
-      const stepName = (_a = this.root.querySelector("[data-step-name]")) == null ? void 0 : _a.closest("label");
+      const stepName = (_b = this.root.querySelector("[data-step-name]")) == null ? void 0 : _b.closest("label");
       if (stepName) stepName.hidden = !this.guide;
       this.root.querySelectorAll("[data-inspector]").forEach((group) => {
         group.hidden = group.dataset.inspector !== selection.kind;
       });
-      const step = (_b = this.guide) == null ? void 0 : _b.steps[this.stepIndex];
+      const step = (_c = this.guide) == null ? void 0 : _c.steps[this.stepIndex];
       this.setValue("[data-step-name]", (step == null ? void 0 : step.label) ?? (step == null ? void 0 : step.content.heading) ?? "");
       const cell = editor.getSelectedCell();
       if (cell) {
@@ -5853,9 +6529,9 @@ ${ISOLATION_CSS}`;
         this.setValue("[data-cell-align]", cell.align);
         this.setValue("[data-cell-gap]", String(cell.gap));
         this.setValue("[data-cell-padding]", String(cell.padding.top));
-        this.setValue("[data-cell-background]", ((_c = cell.style) == null ? void 0 : _c.background) && /^#[0-9a-f]{6}$/i.test(cell.style.background) ? cell.style.background : "#ffffff");
-        this.setValue("[data-cell-border]", String(((_d = cell.style) == null ? void 0 : _d.borderWidth) ?? 0));
-        this.setValue("[data-cell-radius]", String(((_e = cell.style) == null ? void 0 : _e.borderRadius) ?? 0));
+        this.setValue("[data-cell-background]", ((_d = cell.style) == null ? void 0 : _d.background) && /^#[0-9a-f]{6}$/i.test(cell.style.background) ? cell.style.background : "#ffffff");
+        this.setValue("[data-cell-border]", String(((_e = cell.style) == null ? void 0 : _e.borderWidth) ?? 0));
+        this.setValue("[data-cell-radius]", String(((_f = cell.style) == null ? void 0 : _f.borderRadius) ?? 0));
         this.setChecked("[data-cell-stack]", Boolean(cell.responsiveStack));
       }
       const block = editor.getSelectedBlock();
@@ -6150,7 +6826,7 @@ ${ISOLATION_CSS}`;
       this.teardown(true);
     }
     teardown(clearContinuation) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
       this.lifecycle++;
       clearTimeout(this.expiryTimer);
       clearInterval(this.validationTimer);
@@ -6183,6 +6859,8 @@ ${ISOLATION_CSS}`;
       this.compositionSelection = null;
       this.picker.cancel();
       (_j = this.host) == null ? void 0 : _j.remove();
+      (_k = this.surveyEditor) == null ? void 0 : _k.destroy();
+      this.surveyEditor = null;
       this.host = null;
       this.root = null;
       this.bridge = null;

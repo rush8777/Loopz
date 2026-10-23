@@ -1,4 +1,5 @@
 import type { DeliveredExperience, ExperienceAction, SurveyAnswers } from "../types";
+import { type SurveyResume } from "./SurveyRenderer";
 export interface ExperienceRendererCallbacks {
     onVisible: () => void;
     onDismiss: () => void;
@@ -8,7 +9,9 @@ export interface ExperienceRendererCallbacks {
     onGuideBack?: () => void;
     onUnavailable?: () => void;
     onGuideStatus?: (status: "delay" | "waiting" | "ready" | "unavailable") => void;
-    onSurveyProgress?: (answers: SurveyAnswers, currentStepId: string, direction: "next" | "back") => Promise<void> | void;
+    onSurveyLoad?: () => Promise<SurveyResume>;
+    onSurveyAnswersChange?: (answers: SurveyAnswers) => void;
+    onSurveyProgress?: (answers: SurveyAnswers, currentStepId: string, direction: "next" | "back", destinationStepId?: string) => Promise<void> | void;
     onSurveySubmit?: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
 }
 export declare class ExperienceRenderer {

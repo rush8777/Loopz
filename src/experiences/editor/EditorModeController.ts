@@ -1,3 +1,5 @@
+import { SurveyEditor } from "./SurveyEditor";
+import { surveyBranchErrors } from "../survey/SurveyLogic";
 import type {
   EditorDefinition,
   EditorDraft,
@@ -54,6 +56,7 @@ export class EditorModeController {
   private definition: EditorDefinition | null = null;
   private guide: RuntimeGuideDefinition | null = null;
   private survey: SurveyConfig | null = null;
+  private surveyEditor: SurveyEditor | null = null;
   private stepIndex = 0;
   private mode: EditorMode = "design";
   private dirty = false;
@@ -147,6 +150,11 @@ export class EditorModeController {
     if (this.guide) this.root.querySelectorAll("[data-guide] .history-row").forEach(actions => this.root!.querySelector('[data-inspector="step"]')?.append(actions));
     (document.body ?? document.documentElement).appendChild(this.host);
 
+    if (this.survey && this.draft.experience.builderMode === "onsite") this.surveyEditor = new SurveyEditor(this.root, this.survey, {
+      index: () => this.stepIndex, composer: () => this.compositionEditor, canEdit: () => this.mode === "design" && this.saveState !== "expired",
+      flush: () => this.flushContent(), changed: () => this.changed(false), error: errors => this.showValidation(errors),
+      stepsChanged: index => { this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null; this.stepIndex = index; this.changed(); this.refreshStepBar(); },
+    });
     this.bindPanel();
     this.syncPanel();
     this.applyMode();
@@ -178,7 +186,7 @@ export class EditorModeController {
       </div>
       ${guideMarkup}
       <aside aria-label="Contextual inspector"><main>
-        <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
+        <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : this.survey ? "Preview tests the full Survey. No responses, production events or progress are recorded. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         <section class="section composition-inspector" data-composition-inspector hidden>
           <div class="content-heading"><div><div class="eyebrow">Inspector</div><strong data-composition-label>Step</strong></div><button type="button" class="secondary-button compact" data-select-step>Step</button></div>
@@ -603,7 +611,7 @@ export class EditorModeController {
     }
     const errors = this.contentEditor?.getValidation() ?? [];
     if (this.compositionEditor && !this.compositionEditor.flush()) { const compositionErrors = this.compositionEditor.getValidation(); this.showValidation(compositionErrors); return false; }
-    const allErrors = [...errors, ...(this.compositionEditor?.getValidation() ?? []), ...(this.guide?.steps.flatMap(guideStepConfigurationErrors) ?? [])];
+    const allErrors = [...errors, ...(this.compositionEditor?.getValidation() ?? []), ...(this.guide?.steps.flatMap(guideStepConfigurationErrors) ?? []), ...(this.survey ? surveyBranchErrors(this.survey) : [])];
     this.showValidation(allErrors); return !allErrors.length;
   }
 
@@ -629,7 +637,7 @@ export class EditorModeController {
     const definition = JSON.parse(JSON.stringify(this.definition)) as EditorDefinition;
     const snapshot = this.compositionEditor?.snapshot() ?? this.contentEditor?.snapshot();
     if (snapshot) {
-      const part = isGuideDefinition(definition) ? definition.steps[this.stepIndex] : definition;
+      const part = isGuideDefinition(definition) ? definition.steps[this.stepIndex] : definition.survey ? definition.survey.steps[this.stepIndex] : definition;
       part.builder = snapshot.builder; part.content = snapshot.content;
     }
     this.recoveryDraft = JSON.stringify({ experienceId: this.draft?.experience.id, revision: this.draft?.version.revision, definition }, null, 2);
@@ -719,7 +727,7 @@ export class EditorModeController {
       if (isGuideDefinition(rendered)) rendered.steps.forEach(step => { step.behavior.backdrop = false; });
       else if (this.draft.experience.widgetType === "anchored_card") rendered.behavior.backdrop = false;
     }
-    const selectedStepId = this.guide?.steps[this.stepIndex]?.id ?? this.survey?.steps[this.stepIndex]?.id;
+    const selectedStepId = this.guide?.steps[this.stepIndex]?.id ?? (this.mode === "preview" ? undefined : this.survey?.steps[this.stepIndex]?.id);
     this.preview.render({
       id: this.draft.experience.id,
       versionId: this.draft.version.id,
@@ -739,6 +747,7 @@ export class EditorModeController {
       onGuideAdvance: () => { if (this.mode === "preview" && this.guide) this.advanceGuidePreview(1); },
       onGuideBack: () => { if (this.mode === "preview" && this.guide) this.advanceGuidePreview(-1); },
       onGuideStatus: status => { if (generation === this.previewGeneration && this.mode === "preview") this.setText("[data-trigger-status]", status === "delay" ? "Waiting for presentation delay…" : status === "waiting" ? "Waiting for a website element…" : status === "unavailable" ? "Target missing; use Next, Reset or reselect the target." : this.previewTriggerHint()); },
+      onSurveySubmit: this.mode === "preview" && this.survey ? () => { this.setText("[data-preview-limit]", "Preview complete. No response or production analytics were sent. Website interactions can still run your site's JavaScript."); } : undefined,
       onComplete: () => { this.previewRendered = false; this.updateDiagnostics(); },
       onUnavailable: () => { this.previewRendered = false; this.updateDiagnostics(); },
     }, selectedStepId);
@@ -762,7 +771,7 @@ export class EditorModeController {
           onValidation: errors => this.showValidation(errors),
           onImageStatus: message => this.setText("[data-image-status]", message),
           onSelectionChange: selection => { this.compositionSelection = selection; this.syncCompositionInspector(); },
-        });
+        }, this.survey ? { config: this.survey, step: this.survey.steps[this.stepIndex] } : undefined);
         this.compositionEditor.start(); this.syncOnsiteAnchoredPointer(host.shadowRoot, builder); return;
     } catch (error) { this.showValidation([error instanceof Error ? error.message : "This layout could not be converted safely."]); this.compositionEditor = null; }
     this.contentEditor = new OnsiteContentEditor(host.shadowRoot, builder, content, {
@@ -814,6 +823,7 @@ export class EditorModeController {
   }
 
   private syncCompositionInspector(): void {
+    this.surveyEditor?.sync();
     if (!this.root) return; const editor = this.compositionEditor; const selection = this.compositionSelection; const inspector = this.root.querySelector<HTMLElement>("[data-composition-inspector]"); if (!inspector) return;
     inspector.hidden = this.mode !== "design" || !editor || !selection; this.root.querySelector<HTMLElement>("[data-content-inspector]")!.hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
     if (!editor || !selection) return; if (selection.kind === "step") this.syncGuideBehavior(); this.setText("[data-composition-label]", selection.label);
@@ -1096,6 +1106,7 @@ export class EditorModeController {
     this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
     this.picker.cancel();
     this.host?.remove();
+    this.surveyEditor?.destroy(); this.surveyEditor = null;
     this.host = null; this.root = null; this.bridge = null; this.session = null; this.draft = null; this.definition = null; this.guide = null; this.survey = null;
     this.saveState = "clean"; this.editGeneration = 0; this.recoveryDraft = null;
     this.dirty = false; this.previewRendered = false; this.saveInFlight = null;

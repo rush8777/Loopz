@@ -1,7 +1,14 @@
 import type { ExperienceBehavior, ExperienceContent, ExperienceDesign, SurveyAnswers, SurveyConfig } from "../types";
+export interface SurveyResume {
+    answers: SurveyAnswers;
+    currentStepId?: string;
+    closed?: boolean;
+}
 export interface SurveyCallbacks {
-    onDismiss: () => void;
-    onProgress: (answers: SurveyAnswers, currentStepId: string, direction: "next" | "back") => Promise<void> | void;
+    onLoad?: () => Promise<SurveyResume>;
+    onAnswersChange?: (answers: SurveyAnswers) => void;
+    onDismiss: () => Promise<void> | void;
+    onProgress: (answers: SurveyAnswers, currentStepId: string, direction: "next" | "back", destinationStepId?: string) => Promise<void> | void;
     onSubmit: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
     onStepChange?: (stepId: string) => void;
 }
@@ -15,13 +22,18 @@ export declare class SurveyRenderer {
     private behavior;
     private survey;
     private callbacks;
-    private submitting;
+    private busy;
+    private completed;
+    private generation;
+    private retry;
     render(root: ShadowRoot, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, survey: SurveyConfig, callbacks: SurveyCallbacks, requestedStepId?: string): HTMLElement | null;
     private renderStep;
     private syncQuestions;
     private bindQuestion;
     private syncNavigation;
-    private setDisabled;
+    private dismiss;
+    private run;
+    private setBusy;
     private syncProgress;
     private validateStep;
     private validateAll;

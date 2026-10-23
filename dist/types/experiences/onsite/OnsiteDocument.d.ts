@@ -1,5 +1,7 @@
-import type { ExperienceContent, WidgetBuilderState, WidgetType } from "../types";
+import { type OnsiteSurveyContext } from "../survey/SurveyMarkup";
+import type { ExperienceContent, SurveyQuestion, WidgetBuilderState, WidgetType } from "../types";
 export declare const ONSITE_SCHEMA_VERSION: 2;
+export declare const ONSITE_SURVEY_SCHEMA_VERSION: 3;
 export declare const ONSITE_LIMITS: {
     readonly maxDepth: 8;
     readonly maxNodes: 120;
@@ -63,6 +65,13 @@ export type OnsiteButtonAction = {
     eventName: string;
 };
 export type OnsiteBlock = (BlockBase & {
+    type: "question";
+    questionId: string;
+    fontSize: number;
+    color?: string;
+}) | (BlockBase & {
+    type: "survey_controls";
+}) | (BlockBase & {
     type: "heading";
     html: string;
     level: 1 | 2 | 3 | 4;
@@ -112,7 +121,7 @@ export type OnsiteBlock = (BlockBase & {
 });
 export type OnsiteIcon = "check" | "star" | "info" | "warning" | "sparkles" | "arrow" | "heart" | "rocket";
 export interface OnsiteDocument {
-    schemaVersion: 2;
+    schemaVersion: 2 | 3;
     id: string;
     root: OnsiteCell;
 }
@@ -126,13 +135,20 @@ export interface OnsiteValidationResult {
     valid: boolean;
     errors: string[];
 }
-export declare function onsiteId(prefix?: "document" | "cell" | "block" | "action"): string;
+export declare function onsiteId(prefix?: "document" | "cell" | "block" | "action" | "question" | "option" | "step"): string;
 export declare function emptyCell(block?: OnsiteBlock): OnsiteCell;
 export declare function createBlock(type: OnsiteBlock["type"], guide?: boolean): OnsiteBlock;
 export declare function createOnsiteDocument(guide?: boolean): OnsiteDocument;
+export declare function createOnsiteSurveyDocument(questions: SurveyQuestion[], content?: ExperienceContent): OnsiteDocument;
+export declare function validateOnsiteSurveyDocument(document: OnsiteDocument, context: OnsiteSurveyContext): string[];
+export declare function duplicateSurveyCell(document: OnsiteDocument, questions: SurveyQuestion[], id: string): {
+    document: OnsiteDocument;
+    questions: SurveyQuestion[];
+    cellId: string;
+} | null;
 export declare function onsiteDocumentFromBuilder(builder?: WidgetBuilderState): OnsiteDocument | null;
-export declare function applyOnsiteDocument(builder: WidgetBuilderState, document: OnsiteDocument, widgetType: WidgetType | "anchored_card" | "modal"): CompiledOnsiteDocument;
-export declare function compileOnsiteDocument(document: OnsiteDocument, widgetType: string): CompiledOnsiteDocument;
+export declare function applyOnsiteDocument(builder: WidgetBuilderState, document: OnsiteDocument, widgetType: WidgetType | "anchored_card" | "modal", survey?: OnsiteSurveyContext): CompiledOnsiteDocument;
+export declare function compileOnsiteDocument(document: OnsiteDocument, widgetType: string, survey?: OnsiteSurveyContext): CompiledOnsiteDocument;
 export declare function validateOnsiteDocument(value: unknown): OnsiteValidationResult;
 export declare function onsiteImageSourceIsSafe(src: string): boolean;
 export declare function findCell(document: OnsiteDocument, id: string): OnsiteCell | null;

@@ -1,5 +1,7 @@
 # Phase 9 Survey handoff — review only
 
+Historical Phase 8.5 review. See [Phase 9 implementation and verification](phase-9-survey-report.md) for the completed persistence, schema and authoring work.
+
 No Survey authoring, branching, question block or schema change is implemented in Phase 8.5. Existing GrapesJS Surveys remain available; their Results button is restored.
 
 ## Reuse these contracts

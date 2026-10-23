@@ -1,11 +1,16 @@
+import { newSurveyQuestion } from "./SurveyEditing";
+import { surveyBranchErrors } from "../survey/SurveyLogic";
+import { QUESTION_TYPES, surveyQuestionErrors } from "../survey/SurveyMarkup";
 import { editorRange, setEditorRange } from "./EditorSelection";
-import type { ExperienceContent, WidgetBuilderState, WidgetType } from "../types";
+import type { ExperienceContent, SurveyConfig, SurveyStep, SurveyQuestion, WidgetBuilderState, WidgetType } from "../types";
 import {
   applyOnsiteDocument,
   cellForBlock,
   cloneOnsite,
   createBlock,
   duplicateCell,
+  duplicateSurveyCell,
+  validateOnsiteSurveyDocument,
   emptyCell,
   findBlock,
   findCell,
@@ -37,10 +42,10 @@ export type CompositionSelection =
   | { kind: "cell"; label: string; cellId: string }
   | { kind: "block"; label: string; cellId: string; blockId: string; blockType: OnsiteBlock["type"] };
 interface Callbacks { onChange(): void; onSelectionChange(selection: CompositionSelection): void; onValidation(errors: string[]): void; onImageStatus?(message: string): void }
-interface HistoryEntry { document: OnsiteDocument; selection: CompositionSelection; bytes: number }
+interface HistoryEntry { questions?: SurveyQuestion[]; branching?: SurveyStep["branching"]; document: OnsiteDocument; selection: CompositionSelection; bytes: number }
 type CellEdge = "top" | "right" | "bottom" | "left";
 
-const BLOCK_LABEL: Record<OnsiteBlock["type"], string> = { heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
+const BLOCK_LABEL: Record<OnsiteBlock["type"], string> = { question: "Question", survey_controls: "Survey controls", heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
 const HISTORY_LIMIT = 50;
 const HISTORY_BYTES = 2_000_000;
 
@@ -82,6 +87,7 @@ export class OnsiteCompositionEditor {
     private widgetType: WidgetType | "anchored_card" | "modal",
     private guide: boolean,
     private callbacks: Callbacks,
+    private survey?: { config: SurveyConfig; step: SurveyStep },
   ) {
     const existing = onsiteDocumentFromBuilder(builder);
     this.document = existing ?? migrateV1Builder(builder, content, widgetType, guide) ?? (() => { throw new Error("This v1 layout cannot be converted safely. Continue editing it with the compatibility editor."); })();
@@ -116,7 +122,8 @@ export class OnsiteCompositionEditor {
     ];
     this.toolbar.innerHTML = tools.map(([command, label, icon]) => `<button type="button" data-command="${command}" title="${label}" aria-label="${label}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></button>`).join("");
     this.toolbar.querySelector<HTMLButtonElement>('[data-command="move"]')!.draggable = true;
-    this.palette.innerHTML = (Object.keys(BLOCK_LABEL) as OnsiteBlock["type"][]).map(type => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
+    this.palette.innerHTML = (Object.keys(BLOCK_LABEL) as OnsiteBlock["type"][]).filter(type => type !== "question" && type !== "survey_controls").map(type => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
+    if (this.survey) this.palette.insertAdjacentHTML("beforeend", QUESTION_TYPES.map(type => `<button type="button" data-insert-question="${type}">${({ single_choice: "Single choice", multiple_choice: "Multiple choice", short_text: "Short text", long_text: "Long text", rating: "Rating", nps: "NPS" })[type]}</button>`).join(""));
     this.root.append(this.toolbar, this.palette, this.imageInput);
     const edgeLabels = { top: "Add above", right: "Add to the right", bottom: "Add below", left: "Add to the left" };
     this.edgeButtons = (["top", "right", "bottom", "left"] as const).map(edge => {
@@ -152,18 +159,18 @@ export class OnsiteCompositionEditor {
   getSelection(): CompositionSelection { return this.selection; }
   getSelectedCell(): OnsiteCell | null { const id = this.selection.kind === "step" ? this.document.root.id : this.selection.cellId; return findCell(this.document, id); }
   getSelectedBlock(): OnsiteBlock | null { return this.selection.kind === "block" ? findBlock(this.document, this.selection.blockId) : null; }
-  canUndo(): boolean { return this.historyIndex > 0 || this.historyIndex >= 0 && JSON.stringify(this.document) !== JSON.stringify(this.history[this.historyIndex].document); }
-  canRedo(): boolean { return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1 && JSON.stringify(this.document) === JSON.stringify(this.history[this.historyIndex].document); }
+  canUndo(): boolean { return this.historyIndex > 0 || this.historyIndex >= 0 && this.historyState() !== this.historyState(this.history[this.historyIndex]); }
+  canRedo(): boolean { return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1 && this.historyState() === this.historyState(this.history[this.historyIndex]); }
   isComposing(): boolean { return this.composing; }
-  getValidation(): string[] { return validateOnsiteDocument(this.document).errors; }
+  getValidation(): string[] { return [...validateOnsiteDocument(this.document).errors, ...(this.survey ? validateOnsiteSurveyDocument(this.document, this.surveyContext()!) : [])]; }
 
   flush(): boolean {
     if (this.composing) return false;
     clearTimeout(this.compileTimer); this.compileTimer = 0;
     this.repairDocumentStructure();
-    const state = JSON.stringify(this.document); if (state === this.compiledState) return true;
-    const validation = validateOnsiteDocument(this.document); this.callbacks.onValidation(validation.errors); if (!validation.valid) return false;
-    const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType); Object.assign(this.content, compiled.content); this.compiledState = state; return true;
+    const state = this.historyState(); if (state === this.compiledState) return true;
+    const errors = this.getValidation(); this.callbacks.onValidation(errors); if (errors.length) return false;
+    const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext()); Object.assign(this.content, compiled.content); this.compiledState = state; return true;
   }
 
   snapshot(): { builder: WidgetBuilderState; content: ExperienceContent } { this.flush(); return { builder: cloneOnsite(this.builder), content: cloneOnsite(this.content) }; }
@@ -212,8 +219,21 @@ export class OnsiteCompositionEditor {
   }
   split(direction: "row" | "column"): boolean { const cell = this.getSelectedCell(); if (!cell || this.composing) return false; if (!this.beforeTransaction()) return false; const id = splitCell(this.document, cell.id, direction); if (!id) return false; this.commit({ kind: "cell", label: direction === "row" ? "Right cell" : "Lower cell", cellId: id }); return true; }
   addEdge(edge: "top" | "right" | "bottom" | "left"): void { if (this.composing) return; if (!this.beforeTransaction()) return; const id = insertEdgeCell(this.document, edge); this.commit({ kind: "cell", label: `${edge} cell`, cellId: id }); }
-  duplicate(): boolean { const cell = this.getSelectedCell(); if (!cell || cell === this.document.root || this.composing) return false; if (!this.beforeTransaction()) return false; const id = duplicateCell(this.document, cell.id); if (!id) return false; this.commit({ kind: "cell", label: "Duplicated cell", cellId: id }); return true; }
-  remove(): boolean { const cell = this.getSelectedCell(); if (!cell || cell === this.document.root || this.composing) return false; if (!this.beforeTransaction()) return false; const parent = parentCell(this.document, cell.id); if (!removeCell(this.document, cell.id)) return false; this.commit(parent ? { kind: "cell", label: "Parent cell", cellId: parent.id } : { kind: "step", label: "Step" }); return true; }
+  duplicate(): boolean {
+    const cell = this.getSelectedCell(); if (!cell || cell === this.document.root || this.composing) return false;
+    if (!this.beforeTransaction()) return false;
+    if (this.survey) {
+      const duplicated = duplicateSurveyCell(this.document, this.survey.step.questions, cell.id); if (!duplicated) return false;
+      this.document = duplicated.document; this.survey.step.questions = duplicated.questions;
+      this.commit({ kind: "cell", label: "Duplicated cell", cellId: duplicated.cellId }); return true;
+    }
+    const id = duplicateCell(this.document, cell.id); if (!id) return false; this.commit({ kind: "cell", label: "Duplicated cell", cellId: id }); return true;
+  }
+  remove(): boolean { const cell = this.getSelectedCell(); if (!cell || cell === this.document.root || this.composing) return false; if (!this.beforeTransaction()) return false;
+    if (this.survey && listBlocks(cell).some(block => block.type === "survey_controls")) { this.callbacks.onValidation(["Keep the Survey navigation block so visitors can continue or submit."]); return false; }
+    const removed = new Set(listBlocks(cell).filter(block => block.type === "question").map(block => block.type === "question" ? block.questionId : ""));
+    const parent = parentCell(this.document, cell.id); if (!removeCell(this.document, cell.id)) return false;
+    if (this.survey) { this.survey.step.questions = this.survey.step.questions.filter(question => !removed.has(question.id)); if (this.survey.step.branching) this.survey.step.branching.rules = this.survey.step.branching.rules.filter(rule => !removed.has(rule.questionId)); } this.commit(parent ? { kind: "cell", label: "Parent cell", cellId: parent.id } : { kind: "step", label: "Step" }); return true; }
   move(delta: -1 | 1): boolean { const cell = this.getSelectedCell(); if (!cell || this.composing) return false; if (!this.beforeTransaction()) return false; if (!moveCell(this.document, cell.id, delta)) return false; this.commit(this.selection); return true; }
 
   /** Move the existing subtree; never regenerate its cell/block/action IDs. */
@@ -227,6 +247,56 @@ export class OnsiteCompositionEditor {
     const validation = validateOnsiteDocument(candidate); this.callbacks.onValidation(validation.errors); if (!validation.valid) return false;
     if (!this.beforeTransaction()) return false; this.document = candidate; this.cancelMove();
     this.commit(source.block ? { kind: "block", label: BLOCK_LABEL[source.block.type], cellId: source.id, blockId: source.block.id, blockType: source.block.type } : { kind: "cell", label: "Cell", cellId: source.id }); return true;
+  }
+
+  private surveyContext() { return this.survey ? { questions: this.survey.step.questions, submitLabel: this.survey.config.submitLabel } : undefined; }
+  private historyState(entry?: Pick<HistoryEntry, "document" | "questions" | "branching">): string { return JSON.stringify(this.survey ? (entry ? { document: entry.document, questions: entry.questions, branching: entry.branching } : { document: this.document, questions: this.survey.step.questions, branching: this.survey.step.branching }) : entry?.document ?? this.document); }
+  getSelectedQuestion(): SurveyQuestion | null { const block = this.getSelectedBlock(); return block?.type === "question" ? this.survey?.step.questions.find(question => question.id === block.questionId) ?? null : null; }
+  refreshSurvey(): void { this.compileAndPatch(); this.select(this.selection); }
+
+  insertQuestion(type: SurveyQuestion["type"], insertion?: { cellId: string; edge: CellEdge }): boolean {
+    if (!this.survey || !QUESTION_TYPES.includes(type) || this.survey.step.questions.length >= 20 || !this.beforeTransaction()) return false;
+    const selected = this.getSelectedCell(); if (!selected) return false;
+    const candidate = cloneOnsite(this.document), question = newSurveyQuestion(type);
+    const block: OnsiteBlock = { id: onsiteId("block"), type: "question", questionId: question.id, fontSize: 14 };
+    let cell = findCell(candidate, selected.id)!;
+    if (insertion) { const id = insertAdjacentCell(candidate, insertion.cellId, insertion.edge); if (!id) return false; cell = findCell(candidate, id)!; }
+    else if (cell.children) { const added = emptyCell(); cell.children.push(added); cell = added; }
+    else if (cell.block) { const id = insertAdjacentCell(candidate, cell.id, "bottom"); if (!id) return false; cell = findCell(candidate, id)!; }
+    cell.block = block; cell.sizing = { mode: "hug" };
+    const questions = [...this.survey.step.questions, question];
+    const errors = [...validateOnsiteDocument(candidate).errors, ...validateOnsiteSurveyDocument(candidate, { questions })];
+    if (errors.length) { this.callbacks.onValidation(errors); return false; }
+    this.document = candidate; this.survey.step.questions = questions;
+    this.commit({ kind: "block", label: "Question", cellId: cell.id, blockId: block.id, blockType: block.type }); return true;
+  }
+
+  updateStepHeading(label: string): boolean {
+    if (!this.survey || !this.beforeTransaction()) return false;
+    const heading = listBlocks(this.document.root).find(block => block.type === "heading");
+    if (heading?.type !== "heading") { this.callbacks.onValidation(["Insert a Heading block to set the step heading."]); return false; }
+    heading.html = escapeHtmlAttribute(label.slice(0, 160)); this.commit(this.selection); return true;
+  }
+
+  updateBranching(branching: NonNullable<SurveyStep["branching"]>): boolean {
+    if (!this.survey || !this.beforeTransaction()) return false;
+    const step = { ...this.survey.step, branching: cloneOnsite(branching) };
+    const errors = surveyBranchErrors({ ...this.survey.config, steps: this.survey.config.steps.map(value => value.id === step.id ? step : value) });
+    if (errors.length) { this.callbacks.onValidation(errors); return false; }
+    this.survey.step.branching = step.branching; this.commit(this.selection); return true;
+  }
+
+  updateQuestion(question: SurveyQuestion): boolean {
+    const current = this.getSelectedQuestion(); if (!this.survey || !current || current.id !== question.id || !this.beforeTransaction()) return false;
+    const questions = this.survey.step.questions.map(value => value.id === question.id ? cloneOnsite(question) : value);
+    const errors = surveyQuestionErrors(questions); if (errors.length) { this.callbacks.onValidation(errors); return false; }
+    this.survey.step.questions = questions;
+    if (this.survey.step.branching) this.survey.step.branching.rules = this.survey.step.branching.rules.filter(rule => {
+      if (rule.questionId !== question.id) return true;
+      const step = { ...this.survey!.step, branching: { rules: [rule] } };
+      return !surveyBranchErrors({ ...this.survey!.config, steps: this.survey!.config.steps.map(value => value.id === step.id ? step : value) }).length;
+    });
+    this.commit(this.selection); return true;
   }
 
   updateCell(update: Partial<Pick<OnsiteCell, "direction" | "align" | "justify" | "gap" | "padding" | "style" | "responsiveStack">> & { sizing?: OnsiteSizing }): void {
@@ -301,16 +371,17 @@ export class OnsiteCompositionEditor {
 
   private beforeTransaction(): boolean { clearTimeout(this.typingTimer); this.repairDocumentStructure(); if (!this.flush()) return false; this.pushHistory(); return true; }
   private commit(selection: CompositionSelection): void {
-    this.repairDocumentStructure(); const validation = validateOnsiteDocument(this.document);
-    if (!validation.valid) { const previous = this.history[this.historyIndex]; if (previous) { this.document = cloneOnsite(previous.document); this.compileAndPatch(); this.select(previous.selection); } this.callbacks.onValidation(validation.errors); return; }
-    if (JSON.stringify(this.document) === this.compiledState) { this.select(selection); return; }
+    this.repairDocumentStructure(); const errors = this.getValidation(); const validation = { valid: !errors.length, errors };
+    if (!validation.valid) { const previous = this.history[this.historyIndex]; if (previous) { this.document = cloneOnsite(previous.document); if (this.survey && previous.questions) { this.survey.step.questions = cloneOnsite(previous.questions); this.survey.step.branching = previous.branching ? cloneOnsite(previous.branching) : undefined; } this.compileAndPatch(); this.select(previous.selection); } this.callbacks.onValidation(validation.errors); return; }
+    if (this.historyState() === this.compiledState) { this.select(selection); return; }
     this.selection = selection; this.compileAndPatch(); this.pushHistory(); this.callbacks.onChange(); this.select(selection);
   }
   private compileAndPatch(): void {
-    const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType); Object.assign(this.content, compiled.content);
-    this.compiledState = JSON.stringify(this.document);
+    const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext()); Object.assign(this.content, compiled.content);
+    this.compiledState = this.historyState();
     const template = document.createElement("template"); template.innerHTML = compiled.html; this.surface?.replaceChildren(...Array.from(template.content.childNodes));
     this.imagePlaceholders.clear();
+    this.surface?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-movcues-question-input]").forEach(input => { input.readOnly = true; input.tabIndex = -1; });
     this.savedRange = null;
     this.surface?.querySelectorAll<HTMLElement>("[data-movcues-node-id]").forEach(cell => {
       cell.tabIndex = 0; cell.setAttribute("aria-label", "Layout cell");
@@ -350,14 +421,14 @@ export class OnsiteCompositionEditor {
   }
 
   private pushHistory(): void {
-    const document = cloneOnsite(this.document); const bytes = JSON.stringify(document).length; const entry = { document, selection: cloneOnsite(this.selection), bytes };
-    if (this.historyIndex >= 0 && JSON.stringify(this.history[this.historyIndex].document) === JSON.stringify(document)) return;
+    const document = cloneOnsite(this.document), questions = this.survey ? cloneOnsite(this.survey.step.questions) : undefined, branching = this.survey?.step.branching ? cloneOnsite(this.survey.step.branching) : undefined; const bytes = this.historyState().length; const entry = { document, questions, branching, selection: cloneOnsite(this.selection), bytes };
+    if (this.historyIndex >= 0 && this.historyState(this.history[this.historyIndex]) === this.historyState()) return;
     if (this.historyIndex < this.history.length - 1) { this.historyBytes -= this.history.slice(this.historyIndex + 1).reduce((sum, item) => sum + item.bytes, 0); this.history.splice(this.historyIndex + 1); }
     this.history.push(entry); this.historyBytes += bytes;
     while (this.history.length > HISTORY_LIMIT || this.historyBytes > HISTORY_BYTES) { const removed = this.history.shift(); this.historyBytes -= removed?.bytes ?? 0; }
     this.historyIndex = this.history.length - 1;
   }
-  private restore(entry: HistoryEntry): void { this.document = cloneOnsite(entry.document); this.compileAndPatch(); this.selection = cloneOnsite(entry.selection); this.callbacks.onChange(); this.select(this.selection); }
+  private restore(entry: HistoryEntry): void { this.document = cloneOnsite(entry.document); if (this.survey && entry.questions) { this.survey.step.questions = cloneOnsite(entry.questions); this.survey.step.branching = entry.branching ? cloneOnsite(entry.branching) : undefined; } this.compileAndPatch(); this.selection = cloneOnsite(entry.selection); this.callbacks.onChange(); this.select(this.selection); }
 
   private onSurfaceClick = (event: Event): void => {
     const element = event.target instanceof Element ? event.target : null; if (!element) return;
@@ -436,9 +507,9 @@ export class OnsiteCompositionEditor {
 
   private onToolbarClick = (event: Event): void => { const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-command]") : null; if (!button || button.disabled) return; event.preventDefault(); event.stopPropagation(); const command = button.dataset.command; if (command === "add") { if (this.palette.hidden) this.openPalette(button); else this.closePalette(); } else if (command === "columns") this.split("row"); else if (command === "rows") this.split("column"); else if (command === "parent") this.selectParent(); else if (command === "duplicate") this.duplicate(); else if (command === "delete") this.remove(); else if (command === "move-up") this.move(-1); else if (command === "move-down") this.move(1); else if (command === "move") { if (this.moveSource) this.cancelMove(); else { this.moveSource = this.getSelectedCell()?.id ?? null; this.surface?.setAttribute("data-movcues-moving", ""); button.setAttribute("aria-pressed", "true"); button.title = "Choose a destination cell, or press Escape to cancel"; if ((event as MouseEvent).detail === 0) this.moveDestinations()[0]?.focus({ preventScroll: true }); } } };
   private onPaletteClick = (event: Event): void => {
-    const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-insert-block]") : null; if (!button) return;
+    const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-insert-block],[data-insert-question]") : null; if (!button) return;
     event.preventDefault(); event.stopPropagation();
-    if (this.insertBlock(button.dataset.insertBlock as OnsiteBlock["type"], this.insertion ?? undefined)) {
+    if (button.dataset.insertQuestion ? this.insertQuestion(button.dataset.insertQuestion as SurveyQuestion["type"], this.insertion ?? undefined) : this.insertBlock(button.dataset.insertBlock as OnsiteBlock["type"], this.insertion ?? undefined)) {
       this.closePalette();
       const block = this.getSelectedBlock(); const element = block ? this.surface?.querySelector<HTMLElement>(`[data-movcues-block-id="${block.id}"]`) : null;
       if (element) { element.tabIndex = -1; element.focus({ preventScroll: true }); }
@@ -576,6 +647,7 @@ const AUTHORING_STYLE = `
 [data-movcues-composition-toolbar],[data-movcues-block-palette],[data-movcues-resize-handle],[data-movcues-insert-edge]{box-sizing:border-box;position:fixed;left:0;top:0;z-index:2147483646;pointer-events:auto;font:12px/1.2 ui-sans-serif,system-ui,sans-serif}
 [data-movcues-composition-toolbar]{display:flex;gap:1px;max-width:calc(100vw - 12px);overflow:auto;padding:3px;border:1px solid #dbe2ea;border-radius:8px;background:#fff;box-shadow:0 4px 14px rgba(15,23,42,.14)}[data-movcues-composition-toolbar] button,[data-movcues-block-palette] button{min-height:28px;padding:5px 7px;border:0;border-radius:5px;background:transparent;color:#334155;font:600 11px inherit;cursor:pointer}[data-movcues-composition-toolbar] button{flex:none;width:26px;padding:0;font-size:16px}[data-movcues-composition-toolbar] button:hover:not(:disabled),[data-movcues-block-palette] button:hover{background:#eff6ff;color:#1d4ed8}[data-movcues-composition-toolbar] button:disabled{cursor:not-allowed;opacity:.42}
 [data-movcues-composition-toolbar] svg{display:block;margin:auto}
+[data-movcues-builder-surface] [data-movcues-question-input]{pointer-events:none}
 [data-movcues-image-placeholder]{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:120px;padding:16px;border:1px dashed #94a3b8!important;background:#f8fafc;color:#64748b;font:12px/1.4 ui-sans-serif,system-ui,sans-serif;cursor:pointer;white-space:normal}[data-movcues-image-placeholder] svg{flex:none}[data-movcues-image-placeholder]:hover,[data-movcues-image-drop]{outline:2px solid #2563eb!important;outline-offset:2px;background:#eff6ff}[data-movcues-image-placeholder][aria-busy=true]{opacity:.6;cursor:wait}[data-movcues-image-file][hidden]{display:none!important}
 [data-movcues-insert-edge]{width:24px;height:24px;padding:0;border:1px solid #93c5fd;border-radius:50%;background:#fff;color:#2563eb;box-shadow:0 2px 6px rgba(15,23,42,.12);font-size:18px;cursor:pointer}[data-movcues-insert-edge]:hover,[data-movcues-insert-edge][aria-expanded=true]{background:#2563eb;color:#fff}
 [data-movcues-insertion-edge=top]{box-shadow:inset 0 3px #2563eb}[data-movcues-insertion-edge=bottom]{box-shadow:inset 0 -3px #2563eb}[data-movcues-insertion-edge=left]{box-shadow:inset 3px 0 #2563eb}[data-movcues-insertion-edge=right]{box-shadow:inset -3px 0 #2563eb}

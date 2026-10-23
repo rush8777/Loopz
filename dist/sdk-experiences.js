@@ -16,7 +16,7 @@
   }
   const BUILDER_ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "HEADER", "H1", "H2", "H3", "H4", "P", "SPAN", "BR", "BUTTON", "IMG", "HR", "LABEL", "STRONG", "EM", "U", "A", "UL", "OL", "LI"]);
   const BUILDER_SURVEY_INPUT_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA"]);
-  const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "alt", "src", "href", "target", "rel", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-document-version", "data-movcues-node-id", "data-movcues-block-id", "data-movcues-sizing", "data-movcues-responsive-stack", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
+  const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "aria-required", "alt", "src", "href", "target", "rel", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-document-version", "data-movcues-node-id", "data-movcues-block-id", "data-movcues-sizing", "data-movcues-responsive-stack", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
   const BUILDER_BLOCKED_TAGS = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO|SOURCE)$/i;
   const BUILDER_UNSAFE_CSS = /@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i;
   function builderImageUrlIsSafe(value) {
@@ -311,8 +311,8 @@ ${ISOLATION_CSS}`;
     if (!target) return null;
     for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
       try {
-        const matches = document.querySelectorAll(selector);
-        if (matches.length === 1) return matches[0];
+        const matches2 = document.querySelectorAll(selector);
+        if (matches2.length === 1) return matches2[0];
       } catch {
       }
     }
@@ -802,13 +802,53 @@ ${ISOLATION_CSS}`;
     destroy() {
     }
   }
+  function nextSurveyStep(survey, index, answers) {
+    var _a, _b;
+    const step = survey.steps[index];
+    if (!step) return null;
+    const rule = (_a = step.branching) == null ? void 0 : _a.rules.find((rule2) => matches(rule2, answers[rule2.questionId]));
+    const destination = (rule == null ? void 0 : rule.nextStepId) ?? ((_b = step.branching) == null ? void 0 : _b.defaultNextStepId);
+    if (destination === "submit") return null;
+    const next = destination ? survey.steps.findIndex((step2) => step2.id === destination) : index + 1;
+    return next > index && next < survey.steps.length ? next : null;
+  }
+  function surveyPath(survey, answers) {
+    const path = [];
+    let index = survey.steps.length ? 0 : null;
+    while (index !== null && path.length < survey.steps.length) {
+      path.push(index);
+      index = nextSurveyStep(survey, index, answers);
+    }
+    return path;
+  }
+  function answersOnSurveyPath(survey, answers) {
+    const ids = new Set(surveyPath(survey, answers).flatMap((index) => survey.steps[index].questions.map((question) => question.id)));
+    return Object.fromEntries(Object.entries(answers).filter(([id]) => ids.has(id)));
+  }
+  function matches(rule, answer) {
+    if (rule.operator === "answered") return answer !== void 0 && answer !== "" && (!Array.isArray(answer) || answer.length > 0);
+    if (rule.operator === "equals") return answer === rule.value;
+    if (rule.operator === "not_equals") return answer !== void 0 && answer !== rule.value;
+    if (rule.operator === "includes") return Array.isArray(answer) && typeof rule.value === "string" && answer.includes(rule.value);
+    if (rule.operator === "gte") return typeof answer === "number" && typeof rule.value === "number" && answer >= rule.value;
+    if (rule.operator === "lte") return typeof answer === "number" && typeof rule.value === "number" && answer <= rule.value;
+    return false;
+  }
   class SurveyRenderer {
     constructor() {
       this.modal = new ModalRenderer();
       this.stepIndex = 0;
       this.answers = {};
       this.root = null;
-      this.submitting = false;
+      this.busy = false;
+      this.completed = false;
+      this.generation = 0;
+      this.retry = null;
+      this.dismiss = () => {
+        if (!this.busy) void this.run(async () => {
+          await this.callbacks.onDismiss();
+        });
+      };
     }
     render(root, content, design, behavior, survey, callbacks, requestedStepId) {
       if (!survey.steps.length) return null;
@@ -820,10 +860,24 @@ ${ISOLATION_CSS}`;
       this.callbacks = callbacks;
       const requested = requestedStepId ? survey.steps.findIndex((step) => step.id === requestedStepId) : -1;
       this.stepIndex = requested >= 0 ? requested : 0;
-      return this.renderStep();
+      this.generation++;
+      this.completed = false;
+      this.answers = {};
+      this.busy = false;
+      this.retry = null;
+      const card = this.renderStep();
+      if (callbacks.onLoad) void this.run(async (isCurrent) => {
+        const saved = await callbacks.onLoad();
+        if (!isCurrent()) return;
+        this.answers = saved.answers;
+        const index = survey.steps.findIndex((step) => step.id === saved.currentStepId);
+        if (index >= 0) this.stepIndex = index;
+        if (!saved.closed) this.renderStep();
+      });
+      return card;
     }
     renderStep() {
-      var _a, _b, _c;
+      var _a, _b, _c, _d;
       const root = this.root;
       const step = this.survey.steps[this.stepIndex];
       (_b = (_a = this.callbacks).onStepChange) == null ? void 0 : _b.call(_a, step.id);
@@ -833,7 +887,7 @@ ${ISOLATION_CSS}`;
       });
       const content = { heading: step.content.heading || this.content.heading, body: step.content.body || this.content.body };
       const stepDesign = step.size ? { ...this.design, size: step.size } : this.design;
-      const card = this.modal.render(root, content, stepDesign, this.behavior, { onDismiss: this.callbacks.onDismiss, onPrimary: this.callbacks.onDismiss, onSecondary: this.callbacks.onDismiss }, step.builder, "survey");
+      const card = this.modal.render(root, content, stepDesign, this.behavior, { onDismiss: this.dismiss, onPrimary: this.dismiss, onSecondary: this.dismiss }, step.builder, "survey");
       let surface = card.querySelector(".movcues-widget");
       if (!surface) {
         (_c = card.querySelector(".legacy-content")) == null ? void 0 : _c.remove();
@@ -843,21 +897,27 @@ ${ISOLATION_CSS}`;
       }
       surface.dataset.movcuesSurveyStepId = step.id;
       this.syncQuestions(surface, step.questions);
+      if (!surface.querySelector(".movcues-survey-validation")) {
+        const status = document.createElement("p");
+        status.className = "movcues-survey-validation";
+        surface.append(status);
+      }
+      (_d = surface.querySelector(".movcues-survey-validation")) == null ? void 0 : _d.setAttribute("role", "alert");
       this.syncNavigation(surface);
       return card;
     }
     syncQuestions(surface, questions) {
-      var _a;
       const ids = new Set(questions.map((question) => question.id));
       surface.querySelectorAll("[data-movcues-question-id]").forEach((node) => {
         if (!ids.has(node.dataset.movcuesQuestionId ?? "")) node.remove();
       });
-      let navigation = ((_a = surface.querySelector("[data-movcues-survey-action]")) == null ? void 0 : _a.parentElement) ?? null;
+      let navigation = surface.querySelector("[data-movcues-survey-action]");
+      while (navigation && navigation.parentElement !== surface) navigation = navigation.parentElement;
       for (const question of questions) {
-        const matches = Array.from(surface.querySelectorAll(`[data-movcues-question-id="${cssEscape(question.id)}"]`));
-        matches.slice(1).forEach((node2) => node2.remove());
-        const node = matches[0] ?? createQuestionNode(question);
-        if (!matches[0]) surface.insertBefore(node, navigation);
+        const matches2 = Array.from(surface.querySelectorAll(`[data-movcues-question-id="${cssEscape(question.id)}"]`));
+        matches2.slice(1).forEach((node2) => node2.remove());
+        const node = matches2[0] ?? createQuestionNode(question);
+        if (!matches2[0]) surface.insertBefore(node, navigation);
         node.dataset.movcuesQuestionType = question.type;
         node.classList.add("movcues-survey-question", `movcues-survey-question--${question.type}`);
         this.bindQuestion(node, question);
@@ -895,12 +955,15 @@ ${ISOLATION_CSS}`;
           };
           update();
           control.onclick = () => {
+            var _a2, _b;
             if (!allowed.includes(optionId)) return;
             if (question.type === "multiple_choice") {
               const current = Array.isArray(this.answers[question.id]) ? this.answers[question.id] : [];
               this.answers[question.id] = current.includes(optionId) ? current.filter((value) => value !== optionId) : [...current, optionId];
             } else this.answers[question.id] = question.type === "rating" || question.type === "nps" ? Number(optionId) : optionId;
+            (_b = (_a2 = this.callbacks).onAnswersChange) == null ? void 0 : _b.call(_a2, { ...this.answers });
             node.classList.remove("has-error");
+            this.syncNavigation(this.root.querySelector(".movcues-widget"));
             controls.forEach((item) => {
               const value = item.dataset.movcuesOptionId;
               const answer = this.answers[question.id];
@@ -923,12 +986,17 @@ ${ISOLATION_CSS}`;
       input.placeholder = question.placeholder ?? "";
       if (question.maxLength) input.maxLength = question.maxLength;
       input.oninput = () => {
+        var _a2, _b;
         this.answers[question.id] = input.value.slice(0, question.maxLength ?? 1e4);
         node.classList.remove("has-error");
+        (_b = (_a2 = this.callbacks).onAnswersChange) == null ? void 0 : _b.call(_a2, { ...this.answers });
+        this.syncNavigation(this.root.querySelector(".movcues-widget"));
       };
     }
     syncNavigation(surface) {
-      const final = this.stepIndex === this.survey.steps.length - 1;
+      const nextIndex = nextSurveyStep(this.survey, this.stepIndex, this.answers);
+      const final = nextIndex === null;
+      const path = surveyPath(this.survey, this.answers), previousIndex = path[path.indexOf(this.stepIndex) - 1];
       const step = this.survey.steps[this.stepIndex];
       const buttons = Array.from(surface.querySelectorAll("[data-movcues-survey-action]"));
       const back = buttons.filter((button) => button.dataset.movcuesSurveyAction === "back");
@@ -936,57 +1004,89 @@ ${ISOLATION_CSS}`;
       const submit = buttons.filter((button) => button.dataset.movcuesSurveyAction === "submit");
       const legacyControls = Boolean(surface.querySelector("[data-movcues-survey-controls]"));
       for (const button of back) {
-        button.hidden = !this.survey.allowBack || this.stepIndex === 0;
+        button.hidden = !this.survey.allowBack || previousIndex === void 0;
         button.onclick = () => {
-          if (!this.survey.allowBack || this.stepIndex === 0) return;
-          void this.callbacks.onProgress({ ...this.answers }, step.id, "back");
-          this.stepIndex--;
-          this.renderStep();
+          if (this.busy || this.completed || !this.survey.allowBack || previousIndex === void 0) return;
+          void this.run(async (isCurrent) => {
+            await this.callbacks.onProgress({ ...this.answers }, step.id, "back", this.survey.steps[previousIndex].id);
+            if (!isCurrent()) return;
+            this.stepIndex = previousIndex;
+            this.renderStep();
+          });
         };
       }
       for (const button of next) {
         button.hidden = final;
-        button.onclick = async () => {
-          if (!this.validateStep()) return;
-          this.setDisabled(next, true);
-          try {
-            await this.callbacks.onProgress({ ...this.answers }, step.id, "next");
-            this.stepIndex++;
+        button.onclick = () => {
+          if (this.busy || this.completed || nextIndex === null || !this.validateStep()) return;
+          void this.run(async (isCurrent) => {
+            this.answers = answersOnSurveyPath(this.survey, this.answers);
+            await this.callbacks.onProgress({ ...this.answers }, step.id, "next", this.survey.steps[nextIndex].id);
+            if (!isCurrent()) return;
+            this.stepIndex = nextIndex;
             this.renderStep();
-          } finally {
-            this.setDisabled(next, false);
-          }
+          });
         };
       }
       for (const button of submit) {
         button.hidden = !final;
         if (legacyControls) button.textContent = this.survey.submitLabel;
-        button.onclick = async () => {
-          if (this.submitting || !this.validateAll()) return;
-          this.submitting = true;
-          this.setDisabled(submit, true);
-          try {
+        button.onclick = () => {
+          if (this.busy || this.completed || !this.validateAll()) return;
+          void this.run(async (isCurrent) => {
+            this.answers = answersOnSurveyPath(this.survey, this.answers);
             await this.callbacks.onSubmit({ ...this.answers }, step.id);
-          } finally {
-            this.submitting = false;
-            this.setDisabled(submit, false);
-          }
+            if (isCurrent()) this.completed = true;
+          });
         };
       }
       this.syncProgress(surface);
     }
-    setDisabled(buttons, disabled) {
-      buttons.forEach((button) => {
-        if (button.isConnected) button.disabled = disabled;
+    async run(operation) {
+      var _a;
+      if (this.busy || !this.root) return;
+      const generation = this.generation;
+      this.busy = true;
+      this.retry = operation;
+      this.setBusy(true);
+      (_a = this.root.querySelector("[data-movcues-survey-retry]")) == null ? void 0 : _a.remove();
+      try {
+        await operation(() => generation === this.generation && Boolean(this.root));
+        if (generation === this.generation) this.retry = null;
+      } catch {
+        if (generation !== this.generation || !this.root) return;
+        const status = this.root.querySelector(".movcues-survey-validation");
+        if (status) {
+          status.textContent = "Couldn't save your answers. They are still here. Try again.";
+          const retry = document.createElement("button");
+          retry.type = "button";
+          retry.dataset.movcuesSurveyRetry = "";
+          retry.textContent = "Retry";
+          retry.onclick = () => {
+            if (this.retry) void this.run(this.retry);
+          };
+          status.append(" ", retry);
+        }
+      } finally {
+        if (generation === this.generation) {
+          this.busy = false;
+          this.setBusy(false);
+        }
+      }
+    }
+    setBusy(value) {
+      var _a;
+      (_a = this.root) == null ? void 0 : _a.querySelectorAll("[data-movcues-survey-action],[data-movcues-option-id],[data-movcues-question-input]").forEach((control) => {
+        control.disabled = value || this.completed;
       });
     }
     syncProgress(surface) {
       const progress = surface.querySelector("[data-movcues-survey-progress]");
       if (progress) progress.hidden = !this.survey.showProgress;
       const progressLabel = progress == null ? void 0 : progress.querySelector("span:not([data-movcues-survey-progress-bar])");
-      if (progressLabel && !progressLabel.querySelector("[data-movcues-survey-progress-bar]")) progressLabel.textContent = `Step ${this.stepIndex + 1} of ${this.survey.steps.length}`;
+      if (progressLabel && !progressLabel.querySelector("[data-movcues-survey-progress-bar]")) progressLabel.textContent = `Step ${surveyPath(this.survey, this.answers).indexOf(this.stepIndex) + 1} of ${surveyPath(this.survey, this.answers).length}`;
       const bar = surface.querySelector("[data-movcues-survey-progress-bar]");
-      if (bar) bar.style.width = `${(this.stepIndex + 1) / this.survey.steps.length * 100}%`;
+      if (bar) bar.style.width = `${(surveyPath(this.survey, this.answers).indexOf(this.stepIndex) + 1) / surveyPath(this.survey, this.answers).length * 100}%`;
     }
     validateStep() {
       return this.validateQuestions(this.survey.steps[this.stepIndex].questions);
@@ -994,7 +1094,8 @@ ${ISOLATION_CSS}`;
     validateAll() {
       let valid = true;
       let currentValid = true;
-      for (const step of this.survey.steps) {
+      for (const index of surveyPath(this.survey, this.answers)) {
+        const step = this.survey.steps[index];
         const stepValid = this.validateQuestions(step.questions, step === this.survey.steps[this.stepIndex]);
         if (step === this.survey.steps[this.stepIndex]) currentValid = stepValid;
         if (!stepValid) valid = false;
@@ -1018,8 +1119,10 @@ ${ISOLATION_CSS}`;
       return missing.length === 0;
     }
     destroy() {
+      this.generation++;
       this.modal.destroy();
       this.root = null;
+      this.retry = null;
     }
   }
   function createQuestionNode(question) {
@@ -1161,8 +1264,8 @@ ${ISOLATION_CSS}`;
   function findUniqueTarget(target) {
     for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
       try {
-        const matches = document.querySelectorAll(selector);
-        if (matches.length === 1) return matches[0];
+        const matches2 = document.querySelectorAll(selector);
+        if (matches2.length === 1) return matches2[0];
       } catch {
       }
     }
@@ -1267,9 +1370,9 @@ ${ISOLATION_CSS}`;
         const root = this.root(experience.id, { ...definition.behavior, layer: ((_a = selectedStep == null ? void 0 : selectedStep.behavior) == null ? void 0 : _a.layer) ?? definition.behavior.layer });
         const renderer = new SurveyRenderer();
         this.renderer = renderer;
-        renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId, direction) => {
+        renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onLoad: callbacks.onSurveyLoad, onAnswersChange: callbacks.onSurveyAnswersChange, onProgress: (answers, stepId, direction, destinationStepId) => {
           var _a2;
-          return (_a2 = callbacks.onSurveyProgress) == null ? void 0 : _a2.call(callbacks, answers, stepId, direction);
+          return (_a2 = callbacks.onSurveyProgress) == null ? void 0 : _a2.call(callbacks, answers, stepId, direction, destinationStepId);
         }, onSubmit: (answers, stepId) => {
           var _a2;
           return (_a2 = callbacks.onSurveySubmit) == null ? void 0 : _a2.call(callbacks, answers, stepId);
@@ -1953,7 +2056,7 @@ ${ISOLATION_CSS}`;
       const currentStepId = (definition == null ? void 0 : definition.steps.some((step) => step.id === requestedStepId)) ? requestedStepId : (_b = definition == null ? void 0 : definition.steps[0]) == null ? void 0 : _b.id;
       const impressionId = (progress == null ? void 0 : progress.impressionId) ?? experience.impressionId ?? null;
       const ids = (value) => new Set(Array.isArray(value) ? value.filter((id) => typeof id === "string").slice(0, 20) : []);
-      const runtime2 = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId || (progress == null ? void 0 : progress.shownRequested)), shownPromise: null, surveyResponseId: null, surveyResponsePromise: null, surveyAnswers: {}, stepStartedAt: null, visibleStepId: null, readyStepId: null, seenStepIds: ids(progress == null ? void 0 : progress.seenStepIds), completedStepIds: ids(progress == null ? void 0 : progress.completedStepIds), finished: false, stepEntryRoute: location.href, launchContext: (progress == null ? void 0 : progress.launchContext) ?? experience.launchContext };
+      const runtime2 = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId || (progress == null ? void 0 : progress.shownRequested)), shownPromise: null, surveyResponseId: null, surveyResponsePromise: null, surveyResume: null, surveyAnswers: {}, stepStartedAt: null, visibleStepId: null, readyStepId: null, seenStepIds: ids(progress == null ? void 0 : progress.seenStepIds), completedStepIds: ids(progress == null ? void 0 : progress.completedStepIds), finished: false, stepEntryRoute: location.href, launchContext: (progress == null ? void 0 : progress.launchContext) ?? experience.launchContext };
       this.active = runtime2;
       this.checklist.setTransientActive(true);
       if (currentStepId) this.persistGuide(runtime2, "active");
@@ -1975,7 +2078,7 @@ ${ISOLATION_CSS}`;
           this.stepVisible(runtime2);
         },
         onDismiss: () => {
-          if (valid()) void this.finish(runtime2, "dismissed");
+          if (valid()) return this.finish(runtime2, "dismissed");
         },
         onAction: (action) => {
           if (valid()) this.handleAction(runtime2, action);
@@ -2002,9 +2105,20 @@ ${ISOLATION_CSS}`;
             this.checklist.setTransientActive(false);
           }
         },
-        onSurveyProgress: async (answers, stepId2, direction) => {
-          await this.persistSurvey(runtime2, answers, stepId2);
-          if (direction === "next") void this.post(runtime2, "interaction", void 0, "survey_step_completed", { stepId: stepId2, stepIndex: this.surveyStepIndex(runtime2, stepId2) });
+        onSurveyLoad: async () => {
+          const saved = await this.ensureSurveyResponse(runtime2);
+          if (saved.closed) await this.finish(runtime2, "completed", true);
+          return saved;
+        },
+        onSurveyAnswersChange: (answers) => {
+          runtime2.surveyAnswers = answers;
+        },
+        onSurveyProgress: async (answers, stepId2, direction, destinationStepId) => {
+          await this.persistSurvey(runtime2, answers, destinationStepId ?? stepId2);
+          if (direction === "next" && !runtime2.completedStepIds.has(stepId2)) {
+            runtime2.completedStepIds.add(stepId2);
+            await this.post(runtime2, "interaction", void 0, "survey_step_completed", { stepId: stepId2, stepIndex: this.surveyStepIndex(runtime2, stepId2) });
+          }
         },
         onSurveySubmit: async (answers, stepId2) => {
           await this.persistSurvey(runtime2, answers, stepId2, "submitted");
@@ -2019,12 +2133,9 @@ ${ISOLATION_CSS}`;
       this.state.markSeen(runtime2.experience.id);
       runtime2.shownPromise = this.post(runtime2, "shown", void 0, "experience_shown").then((result) => {
         runtime2.impressionId = (result == null ? void 0 : result.impressionId) ?? null;
+        if (!runtime2.impressionId && runtime2.experience.widgetType === "survey") runtime2.shownRequested = false;
         if (this.active === runtime2) this.persistGuide(runtime2, "active");
         else if (this.pausedGuide === runtime2) this.persistGuide(runtime2, "paused");
-      });
-      if (runtime2.experience.widgetType === "survey") void runtime2.shownPromise.then(async () => {
-        await this.ensureSurveyResponse(runtime2);
-        await this.post(runtime2, "interaction", void 0, "survey_started");
       });
     }
     handleAction(runtime2, action) {
@@ -2039,6 +2150,8 @@ ${ISOLATION_CSS}`;
     }
     async finish(runtime2, event, surveyAlreadyPersisted = false) {
       if (runtime2.finished) return;
+      if (runtime2.experience.widgetType === "survey" && event === "dismissed" && !surveyAlreadyPersisted) await this.persistSurvey(runtime2, runtime2.surveyAnswers, null, "abandoned");
+      if (runtime2.finished) return;
       runtime2.finished = true;
       this.deliveryEpoch++;
       this.finishing.add(runtime2.experience.id);
@@ -2048,7 +2161,6 @@ ${ISOLATION_CSS}`;
         this.active = null;
       }
       if (runtime2.currentStepId) this.state.clearGuideProgress(runtime2.experience.id);
-      if (runtime2.experience.widgetType === "survey" && event === "dismissed" && !surveyAlreadyPersisted) await this.persistSurvey(runtime2, runtime2.surveyAnswers, null, "abandoned");
       await runtime2.shownPromise;
       const guide = isGuideDefinition(runtime2.experience.definition);
       const eventType = guide ? event === "completed" ? "guide_completed" : "guide_dismissed" : runtime2.experience.widgetType === "survey" ? event === "completed" ? "survey_submitted" : "survey_abandoned" : event === "dismissed" ? "widget_dismissed" : "widget_interacted";
@@ -2220,34 +2332,33 @@ ${ISOLATION_CSS}`;
       }
     }
     async ensureSurveyResponse(runtime2) {
-      if (runtime2.surveyResponseId) return runtime2.surveyResponseId;
+      if (runtime2.surveyResponseId && runtime2.surveyResume) return runtime2.surveyResume;
       if (runtime2.surveyResponsePromise) return runtime2.surveyResponsePromise;
       runtime2.surveyResponsePromise = (async () => {
         if (!runtime2.shownRequested) this.shown(runtime2);
         await runtime2.shownPromise;
-        if (!runtime2.impressionId) return null;
-        try {
-          const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/survey-responses`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify(this.surveyIdentity(runtime2)) });
-          if (!response.ok) return null;
-          const body = await response.json();
-          runtime2.surveyResponseId = body.responseId ?? null;
-          return runtime2.surveyResponseId;
-        } catch {
-          return null;
-        }
+        if (!runtime2.impressionId) throw new Error("Survey could not be started. Please retry.");
+        const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/survey-responses`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify(this.surveyIdentity(runtime2)) });
+        if (!response.ok) throw new Error("Survey could not be started. Please retry.");
+        const body = await response.json();
+        if (!body.responseId) throw new Error("Survey response was not created. Please retry.");
+        runtime2.surveyResponseId = body.responseId;
+        runtime2.surveyAnswers = body.answers ?? {};
+        runtime2.surveyResume = { answers: runtime2.surveyAnswers, currentStepId: body.currentStepId, closed: Boolean(body.submittedAt) };
+        if (response.status === 201) await this.post(runtime2, "interaction", void 0, "survey_started");
+        return runtime2.surveyResume;
       })();
-      const result = await runtime2.surveyResponsePromise;
-      runtime2.surveyResponsePromise = null;
-      return result;
+      try {
+        return await runtime2.surveyResponsePromise;
+      } finally {
+        runtime2.surveyResponsePromise = null;
+      }
     }
     async persistSurvey(runtime2, answers, currentStepId, state) {
-      const responseId = await this.ensureSurveyResponse(runtime2);
-      if (!responseId || !runtime2.impressionId) return;
       runtime2.surveyAnswers = { ...answers };
-      try {
-        await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/survey-responses/${encodeURIComponent(responseId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ ...this.surveyIdentity(runtime2), currentStepId, answers, ...state === "submitted" ? { submitted: true } : {}, ...state === "abandoned" ? { abandoned: true } : {} }) });
-      } catch {
-      }
+      await this.ensureSurveyResponse(runtime2);
+      const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/survey-responses/${encodeURIComponent(runtime2.surveyResponseId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ ...this.surveyIdentity(runtime2), currentStepId, answers, ...state === "submitted" ? { submitted: true } : {}, ...state === "abandoned" ? { abandoned: true } : {} }) });
+      if (!response.ok) throw new Error("Couldn't save your answers. Please retry.");
     }
     surveyIdentity(runtime2) {
       return { experienceId: runtime2.experience.id, versionId: runtime2.experience.versionId, impressionId: runtime2.impressionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId() };

@@ -7,7 +7,7 @@ import { ModalRenderer } from "./ModalRenderer";
 import { SlideoutRenderer } from "./SlideoutRenderer";
 import { HotspotRenderer } from "./HotspotRenderer";
 import { BannerRenderer } from "./BannerRenderer";
-import { SurveyRenderer } from "./SurveyRenderer";
+import { SurveyRenderer, type SurveyResume } from "./SurveyRenderer";
 import { LayerManager, type AppliedLayer } from "./layering/LayerManager";
 import type { BuilderAction, BuilderRenderCallbacks } from "./BuilderContent";
 import { guideInteractionTarget } from "./GuideStepLogic";
@@ -21,7 +21,9 @@ export interface ExperienceRendererCallbacks {
   onGuideBack?: () => void;
   onUnavailable?: () => void;
   onGuideStatus?: (status: "delay" | "waiting" | "ready" | "unavailable") => void;
-  onSurveyProgress?: (answers: SurveyAnswers, currentStepId: string, direction: "next" | "back") => Promise<void> | void;
+  onSurveyLoad?: () => Promise<SurveyResume>;
+  onSurveyAnswersChange?: (answers: SurveyAnswers) => void;
+  onSurveyProgress?: (answers: SurveyAnswers, currentStepId: string, direction: "next" | "back", destinationStepId?: string) => Promise<void> | void;
   onSurveySubmit?: (answers: SurveyAnswers, currentStepId: string) => Promise<void> | void;
 }
 
@@ -73,7 +75,7 @@ export class ExperienceRenderer {
     } else if (experience.widgetType === "survey" && definition.survey) {
       const selectedStep = definition.survey.steps.find(step => step.id === requestedStepId) ?? definition.survey.steps[0];
       const root = this.root(experience.id, { ...definition.behavior, layer: selectedStep?.behavior?.layer ?? definition.behavior.layer }); const renderer = new SurveyRenderer(); this.renderer = renderer;
-      renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onProgress: (answers, stepId, direction) => callbacks.onSurveyProgress?.(answers, stepId, direction), onSubmit: (answers, stepId) => callbacks.onSurveySubmit?.(answers, stepId), onStepChange: stepId => { const step = definition.survey!.steps.find(item => item.id === stepId); this.applyLayer({ ...definition.behavior, layer: step?.behavior?.layer ?? definition.behavior.layer }); } }, requestedStepId);
+      renderer.render(root, definition.content, definition.design, definition.behavior, definition.survey, { onDismiss: () => callbacks.onDismiss(), onLoad: callbacks.onSurveyLoad, onAnswersChange: callbacks.onSurveyAnswersChange, onProgress: (answers, stepId, direction, destinationStepId) => callbacks.onSurveyProgress?.(answers, stepId, direction, destinationStepId), onSubmit: (answers, stepId) => callbacks.onSurveySubmit?.(answers, stepId), onStepChange: stepId => { const step = definition.survey!.steps.find(item => item.id === stepId); this.applyLayer({ ...definition.behavior, layer: step?.behavior?.layer ?? definition.behavior.layer }); } }, requestedStepId);
     } else if (experience.widgetType === "slideout") {
       const root = this.root(experience.id, definition.behavior); const renderer = new SlideoutRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);

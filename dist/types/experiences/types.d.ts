@@ -220,7 +220,18 @@ export type SurveyQuestion = {
     label: string;
     required?: boolean;
 };
+export interface SurveyBranchRule {
+    questionId: string;
+    operator: "equals" | "not_equals" | "includes" | "gte" | "lte" | "answered";
+    value?: string | number;
+    nextStepId: string;
+}
+export interface SurveyBranching {
+    rules: SurveyBranchRule[];
+    defaultNextStepId?: string;
+}
 export interface SurveyStep {
+    branching?: SurveyBranching;
     id: string;
     content: {
         heading: string;

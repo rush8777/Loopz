@@ -25,6 +25,7 @@ export declare class EditorModeController {
     private definition;
     private guide;
     private survey;
+    private surveyEditor;
     private stepIndex;
     private mode;
     private dirty;

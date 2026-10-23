@@ -1,4 +1,4 @@
-import type { ExperienceContent, WidgetBuilderState, WidgetType } from "../types";
+import type { ExperienceContent, SurveyConfig, SurveyStep, SurveyQuestion, WidgetBuilderState, WidgetType } from "../types";
 import { type OnsiteBlock, type OnsiteCell, type OnsiteDocument, type OnsiteSizing } from "../onsite/OnsiteDocument";
 export type CompositionSelection = {
     kind: "step";
@@ -29,6 +29,7 @@ export declare class OnsiteCompositionEditor {
     private widgetType;
     private guide;
     private callbacks;
+    private survey?;
     private document;
     private surface;
     private toolbar;
@@ -57,7 +58,10 @@ export declare class OnsiteCompositionEditor {
     private imageDropTarget;
     private savedRange;
     private moveSource;
-    constructor(root: ShadowRoot, builder: WidgetBuilderState, content: ExperienceContent, widgetType: WidgetType | "anchored_card" | "modal", guide: boolean, callbacks: Callbacks);
+    constructor(root: ShadowRoot, builder: WidgetBuilderState, content: ExperienceContent, widgetType: WidgetType | "anchored_card" | "modal", guide: boolean, callbacks: Callbacks, survey?: {
+        config: SurveyConfig;
+        step: SurveyStep;
+    } | undefined);
     start(): void;
     getDocument(): OnsiteDocument;
     getSelection(): CompositionSelection;
@@ -88,6 +92,17 @@ export declare class OnsiteCompositionEditor {
     move(delta: -1 | 1): boolean;
     /** Move the existing subtree; never regenerate its cell/block/action IDs. */
     moveTo(targetId: string, before?: boolean, sourceId?: string | undefined): boolean;
+    private surveyContext;
+    private historyState;
+    getSelectedQuestion(): SurveyQuestion | null;
+    refreshSurvey(): void;
+    insertQuestion(type: SurveyQuestion["type"], insertion?: {
+        cellId: string;
+        edge: CellEdge;
+    }): boolean;
+    updateStepHeading(label: string): boolean;
+    updateBranching(branching: NonNullable<SurveyStep["branching"]>): boolean;
+    updateQuestion(question: SurveyQuestion): boolean;
     updateCell(update: Partial<Pick<OnsiteCell, "direction" | "align" | "justify" | "gap" | "padding" | "style" | "responsiveStack">> & {
         sizing?: OnsiteSizing;
     }): void;

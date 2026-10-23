@@ -27,6 +27,7 @@ describe("createAnalytics() single-instance guarantee", () => {
   function make(siteId = "site_1") {
     const a = createAnalytics({
       siteId,
+      endpoint: "https://api.unit.test",
       autocapture: { scroll: false, move: false, rageClick: false, hover: false, cursor: false, elementCrawler: false },
     });
     instances.push(a);
@@ -64,17 +65,17 @@ describe("createAnalytics() single-instance guarantee", () => {
   });
 
   it("allows creating a new instance after the previous one is destroyed", () => {
-    const first = createAnalytics({ siteId: "site_1" });
+    const first = createAnalytics({ siteId: "site_1", endpoint: "https://api.unit.test" });
     first.destroy();
 
-    const second = createAnalytics({ siteId: "site_1" });
+    const second = createAnalytics({ siteId: "site_1", endpoint: "https://api.unit.test" });
     instances.push(second);
 
     expect(second).not.toBe(first);
   });
 
   it("destroying a stale reference after a new instance has already replaced it doesn't clear the new instance's tracking", () => {
-    const first = createAnalytics({ siteId: "site_1" });
+    const first = createAnalytics({ siteId: "site_1", endpoint: "https://api.unit.test" });
     first.destroy();
     const second = make(); // tracked instance is now `second`
 
@@ -82,7 +83,7 @@ describe("createAnalytics() single-instance guarantee", () => {
     // affect the module's tracking of the current active instance.
     first.destroy();
 
-    const third = createAnalytics({ siteId: "site_1" });
+    const third = createAnalytics({ siteId: "site_1", endpoint: "https://api.unit.test" });
     expect(third).toBe(second);
   });
 });
