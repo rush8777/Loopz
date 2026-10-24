@@ -1,7 +1,9 @@
+import { type OnsiteChecklistContext, type ChecklistView, type ChecklistTextRole, type ChecklistControlRole } from "../checklist/ChecklistMarkup";
 import { type OnsiteSurveyContext } from "../survey/SurveyMarkup";
 import type { ExperienceContent, SurveyQuestion, WidgetBuilderState, WidgetType } from "../types";
 export declare const ONSITE_SCHEMA_VERSION: 2;
 export declare const ONSITE_SURVEY_SCHEMA_VERSION: 3;
+export declare const ONSITE_CHECKLIST_SCHEMA_VERSION: 4;
 export declare const ONSITE_LIMITS: {
     readonly maxDepth: 8;
     readonly maxNodes: 120;
@@ -36,6 +38,8 @@ export interface OnsiteCellStyle {
 }
 export interface OnsiteCell {
     type: "cell";
+    checklistRole?: ChecklistView | "items";
+    checklistWidth?: number;
     id: string;
     direction: OnsiteDirection;
     sizing: OnsiteSizing;
@@ -65,6 +69,27 @@ export type OnsiteButtonAction = {
     eventName: string;
 };
 export type OnsiteBlock = (BlockBase & {
+    type: "checklist_task";
+    itemId: string;
+    fontSize: number;
+    color?: string;
+    indicator: OnsiteIcon;
+}) | (BlockBase & {
+    type: "checklist_text";
+    role: ChecklistTextRole;
+    fontSize: number;
+    color?: string;
+    text?: string;
+}) | (BlockBase & {
+    type: "checklist_control";
+    role: ChecklistControlRole;
+    fontSize: number;
+    color?: string;
+}) | (BlockBase & {
+    type: "checklist_progress";
+    fontSize: number;
+    color?: string;
+}) | (BlockBase & {
     type: "question";
     questionId: string;
     fontSize: number;
@@ -121,7 +146,7 @@ export type OnsiteBlock = (BlockBase & {
 });
 export type OnsiteIcon = "check" | "star" | "info" | "warning" | "sparkles" | "arrow" | "heart" | "rocket";
 export interface OnsiteDocument {
-    schemaVersion: 2 | 3;
+    schemaVersion: 2 | 3 | 4;
     id: string;
     root: OnsiteCell;
 }
@@ -135,7 +160,7 @@ export interface OnsiteValidationResult {
     valid: boolean;
     errors: string[];
 }
-export declare function onsiteId(prefix?: "document" | "cell" | "block" | "action" | "question" | "option" | "step"): string;
+export declare function onsiteId(prefix?: "document" | "cell" | "block" | "action" | "question" | "option" | "step" | "item"): string;
 export declare function emptyCell(block?: OnsiteBlock): OnsiteCell;
 export declare function createBlock(type: OnsiteBlock["type"], guide?: boolean): OnsiteBlock;
 export declare function createOnsiteDocument(guide?: boolean): OnsiteDocument;
@@ -146,9 +171,16 @@ export declare function duplicateSurveyCell(document: OnsiteDocument, questions:
     questions: SurveyQuestion[];
     cellId: string;
 } | null;
+export declare function createOnsiteChecklistDocument(context: OnsiteChecklistContext): OnsiteDocument;
+export declare function validateOnsiteChecklistDocument(document: OnsiteDocument, context: OnsiteChecklistContext): string[];
+export declare function duplicateChecklistCell(document: OnsiteDocument, context: OnsiteChecklistContext, cellId: string): {
+    document: OnsiteDocument;
+    items: OnsiteChecklistContext['items'];
+    cellId: string;
+} | null;
 export declare function onsiteDocumentFromBuilder(builder?: WidgetBuilderState): OnsiteDocument | null;
-export declare function applyOnsiteDocument(builder: WidgetBuilderState, document: OnsiteDocument, widgetType: WidgetType | "anchored_card" | "modal", survey?: OnsiteSurveyContext): CompiledOnsiteDocument;
-export declare function compileOnsiteDocument(document: OnsiteDocument, widgetType: string, survey?: OnsiteSurveyContext): CompiledOnsiteDocument;
+export declare function applyOnsiteDocument(builder: WidgetBuilderState, document: OnsiteDocument, widgetType: WidgetType | "anchored_card" | "modal" | "checklist", survey?: OnsiteSurveyContext, checklist?: OnsiteChecklistContext): CompiledOnsiteDocument;
+export declare function compileOnsiteDocument(document: OnsiteDocument, widgetType: string, survey?: OnsiteSurveyContext, checklist?: OnsiteChecklistContext): CompiledOnsiteDocument;
 export declare function validateOnsiteDocument(value: unknown): OnsiteValidationResult;
 export declare function onsiteImageSourceIsSafe(src: string): boolean;
 export declare function findCell(document: OnsiteDocument, id: string): OnsiteCell | null;
@@ -166,6 +198,6 @@ export declare function resizeSiblings(document: OnsiteDocument, firstId: string
 export declare function duplicateCell(document: OnsiteDocument, id: string): string | null;
 export declare function duplicateDocument(document: OnsiteDocument): OnsiteDocument;
 export declare function cloneOnsite<T>(value: T): T;
-export declare function migrateV1Builder(builder: WidgetBuilderState, content: ExperienceContent, widgetType: WidgetType | "anchored_card" | "modal", guide?: boolean): OnsiteDocument | null;
+export declare function migrateV1Builder(builder: WidgetBuilderState, content: ExperienceContent, widgetType: WidgetType | "anchored_card" | "modal" | "checklist", guide?: boolean): OnsiteDocument | null;
 export declare function sanitizeRichText(input: string): string;
 export {};

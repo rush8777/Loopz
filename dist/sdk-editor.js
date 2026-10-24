@@ -1,5 +1,634 @@
 (function() {
   "use strict";
+  const BUILDER_ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "HEADER", "H1", "H2", "H3", "H4", "P", "SPAN", "BR", "BUTTON", "IMG", "HR", "LABEL", "STRONG", "EM", "U", "A", "UL", "OL", "LI"]);
+  const BUILDER_SURVEY_INPUT_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA"]);
+  const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "aria-required", "alt", "src", "href", "target", "rel", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-document-version", "data-movcues-node-id", "data-movcues-block-id", "data-movcues-sizing", "data-movcues-responsive-stack", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
+  const BUILDER_BLOCKED_TAGS = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO|SOURCE)$/i;
+  const BUILDER_UNSAFE_CSS = /@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i;
+  function builderImageUrlIsSafe(value) {
+    return !value || !/[\u0000-\u0020\u007f]/.test(value) && /^(https?:\/\/|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(value);
+  }
+  function builderLinkUrlIsSafe(value) {
+    return !/[\u0000-\u001f\u007f]/.test(value) && /^(https?:\/\/|mailto:|tel:|\/|#|\?|\.\.?\/)/i.test(value.trim());
+  }
+  function builderInputTypeIsSafe(value) {
+    return ["text", "radio", "checkbox", "number"].includes(value.toLowerCase());
+  }
+  function safeScopedBuilderCss(input) {
+    const css = input.replace(/\/\*[\s\S]*?\*\//g, "").trim();
+    if (BUILDER_UNSAFE_CSS.test(css)) return null;
+    const rule = /([^{}]+)\{/g;
+    let match;
+    while ((match = rule.exec(css)) !== null) {
+      const prelude = match[1].trim();
+      if (!prelude || prelude.startsWith("@")) continue;
+      if (prelude.split(",").some((selector) => !selector.trim().includes(".movcues-widget"))) return null;
+    }
+    return css;
+  }
+  function mountBuilderContent(root, card, builder, callbacks, allowSurveyInputs = false) {
+    const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
+    const css = safeBuilderCss(builder.css);
+    if (!html || css === null) return false;
+    let style = root.querySelector("style[data-movcues-builder-style]");
+    if (!style) {
+      style = document.createElement("style");
+      style.dataset.movcuesBuilderStyle = "";
+      root.appendChild(style);
+    }
+    style.textContent = `${css}
+${ISOLATION_CSS}`;
+    const content = document.createElement("div");
+    content.className = "builder-content";
+    content.dataset.movcuesBuilderSurface = "";
+    content.append(...html);
+    card.appendChild(content);
+    card.classList.add("builder-card");
+    card.addEventListener("click", (event) => {
+      var _a, _b;
+      const target = event.target instanceof Element ? event.target.closest("[data-movcues-action-id]") : null;
+      if (!target || !card.contains(target)) return;
+      const actionId = target.dataset.movcuesActionId;
+      if (actionId === "primary") callbacks.onPrimary();
+      else if (actionId === "secondary") callbacks.onSecondary();
+      else {
+        const action = findOnsiteAction(builder, actionId ?? "");
+        if (action) (_b = callbacks.onActionId) == null ? void 0 : _b.call(callbacks, action, ((_a = target.textContent) == null ? void 0 : _a.trim()) ?? "");
+      }
+    });
+    return true;
+  }
+  const ISOLATION_CSS = `[data-movcues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movcues-builder-surface]>.movcues-widget{position:relative!important;inset:auto!important}`;
+  function sanitizeBuilderHtml(input, allowSurveyInputs = false) {
+    const template = document.createElement("template");
+    template.innerHTML = input;
+    for (const element of Array.from(template.content.querySelectorAll("*"))) {
+      const allowedTag = BUILDER_ALLOWED_TAGS.has(element.tagName) || allowSurveyInputs && BUILDER_SURVEY_INPUT_TAGS.has(element.tagName);
+      if (!allowedTag) {
+        if (BUILDER_BLOCKED_TAGS.test(element.tagName)) element.remove();
+        else element.replaceWith(...Array.from(element.childNodes));
+        continue;
+      }
+      for (const attribute of Array.from(element.attributes)) {
+        const name = attribute.name.toLowerCase();
+        if (!BUILDER_ALLOWED_ATTRIBUTES.has(name) || name.startsWith("on") || /javascript\s*:/i.test(attribute.value)) element.removeAttribute(attribute.name);
+      }
+      const action = element.getAttribute("data-movcues-action-id");
+      if (action && action !== "primary" && action !== "secondary" && !/^[A-Za-z][A-Za-z0-9_-]{2,63}$/.test(action)) element.removeAttribute("data-movcues-action-id");
+      const surveyAction = element.getAttribute("data-movcues-survey-action");
+      if (surveyAction && surveyAction !== "back" && surveyAction !== "next" && surveyAction !== "submit") element.removeAttribute("data-movcues-survey-action");
+      if (element.tagName === "IMG") {
+        const source = element.getAttribute("src") ?? "";
+        if (!builderImageUrlIsSafe(source)) element.removeAttribute("src");
+      }
+      if (element.hasAttribute("src") && element.tagName !== "IMG") element.removeAttribute("src");
+      if (element.tagName === "A") {
+        const href = element.getAttribute("href") ?? "";
+        if (!builderLinkUrlIsSafe(href)) element.removeAttribute("href");
+        const target = element.getAttribute("target");
+        if (target && target !== "_blank" && target !== "_self") element.removeAttribute("target");
+        if (target === "_blank") element.setAttribute("rel", "noopener noreferrer");
+      } else {
+        element.removeAttribute("href");
+        element.removeAttribute("target");
+        element.removeAttribute("rel");
+      }
+      if (element.tagName === "INPUT") {
+        const type = (element.getAttribute("type") ?? "text").toLowerCase();
+        if (!builderInputTypeIsSafe(type)) element.setAttribute("type", "text");
+      }
+    }
+    const root = template.content.querySelector(".movcues-widget");
+    if (!root) return null;
+    for (const slot of ["primary", "secondary"]) {
+      const actions = Array.from(template.content.querySelectorAll(`[data-movcues-action-id="${slot}"]`));
+      actions.slice(1).forEach((action) => action.remove());
+    }
+    return Array.from(template.content.childNodes);
+  }
+  function findOnsiteAction(builder, id) {
+    const movcues = builder.projectData.movcues;
+    const bindings = movcues && typeof movcues === "object" ? movcues.actionBindings : null;
+    const candidate = bindings && typeof bindings === "object" ? bindings[id] : null;
+    if (!candidate || typeof candidate !== "object") return null;
+    const action = candidate;
+    if (action.id !== id || !["next_step", "previous_step", "dismiss", "open_url", "track_event"].includes(String(action.type))) return null;
+    if (action.type === "open_url" && (typeof action.url !== "string" || !/^https?:\/\//i.test(action.url) || !builderLinkUrlIsSafe(action.url))) return null;
+    if (action.type === "track_event" && (typeof action.eventName !== "string" || !action.eventName.trim() || action.eventName.length > 200)) return null;
+    return action;
+  }
+  function safeBuilderCss(input) {
+    return safeScopedBuilderCss(input);
+  }
+  class StackingContextResolver {
+    resolve(element) {
+      if (!element) return { element: null, zIndex: 0, chain: [] };
+      const chain = [];
+      let current = element;
+      while (current && current !== document.documentElement) {
+        const style = getComputedStyle(current);
+        chain.push({ element: current, zIndex: numericZIndex(style.zIndex), createsStackingContext: createsStackingContext(style) });
+        current = current.parentElement;
+      }
+      const outermost = [...chain].reverse().find((entry) => entry.createsStackingContext);
+      return { element: (outermost == null ? void 0 : outermost.element) ?? null, zIndex: (outermost == null ? void 0 : outermost.zIndex) ?? 0, chain };
+    }
+  }
+  function numericZIndex(value) {
+    if (!value || value === "auto") return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+  }
+  function createsStackingContext(style) {
+    const position = style.position;
+    if ((position === "absolute" || position === "relative") && numericZIndex(style.zIndex) !== null || position === "fixed" || position === "sticky") return true;
+    if (Number.parseFloat(style.opacity || "1") < 1) return true;
+    if (property(style, "transform") !== "none" || property(style, "filter") !== "none" || property(style, "perspective") !== "none") return true;
+    if (style.isolation === "isolate" || !!style.mixBlendMode && style.mixBlendMode !== "normal") return true;
+    const contain = property(style, "contain");
+    if (/(^|\s)(layout|paint|strict|content)(\s|$)/.test(contain)) return true;
+    const willChange = property(style, "willChange").split(",").map((value) => value.trim());
+    return willChange.some((value) => ["transform", "opacity", "filter", "perspective", "contain"].includes(value));
+  }
+  function property(style, name) {
+    return (style[name] || "none").trim();
+  }
+  const ALWAYS_ON_TOP_Z_INDEX = 2147483e3;
+  const SAFE_DEFAULT_Z_INDEX = 1;
+  class LayerManager {
+    constructor(resolver = new StackingContextResolver(), findTarget2 = findUniqueTarget) {
+      this.resolver = resolver;
+      this.findTarget = findTarget2;
+    }
+    resolve(options) {
+      if (!options.layer) {
+        if (options.legacyZIndex !== void 0) return { zIndex: options.legacyZIndex, mode: "legacy", context: null };
+        return { zIndex: ALWAYS_ON_TOP_Z_INDEX, mode: "legacy", context: null };
+      }
+      const layer = options.layer;
+      if (layer.mode === "always_on_top") return { zIndex: ALWAYS_ON_TOP_Z_INDEX, mode: layer.mode, context: null };
+      if (layer.mode === "custom") return { zIndex: layer.zIndex, mode: layer.mode, context: null };
+      if (layer.mode === "relative") {
+        const reference = this.findTarget(layer.target);
+        if (!reference) {
+          const automatic = this.auto(options.targetElement);
+          return { ...automatic, mode: layer.mode, fallback: "relative_target_missing" };
+        }
+        const context = this.resolver.resolve(reference);
+        return { zIndex: bounded(context.zIndex + (layer.relation === "above" ? 1 : -1)), mode: layer.mode, context };
+      }
+      return this.auto(options.targetElement);
+    }
+    auto(targetElement) {
+      const context = this.resolver.resolve(targetElement ?? null);
+      return { zIndex: targetElement ? bounded(context.zIndex + 1) : SAFE_DEFAULT_Z_INDEX, mode: "auto", context };
+    }
+    apply(host, options) {
+      let observers = [];
+      let active = true;
+      let frameId = null;
+      let last;
+      const disconnect = () => {
+        observers.forEach((observer) => observer.disconnect());
+        observers = [];
+      };
+      const refresh = () => {
+        var _a, _b, _c;
+        if (!active) return last;
+        if (frameId !== null) {
+          cancelAnimationFrame(frameId);
+          frameId = null;
+        }
+        disconnect();
+        const resolution = this.resolve(options);
+        last = resolution;
+        const zIndex = String(resolution.zIndex);
+        if (host.style.zIndex !== zIndex) host.style.zIndex = zIndex;
+        if (resolution.fallback) {
+          if (host.dataset.movcuesLayerFallback !== resolution.fallback) host.dataset.movcuesLayerFallback = resolution.fallback;
+        } else if (host.dataset.movcuesLayerFallback) delete host.dataset.movcuesLayerFallback;
+        const dynamicLayer = ((_a = options.layer) == null ? void 0 : _a.mode) === "auto" || ((_b = options.layer) == null ? void 0 : _b.mode) === "relative";
+        const watched = dynamicLayer ? ((_c = options.layer) == null ? void 0 : _c.mode) === "relative" ? this.findTarget(options.layer.target) : options.targetElement : null;
+        if (watched && typeof MutationObserver !== "undefined") {
+          const observer = new MutationObserver(() => scheduleRefresh());
+          for (let element = watched; element; element = element.parentElement) {
+            observer.observe(element, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
+            if (element.parentElement) observer.observe(element.parentElement, { childList: true });
+          }
+          observers.push(observer);
+        }
+        return resolution;
+      };
+      const scheduleRefresh = () => {
+        if (!active || frameId !== null) return;
+        frameId = requestAnimationFrame(() => {
+          frameId = null;
+          refresh();
+        });
+      };
+      refresh();
+      return {
+        refresh,
+        destroy: () => {
+          active = false;
+          disconnect();
+          if (frameId !== null) cancelAnimationFrame(frameId);
+          frameId = null;
+        }
+      };
+    }
+  }
+  function findUniqueTarget(target) {
+    for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
+      try {
+        const matches2 = document.querySelectorAll(selector);
+        if (matches2.length === 1) return matches2[0];
+      } catch {
+      }
+    }
+    return null;
+  }
+  function bounded(value) {
+    return Math.max(-2147483648, Math.min(2147483647, value));
+  }
+  class ChecklistRenderer {
+    constructor() {
+      this.host = null;
+    }
+    render(checklist, callbacks, forceLauncher = false) {
+      this.destroy();
+      const nodes = sanitizeBuilderHtml(checklist.definition.builder.html);
+      const css = safeBuilderCss(checklist.definition.builder.css);
+      if (!nodes || css === null) return false;
+      this.host = document.createElement("div");
+      this.host.dataset.movcuesChecklist = checklist.id;
+      const side = checklist.definition.behavior.position === "bottom-left" ? "left:16px" : "right:16px";
+      this.host.style.cssText = `position:fixed;bottom:16px;${side};z-index:${ALWAYS_ON_TOP_Z_INDEX};pointer-events:auto`;
+      const root = this.host.attachShadow({ mode: "open" });
+      const style = document.createElement("style");
+      style.textContent = `:host{all:initial}.surface{position:relative;pointer-events:auto}.surface>.movcues-widget{position:relative!important;inset:auto!important}${css}`;
+      root.appendChild(style);
+      const surface = document.createElement("div");
+      surface.className = "surface";
+      surface.append(...nodes);
+      root.appendChild(surface);
+      const authoredRoot = surface.querySelector('[data-movcues-checklist-role="root"]');
+      if (!authoredRoot || surface.querySelectorAll('[data-movcues-checklist-role="root"]').length !== 1) {
+        this.destroy();
+        return false;
+      }
+      const requiredRoles = ["title", "description", "progress", "items", "launcher-label", "remaining-count", "completion-title", "completion-description", "completion-acknowledge"];
+      const requiredViews = ["expanded", "launcher", "completion"];
+      if (requiredRoles.some((role) => authoredRoot.querySelectorAll(`[data-movcues-checklist-role="${role}"]`).length !== 1) || requiredViews.some((view2) => authoredRoot.querySelectorAll(`[data-movcues-checklist-view="${view2}"]`).length !== 1)) {
+        this.destroy();
+        return false;
+      }
+      const itemElements = /* @__PURE__ */ new Map();
+      for (const element of Array.from(authoredRoot.querySelectorAll("[data-movcues-checklist-item-id]"))) {
+        const id = element.dataset.movcuesChecklistItemId;
+        if (!id || itemElements.has(id) || element.querySelectorAll('[data-movcues-checklist-item-role="state"]').length !== 1 || element.querySelectorAll('[data-movcues-checklist-item-role="title"]').length !== 1 || element.querySelectorAll('[data-movcues-checklist-item-role="description"]').length !== 1) {
+          this.destroy();
+          return false;
+        }
+        itemElements.set(id, element);
+      }
+      if (checklist.definition.items.some((item) => !itemElements.has(item.id)) || itemElements.size !== checklist.definition.items.length) {
+        this.destroy();
+        return false;
+      }
+      const cellDocument = authoredRoot.dataset.movcuesDocumentVersion === "4";
+      setText(authoredRoot, "title", checklist.definition.title);
+      setText(authoredRoot, "description", checklist.definition.description ?? "");
+      if (!cellDocument) setText(authoredRoot, "launcher-label", checklist.definition.title);
+      setText(authoredRoot, "completion-title", checklist.definition.completionMessage.title);
+      setText(authoredRoot, "completion-description", checklist.definition.completionMessage.description ?? "");
+      setText(authoredRoot, "completion-acknowledge", checklist.definition.completionMessage.acknowledgeLabel);
+      authoredRoot.querySelectorAll('[data-movcues-checklist-role="dismiss"]').forEach((element) => {
+        element.hidden = !checklist.definition.behavior.dismissible;
+      });
+      const completed = new Set(checklist.progress.completedItemIds);
+      const remaining = checklist.definition.items.length - completed.size;
+      authoredRoot.style.setProperty("--movcues-checklist-progress", `${checklist.definition.items.length ? completed.size / checklist.definition.items.length * 100 : 0}%`);
+      setText(authoredRoot, "progress", `${completed.size} of ${checklist.definition.items.length} complete`);
+      setText(authoredRoot, "remaining-count", checklist.definition.behavior.showRemainingCount ? String(remaining) : "");
+      const container = authoredRoot.querySelector('[data-movcues-checklist-role="items"]');
+      if (!container) {
+        this.destroy();
+        return false;
+      }
+      checklist.definition.items.forEach((item, index) => {
+        var _a;
+        const element = itemElements.get(item.id);
+        if (!cellDocument) container.appendChild(element);
+        const state = ((_a = checklist.progress.items[index]) == null ? void 0 : _a.state) ?? "locked";
+        element.dataset.state = state;
+        element.setAttribute("aria-disabled", state === "locked" ? "true" : "false");
+        setText(element, "title", item.title, true);
+        setText(element, "description", item.description ?? "", true);
+      });
+      const view = checklist.progress.complete ? "completion" : forceLauncher || checklist.progress.collapsed ? "launcher" : "expanded";
+      authoredRoot.querySelectorAll("[data-movcues-checklist-view]").forEach((element) => element.classList.toggle("is-active", element.dataset.movcuesChecklistView === view));
+      authoredRoot.addEventListener("click", (event) => {
+        var _a;
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target) return;
+        const item = target.closest("[data-movcues-checklist-item-id]");
+        if (item && item.dataset.state !== "locked") {
+          callbacks.onItemClick(item.dataset.movcuesChecklistItemId);
+          return;
+        }
+        const role = (_a = target.closest("[data-movcues-checklist-role]")) == null ? void 0 : _a.dataset.movcuesChecklistRole;
+        if (role === "launcher-label" || target.closest('[data-movcues-checklist-view="launcher"]')) callbacks.onOpen();
+        else if (role === "collapse") callbacks.onCollapse();
+        else if (role === "completion-acknowledge") callbacks.onAcknowledge();
+        else if (role === "dismiss") callbacks.onDismiss();
+      });
+      document.documentElement.appendChild(this.host);
+      return true;
+    }
+    destroy() {
+      var _a;
+      (_a = this.host) == null ? void 0 : _a.remove();
+      this.host = null;
+    }
+  }
+  function setText(root, role, value, itemRole = false) {
+    const attribute = itemRole ? "data-movcues-checklist-item-role" : "data-movcues-checklist-role";
+    const element = root.querySelector(`[${attribute}="${role}"]`);
+    if (element) element.textContent = value;
+  }
+  const esc = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  class ChecklistEditor {
+    constructor(root, definition, references, options) {
+      var _a, _b, _c, _d;
+      this.root = root;
+      this.definition = definition;
+      this.references = references;
+      this.options = options;
+      this.renderer = new ChecklistRenderer();
+      this.step = document.createElement("div");
+      this.task = document.createElement("div");
+      this.tools = document.createElement("div");
+      this.style = document.createElement("style");
+      this.view = "expanded";
+      this.preview = false;
+      this.completed = /* @__PURE__ */ new Set();
+      this.sample = /* @__PURE__ */ new Map();
+      this.onChange = (event) => {
+        var _a2, _b2, _c2, _d2;
+        const input = event.target;
+        if (!input.matches("[data-checklist-view]") && !this.options.canEdit()) return;
+        if (input.matches("[data-checklist-view]")) {
+          if (this.options.flush()) {
+            this.view = input.value;
+            this.closeMobileInspector();
+            this.options.render();
+          }
+          return;
+        }
+        const c = this.options.composer();
+        if (!c) return;
+        const item = c.getSelectedTask();
+        if (input.matches("[data-checklist-sample]") && item) {
+          this.sample.set(item.id, input.value);
+          (_a2 = this.options.composer()) == null ? void 0 : _a2.refreshChecklist();
+          return;
+        }
+        if (input.matches("[data-checklist-view-width]")) {
+          c.updateChecklistViewWidth(Number(input.value));
+          return;
+        }
+        if (input.matches("[data-checklist-font]")) {
+          c.updateBlock({ fontSize: Number(input.value) });
+          return;
+        }
+        if (input.matches("[data-checklist-color]")) {
+          c.updateBlock({ color: input.value });
+          return;
+        }
+        if (input.matches("[data-checklist-indicator]")) {
+          c.updateBlock({ indicator: input.value });
+          return;
+        }
+        if (input.matches("[data-checklist-launcher-label]")) {
+          c.updateBlock({ text: input.value });
+          return;
+        }
+        if (this.step.contains(input)) {
+          c.updateChecklist((next2) => {
+            if (input.matches("[data-checklist-title]")) next2.title = input.value;
+            if (input.matches("[data-checklist-description]")) next2.description = input.value;
+            if (input.matches("[data-checklist-completion-title]")) next2.completionMessage.title = input.value;
+            if (input.matches("[data-checklist-completion-description]")) next2.completionMessage.description = input.value;
+            if (input.matches("[data-checklist-ack]")) next2.completionMessage.acknowledgeLabel = input.value;
+            if (input.matches("[data-checklist-position]")) next2.behavior.position = input.value;
+            if (input.matches("[data-checklist-order]")) next2.behavior.order = input.value;
+            if (input.matches("[data-checklist-initial]")) next2.behavior.initialState = input.value;
+            if (input.matches("[data-checklist-dismissible]")) next2.behavior.dismissible = input.checked;
+            if (input.matches("[data-checklist-remaining]")) next2.behavior.showRemainingCount = input.checked;
+          });
+          return;
+        }
+        if (!item || !this.task.contains(input)) return;
+        const next = structuredClone(item);
+        if (input.matches("[data-checklist-task-title]")) next.title = input.value;
+        if (input.matches("[data-checklist-task-description]")) next.description = input.value;
+        if (input.matches("[data-checklist-action]")) next.action = input.value === "none" ? { type: "none" } : input.value === "launch_guide" ? { type: "launch_guide", experienceId: ((_b2 = this.references.guides[0]) == null ? void 0 : _b2.id) ?? "" } : { type: input.value, url: input.value === "navigate" ? "/" : location.origin };
+        if (input.matches("[data-checklist-action-guide]")) next.action = { type: "launch_guide", experienceId: input.value };
+        if (input.matches("[data-checklist-url]") && "url" in next.action) next.action.url = input.value;
+        if (input.matches("[data-checklist-condition]")) next.completion = input.value === "item_clicked" ? { type: "item_clicked" } : input.value === "segment" ? { type: "segment", segmentId: ((_c2 = this.references.segments[0]) == null ? void 0 : _c2.id) ?? "" } : { type: "guide_completed", experienceId: ((_d2 = this.references.guides[0]) == null ? void 0 : _d2.id) ?? "" };
+        if (input.matches("[data-checklist-segment]")) next.completion = { type: "segment", segmentId: input.value };
+        if (input.matches("[data-checklist-completion-guide]")) next.completion = { type: "guide_completed", experienceId: input.value };
+        if (next.action.type === "launch_guide" && !next.action.experienceId || next.completion.type === "segment" && !next.completion.segmentId || next.completion.type === "guide_completed" && !next.completion.experienceId) {
+          this.options.error(["Select a Guide or Segment from this site."]);
+          return;
+        }
+        c.updateChecklist((value) => {
+          value.items = value.items.map((task) => task.id === next.id ? next : task);
+        });
+        this.sync();
+      };
+      this.onClick = (event) => {
+        var _a2, _b2, _c2;
+        const button = (_b2 = (_a2 = event.target) == null ? void 0 : _a2.closest) == null ? void 0 : _b2.call(_a2, "button");
+        if (!button) return;
+        if (button.matches("[data-checklist-reset]")) {
+          this.completed.clear();
+          this.sample.clear();
+          this.view = "expanded";
+          this.options.render();
+          return;
+        }
+        if (!this.options.canEdit()) return;
+        if (button.matches("[data-checklist-add]")) {
+          this.view = "expanded";
+          const c = this.options.composer();
+          if (c == null ? void 0 : c.insertTask()) this.sync();
+        }
+        if (button.matches("[data-checklist-task-move]")) (_c2 = this.options.composer()) == null ? void 0 : _c2.move(Number(button.dataset.checklistTaskMove));
+      };
+      this.step.dataset.checklistInspector = "";
+      this.step.innerHTML = '<label>View width<input type="number" data-checklist-view-width min="120" max="720"></label><small>Width for the selected visual state. It automatically fits small screens.</small><label>Checklist title<input data-checklist-title maxlength="160"></label><label>Description<textarea data-checklist-description rows="3" maxlength="2000"></textarea></label><label>Position<select data-checklist-position><option value="bottom-right">Bottom right</option><option value="bottom-left">Bottom left</option></select></label><label>Task order<select data-checklist-order><option value="any">Any order</option><option value="sequential">In order</option></select></label><small>In order unlocks each task after the previous task is completed.</small><label>Start as<select data-checklist-initial><option value="expanded">Expanded</option><option value="collapsed">Collapsed</option></select></label><label class="check"><input type="checkbox" data-checklist-dismissible> Allow dismissal</label><label class="check"><input type="checkbox" data-checklist-remaining> Show remaining count</label><label>Completion title<input data-checklist-completion-title maxlength="160"></label><label>Completion message<textarea data-checklist-completion-description rows="3" maxlength="2000"></textarea></label><label>Done button<input data-checklist-ack maxlength="80"></label><button type="button" class="secondary-button" data-checklist-add>Add task</button>';
+      this.task.dataset.block = "checklist_task,checklist_text,checklist_control,checklist_progress";
+      this.task.innerHTML = '<div data-checklist-task-fields><label>Task title<input data-checklist-task-title maxlength="200"></label><label>Description<textarea data-checklist-task-description rows="3" maxlength="1000"></textarea></label><label>Action<select data-checklist-action><option value="none">No action</option><option value="launch_guide">Launch Guide</option><option value="navigate">Go to a page</option><option value="open_url">Open external URL</option></select></label><label data-checklist-guide-field>Guide<select data-checklist-action-guide></select></label><label data-checklist-url-field>Page URL<input data-checklist-url type="url" maxlength="2000" placeholder="/getting-started"></label><label>Complete when<select data-checklist-condition><option value="item_clicked">Task clicked</option><option value="segment">Matches saved Segment</option><option value="guide_completed">Guide completed</option></select></label><label data-checklist-segment-field>Segment<select data-checklist-segment></select></label><label data-checklist-completion-guide-field>Guide<select data-checklist-completion-guide></select></label><small data-checklist-action-note></small><label>Sample status<select data-checklist-sample><option value="available">Available</option><option value="completed">Completed</option><option value="locked">Locked</option></select></label><label>Status icon<select data-checklist-indicator><option value="check">Check</option><option value="star">Star</option><option value="rocket">Rocket</option><option value="heart">Heart</option><option value="info">Info</option><option value="warning">Warning</option><option value="sparkles">Sparkles</option><option value="arrow">Arrow</option></select></label><div class="history-row"><button type="button" class="secondary-button compact" data-checklist-task-move="-1">Move earlier</button><button type="button" class="secondary-button compact" data-checklist-task-move="1">Move later</button></div></div><label data-checklist-launcher-field>Launcher label<input data-checklist-launcher-label maxlength="200"></label><label>Font size<input type="number" data-checklist-font min="10" max="48"></label><label>Color<input type="color" data-checklist-color></label>';
+      this.tools.dataset.checklistTools = "";
+      this.tools.innerHTML = '<select aria-label="Checklist visual state" data-checklist-view><option value="expanded">Expanded</option><option value="launcher">Collapsed</option><option value="completion">Completed</option></select><button type="button" class="secondary-button compact" data-checklist-add aria-label="Add Checklist task">＋ Task</button><button type="button" class="secondary-button compact" data-checklist-reset>Reset simulation</button><span data-checklist-preview-note hidden>Simulated progress</span>';
+      (_a = this.root.querySelector("[data-inspector=step]")) == null ? void 0 : _a.append(this.step);
+      (_b = this.root.querySelector("[data-inspector=block]")) == null ? void 0 : _b.append(this.task);
+      (_c = this.root.querySelector("[data-editor-toolbar]")) == null ? void 0 : _c.append(this.tools);
+      const guideOptions = '<option value="">Select Guide</option>' + references.guides.map((g) => `<option value="${esc(g.id)}">${esc(g.name)}${g.status === "published" ? "" : " (not published)"}</option>`).join("");
+      this.task.querySelectorAll("[data-checklist-action-guide],[data-checklist-completion-guide]").forEach((select) => select.innerHTML = guideOptions);
+      this.task.querySelector("[data-checklist-segment]").innerHTML = '<option value="">Select Segment</option>' + references.segments.map((segment) => `<option value="${esc(segment.id)}">${esc(segment.name)}</option>`).join("");
+      this.style.textContent = "[data-checklist-inspector],[data-block^=checklist_task]{display:grid;gap:8px}[data-checklist-inspector] small,[data-checklist-action-note]{font-size:11px;color:#64748b}[data-checklist-inspector] textarea,[data-block^=checklist_task] textarea{width:100%;min-width:0;box-sizing:border-box;border:1px solid #d7dce3;border-radius:6px;font:12px ui-sans-serif,system-ui;padding:7px}[data-checklist-tools]{display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-width:0;max-width:100%;padding:0 6px 6px}[data-checklist-tools] select{width:auto;max-width:100%;font-size:11px}[data-checklist-tools] span{font-size:10px;color:#64748b}[data-checklist-task-fields]{display:grid;gap:8px}";
+      this.root.append(this.style);
+      root.addEventListener("change", this.onChange);
+      root.addEventListener("click", this.onClick);
+      if (innerWidth <= 480) this.closeMobileInspector();
+      else (_d = this.root.querySelector("aside")) == null ? void 0 : _d.classList.toggle("left-side", definition.behavior.position === "bottom-right");
+    }
+    sync() {
+      var _a, _b, _c;
+      const c = this.options.composer(), task = c == null ? void 0 : c.getSelectedTask(), block = c == null ? void 0 : c.getSelectedBlock();
+      this.task.querySelector("[data-checklist-task-fields]").hidden = !task;
+      this.value("[data-checklist-view]", this.view);
+      this.root.querySelector("[data-checklist-preview-note]").hidden = !this.preview;
+      this.root.querySelectorAll("[data-checklist-add]").forEach((button) => {
+        button.disabled = !this.options.canEdit() || this.definition.items.length >= 20;
+      });
+      const d = this.definition;
+      this.value("[data-checklist-view-width]", String(((_b = (_a = c == null ? void 0 : c.getDocument().root.children) == null ? void 0 : _a.find((cell) => cell.checklistRole === this.view)) == null ? void 0 : _b.checklistWidth) ?? (this.view === "launcher" ? 220 : 360)));
+      this.value("[data-checklist-title]", d.title);
+      this.value("[data-checklist-description]", d.description ?? "");
+      this.value("[data-checklist-position]", d.behavior.position);
+      this.value("[data-checklist-order]", d.behavior.order);
+      this.value("[data-checklist-initial]", d.behavior.initialState);
+      this.check("[data-checklist-dismissible]", d.behavior.dismissible);
+      this.check("[data-checklist-remaining]", d.behavior.showRemainingCount);
+      this.value("[data-checklist-completion-title]", d.completionMessage.title);
+      this.value("[data-checklist-completion-description]", d.completionMessage.description ?? "");
+      this.value("[data-checklist-ack]", d.completionMessage.acknowledgeLabel);
+      if (task) {
+        this.value("[data-checklist-task-title]", task.title);
+        this.value("[data-checklist-task-description]", task.description ?? "");
+        this.value("[data-checklist-action]", task.action.type);
+        this.value("[data-checklist-action-guide]", task.action.type === "launch_guide" ? task.action.experienceId : "");
+        this.value("[data-checklist-url]", "url" in task.action ? task.action.url : "");
+        this.value("[data-checklist-condition]", task.completion.type);
+        this.value("[data-checklist-segment]", task.completion.type === "segment" ? task.completion.segmentId : "");
+        this.value("[data-checklist-completion-guide]", task.completion.type === "guide_completed" ? task.completion.experienceId : "");
+        this.value("[data-checklist-sample]", this.sample.get(task.id) ?? "available");
+        this.hide("[data-checklist-guide-field]", task.action.type !== "launch_guide");
+        this.hide("[data-checklist-url-field]", !["navigate", "open_url"].includes(task.action.type));
+        this.hide("[data-checklist-segment-field]", task.completion.type !== "segment");
+        this.hide("[data-checklist-completion-guide-field]", task.completion.type !== "guide_completed");
+        const note = this.task.querySelector("[data-checklist-action-note]");
+        note.textContent = task.action.type === "launch_guide" && ((_c = this.references.guides.find((g) => g.id === ("experienceId" in task.action ? task.action.experienceId : ""))) == null ? void 0 : _c.status) !== "published" ? "Publish the selected Guide before publishing this Checklist." : "Completion is verified by the server. Sample status changes only this editor.";
+      }
+      this.hide("[data-checklist-launcher-field]", (block == null ? void 0 : block.type) !== "checklist_text" || block.role !== "launcher-label");
+      if (block == null ? void 0 : block.type.startsWith("checklist_")) {
+        const visual = block;
+        this.value("[data-checklist-font]", String(visual.fontSize));
+        this.value("[data-checklist-color]", visual.color ?? "#111827");
+        if (block.type === "checklist_task") this.value("[data-checklist-indicator]", block.indicator);
+        if (block.type === "checklist_text" && block.role === "launcher-label") this.value("[data-checklist-launcher-label]", block.text ?? d.title);
+      }
+    }
+    render(id, versionId, preview) {
+      var _a, _b;
+      this.preview = preview;
+      const completed = this.view === "completion" ? this.definition.items.map((item) => item.id) : this.definition.items.filter((item) => this.completed.has(item.id)).map((item) => item.id);
+      const ids = new Set(completed);
+      let unlocked = true;
+      const progress = { stateId: "editor-only", collapsed: this.view === "launcher", dismissed: false, complete: this.view === "completion", completionAcknowledged: false, completedItemIds: completed, items: this.definition.items.map((item) => {
+        const state = ids.has(item.id) ? "completed" : this.definition.behavior.order === "sequential" && !unlocked ? "locked" : "available";
+        if (!ids.has(item.id)) unlocked = false;
+        return { id: item.id, state };
+      }) };
+      const mounted = this.renderer.render({ id, versionId, kind: "checklist", priority: 0, definition: this.definition, progress }, { onOpen: () => this.transition("expanded"), onCollapse: () => this.transition("launcher"), onDismiss: () => this.renderer.destroy(), onAcknowledge: () => this.renderer.destroy(), onItemClick: (itemId) => {
+        this.completed.add(itemId);
+        if (this.definition.items.every((item) => this.completed.has(item.id))) this.view = "completion";
+        this.options.render();
+      } });
+      const host = this.host(id);
+      if (host && document.body && !document.body.contains(host)) document.body.append(host);
+      const surface = (_a = host == null ? void 0 : host.shadowRoot) == null ? void 0 : _a.querySelector(".surface"), style = (_b = host == null ? void 0 : host.shadowRoot) == null ? void 0 : _b.querySelector("style");
+      if (surface) surface.dataset.movcuesBuilderSurface = "";
+      if (style) style.dataset.movcuesBuilderStyle = "";
+      this.sync();
+      return mounted;
+    }
+    applyDesign(id) {
+      var _a;
+      const host = this.host(id), root = host == null ? void 0 : host.shadowRoot;
+      if (!host || !root) return;
+      host.style.left = this.definition.behavior.position === "bottom-left" ? "16px" : "auto";
+      host.style.right = this.definition.behavior.position === "bottom-right" ? "16px" : "auto";
+      root.querySelectorAll("[data-movcues-checklist-view]").forEach((view) => view.classList.toggle("is-active", view.dataset.movcuesChecklistView === this.view));
+      let available = true;
+      root.querySelectorAll("[data-movcues-checklist-item-id]").forEach((node) => {
+        const explicit = this.sample.get(node.dataset.movcuesChecklistItemId);
+        node.dataset.state = explicit ?? (this.definition.behavior.order === "sequential" && !available ? "locked" : "available");
+        if (node.dataset.state !== "completed") available = false;
+      });
+      root.querySelector("[data-movcues-checklist-role=progress]").textContent = `${this.definition.items.filter((item) => this.sample.get(item.id) === "completed").length} of ${this.definition.items.length} complete`;
+      root.querySelectorAll("[data-movcues-checklist-role=dismiss]").forEach((node) => node.hidden = !this.definition.behavior.dismissible);
+      const count = root.querySelector("[data-movcues-checklist-role=remaining-count]");
+      if (count) count.textContent = this.definition.behavior.showRemainingCount ? String(this.definition.items.length) : "";
+      (_a = this.options.composer()) == null ? void 0 : _a.setChecklistView(this.view);
+    }
+    host(id) {
+      return Array.from(document.querySelectorAll("[data-movcues-checklist]")).find((host) => host.dataset.movcuesChecklist === id) ?? null;
+    }
+    closeMobileInspector() {
+      var _a, _b;
+      if (innerWidth > 480) return;
+      (_a = this.root.querySelector("aside")) == null ? void 0 : _a.classList.add("minimized");
+      (_b = this.root.querySelector("[data-minimize]")) == null ? void 0 : _b.setAttribute("aria-expanded", "false");
+    }
+    transition(view) {
+      this.view = view;
+      this.options.render();
+    }
+    value(selector, value) {
+      const input = this.root.querySelector(selector);
+      if (input && this.root.activeElement !== input) input.value = value;
+    }
+    check(selector, value) {
+      const input = this.root.querySelector(selector);
+      if (input) input.checked = value;
+    }
+    hide(selector, value) {
+      const element = this.task.querySelector(selector);
+      if (element) element.hidden = value;
+    }
+    destroyView() {
+      this.renderer.destroy();
+    }
+    destroy() {
+      this.renderer.destroy();
+      this.root.removeEventListener("change", this.onChange);
+      this.root.removeEventListener("click", this.onClick);
+      this.step.remove();
+      this.task.remove();
+      this.tools.remove();
+      this.style.remove();
+    }
+  }
+  function getGuideStepPattern(step) {
+    return step.pattern ?? "anchored_card";
+  }
+  function guideStepRequiresTarget(step) {
+    return getGuideStepPattern(step) === "anchored_card";
+  }
+  function isGuideDefinition(value) {
+    return "steps" in value;
+  }
+  function isChecklistDefinition(value) {
+    return "items" in value;
+  }
+  const checklistCopy = (value) => ({ title: value.title, description: value.description ?? "", "launcher-label": value.title, "remaining-count": "", "completion-title": value.completionMessage.title, "completion-description": value.completionMessage.description ?? "" });
+  const escapeChecklist = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const CHECKLIST_CELL_CSS = '.movcues-widget--checklist{width:360px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 32px);overflow:auto;background:var(--movcues-bg,#fff);color:var(--movcues-fg,#111827);border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 12px 40px #0f172a24;font:14px/1.4 ui-sans-serif,system-ui}.movcues-widget [data-movcues-checklist-view]:not(.is-active){display:none!important}.movcues-widget--checklist:has([data-movcues-checklist-view="launcher"].is-active){width:220px}.movcues-widget .movcues-checklist__item{display:flex;align-items:flex-start;gap:10px;width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;color:inherit;text-align:left;cursor:pointer;font:inherit}.movcues-widget .movcues-checklist__copy{display:grid;gap:3px}.movcues-widget [data-movcues-checklist-item-role="title"]{font-weight:600}.movcues-widget [data-movcues-checklist-item-role="description"]{font-size:.9em;color:#64748b}.movcues-widget [data-movcues-checklist-item-role="state"]{display:grid;place-items:center;flex:none;width:22px;height:22px;border:1px solid #94a3b8;border-radius:50%;color:transparent}.movcues-widget [data-state="completed"] [data-movcues-checklist-item-role="state"]{background:#16a34a;border-color:#16a34a;color:#fff}.movcues-widget [data-state="locked"]{opacity:.5;cursor:not-allowed}.movcues-widget .movcues-checklist-progress-track{height:4px;border-radius:4px;background:#e2e8f0;overflow:hidden}.movcues-widget .movcues-checklist-progress-fill{display:block;height:100%;width:var(--movcues-checklist-progress,0%);background:#2563eb}.movcues-widget .movcues-checklist-control{border:1px solid #cbd5e1;border-radius:6px;padding:6px 10px;background:#fff;color:inherit;cursor:pointer;font:inherit}.movcues-widget [data-movcues-checklist-role="completion-acknowledge"]{background:#2563eb;border-color:#2563eb;color:#fff}.movcues-widget [data-movcues-checklist-view="launcher"]{cursor:pointer}.movcues-widget [hidden]{display:none!important}';
   const QUESTION_TYPES = ["single_choice", "multiple_choice", "short_text", "long_text", "rating", "nps"];
   function surveyQuestionMarkup(question, blockId) {
     const label = escape$1(question.label);
@@ -50,32 +679,6 @@
   function escape$1(value) {
     return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
-  const BUILDER_ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "HEADER", "H1", "H2", "H3", "H4", "P", "SPAN", "BR", "BUTTON", "IMG", "HR", "LABEL", "STRONG", "EM", "U", "A", "UL", "OL", "LI"]);
-  const BUILDER_SURVEY_INPUT_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA"]);
-  const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "aria-required", "alt", "src", "href", "target", "rel", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-document-version", "data-movcues-node-id", "data-movcues-block-id", "data-movcues-sizing", "data-movcues-responsive-stack", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
-  const BUILDER_BLOCKED_TAGS = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO|SOURCE)$/i;
-  const BUILDER_UNSAFE_CSS = /@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i;
-  function builderImageUrlIsSafe(value) {
-    return !value || !/[\u0000-\u0020\u007f]/.test(value) && /^(https?:\/\/|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(value);
-  }
-  function builderLinkUrlIsSafe(value) {
-    return !/[\u0000-\u001f\u007f]/.test(value) && /^(https?:\/\/|mailto:|tel:|\/|#|\?|\.\.?\/)/i.test(value.trim());
-  }
-  function builderInputTypeIsSafe(value) {
-    return ["text", "radio", "checkbox", "number"].includes(value.toLowerCase());
-  }
-  function safeScopedBuilderCss(input) {
-    const css = input.replace(/\/\*[\s\S]*?\*\//g, "").trim();
-    if (BUILDER_UNSAFE_CSS.test(css)) return null;
-    const rule = /([^{}]+)\{/g;
-    let match;
-    while ((match = rule.exec(css)) !== null) {
-      const prelude = match[1].trim();
-      if (!prelude || prelude.startsWith("@")) continue;
-      if (prelude.split(",").some((selector) => !selector.trim().includes(".movcues-widget"))) return null;
-    }
-    return css;
-  }
   const ONSITE_LIMITS = {
     maxDepth: 8,
     maxNodes: 120,
@@ -101,6 +704,7 @@
   }
   function createBlock(type, guide = false) {
     const id = onsiteId("block");
+    if (type.startsWith("checklist_")) throw new Error("Insert a structured Checklist component.");
     if (type === "question") throw new Error("Insert a canonical Survey question first.");
     if (type === "survey_controls") return { id, type };
     if (type === "heading") return { id, type, html: "A clear heading", level: 2, fontSize: 24, weight: 600, lineHeight: 1.25 };
@@ -160,6 +764,60 @@
     if (!validateOnsiteDocument(candidate).valid || validateOnsiteSurveyDocument(candidate, { questions: nextQuestions }).length) return null;
     return { document: candidate, questions: nextQuestions, cellId };
   }
+  function validateOnsiteChecklistDocument(document2, context) {
+    const errors = [];
+    const views = document2.root.children ?? [];
+    if (document2.schemaVersion !== 4 || document2.root.checklistRole || document2.root.block || views.length !== 3 || !["expanded", "launcher", "completion"].every((role) => views.filter((cell) => cell.checklistRole === role).length === 1)) errors.push("Checklist document needs exactly one Expanded, Collapsed and Completed view.");
+    const expected = { title: "expanded", description: "expanded", progress: "expanded", collapse: "expanded", dismiss: "expanded", "launcher-label": "launcher", "remaining-count": "launcher", "completion-title": "completion", "completion-description": "completion", "completion-acknowledge": "completion" };
+    const counts = /* @__PURE__ */ new Map(), itemCounts = /* @__PURE__ */ new Map(), ids = /* @__PURE__ */ new Set();
+    let containers = 0;
+    if (!context.items.length || context.items.length > 20) errors.push("A Checklist needs 1–20 tasks.");
+    for (const item of context.items) {
+      if (ids.has(item.id)) errors.push("Checklist item IDs must be unique.");
+      ids.add(item.id);
+      if (!item.title.trim()) errors.push("Task title cannot be empty.");
+    }
+    const visit = (cell, view, inItems = false) => {
+      var _a;
+      if (cell.checklistRole === "items") {
+        containers++;
+        if (view !== "expanded" || inItems) errors.push("Task container belongs in the Expanded view.");
+        inItems = true;
+      }
+      if (cell.checklistRole && cell.checklistRole !== "items" && cell !== views.find((value) => value.id === cell.id)) errors.push("Checklist views cannot be nested.");
+      const block = cell.block;
+      if ((block == null ? void 0 : block.type) === "checklist_task") {
+        itemCounts.set(block.itemId, (itemCounts.get(block.itemId) ?? 0) + 1);
+        if (!ids.has(block.itemId) || !inItems || view !== "expanded") errors.push("Orphaned task reference or task outside the Expanded task container.");
+      } else if ((block == null ? void 0 : block.type) === "checklist_text" || (block == null ? void 0 : block.type) === "checklist_control" || (block == null ? void 0 : block.type) === "checklist_progress") {
+        const role = block.type === "checklist_progress" ? "progress" : block.role;
+        counts.set(role, (counts.get(role) ?? 0) + 1);
+        if (expected[role] !== view || inItems) errors.push("Checklist structural component is in the wrong view.");
+      } else if (block && ["question", "survey_controls", "button"].includes(block.type)) errors.push("Use Checklist controls and tasks in a Checklist document.");
+      (_a = cell.children) == null ? void 0 : _a.forEach((child) => visit(child, view, inItems));
+    };
+    views.forEach((view) => visit(view, view.checklistRole ?? ""));
+    if (containers !== 1) errors.push("Checklist needs exactly one task container.");
+    for (const role of Object.keys(expected)) if (counts.get(role) !== 1) errors.push(`Checklist role ${role} must appear exactly once.`);
+    for (const item of context.items) if (itemCounts.get(item.id) !== 1) errors.push(`Task ${item.id} must be referenced exactly once.`);
+    const order = listBlocks(document2.root).filter((block) => block.type === "checklist_task").map((block) => block.itemId);
+    if (JSON.stringify(order) !== JSON.stringify(context.items.map((item) => item.id))) errors.push("Task layout order must match the canonical item order.");
+    return errors;
+  }
+  function duplicateChecklistCell(document2, context, cellId) {
+    const candidate = cloneOnsite(document2), items = cloneOnsite(context.items), id = duplicateCell(candidate, cellId);
+    if (!id) return null;
+    for (const block of listBlocks(findCell(candidate, id))) if (block.type === "checklist_task") {
+      const source = items.find((item) => item.id === block.itemId);
+      if (!source) return null;
+      const copy = { ...cloneOnsite(source), id: onsiteId("item") };
+      block.itemId = copy.id;
+      items.push(copy);
+    }
+    const ordered = listBlocks(candidate.root).filter((block) => block.type === "checklist_task").map((block) => items.find((item) => item.id === block.itemId));
+    if (validateOnsiteChecklistDocument(candidate, { ...context, items: ordered }).length || !validateOnsiteDocument(candidate).valid) return null;
+    return { document: candidate, items: ordered, cellId: id };
+  }
   function onsiteDocumentFromBuilder(builder) {
     var _a;
     const movcues = (_a = builder == null ? void 0 : builder.projectData) == null ? void 0 : _a.movcues;
@@ -167,18 +825,23 @@
     const document2 = movcues.onsiteDocument;
     return isOnsiteDocument(document2) ? document2 : null;
   }
-  function applyOnsiteDocument(builder, document2, widgetType, survey) {
-    const compiled = compileOnsiteDocument(document2, widgetType, survey);
+  function applyOnsiteDocument(builder, document2, widgetType, survey, checklist) {
+    const compiled = compileOnsiteDocument(document2, widgetType, survey, checklist);
     builder.version = 1;
     builder.projectData = { ...builder.projectData, movcues: { ...asRecord(builder.projectData.movcues), authoringSurface: "onsite", schemaVersion: document2.schemaVersion, onsiteDocument: document2, actionBindings: compiled.actionBindings } };
     builder.html = compiled.html;
     builder.css = compiled.css;
     return compiled;
   }
-  function compileOnsiteDocument(document2, widgetType, survey) {
+  function compileOnsiteDocument(document2, widgetType, survey, checklist) {
     var _a;
     const validation = validateOnsiteDocument(document2);
     if (!validation.valid) throw new Error(validation.errors.join(" "));
+    if (document2.schemaVersion === 4) {
+      if (widgetType !== "checklist" || !checklist || survey) throw new Error("Version 4 requires a Checklist context.");
+      const errors = validateOnsiteChecklistDocument(document2, checklist);
+      if (errors.length) throw new Error(errors.join(" "));
+    } else if (checklist) throw new Error("Checklist cells require document version 4.");
     if (document2.schemaVersion === 3) {
       if (widgetType !== "survey" || !survey) throw new Error("Version 3 requires a Survey question context.");
       const errors = validateOnsiteSurveyDocument(document2, survey);
@@ -197,7 +860,8 @@
       ".movcues-widget .movcues-block--full{width:100%}"
     ];
     if (document2.schemaVersion === 3) css.push(SURVEY_CELL_CSS);
-    const html = renderCell(document2.root, css, 0, survey);
+    if (document2.schemaVersion === 4) css.push(CHECKLIST_CELL_CSS);
+    const html = renderCell(document2.root, css, 0, survey, checklist);
     css.push('@media(max-width:480px){.movcues-widget [data-movcues-responsive-stack="true"]{flex-direction:column!important}.movcues-widget [data-movcues-sizing="fixed"]{max-width:100%!important}.movcues-widget .movcues-button{min-height:40px}.movcues-widget img{height:auto!important}}');
     const blocks = listBlocks(document2.root);
     const firstHeading = blocks.find((block) => block.type === "heading");
@@ -206,25 +870,39 @@
     const actionBindings = Object.fromEntries(actions.map((block) => [block.action.id, block.action]));
     const legacy = actions.slice(0, 2).map((block) => ({ label: block.label, type: block.action.type === "previous_step" ? "dismiss" : block.action.type, ..."url" in block.action ? { url: block.action.url } : {}, ..."eventName" in block.action ? { eventName: block.action.eventName } : {} }));
     const content = {
-      heading: firstHeading ? richTextToPlain(firstHeading.html).slice(0, 160) : "",
-      body: text,
+      heading: checklist ? checklist.title : firstHeading ? richTextToPlain(firstHeading.html).slice(0, 160) : "",
+      body: checklist ? checklist.description ?? "" : text,
       ...legacy[0] ? { primaryAction: legacy[0] } : {},
       ...((_a = legacy[1]) == null ? void 0 : _a.type) === "dismiss" ? { secondaryAction: { label: legacy[1].label, type: "dismiss" } } : {}
     };
-    return { html: `<section class="movcues-widget movcues-widget--${escapeAttribute(widgetType)}" data-movcues-widget-type="${escapeAttribute(widgetType)}" data-movcues-document-version="${document2.schemaVersion}">${html}</section>`, css: css.join(""), content, actionBindings };
+    return { html: `<section class="movcues-widget movcues-widget--${escapeAttribute(widgetType)}" data-movcues-widget-type="${escapeAttribute(widgetType)}" data-movcues-document-version="${document2.schemaVersion}"${checklist ? ' data-movcues-checklist-role="root"' : ""}>${html}</section>`, css: css.join(""), content, actionBindings };
   }
-  function renderCell(cell, css, depth, survey) {
+  function renderCell(cell, css, depth, survey, checklist) {
     var _a;
     const selector = `.movcues-widget [data-movcues-node-id="${cell.id}"]`;
     const sizing = cell.sizing.mode === "flexible" ? `flex:${round(cell.sizing.weight)} 1 0` : cell.sizing.mode === "hug" ? "flex:0 0 auto" : `flex:0 1 ${cell.sizing.value}px`;
     const style = cell.style ?? {};
     css.push(`${selector}{${sizing};flex-direction:${cell.direction};align-items:${cell.align};justify-content:${cell.justify};gap:${cell.gap}px;padding:${cell.padding.top}px ${cell.padding.right}px ${cell.padding.bottom}px ${cell.padding.left}px;${style.background ? `background:${style.background};` : ""}${style.borderWidth ? `border:${style.borderWidth}px solid ${style.borderColor ?? "#dbe2ea"};` : ""}${style.borderRadius ? `border-radius:${style.borderRadius}px;` : ""}}`);
-    const children = ((_a = cell.children) == null ? void 0 : _a.map((child) => renderCell(child, css, depth + 1, survey)).join("")) ?? (cell.block ? renderBlock(cell.block, css, survey) : "");
-    return `<div class="movcues-cell" data-movcues-node-id="${cell.id}" data-movcues-sizing="${cell.sizing.mode}"${cell.responsiveStack ? ' data-movcues-responsive-stack="true"' : ""}>${children}</div>`;
+    if (cell.checklistWidth !== void 0) css.push(`.movcues-widget--checklist:has([data-movcues-node-id="${cell.id}"].is-active){width:${cell.checklistWidth}px}`);
+    const children = ((_a = cell.children) == null ? void 0 : _a.map((child) => renderCell(child, css, depth + 1, survey, checklist)).join("")) ?? (cell.block ? renderBlock(cell.block, css, survey, checklist) : "");
+    return `<div class="movcues-cell" data-movcues-node-id="${cell.id}"${cell.checklistRole ? cell.checklistRole === "items" ? ' data-movcues-checklist-role="items"' : ` data-movcues-checklist-view="${cell.checklistRole}"` : ""} data-movcues-sizing="${cell.sizing.mode}"${cell.responsiveStack ? ' data-movcues-responsive-stack="true"' : ""}>${children}</div>`;
   }
-  function renderBlock(block, css, survey) {
+  function renderBlock(block, css, survey, checklist) {
     const selector = `.movcues-widget [data-movcues-block-id="${block.id}"]`;
     const align = block.align ?? "left";
+    if (block.type === "checklist_task" || block.type === "checklist_text" || block.type === "checklist_control" || block.type === "checklist_progress") {
+      if (!checklist) throw new Error("Checklist component needs canonical context.");
+      const item = block;
+      css.push(`${selector}{font-size:${item.fontSize}px;text-align:${align};${item.color ? `color:${item.color};` : ""}}`);
+      const attrs = `class="movcues-block" data-movcues-block-id="${block.id}"`;
+      if (item.type === "checklist_task") {
+        const task = checklist.items.find((value) => value.id === item.itemId);
+        return `<button type="button" class="movcues-block movcues-checklist__item" data-movcues-block-id="${item.id}" data-movcues-checklist-role="item" data-movcues-checklist-item-id="${escapeChecklist(task.id)}"><span data-movcues-checklist-item-role="state">${ICONS[item.indicator]}</span><span class="movcues-checklist__copy"><span data-movcues-checklist-item-role="title">${escapeChecklist(task.title)}</span><span data-movcues-checklist-item-role="description">${escapeChecklist(task.description ?? "")}</span></span></button>`;
+      }
+      if (item.type === "checklist_text") return `<div ${attrs} data-movcues-checklist-role="${item.role}">${escapeChecklist(item.role === "launcher-label" && item.text !== void 0 ? item.text : checklistCopy(checklist)[item.role])}</div>`;
+      if (item.type === "checklist_control") return `<button type="button" class="movcues-block movcues-checklist-control" data-movcues-block-id="${item.id}" data-movcues-checklist-role="${item.role}" aria-label="${item.role === "collapse" ? "Collapse checklist" : item.role === "dismiss" ? "Dismiss checklist" : "Acknowledge completion"}">${escapeChecklist(item.role === "collapse" ? "−" : item.role === "dismiss" ? "×" : checklist.completionMessage.acknowledgeLabel)}</button>`;
+      return `<div ${attrs}><div data-movcues-checklist-role="progress"></div><div class="movcues-checklist-progress-track"><span class="movcues-checklist-progress-fill"></span></div></div>`;
+    }
     if (block.type === "question") {
       css.push(`${selector}{font:${block.fontSize}px/1.5 ui-sans-serif,system-ui,sans-serif;text-align:${align};${block.color ? `color:${block.color};` : ""}}`);
       return surveyQuestionMarkup(survey.questions.find((question) => question.id === block.questionId), block.id);
@@ -259,7 +937,7 @@
   }
   function validateOnsiteDocument(value) {
     const errors = [];
-    if (!isOnsiteDocumentShape(value)) return { valid: false, errors: ["On-site document must use schemaVersion 2 or 3 and contain one root cell."] };
+    if (!isOnsiteDocumentShape(value)) return { valid: false, errors: ["On-site document must use schemaVersion 2, 3 or 4 and contain one root cell."] };
     unexpectedKeys(value, ["schemaVersion", "id", "root"], "Document", errors);
     const ids = /* @__PURE__ */ new Set();
     const seen = /* @__PURE__ */ new Set();
@@ -274,7 +952,7 @@
     };
     addId(value.id, "Document");
     const visit = (cell, depth, path) => {
-      var _a, _b, _c, _d;
+      var _a, _b, _c, _d, _e;
       if (!cell || typeof cell !== "object") {
         errors.push(`${path} must be a cell object.`);
         return;
@@ -286,7 +964,7 @@
       seen.add(cell);
       count++;
       addId(cell.id, path);
-      unexpectedKeys(cell, ["type", "id", "direction", "sizing", "align", "justify", "gap", "padding", "responsiveStack", "style", "children", "block"], path, errors);
+      unexpectedKeys(cell, ["type", "id", "checklistRole", "checklistWidth", "direction", "sizing", "align", "justify", "gap", "padding", "responsiveStack", "style", "children", "block"], path, errors);
       if (depth > ONSITE_LIMITS.maxDepth) errors.push(`${path} exceeds maximum nesting depth ${ONSITE_LIMITS.maxDepth}.`);
       if (!["row", "column"].includes(cell.direction)) errors.push(`${path} has an invalid direction.`);
       if (!["start", "center", "end", "stretch"].includes(cell.align)) errors.push(`${path} has an invalid alignment.`);
@@ -310,6 +988,9 @@
         if (!cell.children.length) errors.push(`${path} cannot contain an empty children list.`);
         cell.children.forEach((child, index) => visit(child, depth + 1, `${path} > cell ${index + 1}`));
       }
+      if (cell.checklistWidth !== void 0 && (value.schemaVersion !== 4 || !["expanded", "launcher", "completion"].includes(cell.checklistRole ?? "") || !Number.isInteger(cell.checklistWidth) || cell.checklistWidth < 120 || cell.checklistWidth > 720)) errors.push(`${path} view width must be 120–720 pixels.`);
+      if (cell.checklistRole !== void 0 && (value.schemaVersion !== 4 || !["expanded", "launcher", "completion", "items"].includes(cell.checklistRole))) errors.push(`${path} has an invalid Checklist container.`);
+      if (((_e = cell.block) == null ? void 0 : _e.type.startsWith("checklist_")) && value.schemaVersion !== 4) errors.push("Checklist blocks require schemaVersion 4.");
       if (cell.block && value.schemaVersion === 2 && ["question", "survey_controls"].includes(cell.block.type)) errors.push("Survey blocks require schemaVersion 3.");
       if (cell.block) validateBlock(cell.block, `${path} block`, addId, number, errors);
     };
@@ -330,14 +1011,20 @@
     var _a, _b, _c, _d, _e;
     addId(block.id, path);
     const base = ["id", "type", "align"];
-    const keys = { question: [...base, "questionId", "fontSize", "color"], survey_controls: base, heading: [...base, "html", "level", "fontSize", "weight", "color", "lineHeight"], text: [...base, "html", "fontSize", "weight", "color", "lineHeight"], button: [...base, "label", "action", "variant", "background", "color", "radius", "paddingX", "paddingY", "width"], image: [...base, "src", "alt", "fit", "width", "height", "radius"], divider: [...base, "orientation", "thickness", "color"], spacer: [...base, "size"], icon: [...base, "icon", "size", "color"] };
+    const keys = { checklist_task: [...base, "itemId", "fontSize", "color", "indicator"], checklist_text: [...base, "role", "fontSize", "color", "text"], checklist_control: [...base, "role", "fontSize", "color"], checklist_progress: [...base, "fontSize", "color"], question: [...base, "questionId", "fontSize", "color"], survey_controls: base, heading: [...base, "html", "level", "fontSize", "weight", "color", "lineHeight"], text: [...base, "html", "fontSize", "weight", "color", "lineHeight"], button: [...base, "label", "action", "variant", "background", "color", "radius", "paddingX", "paddingY", "width"], image: [...base, "src", "alt", "fit", "width", "height", "radius"], divider: [...base, "orientation", "thickness", "color"], spacer: [...base, "size"], icon: [...base, "icon", "size", "color"] };
     if (!Object.prototype.hasOwnProperty.call(keys, block.type)) {
       errors.push(`${path} has an unsupported block type.`);
       return;
     }
     unexpectedKeys(block, keys[block.type], path, errors);
     if (block.align !== void 0 && !["left", "center", "right"].includes(block.align)) errors.push(`${path} has an invalid alignment.`);
-    if (block.type === "question") {
+    if (block.type === "checklist_task" || block.type === "checklist_text" || block.type === "checklist_control" || block.type === "checklist_progress") {
+      const item = block;
+      number(item.fontSize, 10, 48, `${path} font size`);
+      if (item.type === "checklist_task" && (typeof item.itemId !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(item.itemId) || !(item.indicator in ICONS))) errors.push(`${path} has an invalid task reference or indicator.`);
+      if (item.type === "checklist_text" && (!["title", "description", "launcher-label", "remaining-count", "completion-title", "completion-description"].includes(item.role) || item.text !== void 0 && (item.role !== "launcher-label" || typeof item.text !== "string" || !item.text.trim() || item.text.length > 200))) errors.push(`${path} has an invalid Checklist text role.`);
+      if (item.type === "checklist_control" && !["collapse", "dismiss", "completion-acknowledge"].includes(item.role)) errors.push(`${path} has an invalid Checklist control.`);
+    } else if (block.type === "question") {
       if (typeof block.questionId !== "string" || !block.questionId.trim() || block.questionId.length > 64) errors.push(`${path} must reference a stable question ID.`);
       number(block.fontSize, 10, 36, `${path} font size`);
     } else if (block.type === "heading" || block.type === "text") {
@@ -529,6 +1216,7 @@
   }
   function collapseSingleChild(cell) {
     var _a;
+    if (cell.checklistRole) return;
     const child = (_a = cell.children) == null ? void 0 : _a[0];
     if (!child) return;
     const id = cell.id;
@@ -644,7 +1332,7 @@
     return isOnsiteDocumentShape(value) && validateOnsiteDocument(value).valid;
   }
   function isOnsiteDocumentShape(value) {
-    return !!value && typeof value === "object" && [2, 3].includes(value.schemaVersion) && !!value.root && value.root.type === "cell";
+    return !!value && typeof value === "object" && [2, 3, 4].includes(value.schemaVersion) && !!value.root && value.root.type === "cell";
   }
   function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -1008,15 +1696,6 @@
   function escape(value) {
     return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
-  function getGuideStepPattern(step) {
-    return step.pattern ?? "anchored_card";
-  }
-  function guideStepRequiresTarget(step) {
-    return getGuideStepPattern(step) === "anchored_card";
-  }
-  function isGuideDefinition(value) {
-    return "steps" in value;
-  }
   const EDITOR_CONTINUATION_KEY = "__movcues_experience_editor_session__";
   function storeEditorContinuation(continuation) {
     try {
@@ -1083,100 +1762,6 @@
         }
       }, 0);
     }
-  }
-  function mountBuilderContent(root, card, builder, callbacks, allowSurveyInputs = false) {
-    const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
-    const css = safeBuilderCss(builder.css);
-    if (!html || css === null) return false;
-    let style = root.querySelector("style[data-movcues-builder-style]");
-    if (!style) {
-      style = document.createElement("style");
-      style.dataset.movcuesBuilderStyle = "";
-      root.appendChild(style);
-    }
-    style.textContent = `${css}
-${ISOLATION_CSS}`;
-    const content = document.createElement("div");
-    content.className = "builder-content";
-    content.dataset.movcuesBuilderSurface = "";
-    content.append(...html);
-    card.appendChild(content);
-    card.classList.add("builder-card");
-    card.addEventListener("click", (event) => {
-      var _a, _b;
-      const target = event.target instanceof Element ? event.target.closest("[data-movcues-action-id]") : null;
-      if (!target || !card.contains(target)) return;
-      const actionId = target.dataset.movcuesActionId;
-      if (actionId === "primary") callbacks.onPrimary();
-      else if (actionId === "secondary") callbacks.onSecondary();
-      else {
-        const action = findOnsiteAction(builder, actionId ?? "");
-        if (action) (_b = callbacks.onActionId) == null ? void 0 : _b.call(callbacks, action, ((_a = target.textContent) == null ? void 0 : _a.trim()) ?? "");
-      }
-    });
-    return true;
-  }
-  const ISOLATION_CSS = `[data-movcues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movcues-builder-surface]>.movcues-widget{position:relative!important;inset:auto!important}`;
-  function sanitizeBuilderHtml(input, allowSurveyInputs = false) {
-    const template = document.createElement("template");
-    template.innerHTML = input;
-    for (const element of Array.from(template.content.querySelectorAll("*"))) {
-      const allowedTag = BUILDER_ALLOWED_TAGS.has(element.tagName) || allowSurveyInputs && BUILDER_SURVEY_INPUT_TAGS.has(element.tagName);
-      if (!allowedTag) {
-        if (BUILDER_BLOCKED_TAGS.test(element.tagName)) element.remove();
-        else element.replaceWith(...Array.from(element.childNodes));
-        continue;
-      }
-      for (const attribute of Array.from(element.attributes)) {
-        const name = attribute.name.toLowerCase();
-        if (!BUILDER_ALLOWED_ATTRIBUTES.has(name) || name.startsWith("on") || /javascript\s*:/i.test(attribute.value)) element.removeAttribute(attribute.name);
-      }
-      const action = element.getAttribute("data-movcues-action-id");
-      if (action && action !== "primary" && action !== "secondary" && !/^[A-Za-z][A-Za-z0-9_-]{2,63}$/.test(action)) element.removeAttribute("data-movcues-action-id");
-      const surveyAction = element.getAttribute("data-movcues-survey-action");
-      if (surveyAction && surveyAction !== "back" && surveyAction !== "next" && surveyAction !== "submit") element.removeAttribute("data-movcues-survey-action");
-      if (element.tagName === "IMG") {
-        const source = element.getAttribute("src") ?? "";
-        if (!builderImageUrlIsSafe(source)) element.removeAttribute("src");
-      }
-      if (element.hasAttribute("src") && element.tagName !== "IMG") element.removeAttribute("src");
-      if (element.tagName === "A") {
-        const href = element.getAttribute("href") ?? "";
-        if (!builderLinkUrlIsSafe(href)) element.removeAttribute("href");
-        const target = element.getAttribute("target");
-        if (target && target !== "_blank" && target !== "_self") element.removeAttribute("target");
-        if (target === "_blank") element.setAttribute("rel", "noopener noreferrer");
-      } else {
-        element.removeAttribute("href");
-        element.removeAttribute("target");
-        element.removeAttribute("rel");
-      }
-      if (element.tagName === "INPUT") {
-        const type = (element.getAttribute("type") ?? "text").toLowerCase();
-        if (!builderInputTypeIsSafe(type)) element.setAttribute("type", "text");
-      }
-    }
-    const root = template.content.querySelector(".movcues-widget");
-    if (!root) return null;
-    for (const slot of ["primary", "secondary"]) {
-      const actions = Array.from(template.content.querySelectorAll(`[data-movcues-action-id="${slot}"]`));
-      actions.slice(1).forEach((action) => action.remove());
-    }
-    return Array.from(template.content.childNodes);
-  }
-  function findOnsiteAction(builder, id) {
-    const movcues = builder.projectData.movcues;
-    const bindings = movcues && typeof movcues === "object" ? movcues.actionBindings : null;
-    const candidate = bindings && typeof bindings === "object" ? bindings[id] : null;
-    if (!candidate || typeof candidate !== "object") return null;
-    const action = candidate;
-    if (action.id !== id || !["next_step", "previous_step", "dismiss", "open_url", "track_event"].includes(String(action.type))) return null;
-    if (action.type === "open_url" && (typeof action.url !== "string" || !/^https?:\/\//i.test(action.url) || !builderLinkUrlIsSafe(action.url))) return null;
-    if (action.type === "track_event" && (typeof action.eventName !== "string" || !action.eventName.trim() || action.eventName.length > 200)) return null;
-    return action;
-  }
-  function safeBuilderCss(input) {
-    return safeScopedBuilderCss(input);
   }
   const WIDGET_SIZE_CONSTRAINTS = {
     anchored_card: { width: { default: 320, min: 240, max: 480 }, height: { allowFixed: true, min: 120, max: 700 }, viewportGutter: 24 },
@@ -2154,137 +2739,6 @@ ${ISOLATION_CSS}`;
   }
   function cssEscape(value) {
     return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(value) : value.replace(/["\\]/g, "\\$&");
-  }
-  class StackingContextResolver {
-    resolve(element) {
-      if (!element) return { element: null, zIndex: 0, chain: [] };
-      const chain = [];
-      let current = element;
-      while (current && current !== document.documentElement) {
-        const style = getComputedStyle(current);
-        chain.push({ element: current, zIndex: numericZIndex(style.zIndex), createsStackingContext: createsStackingContext(style) });
-        current = current.parentElement;
-      }
-      const outermost = [...chain].reverse().find((entry) => entry.createsStackingContext);
-      return { element: (outermost == null ? void 0 : outermost.element) ?? null, zIndex: (outermost == null ? void 0 : outermost.zIndex) ?? 0, chain };
-    }
-  }
-  function numericZIndex(value) {
-    if (!value || value === "auto") return null;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
-  }
-  function createsStackingContext(style) {
-    const position = style.position;
-    if ((position === "absolute" || position === "relative") && numericZIndex(style.zIndex) !== null || position === "fixed" || position === "sticky") return true;
-    if (Number.parseFloat(style.opacity || "1") < 1) return true;
-    if (property(style, "transform") !== "none" || property(style, "filter") !== "none" || property(style, "perspective") !== "none") return true;
-    if (style.isolation === "isolate" || !!style.mixBlendMode && style.mixBlendMode !== "normal") return true;
-    const contain = property(style, "contain");
-    if (/(^|\s)(layout|paint|strict|content)(\s|$)/.test(contain)) return true;
-    const willChange = property(style, "willChange").split(",").map((value) => value.trim());
-    return willChange.some((value) => ["transform", "opacity", "filter", "perspective", "contain"].includes(value));
-  }
-  function property(style, name) {
-    return (style[name] || "none").trim();
-  }
-  const ALWAYS_ON_TOP_Z_INDEX = 2147483e3;
-  const SAFE_DEFAULT_Z_INDEX = 1;
-  class LayerManager {
-    constructor(resolver = new StackingContextResolver(), findTarget2 = findUniqueTarget) {
-      this.resolver = resolver;
-      this.findTarget = findTarget2;
-    }
-    resolve(options) {
-      if (!options.layer) {
-        if (options.legacyZIndex !== void 0) return { zIndex: options.legacyZIndex, mode: "legacy", context: null };
-        return { zIndex: ALWAYS_ON_TOP_Z_INDEX, mode: "legacy", context: null };
-      }
-      const layer = options.layer;
-      if (layer.mode === "always_on_top") return { zIndex: ALWAYS_ON_TOP_Z_INDEX, mode: layer.mode, context: null };
-      if (layer.mode === "custom") return { zIndex: layer.zIndex, mode: layer.mode, context: null };
-      if (layer.mode === "relative") {
-        const reference = this.findTarget(layer.target);
-        if (!reference) {
-          const automatic = this.auto(options.targetElement);
-          return { ...automatic, mode: layer.mode, fallback: "relative_target_missing" };
-        }
-        const context = this.resolver.resolve(reference);
-        return { zIndex: bounded(context.zIndex + (layer.relation === "above" ? 1 : -1)), mode: layer.mode, context };
-      }
-      return this.auto(options.targetElement);
-    }
-    auto(targetElement) {
-      const context = this.resolver.resolve(targetElement ?? null);
-      return { zIndex: targetElement ? bounded(context.zIndex + 1) : SAFE_DEFAULT_Z_INDEX, mode: "auto", context };
-    }
-    apply(host, options) {
-      let observers = [];
-      let active = true;
-      let frameId = null;
-      let last;
-      const disconnect = () => {
-        observers.forEach((observer) => observer.disconnect());
-        observers = [];
-      };
-      const refresh = () => {
-        var _a, _b, _c;
-        if (!active) return last;
-        if (frameId !== null) {
-          cancelAnimationFrame(frameId);
-          frameId = null;
-        }
-        disconnect();
-        const resolution = this.resolve(options);
-        last = resolution;
-        const zIndex = String(resolution.zIndex);
-        if (host.style.zIndex !== zIndex) host.style.zIndex = zIndex;
-        if (resolution.fallback) {
-          if (host.dataset.movcuesLayerFallback !== resolution.fallback) host.dataset.movcuesLayerFallback = resolution.fallback;
-        } else if (host.dataset.movcuesLayerFallback) delete host.dataset.movcuesLayerFallback;
-        const dynamicLayer = ((_a = options.layer) == null ? void 0 : _a.mode) === "auto" || ((_b = options.layer) == null ? void 0 : _b.mode) === "relative";
-        const watched = dynamicLayer ? ((_c = options.layer) == null ? void 0 : _c.mode) === "relative" ? this.findTarget(options.layer.target) : options.targetElement : null;
-        if (watched && typeof MutationObserver !== "undefined") {
-          const observer = new MutationObserver(() => scheduleRefresh());
-          for (let element = watched; element; element = element.parentElement) {
-            observer.observe(element, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
-            if (element.parentElement) observer.observe(element.parentElement, { childList: true });
-          }
-          observers.push(observer);
-        }
-        return resolution;
-      };
-      const scheduleRefresh = () => {
-        if (!active || frameId !== null) return;
-        frameId = requestAnimationFrame(() => {
-          frameId = null;
-          refresh();
-        });
-      };
-      refresh();
-      return {
-        refresh,
-        destroy: () => {
-          active = false;
-          disconnect();
-          if (frameId !== null) cancelAnimationFrame(frameId);
-          frameId = null;
-        }
-      };
-    }
-  }
-  function findUniqueTarget(target) {
-    for (const selector of [target.primarySelector, ...target.fallbackSelectors]) {
-      try {
-        const matches2 = document.querySelectorAll(selector);
-        if (matches2.length === 1) return matches2[0];
-      } catch {
-      }
-    }
-    return null;
-  }
-  function bounded(value) {
-    return Math.max(-2147483648, Math.min(2147483647, value));
   }
   function guideInteractionTarget(step) {
     var _a, _b;
@@ -3754,11 +4208,11 @@ ${ISOLATION_CSS}`;
       URL.revokeObjectURL(url);
     }
   }
-  const BLOCK_LABEL = { question: "Question", survey_controls: "Survey controls", heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
+  const BLOCK_LABEL = { checklist_task: "Task", checklist_text: "Checklist text", checklist_control: "Checklist control", checklist_progress: "Progress", question: "Question", survey_controls: "Survey controls", heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
   const HISTORY_LIMIT = 50;
   const HISTORY_BYTES = 2e6;
   class OnsiteCompositionEditor {
-    constructor(root, builder, content, widgetType, guide, callbacks, survey) {
+    constructor(root, builder, content, widgetType, guide, callbacks, survey, checklist) {
       this.root = root;
       this.builder = builder;
       this.content = content;
@@ -3766,6 +4220,7 @@ ${ISOLATION_CSS}`;
       this.guide = guide;
       this.callbacks = callbacks;
       this.survey = survey;
+      this.checklist = checklist;
       this.edgeButtons = [];
       this.insertion = null;
       this.paletteAnchor = null;
@@ -3788,6 +4243,7 @@ ${ISOLATION_CSS}`;
       this.imageDropTarget = null;
       this.savedRange = null;
       this.moveSource = null;
+      this.checklistView = "expanded";
       this.rememberSelection = () => {
         var _a;
         const range2 = editorRange(this.root);
@@ -4028,11 +4484,11 @@ ${ISOLATION_CSS}`;
       };
       this.onPaletteClick = (event) => {
         var _a;
-        const button = event.target instanceof Element ? event.target.closest("[data-insert-block],[data-insert-question]") : null;
+        const button = event.target instanceof Element ? event.target.closest("[data-insert-block],[data-insert-question],[data-insert-task]") : null;
         if (!button) return;
         event.preventDefault();
         event.stopPropagation();
-        if (button.dataset.insertQuestion ? this.insertQuestion(button.dataset.insertQuestion, this.insertion ?? void 0) : this.insertBlock(button.dataset.insertBlock, this.insertion ?? void 0)) {
+        if (button.hasAttribute("data-insert-task") ? this.insertTask(this.insertion ?? void 0) : button.dataset.insertQuestion ? this.insertQuestion(button.dataset.insertQuestion, this.insertion ?? void 0) : this.insertBlock(button.dataset.insertBlock, this.insertion ?? void 0)) {
           this.closePalette();
           const block = this.getSelectedBlock();
           const element = block ? (_a = this.surface) == null ? void 0 : _a.querySelector(`[data-movcues-block-id="${block.id}"]`) : null;
@@ -4168,7 +4624,7 @@ ${ISOLATION_CSS}`;
       ];
       this.toolbar.innerHTML = tools.map(([command, label, icon]) => `<button type="button" data-command="${command}" title="${label}" aria-label="${label}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></button>`).join("");
       this.toolbar.querySelector('[data-command="move"]').draggable = true;
-      this.palette.innerHTML = Object.keys(BLOCK_LABEL).filter((type) => type !== "question" && type !== "survey_controls").map((type) => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
+      this.palette.innerHTML = Object.keys(BLOCK_LABEL).filter((type) => type !== "question" && type !== "survey_controls" && !type.startsWith("checklist_") && !(this.checklist && type === "button")).map((type) => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
       if (this.survey) this.palette.insertAdjacentHTML("beforeend", QUESTION_TYPES.map((type) => `<button type="button" data-insert-question="${type}">${{ single_choice: "Single choice", multiple_choice: "Multiple choice", short_text: "Short text", long_text: "Long text", rating: "Rating", nps: "NPS" }[type]}</button>`).join(""));
       this.root.append(this.toolbar, this.palette, this.imageInput);
       const edgeLabels = { top: "Add above", right: "Add to the right", bottom: "Add below", left: "Add to the left" };
@@ -4188,6 +4644,7 @@ ${ISOLATION_CSS}`;
         this.root.append(button);
         return button;
       });
+      if (this.checklist) this.palette.insertAdjacentHTML("afterbegin", '<button type="button" data-insert-task>Task</button>');
       this.surface.addEventListener("click", this.onSurfaceClick);
       this.surface.addEventListener("dblclick", this.onDoubleClick);
       this.surface.addEventListener("input", this.onInput);
@@ -4221,7 +4678,7 @@ ${ISOLATION_CSS}`;
       return this.selection;
     }
     getSelectedCell() {
-      const id = this.selection.kind === "step" ? this.document.root.id : this.selection.cellId;
+      const id = this.selection.kind === "step" ? this.checklist ? this.document.root.children.find((cell) => cell.checklistRole === this.checklistView).id : this.document.root.id : this.selection.cellId;
       return findCell(this.document, id);
     }
     getSelectedBlock() {
@@ -4237,7 +4694,7 @@ ${ISOLATION_CSS}`;
       return this.composing;
     }
     getValidation() {
-      return [...validateOnsiteDocument(this.document).errors, ...this.survey ? validateOnsiteSurveyDocument(this.document, this.surveyContext()) : []];
+      return [...validateOnsiteDocument(this.document).errors, ...this.survey ? validateOnsiteSurveyDocument(this.document, this.surveyContext()) : [], ...this.checklist ? validateOnsiteChecklistDocument(this.document, this.checklist) : []];
     }
     flush() {
       if (this.composing) return false;
@@ -4249,7 +4706,7 @@ ${ISOLATION_CSS}`;
       const errors = this.getValidation();
       this.callbacks.onValidation(errors);
       if (errors.length) return false;
-      const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext());
+      const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext(), this.checklist);
       Object.assign(this.content, compiled.content);
       this.compiledState = state;
       return true;
@@ -4357,6 +4814,17 @@ ${ISOLATION_CSS}`;
       const cell = this.getSelectedCell();
       if (!cell || cell === this.document.root || this.composing) return false;
       if (!this.beforeTransaction()) return false;
+      if (this.checklist) {
+        const duplicated = duplicateChecklistCell(this.document, this.checklist, cell.id);
+        if (!duplicated) {
+          this.callbacks.onValidation(["Required Checklist components cannot be duplicated."]);
+          return false;
+        }
+        this.document = duplicated.document;
+        this.checklist.items = duplicated.items;
+        this.commit({ kind: "cell", label: "Duplicated cell", cellId: duplicated.cellId });
+        return true;
+      }
       if (this.survey) {
         const duplicated = duplicateSurveyCell(this.document, this.survey.step.questions, cell.id);
         if (!duplicated) return false;
@@ -4377,6 +4845,19 @@ ${ISOLATION_CSS}`;
       if (this.survey && listBlocks(cell).some((block) => block.type === "survey_controls")) {
         this.callbacks.onValidation(["Keep the Survey navigation block so visitors can continue or submit."]);
         return false;
+      }
+      if (this.checklist) {
+        const components = listBlocks(cell);
+        if (cell.checklistRole || components.some((block) => block.type.startsWith("checklist_") && block.type !== "checklist_task")) {
+          this.callbacks.onValidation(["Keep the required Checklist views and controls. You can style or move them within their view."]);
+          return false;
+        }
+        const removedTasks = new Set(components.filter((block) => block.type === "checklist_task").map((block) => block.itemId));
+        if (this.checklist.items.length - removedTasks.size < 1) {
+          this.callbacks.onValidation(["Keep at least one task in this Checklist."]);
+          return false;
+        }
+        this.checklist.items = this.checklist.items.filter((item) => !removedTasks.has(item.id));
       }
       const removed = new Set(listBlocks(cell).filter((block) => block.type === "question").map((block) => block.type === "question" ? block.questionId : ""));
       const parent = parentCell(this.document, cell.id);
@@ -4421,11 +4902,82 @@ ${ISOLATION_CSS}`;
       this.commit(source.block ? { kind: "block", label: BLOCK_LABEL[source.block.type], cellId: source.id, blockId: source.block.id, blockType: source.block.type } : { kind: "cell", label: "Cell", cellId: source.id });
       return true;
     }
+    checklistState() {
+      const value = this.checklist;
+      return cloneOnsite({ title: value.title, description: value.description, items: value.items, behavior: value.behavior, completionMessage: value.completionMessage });
+    }
+    updateChecklistViewWidth(width) {
+      if (!this.checklist || !this.beforeTransaction()) return;
+      const view = this.document.root.children.find((cell) => cell.checklistRole === this.checklistView);
+      view.checklistWidth = width;
+      this.commit(this.selection);
+    }
+    refreshChecklist() {
+      var _a, _b;
+      (_b = (_a = this.callbacks).onPatch) == null ? void 0 : _b.call(_a);
+      this.callbacks.onSelectionChange(this.selection);
+    }
+    setChecklistView(view) {
+      this.checklistView = view;
+    }
+    getSelectedTask() {
+      var _a;
+      const block = this.getSelectedBlock();
+      return (block == null ? void 0 : block.type) === "checklist_task" ? ((_a = this.checklist) == null ? void 0 : _a.items.find((item) => item.id === block.itemId)) ?? null : null;
+    }
+    updateChecklist(update) {
+      if (!this.checklist || !this.beforeTransaction()) return false;
+      const next = this.checklistState();
+      update(next);
+      if (!next.title.trim() || next.title.length > 160 || !next.completionMessage.title.trim() || !next.completionMessage.acknowledgeLabel.trim() || next.completionMessage.acknowledgeLabel.length > 80 || next.items.some((item) => {
+        var _a;
+        return !item.title.trim() || item.title.length > 200 || (((_a = item.description) == null ? void 0 : _a.length) ?? 0) > 1e3 || item.action.type === "none" && item.completion.type !== "item_clicked";
+      })) {
+        this.callbacks.onValidation(["Use a title and valid task settings. Tasks without an action must complete when clicked."]);
+        return false;
+      }
+      Object.assign(this.checklist, next);
+      this.commit(this.selection);
+      return true;
+    }
+    insertTask(insertion) {
+      if (!this.checklist || this.checklist.items.length >= 20 || !this.beforeTransaction()) return false;
+      let container;
+      const visit = (cell2) => {
+        var _a;
+        if (cell2.checklistRole === "items") container = cell2;
+        (_a = cell2.children) == null ? void 0 : _a.forEach(visit);
+      };
+      visit(this.document.root);
+      if (!container) return false;
+      const item = { id: onsiteId("item"), title: "New task", description: "Describe the next step.", action: { type: "none" }, completion: { type: "item_clicked" } };
+      let cell;
+      if (insertion) {
+        let target = findCell(this.document, insertion.cellId);
+        while (target && target !== container) target = parentCell(this.document, target.id);
+        if (!target) {
+          this.callbacks.onValidation(["Insert tasks inside the Expanded task list."]);
+          return false;
+        }
+        const id = insertAdjacentCell(this.document, insertion.cellId, insertion.edge);
+        if (!id) return false;
+        cell = findCell(this.document, id);
+        cell.block = { id: onsiteId("block"), type: "checklist_task", itemId: item.id, fontSize: 14, indicator: "check" };
+      } else {
+        cell = emptyCell({ id: onsiteId("block"), type: "checklist_task", itemId: item.id, fontSize: 14, indicator: "check" });
+        container.children.push(cell);
+      }
+      cell.sizing = { mode: "hug" };
+      this.checklist.items.push(item);
+      this.checklistView = "expanded";
+      this.commit({ kind: "block", label: "Task", cellId: cell.id, blockId: cell.block.id, blockType: "checklist_task" });
+      return true;
+    }
     surveyContext() {
       return this.survey ? { questions: this.survey.step.questions, submitLabel: this.survey.config.submitLabel } : void 0;
     }
     historyState(entry) {
-      return JSON.stringify(this.survey ? entry ? { document: entry.document, questions: entry.questions, branching: entry.branching } : { document: this.document, questions: this.survey.step.questions, branching: this.survey.step.branching } : (entry == null ? void 0 : entry.document) ?? this.document);
+      return JSON.stringify(this.checklist ? { document: (entry == null ? void 0 : entry.document) ?? this.document, checklist: entry ? entry.checklist : this.checklistState() } : this.survey ? entry ? { document: entry.document, questions: entry.questions, branching: entry.branching } : { document: this.document, questions: this.survey.step.questions, branching: this.survey.step.branching } : (entry == null ? void 0 : entry.document) ?? this.document);
     }
     getSelectedQuestion() {
       var _a;
@@ -4685,12 +5237,17 @@ ${ISOLATION_CSS}`;
     }
     commit(selection) {
       this.repairDocumentStructure();
+      if (this.checklist) {
+        const byId = new Map(this.checklist.items.map((item) => [item.id, item]));
+        this.checklist.items = listBlocks(this.document.root).filter((block) => block.type === "checklist_task").map((block) => byId.get(block.itemId)).filter(Boolean);
+      }
       const errors = this.getValidation();
       const validation = { valid: !errors.length, errors };
       if (!validation.valid) {
         const previous = this.history[this.historyIndex];
         if (previous) {
           this.document = cloneOnsite(previous.document);
+          if (this.checklist && previous.checklist) Object.assign(this.checklist, cloneOnsite(previous.checklist));
           if (this.survey && previous.questions) {
             this.survey.step.questions = cloneOnsite(previous.questions);
             this.survey.step.branching = previous.branching ? cloneOnsite(previous.branching) : void 0;
@@ -4712,8 +5269,8 @@ ${ISOLATION_CSS}`;
       this.select(selection);
     }
     compileAndPatch() {
-      var _a, _b, _c, _d;
-      const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext());
+      var _a, _b, _c, _d, _e, _f;
+      const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext(), this.checklist);
       Object.assign(this.content, compiled.content);
       this.compiledState = this.historyState();
       const template = document.createElement("template");
@@ -4750,6 +5307,7 @@ ${ISOLATION_CSS}`;
       const style = this.root.querySelector("style[data-movcues-builder-style]");
       if (style) style.textContent = `${compiled.css}
 [data-movcues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movcues-builder-surface]>.movcues-widget{position:relative!important;inset:auto!important}`;
+      (_f = (_e = this.callbacks).onPatch) == null ? void 0 : _f.call(_e);
     }
     scheduleCompile() {
       clearTimeout(this.compileTimer);
@@ -4784,7 +5342,7 @@ ${ISOLATION_CSS}`;
       var _a;
       const document2 = cloneOnsite(this.document), questions = this.survey ? cloneOnsite(this.survey.step.questions) : void 0, branching = ((_a = this.survey) == null ? void 0 : _a.step.branching) ? cloneOnsite(this.survey.step.branching) : void 0;
       const bytes = this.historyState().length;
-      const entry = { document: document2, questions, branching, selection: cloneOnsite(this.selection), bytes };
+      const entry = { document: document2, questions, branching, checklist: this.checklist ? this.checklistState() : void 0, selection: cloneOnsite(this.selection), bytes };
       if (this.historyIndex >= 0 && this.historyState(this.history[this.historyIndex]) === this.historyState()) return;
       if (this.historyIndex < this.history.length - 1) {
         this.historyBytes -= this.history.slice(this.historyIndex + 1).reduce((sum, item) => sum + item.bytes, 0);
@@ -4800,6 +5358,7 @@ ${ISOLATION_CSS}`;
     }
     restore(entry) {
       this.document = cloneOnsite(entry.document);
+      if (this.checklist && entry.checklist) Object.assign(this.checklist, cloneOnsite(entry.checklist));
       if (this.survey && entry.questions) {
         this.survey.step.questions = cloneOnsite(entry.questions);
         this.survey.step.branching = entry.branching ? cloneOnsite(entry.branching) : void 0;
@@ -5056,6 +5615,8 @@ ${ISOLATION_CSS}`;
       this.guide = null;
       this.survey = null;
       this.surveyEditor = null;
+      this.checklist = null;
+      this.checklistEditor = null;
       this.stepIndex = 0;
       this.mode = "design";
       this.dirty = false;
@@ -5173,14 +5734,15 @@ ${ISOLATION_CSS}`;
         clearEditorContinuation();
         return false;
       }
-      if (draft.experience.kind === "checklist") {
+      if (draft.experience.kind === "checklist" && draft.experience.builderMode !== "onsite") {
         clearEditorContinuation();
         return false;
       }
       this.bridge = bridge;
       this.session = session;
       this.draft = draft;
-      this.definition = draft.version.definition;
+      this.checklist = isChecklistDefinition(draft.version.definition) ? draft.version.definition : null;
+      this.definition = this.checklist ? checklistEditorAdapter(this.checklist) : draft.version.definition;
       this.guide = isGuideDefinition(this.definition) ? this.definition : null;
       this.survey = !this.guide && draft.experience.widgetType === "survey" ? this.definition.survey ?? null : null;
       const selectableSteps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
@@ -5230,6 +5792,17 @@ ${ISOLATION_CSS}`;
           this.changed();
           this.refreshStepBar();
         }
+      });
+      if (this.checklist) this.checklistEditor = new ChecklistEditor(this.root, this.checklist, this.draft.references ?? { guides: [], segments: [] }, {
+        composer: () => this.compositionEditor,
+        canEdit: () => this.mode === "design" && this.saveState !== "expired",
+        flush: () => this.flushContent(),
+        changed: () => this.changed(false),
+        render: () => {
+          this.renderPreview();
+          this.syncPanel();
+        },
+        error: (errors) => this.showValidation(errors)
       });
       this.bindPanel();
       this.syncPanel();
@@ -6099,8 +6672,10 @@ ${ISOLATION_CSS}`;
       this.applyMode();
     }
     applyMode() {
+      var _a;
       if (this.mode === "navigate") {
         this.previewGeneration++;
+        (_a = this.checklistEditor) == null ? void 0 : _a.destroyView();
         this.preview.destroy();
         this.previewRendered = false;
         this.syncPanel();
@@ -6194,12 +6769,12 @@ ${ISOLATION_CSS}`;
     captureRecovery() {
       var _a, _b, _c, _d, _e, _f;
       if (!this.definition || !this.dirty && !((_a = this.contentEditor) == null ? void 0 : _a.isComposing()) && !((_b = this.compositionEditor) == null ? void 0 : _b.isComposing())) return;
-      const definition = JSON.parse(JSON.stringify(this.definition));
+      const definition = JSON.parse(JSON.stringify(this.checklist ?? this.definition));
       const snapshot = ((_c = this.compositionEditor) == null ? void 0 : _c.snapshot()) ?? ((_d = this.contentEditor) == null ? void 0 : _d.snapshot());
       if (snapshot) {
-        const part = isGuideDefinition(definition) ? definition.steps[this.stepIndex] : definition.survey ? definition.survey.steps[this.stepIndex] : definition;
+        const part = isGuideDefinition(definition) ? definition.steps[this.stepIndex] : "survey" in definition && definition.survey ? definition.survey.steps[this.stepIndex] : definition;
         part.builder = snapshot.builder;
-        part.content = snapshot.content;
+        if (!isChecklistDefinition(part)) part.content = snapshot.content;
       }
       this.recoveryDraft = JSON.stringify({ experienceId: (_e = this.draft) == null ? void 0 : _e.experience.id, revision: (_f = this.draft) == null ? void 0 : _f.version.revision, definition }, null, 2);
     }
@@ -6267,7 +6842,7 @@ ${ISOLATION_CSS}`;
       const bridge = this.bridge;
       const generation = this.editGeneration;
       const lifecycle = this.lifecycle;
-      const definition = JSON.parse(JSON.stringify(this.definition));
+      const definition = JSON.parse(JSON.stringify(this.checklist ?? this.definition));
       const revision = ((_a = this.draft) == null ? void 0 : _a.version.revision) ?? 1;
       this.saveState = "saving";
       this.showSaveState();
@@ -6320,6 +6895,13 @@ ${ISOLATION_CSS}`;
       (_b = this.compositionEditor) == null ? void 0 : _b.destroy();
       this.compositionEditor = null;
       this.compositionSelection = null;
+      if (this.checklist && this.checklistEditor) {
+        this.preview.destroy();
+        this.previewRendered = this.checklistEditor.render(this.draft.experience.id, this.draft.version.id, this.mode === "preview");
+        if (this.mode === "design" && this.previewRendered) this.attachContentEditor();
+        this.updateDiagnostics();
+        return;
+      }
       const definition = this.definition;
       const rendered = JSON.parse(JSON.stringify(definition));
       if (this.mode !== "preview") {
@@ -6398,8 +6980,8 @@ ${ISOLATION_CSS}`;
     attachContentEditor() {
       var _a, _b, _c;
       if (((_a = this.draft) == null ? void 0 : _a.experience.builderMode) !== "onsite" || this.mode !== "design") return;
-      const host = Array.from(document.querySelectorAll("[data-movcues-experience]")).find(
-        (element) => element.dataset.movcuesExperience === this.draft.experience.id
+      const host = Array.from(document.querySelectorAll("[data-movcues-experience],[data-movcues-checklist]")).find(
+        (element) => (element.dataset.movcuesExperience ?? element.dataset.movcuesChecklist) === this.draft.experience.id
       );
       const builder = this.currentBuilder();
       const content = this.currentContent();
@@ -6408,7 +6990,11 @@ ${ISOLATION_CSS}`;
       (_b = this.contentEditor) == null ? void 0 : _b.destroy();
       (_c = this.compositionEditor) == null ? void 0 : _c.destroy();
       try {
-        this.compositionEditor = new OnsiteCompositionEditor(host.shadowRoot, builder, content, this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : this.draft.experience.widgetType ?? "modal", Boolean(this.guide), {
+        this.compositionEditor = new OnsiteCompositionEditor(host.shadowRoot, builder, content, this.checklist ? "checklist" : this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : this.draft.experience.widgetType ?? "modal", Boolean(this.guide), {
+          onPatch: () => {
+            var _a2;
+            (_a2 = this.checklistEditor) == null ? void 0 : _a2.applyDesign(this.draft.experience.id);
+          },
           onChange: () => {
             this.syncOnsiteAnchoredPointer(host.shadowRoot, builder);
             this.changed(false);
@@ -6416,10 +7002,15 @@ ${ISOLATION_CSS}`;
           onValidation: (errors) => this.showValidation(errors),
           onImageStatus: (message) => this.setText("[data-image-status]", message),
           onSelectionChange: (selection) => {
+            var _a2, _b2, _c2, _d;
+            if (this.checklist && selection.kind !== "step") {
+              (_b2 = (_a2 = this.root) == null ? void 0 : _a2.querySelector("aside")) == null ? void 0 : _b2.classList.remove("minimized");
+              (_d = (_c2 = this.root) == null ? void 0 : _c2.querySelector("[data-minimize]")) == null ? void 0 : _d.setAttribute("aria-expanded", "true");
+            }
             this.compositionSelection = selection;
             this.syncCompositionInspector();
           }
-        }, this.survey ? { config: this.survey, step: this.survey.steps[this.stepIndex] } : void 0);
+        }, this.survey ? { config: this.survey, step: this.survey.steps[this.stepIndex] } : void 0, this.checklist ?? void 0);
         this.compositionEditor.start();
         this.syncOnsiteAnchoredPointer(host.shadowRoot, builder);
         return;
@@ -6495,8 +7086,9 @@ ${ISOLATION_CSS}`;
       if (redo) redo.disabled = !((_b = this.contentEditor) == null ? void 0 : _b.canRedo());
     }
     syncCompositionInspector() {
-      var _a, _b, _c, _d, _e, _f;
+      var _a, _b, _c, _d, _e, _f, _g;
       (_a = this.surveyEditor) == null ? void 0 : _a.sync();
+      (_b = this.checklistEditor) == null ? void 0 : _b.sync();
       if (!this.root) return;
       const editor = this.compositionEditor;
       const selection = this.compositionSelection;
@@ -6513,12 +7105,12 @@ ${ISOLATION_CSS}`;
       if (selection.kind === "step") this.root.querySelectorAll("[data-step-only]").forEach((group) => {
         group.hidden = group.hasAttribute("data-for") ? !this.isTargetedType() : group.hasAttribute("data-step-summary") ? !this.guide : group.hasAttribute("data-placement-section") ? Boolean(this.guide && getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal") : false;
       });
-      const stepName = (_b = this.root.querySelector("[data-step-name]")) == null ? void 0 : _b.closest("label");
+      const stepName = (_c = this.root.querySelector("[data-step-name]")) == null ? void 0 : _c.closest("label");
       if (stepName) stepName.hidden = !this.guide;
       this.root.querySelectorAll("[data-inspector]").forEach((group) => {
         group.hidden = group.dataset.inspector !== selection.kind;
       });
-      const step = (_c = this.guide) == null ? void 0 : _c.steps[this.stepIndex];
+      const step = (_d = this.guide) == null ? void 0 : _d.steps[this.stepIndex];
       this.setValue("[data-step-name]", (step == null ? void 0 : step.label) ?? (step == null ? void 0 : step.content.heading) ?? "");
       const cell = editor.getSelectedCell();
       if (cell) {
@@ -6529,9 +7121,9 @@ ${ISOLATION_CSS}`;
         this.setValue("[data-cell-align]", cell.align);
         this.setValue("[data-cell-gap]", String(cell.gap));
         this.setValue("[data-cell-padding]", String(cell.padding.top));
-        this.setValue("[data-cell-background]", ((_d = cell.style) == null ? void 0 : _d.background) && /^#[0-9a-f]{6}$/i.test(cell.style.background) ? cell.style.background : "#ffffff");
-        this.setValue("[data-cell-border]", String(((_e = cell.style) == null ? void 0 : _e.borderWidth) ?? 0));
-        this.setValue("[data-cell-radius]", String(((_f = cell.style) == null ? void 0 : _f.borderRadius) ?? 0));
+        this.setValue("[data-cell-background]", ((_e = cell.style) == null ? void 0 : _e.background) && /^#[0-9a-f]{6}$/i.test(cell.style.background) ? cell.style.background : "#ffffff");
+        this.setValue("[data-cell-border]", String(((_f = cell.style) == null ? void 0 : _f.borderWidth) ?? 0));
+        this.setValue("[data-cell-radius]", String(((_g = cell.style) == null ? void 0 : _g.borderRadius) ?? 0));
         this.setChecked("[data-cell-stack]", Boolean(cell.responsiveStack));
       }
       const block = editor.getSelectedBlock();
@@ -6585,6 +7177,7 @@ ${ISOLATION_CSS}`;
         this.root.querySelector("[data-v2-image-src]").placeholder = local ? "Added from file; paste a URL to replace" : "https://… (optional)";
         this.setText("[data-choose-image]", block.src ? "Replace image" : "Choose image");
       }
+      this.hideChecklistWidgetControls();
       const undo = this.root.querySelector("[data-v2-undo]");
       if (undo) undo.disabled = !editor.canUndo();
       const redo = this.root.querySelector("[data-v2-redo]");
@@ -6653,7 +7246,18 @@ ${ISOLATION_CSS}`;
       this.updateDiagnostics();
       this.syncContentInspector();
       this.syncCompositionInspector();
+      this.hideChecklistWidgetControls();
       this.setText("[data-mode-hint]", this.mode === "design" && this.draft.experience.widgetType === "cursor_follow" ? "Stationary authoring view · Preview tests cursor-follow movement" : this.mode === "design" && this.isTargetedType() && !this.currentTarget() ? "Select a page target in Target mode before editing this anchored card" : this.mode === "design" ? "Click a component to select · Double-click text to edit" : this.mode === "target" ? this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "This experience does not need a page target" : this.mode === "navigate" ? "Customer app interaction is enabled" : "End-user preview · analytics and actions are disabled");
+    }
+    hideChecklistWidgetControls() {
+      if (!this.checklist || !this.root) return;
+      this.root.querySelectorAll("[data-step-only],[data-edge]").forEach((node) => node.hidden = true);
+      const target = this.root.querySelector("[data-mode=target]");
+      if (target) {
+        target.hidden = true;
+        target.disabled = true;
+      }
+      this.setText("[data-preview-limit]", "Simulated Checklist progress only. No visitor records, Guide launches, navigation or production analytics are sent. Website JavaScript may still have side effects.");
     }
     renderConfigured(targeting) {
       var _a;
@@ -6826,7 +7430,7 @@ ${ISOLATION_CSS}`;
       this.teardown(true);
     }
     teardown(clearContinuation) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
       this.lifecycle++;
       clearTimeout(this.expiryTimer);
       clearInterval(this.validationTimer);
@@ -6861,6 +7465,9 @@ ${ISOLATION_CSS}`;
       (_j = this.host) == null ? void 0 : _j.remove();
       (_k = this.surveyEditor) == null ? void 0 : _k.destroy();
       this.surveyEditor = null;
+      (_l = this.checklistEditor) == null ? void 0 : _l.destroy();
+      this.checklistEditor = null;
+      this.checklist = null;
       this.host = null;
       this.root = null;
       this.bridge = null;
@@ -6937,6 +7544,9 @@ ${ISOLATION_CSS}`;
 @media(max-width:480px){.editor-toolbar{left:4px;top:4px;transform:none}.header-copy strong{font-size:10px}.header-copy small{font-size:9px}.header-actions [data-return-dashboard],.header-actions [data-move-side]{display:none}aside{width:calc(100vw - 8px)}.step-navigator{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:calc(100vw - 8px);box-shadow:0 4px 14px rgba(15,23,42,.12)}.step-navigator>.history-row{display:none}.step-navigator .content-heading{display:none}}
 `;
   const GUIDE_STYLE = `.guide-behavior{display:grid;gap:8px;border-top:1px solid #eef0f3;padding-top:10px;margin-top:8px}.guide-behavior [data-guide-config],.guide-behavior [data-guide-missing]{display:grid;gap:7px}.guide-behavior .muted{margin:0;overflow-wrap:anywhere}.guide-preview-controls{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:5px 7px;border-top:1px solid #eef0f3}.guide-preview-controls button{border:1px solid #d7dce3;border-radius:5px;background:#fff;color:#334155;padding:4px 6px;font:11px ui-sans-serif,system-ui;cursor:pointer}.guide-preview-controls small{flex-basis:100%;color:#64748b;font-size:10px}.guide-preview-controls button:disabled{opacity:.4}.guide-preview-controls span{font-size:10px;margin-left:auto}`;
+  function checklistEditorAdapter(value) {
+    return { content: { heading: value.title, body: value.description ?? "" }, builder: value.builder, design: { width: "sm", theme: { background: "#fff", foreground: "#111827", primary: "#2563eb", borderRadius: "md" } }, behavior: { dismissible: false }, targeting: { ...value.targeting, trigger: { type: "page_load" }, frequency: { mode: "once" } } };
+  }
   const runtime = {
     createController: (apiBase) => new EditorModeController(apiBase)
   };

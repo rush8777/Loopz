@@ -1,3 +1,5 @@
+import fixture from './fixtures/checklist-v4.json';
+import {applyOnsiteDocument,listBlocks,type OnsiteDocument} from '../src/experiences/onsite/OnsiteDocument';
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChecklistRenderer } from "../src/experiences/runtime/ChecklistRenderer";
 import type { DeliveredChecklist } from "../src/experiences/types";
@@ -24,4 +26,9 @@ describe("ChecklistRenderer", () => {
   });
 
   it("shows authored completion copy only in the completion state", () => { const value = checklist(); value.progress.complete = true; value.progress.completedItemIds = ["first", "second"]; value.progress.items = value.progress.items.map(item => ({ ...item, state: "completed" })); const renderer = new ChecklistRenderer(); renderer.render(value, { onOpen: vi.fn(), onCollapse: vi.fn(), onDismiss: vi.fn(), onAcknowledge: vi.fn(), onItemClick: vi.fn() }); const root = document.querySelector<HTMLElement>("[data-movcues-checklist]")!.shadowRoot!; expect(root.querySelector('[data-movcues-checklist-view="completion"]')?.classList.contains("is-active")).toBe(true); expect(root.textContent).toContain("All complete"); renderer.destroy(); });
+  it('preserves nested version 4 task cells, authored launcher copy and runtime progress',()=>{
+    const f=structuredClone(fixture),value=checklist();value.definition={...f.definition,builder:{version:1,projectData:{},html:'',css:''}} as DeliveredChecklist['definition'];const doc=f.document as OnsiteDocument;const label=listBlocks(doc.root).find(block=>block.type==='checklist_text'&&block.role==='launcher-label')!;if(label.type==='checklist_text')label.text='Continue setup';applyOnsiteDocument(value.definition.builder,doc,'checklist',undefined,value.definition);value.progress.completedItemIds=['item_one'];value.progress.items=value.definition.items.map((item,index)=>({id:item.id,state:index===0?'completed':index===1?'available':'locked'}));
+    const renderer=new ChecklistRenderer();expect(renderer.render(value,{onOpen:vi.fn(),onCollapse:vi.fn(),onDismiss:vi.fn(),onAcknowledge:vi.fn(),onItemClick:vi.fn()},true)).toBe(true);const root=document.querySelector<HTMLElement>('[data-movcues-checklist]')!.shadowRoot!;expect(root.querySelector('[data-movcues-checklist-item-id="item_one"]')!.parentElement!.classList.contains('movcues-cell')).toBe(true);expect(root.querySelector('[data-movcues-checklist-role="launcher-label"]')!.textContent).toBe('Continue setup');expect(root.querySelector('[data-movcues-checklist-role="progress"]')!.textContent).toBe('1 of 3 complete');expect(root.querySelector('[data-movcues-checklist-view="launcher"]')!.classList.contains('is-active')).toBe(true);renderer.destroy();
+  });
+
 });

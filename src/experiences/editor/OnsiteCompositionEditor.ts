@@ -1,3 +1,5 @@
+import type { ChecklistItem } from "../types";
+import type { ChecklistView, OnsiteChecklistContext } from "../checklist/ChecklistMarkup";
 import { newSurveyQuestion } from "./SurveyEditing";
 import { surveyBranchErrors } from "../survey/SurveyLogic";
 import { QUESTION_TYPES, surveyQuestionErrors } from "../survey/SurveyMarkup";
@@ -10,6 +12,8 @@ import {
   createBlock,
   duplicateCell,
   duplicateSurveyCell,
+  duplicateChecklistCell,
+  validateOnsiteChecklistDocument,
   validateOnsiteSurveyDocument,
   emptyCell,
   findBlock,
@@ -41,11 +45,11 @@ export type CompositionSelection =
   | { kind: "step"; label: string }
   | { kind: "cell"; label: string; cellId: string }
   | { kind: "block"; label: string; cellId: string; blockId: string; blockType: OnsiteBlock["type"] };
-interface Callbacks { onChange(): void; onSelectionChange(selection: CompositionSelection): void; onValidation(errors: string[]): void; onImageStatus?(message: string): void }
-interface HistoryEntry { questions?: SurveyQuestion[]; branching?: SurveyStep["branching"]; document: OnsiteDocument; selection: CompositionSelection; bytes: number }
+interface Callbacks { onChange(): void; onSelectionChange(selection: CompositionSelection): void; onValidation(errors: string[]): void; onImageStatus?(message: string): void; onPatch?(): void }
+interface HistoryEntry { checklist?: OnsiteChecklistContext; questions?: SurveyQuestion[]; branching?: SurveyStep["branching"]; document: OnsiteDocument; selection: CompositionSelection; bytes: number }
 type CellEdge = "top" | "right" | "bottom" | "left";
 
-const BLOCK_LABEL: Record<OnsiteBlock["type"], string> = { question: "Question", survey_controls: "Survey controls", heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
+const BLOCK_LABEL: Record<OnsiteBlock["type"], string> = { checklist_task:"Task",checklist_text:"Checklist text",checklist_control:"Checklist control",checklist_progress:"Progress", question: "Question", survey_controls: "Survey controls", heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
 const HISTORY_LIMIT = 50;
 const HISTORY_BYTES = 2_000_000;
 
@@ -79,15 +83,17 @@ export class OnsiteCompositionEditor {
   private imageDropTarget: HTMLElement | null = null;
   private savedRange: Range | null = null;
   private moveSource: string | null = null;
+  private checklistView: ChecklistView = "expanded";
 
   constructor(
     private root: ShadowRoot,
     private builder: WidgetBuilderState,
     private content: ExperienceContent,
-    private widgetType: WidgetType | "anchored_card" | "modal",
+    private widgetType: WidgetType | "anchored_card" | "modal" | "checklist",
     private guide: boolean,
     private callbacks: Callbacks,
     private survey?: { config: SurveyConfig; step: SurveyStep },
+    private checklist?: OnsiteChecklistContext,
   ) {
     const existing = onsiteDocumentFromBuilder(builder);
     this.document = existing ?? migrateV1Builder(builder, content, widgetType, guide) ?? (() => { throw new Error("This v1 layout cannot be converted safely. Continue editing it with the compatibility editor."); })();
@@ -122,7 +128,7 @@ export class OnsiteCompositionEditor {
     ];
     this.toolbar.innerHTML = tools.map(([command, label, icon]) => `<button type="button" data-command="${command}" title="${label}" aria-label="${label}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></button>`).join("");
     this.toolbar.querySelector<HTMLButtonElement>('[data-command="move"]')!.draggable = true;
-    this.palette.innerHTML = (Object.keys(BLOCK_LABEL) as OnsiteBlock["type"][]).filter(type => type !== "question" && type !== "survey_controls").map(type => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
+    this.palette.innerHTML = (Object.keys(BLOCK_LABEL) as OnsiteBlock["type"][]).filter(type => type !== "question" && type !== "survey_controls" && !type.startsWith("checklist_") && !(this.checklist && type === "button")).map(type => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
     if (this.survey) this.palette.insertAdjacentHTML("beforeend", QUESTION_TYPES.map(type => `<button type="button" data-insert-question="${type}">${({ single_choice: "Single choice", multiple_choice: "Multiple choice", short_text: "Short text", long_text: "Long text", rating: "Rating", nps: "NPS" })[type]}</button>`).join(""));
     this.root.append(this.toolbar, this.palette, this.imageInput);
     const edgeLabels = { top: "Add above", right: "Add to the right", bottom: "Add below", left: "Add to the left" };
@@ -132,6 +138,7 @@ export class OnsiteCompositionEditor {
       button.addEventListener("click", () => { const cell = this.getSelectedCell(); if (this.paletteAnchor === button && !this.palette.hidden) this.closePalette(); else if (cell) this.openPalette(button, { cellId: cell.id, edge }); });
       this.root.append(button); return button;
     });
+    if(this.checklist)this.palette.insertAdjacentHTML("afterbegin",'<button type="button" data-insert-task>Task</button>');
     this.surface.addEventListener("click", this.onSurfaceClick);
     this.surface.addEventListener("dblclick", this.onDoubleClick);
     this.surface.addEventListener("input", this.onInput);
@@ -157,12 +164,12 @@ export class OnsiteCompositionEditor {
 
   getDocument(): OnsiteDocument { return this.document; }
   getSelection(): CompositionSelection { return this.selection; }
-  getSelectedCell(): OnsiteCell | null { const id = this.selection.kind === "step" ? this.document.root.id : this.selection.cellId; return findCell(this.document, id); }
+  getSelectedCell(): OnsiteCell | null { const id = this.selection.kind === "step" ? (this.checklist ? this.document.root.children!.find(cell=>cell.checklistRole===this.checklistView)!.id : this.document.root.id) : this.selection.cellId; return findCell(this.document, id); }
   getSelectedBlock(): OnsiteBlock | null { return this.selection.kind === "block" ? findBlock(this.document, this.selection.blockId) : null; }
   canUndo(): boolean { return this.historyIndex > 0 || this.historyIndex >= 0 && this.historyState() !== this.historyState(this.history[this.historyIndex]); }
   canRedo(): boolean { return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1 && this.historyState() === this.historyState(this.history[this.historyIndex]); }
   isComposing(): boolean { return this.composing; }
-  getValidation(): string[] { return [...validateOnsiteDocument(this.document).errors, ...(this.survey ? validateOnsiteSurveyDocument(this.document, this.surveyContext()!) : [])]; }
+  getValidation(): string[] { return [...validateOnsiteDocument(this.document).errors, ...(this.survey ? validateOnsiteSurveyDocument(this.document, this.surveyContext()!) : []), ...(this.checklist ? validateOnsiteChecklistDocument(this.document,this.checklist) : [])]; }
 
   flush(): boolean {
     if (this.composing) return false;
@@ -170,7 +177,7 @@ export class OnsiteCompositionEditor {
     this.repairDocumentStructure();
     const state = this.historyState(); if (state === this.compiledState) return true;
     const errors = this.getValidation(); this.callbacks.onValidation(errors); if (errors.length) return false;
-    const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext()); Object.assign(this.content, compiled.content); this.compiledState = state; return true;
+    const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext(), this.checklist); Object.assign(this.content, compiled.content); this.compiledState = state; return true;
   }
 
   snapshot(): { builder: WidgetBuilderState; content: ExperienceContent } { this.flush(); return { builder: cloneOnsite(this.builder), content: cloneOnsite(this.content) }; }
@@ -222,6 +229,10 @@ export class OnsiteCompositionEditor {
   duplicate(): boolean {
     const cell = this.getSelectedCell(); if (!cell || cell === this.document.root || this.composing) return false;
     if (!this.beforeTransaction()) return false;
+    if (this.checklist) {
+      const duplicated=duplicateChecklistCell(this.document,this.checklist,cell.id);if(!duplicated){this.callbacks.onValidation(["Required Checklist components cannot be duplicated."]);return false;}
+      this.document=duplicated.document;this.checklist.items=duplicated.items;this.commit({kind:"cell",label:"Duplicated cell",cellId:duplicated.cellId});return true;
+    }
     if (this.survey) {
       const duplicated = duplicateSurveyCell(this.document, this.survey.step.questions, cell.id); if (!duplicated) return false;
       this.document = duplicated.document; this.survey.step.questions = duplicated.questions;
@@ -231,6 +242,12 @@ export class OnsiteCompositionEditor {
   }
   remove(): boolean { const cell = this.getSelectedCell(); if (!cell || cell === this.document.root || this.composing) return false; if (!this.beforeTransaction()) return false;
     if (this.survey && listBlocks(cell).some(block => block.type === "survey_controls")) { this.callbacks.onValidation(["Keep the Survey navigation block so visitors can continue or submit."]); return false; }
+    if(this.checklist){
+      const components=listBlocks(cell);if(cell.checklistRole||components.some(block=>block.type.startsWith("checklist_")&&block.type!=="checklist_task")){this.callbacks.onValidation(["Keep the required Checklist views and controls. You can style or move them within their view."]);return false;}
+      const removedTasks=new Set(components.filter((block):block is Extract<OnsiteBlock,{type:"checklist_task"}>=>block.type==="checklist_task").map(block=>block.itemId));
+      if(this.checklist.items.length-removedTasks.size<1){this.callbacks.onValidation(["Keep at least one task in this Checklist."]);return false;}
+      this.checklist.items=this.checklist.items.filter(item=>!removedTasks.has(item.id));
+    }
     const removed = new Set(listBlocks(cell).filter(block => block.type === "question").map(block => block.type === "question" ? block.questionId : ""));
     const parent = parentCell(this.document, cell.id); if (!removeCell(this.document, cell.id)) return false;
     if (this.survey) { this.survey.step.questions = this.survey.step.questions.filter(question => !removed.has(question.id)); if (this.survey.step.branching) this.survey.step.branching.rules = this.survey.step.branching.rules.filter(rule => !removed.has(rule.questionId)); } this.commit(parent ? { kind: "cell", label: "Parent cell", cellId: parent.id } : { kind: "step", label: "Step" }); return true; }
@@ -249,8 +266,28 @@ export class OnsiteCompositionEditor {
     this.commit(source.block ? { kind: "block", label: BLOCK_LABEL[source.block.type], cellId: source.id, blockId: source.block.id, blockType: source.block.type } : { kind: "cell", label: "Cell", cellId: source.id }); return true;
   }
 
+  private checklistState(): OnsiteChecklistContext { const value=this.checklist!;return cloneOnsite({title:value.title,description:value.description,items:value.items,behavior:value.behavior,completionMessage:value.completionMessage}); }
+  updateChecklistViewWidth(width:number):void{if(!this.checklist||!this.beforeTransaction())return;const view=this.document.root.children!.find(cell=>cell.checklistRole===this.checklistView)!;view.checklistWidth=width;this.commit(this.selection);}
+  refreshChecklist():void {this.callbacks.onPatch?.();this.callbacks.onSelectionChange(this.selection);}
+  setChecklistView(view: ChecklistView):void {this.checklistView=view;}
+  getSelectedTask(): ChecklistItem | null {const block=this.getSelectedBlock();return block?.type==="checklist_task"?this.checklist?.items.find(item=>item.id===block.itemId)??null:null;}
+  updateChecklist(update:(next:OnsiteChecklistContext)=>void):boolean {
+    if(!this.checklist||!this.beforeTransaction())return false;const next=this.checklistState();update(next);
+    if(!next.title.trim()||next.title.length>160||!next.completionMessage.title.trim()||!next.completionMessage.acknowledgeLabel.trim()||next.completionMessage.acknowledgeLabel.length>80||next.items.some(item=>!item.title.trim()||item.title.length>200||(item.description?.length??0)>1000||item.action.type==="none"&&item.completion.type!=="item_clicked")){this.callbacks.onValidation(["Use a title and valid task settings. Tasks without an action must complete when clicked."]);return false;}
+    Object.assign(this.checklist,next);this.commit(this.selection);return true;
+  }
+  insertTask(insertion?:{cellId:string;edge:CellEdge}): boolean {
+    if(!this.checklist||this.checklist.items.length>=20||!this.beforeTransaction())return false;
+    let container:OnsiteCell|undefined;const visit=(cell:OnsiteCell)=>{if(cell.checklistRole==="items")container=cell;cell.children?.forEach(visit);};visit(this.document.root);if(!container)return false;
+    const item:ChecklistItem={id:onsiteId("item"),title:"New task",description:"Describe the next step.",action:{type:"none"},completion:{type:"item_clicked"}};
+    let cell:OnsiteCell;
+    if(insertion){let target=findCell(this.document,insertion.cellId);while(target&&target!==container)target=parentCell(this.document,target.id);if(!target){this.callbacks.onValidation(["Insert tasks inside the Expanded task list."]);return false;}const id=insertAdjacentCell(this.document,insertion.cellId,insertion.edge);if(!id)return false;cell=findCell(this.document,id)!;cell.block={id:onsiteId("block"),type:"checklist_task",itemId:item.id,fontSize:14,indicator:"check"};}
+    else{cell=emptyCell({id:onsiteId("block"),type:"checklist_task",itemId:item.id,fontSize:14,indicator:"check"});container.children!.push(cell);}
+    cell.sizing={mode:"hug"};this.checklist.items.push(item);
+    this.checklistView="expanded";this.commit({kind:"block",label:"Task",cellId:cell.id,blockId:cell.block!.id,blockType:"checklist_task"});return true;
+  }
   private surveyContext() { return this.survey ? { questions: this.survey.step.questions, submitLabel: this.survey.config.submitLabel } : undefined; }
-  private historyState(entry?: Pick<HistoryEntry, "document" | "questions" | "branching">): string { return JSON.stringify(this.survey ? (entry ? { document: entry.document, questions: entry.questions, branching: entry.branching } : { document: this.document, questions: this.survey.step.questions, branching: this.survey.step.branching }) : entry?.document ?? this.document); }
+  private historyState(entry?: Pick<HistoryEntry, "document" | "questions" | "branching" | "checklist">): string { return JSON.stringify(this.checklist ? {document:entry?.document??this.document,checklist:entry?entry.checklist:this.checklistState()} : this.survey ? (entry ? { document: entry.document, questions: entry.questions, branching: entry.branching } : { document: this.document, questions: this.survey.step.questions, branching: this.survey.step.branching }) : entry?.document ?? this.document); }
   getSelectedQuestion(): SurveyQuestion | null { const block = this.getSelectedBlock(); return block?.type === "question" ? this.survey?.step.questions.find(question => question.id === block.questionId) ?? null : null; }
   refreshSurvey(): void { this.compileAndPatch(); this.select(this.selection); }
 
@@ -371,13 +408,15 @@ export class OnsiteCompositionEditor {
 
   private beforeTransaction(): boolean { clearTimeout(this.typingTimer); this.repairDocumentStructure(); if (!this.flush()) return false; this.pushHistory(); return true; }
   private commit(selection: CompositionSelection): void {
-    this.repairDocumentStructure(); const errors = this.getValidation(); const validation = { valid: !errors.length, errors };
-    if (!validation.valid) { const previous = this.history[this.historyIndex]; if (previous) { this.document = cloneOnsite(previous.document); if (this.survey && previous.questions) { this.survey.step.questions = cloneOnsite(previous.questions); this.survey.step.branching = previous.branching ? cloneOnsite(previous.branching) : undefined; } this.compileAndPatch(); this.select(previous.selection); } this.callbacks.onValidation(validation.errors); return; }
+    this.repairDocumentStructure();
+    if(this.checklist){const byId=new Map(this.checklist.items.map(item=>[item.id,item]));this.checklist.items=listBlocks(this.document.root).filter((block):block is Extract<OnsiteBlock,{type:"checklist_task"}>=>block.type==="checklist_task").map(block=>byId.get(block.itemId)!).filter(Boolean);}
+    const errors = this.getValidation(); const validation = { valid: !errors.length, errors };
+    if (!validation.valid) { const previous = this.history[this.historyIndex]; if (previous) { this.document = cloneOnsite(previous.document); if(this.checklist&&previous.checklist)Object.assign(this.checklist,cloneOnsite(previous.checklist)); if (this.survey && previous.questions) { this.survey.step.questions = cloneOnsite(previous.questions); this.survey.step.branching = previous.branching ? cloneOnsite(previous.branching) : undefined; } this.compileAndPatch(); this.select(previous.selection); } this.callbacks.onValidation(validation.errors); return; }
     if (this.historyState() === this.compiledState) { this.select(selection); return; }
     this.selection = selection; this.compileAndPatch(); this.pushHistory(); this.callbacks.onChange(); this.select(selection);
   }
   private compileAndPatch(): void {
-    const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext()); Object.assign(this.content, compiled.content);
+    const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext(), this.checklist); Object.assign(this.content, compiled.content);
     this.compiledState = this.historyState();
     const template = document.createElement("template"); template.innerHTML = compiled.html; this.surface?.replaceChildren(...Array.from(template.content.childNodes));
     this.imagePlaceholders.clear();
@@ -395,6 +434,7 @@ export class OnsiteCompositionEditor {
       image.replaceWith(placeholder); this.imagePlaceholders.set(placeholder, image);
     });
     const style = this.root.querySelector<HTMLStyleElement>("style[data-movcues-builder-style]"); if (style) style.textContent = `${compiled.css}\n[data-movcues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movcues-builder-surface]>.movcues-widget{position:relative!important;inset:auto!important}`;
+    this.callbacks.onPatch?.();
   }
   private scheduleCompile(): void { clearTimeout(this.compileTimer); this.compileTimer = window.setTimeout(() => { if (!this.destroyed && !this.composing) this.flush(); }, 160); }
 
@@ -421,14 +461,14 @@ export class OnsiteCompositionEditor {
   }
 
   private pushHistory(): void {
-    const document = cloneOnsite(this.document), questions = this.survey ? cloneOnsite(this.survey.step.questions) : undefined, branching = this.survey?.step.branching ? cloneOnsite(this.survey.step.branching) : undefined; const bytes = this.historyState().length; const entry = { document, questions, branching, selection: cloneOnsite(this.selection), bytes };
+    const document = cloneOnsite(this.document), questions = this.survey ? cloneOnsite(this.survey.step.questions) : undefined, branching = this.survey?.step.branching ? cloneOnsite(this.survey.step.branching) : undefined; const bytes = this.historyState().length; const entry = { document, questions, branching, checklist:this.checklist?this.checklistState():undefined, selection: cloneOnsite(this.selection), bytes };
     if (this.historyIndex >= 0 && this.historyState(this.history[this.historyIndex]) === this.historyState()) return;
     if (this.historyIndex < this.history.length - 1) { this.historyBytes -= this.history.slice(this.historyIndex + 1).reduce((sum, item) => sum + item.bytes, 0); this.history.splice(this.historyIndex + 1); }
     this.history.push(entry); this.historyBytes += bytes;
     while (this.history.length > HISTORY_LIMIT || this.historyBytes > HISTORY_BYTES) { const removed = this.history.shift(); this.historyBytes -= removed?.bytes ?? 0; }
     this.historyIndex = this.history.length - 1;
   }
-  private restore(entry: HistoryEntry): void { this.document = cloneOnsite(entry.document); if (this.survey && entry.questions) { this.survey.step.questions = cloneOnsite(entry.questions); this.survey.step.branching = entry.branching ? cloneOnsite(entry.branching) : undefined; } this.compileAndPatch(); this.selection = cloneOnsite(entry.selection); this.callbacks.onChange(); this.select(this.selection); }
+  private restore(entry: HistoryEntry): void { this.document = cloneOnsite(entry.document); if(this.checklist&&entry.checklist)Object.assign(this.checklist,cloneOnsite(entry.checklist)); if (this.survey && entry.questions) { this.survey.step.questions = cloneOnsite(entry.questions); this.survey.step.branching = entry.branching ? cloneOnsite(entry.branching) : undefined; } this.compileAndPatch(); this.selection = cloneOnsite(entry.selection); this.callbacks.onChange(); this.select(this.selection); }
 
   private onSurfaceClick = (event: Event): void => {
     const element = event.target instanceof Element ? event.target : null; if (!element) return;
@@ -507,9 +547,9 @@ export class OnsiteCompositionEditor {
 
   private onToolbarClick = (event: Event): void => { const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-command]") : null; if (!button || button.disabled) return; event.preventDefault(); event.stopPropagation(); const command = button.dataset.command; if (command === "add") { if (this.palette.hidden) this.openPalette(button); else this.closePalette(); } else if (command === "columns") this.split("row"); else if (command === "rows") this.split("column"); else if (command === "parent") this.selectParent(); else if (command === "duplicate") this.duplicate(); else if (command === "delete") this.remove(); else if (command === "move-up") this.move(-1); else if (command === "move-down") this.move(1); else if (command === "move") { if (this.moveSource) this.cancelMove(); else { this.moveSource = this.getSelectedCell()?.id ?? null; this.surface?.setAttribute("data-movcues-moving", ""); button.setAttribute("aria-pressed", "true"); button.title = "Choose a destination cell, or press Escape to cancel"; if ((event as MouseEvent).detail === 0) this.moveDestinations()[0]?.focus({ preventScroll: true }); } } };
   private onPaletteClick = (event: Event): void => {
-    const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-insert-block],[data-insert-question]") : null; if (!button) return;
+    const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-insert-block],[data-insert-question],[data-insert-task]") : null; if (!button) return;
     event.preventDefault(); event.stopPropagation();
-    if (button.dataset.insertQuestion ? this.insertQuestion(button.dataset.insertQuestion as SurveyQuestion["type"], this.insertion ?? undefined) : this.insertBlock(button.dataset.insertBlock as OnsiteBlock["type"], this.insertion ?? undefined)) {
+    if (button.hasAttribute("data-insert-task") ? this.insertTask(this.insertion ?? undefined) : button.dataset.insertQuestion ? this.insertQuestion(button.dataset.insertQuestion as SurveyQuestion["type"], this.insertion ?? undefined) : this.insertBlock(button.dataset.insertBlock as OnsiteBlock["type"], this.insertion ?? undefined)) {
       this.closePalette();
       const block = this.getSelectedBlock(); const element = block ? this.surface?.querySelector<HTMLElement>(`[data-movcues-block-id="${block.id}"]`) : null;
       if (element) { element.tabIndex = -1; element.focus({ preventScroll: true }); }

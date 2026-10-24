@@ -45,6 +45,7 @@ export type ExperienceLaunchContext = { source: "api" } | { source: "checklist";
 export interface DeliveredExperience { id: string; versionId: string; kind: ExperienceKind; widgetType: WidgetType | null; priority: number; interruptPolicy?: "queue" | "interrupt"; impressionId?: string; definition: RuntimeDefinition; launchContext?: ExperienceLaunchContext }
 export interface DeliveredChecklist { id: string; versionId: string; kind: "checklist"; priority: number; definition: RuntimeChecklistDefinition; progress: ChecklistProgress }
 export type EditorDefinition = RuntimeDefinition & { targeting: ExperienceTargeting };
-export interface EditorDraft { experience: { id: string; name: string; kind: ExperienceKind; widgetType: WidgetType | null; builderMode: BuilderMode }; version: { id: string; versionNumber: number; revision: number; definition: EditorDefinition } }
+export type EditorChecklistDefinition = RuntimeChecklistDefinition & { targeting: Pick<ExperienceTargeting,"pageRules"|"audience"|"priority"|"schedule"|"allowedOrigins"> };
+export interface EditorDraft { references?: {guides:Array<{id:string;name:string;status:string}>;segments:Array<{id:string;name:string}>}; experience: { id: string; name: string; kind: ExperienceKind; widgetType: WidgetType | null; builderMode: BuilderMode }; version: { id: string; versionNumber: number; revision: number; definition: EditorDefinition | EditorChecklistDefinition } }
 export function isGuideDefinition(value: RuntimeDefinition): value is RuntimeGuideDefinition { return "steps" in value; }
 export function isChecklistDefinition(value: RuntimeDefinition | RuntimeChecklistDefinition): value is RuntimeChecklistDefinition { return "items" in value; }

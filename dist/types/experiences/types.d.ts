@@ -354,7 +354,21 @@ export interface DeliveredChecklist {
 export type EditorDefinition = RuntimeDefinition & {
     targeting: ExperienceTargeting;
 };
+export type EditorChecklistDefinition = RuntimeChecklistDefinition & {
+    targeting: Pick<ExperienceTargeting, "pageRules" | "audience" | "priority" | "schedule" | "allowedOrigins">;
+};
 export interface EditorDraft {
+    references?: {
+        guides: Array<{
+            id: string;
+            name: string;
+            status: string;
+        }>;
+        segments: Array<{
+            id: string;
+            name: string;
+        }>;
+    };
     experience: {
         id: string;
         name: string;
@@ -366,7 +380,7 @@ export interface EditorDraft {
         id: string;
         versionNumber: number;
         revision: number;
-        definition: EditorDefinition;
+        definition: EditorDefinition | EditorChecklistDefinition;
     };
 }
 export declare function isGuideDefinition(value: RuntimeDefinition): value is RuntimeGuideDefinition;

@@ -47,7 +47,7 @@
     "test": "vitest run",
     "dev": "vite",
     "test:browser": "playwright test",
-    "test:integration": "playwright test --config playwright.integration.config.ts"
+    "test:integration": "node scripts/runIntegration.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

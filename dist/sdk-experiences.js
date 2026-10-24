@@ -1730,9 +1730,10 @@ ${ISOLATION_CSS}`;
         this.destroy();
         return false;
       }
+      const cellDocument = authoredRoot.dataset.movcuesDocumentVersion === "4";
       setText(authoredRoot, "title", checklist.definition.title);
       setText(authoredRoot, "description", checklist.definition.description ?? "");
-      setText(authoredRoot, "launcher-label", checklist.definition.title);
+      if (!cellDocument) setText(authoredRoot, "launcher-label", checklist.definition.title);
       setText(authoredRoot, "completion-title", checklist.definition.completionMessage.title);
       setText(authoredRoot, "completion-description", checklist.definition.completionMessage.description ?? "");
       setText(authoredRoot, "completion-acknowledge", checklist.definition.completionMessage.acknowledgeLabel);
@@ -1741,6 +1742,7 @@ ${ISOLATION_CSS}`;
       });
       const completed = new Set(checklist.progress.completedItemIds);
       const remaining = checklist.definition.items.length - completed.size;
+      authoredRoot.style.setProperty("--movcues-checklist-progress", `${checklist.definition.items.length ? completed.size / checklist.definition.items.length * 100 : 0}%`);
       setText(authoredRoot, "progress", `${completed.size} of ${checklist.definition.items.length} complete`);
       setText(authoredRoot, "remaining-count", checklist.definition.behavior.showRemainingCount ? String(remaining) : "");
       const container = authoredRoot.querySelector('[data-movcues-checklist-role="items"]');
@@ -1751,7 +1753,7 @@ ${ISOLATION_CSS}`;
       checklist.definition.items.forEach((item, index) => {
         var _a;
         const element = itemElements.get(item.id);
-        container.appendChild(element);
+        if (!cellDocument) container.appendChild(element);
         const state = ((_a = checklist.progress.items[index]) == null ? void 0 : _a.state) ?? "locked";
         element.dataset.state = state;
         element.setAttribute("aria-disabled", state === "locked" ? "true" : "false");

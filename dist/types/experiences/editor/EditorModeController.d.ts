@@ -26,6 +26,8 @@ export declare class EditorModeController {
     private guide;
     private survey;
     private surveyEditor;
+    private checklist;
+    private checklistEditor;
     private stepIndex;
     private mode;
     private dirty;
@@ -88,6 +90,7 @@ export declare class EditorModeController {
     private syncContentInspector;
     private syncCompositionInspector;
     private syncPanel;
+    private hideChecklistWidgetControls;
     private renderConfigured;
     private updateDiagnostics;
     private configureDiagnostics;

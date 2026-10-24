@@ -2587,6 +2587,9 @@ function guideStepRequiresTarget(step) {
 function isGuideDefinition(value) {
   return "steps" in value;
 }
+function isChecklistDefinition(value) {
+  return "items" in value;
+}
 class EligibilityEngine {
   choose(experiences) {
     return [...experiences].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))[0] ?? null;
@@ -4357,9 +4360,10 @@ class ChecklistRenderer {
       this.destroy();
       return false;
     }
+    const cellDocument = authoredRoot.dataset.movcuesDocumentVersion === "4";
     setText(authoredRoot, "title", checklist.definition.title);
     setText(authoredRoot, "description", checklist.definition.description ?? "");
-    setText(authoredRoot, "launcher-label", checklist.definition.title);
+    if (!cellDocument) setText(authoredRoot, "launcher-label", checklist.definition.title);
     setText(authoredRoot, "completion-title", checklist.definition.completionMessage.title);
     setText(authoredRoot, "completion-description", checklist.definition.completionMessage.description ?? "");
     setText(authoredRoot, "completion-acknowledge", checklist.definition.completionMessage.acknowledgeLabel);
@@ -4368,6 +4372,7 @@ class ChecklistRenderer {
     });
     const completed = new Set(checklist.progress.completedItemIds);
     const remaining = checklist.definition.items.length - completed.size;
+    authoredRoot.style.setProperty("--movcues-checklist-progress", `${checklist.definition.items.length ? completed.size / checklist.definition.items.length * 100 : 0}%`);
     setText(authoredRoot, "progress", `${completed.size} of ${checklist.definition.items.length} complete`);
     setText(authoredRoot, "remaining-count", checklist.definition.behavior.showRemainingCount ? String(remaining) : "");
     const container = authoredRoot.querySelector('[data-movcues-checklist-role="items"]');
@@ -4378,7 +4383,7 @@ class ChecklistRenderer {
     checklist.definition.items.forEach((item, index) => {
       var _a;
       const element = itemElements.get(item.id);
-      container.appendChild(element);
+      if (!cellDocument) container.appendChild(element);
       const state = ((_a = checklist.progress.items[index]) == null ? void 0 : _a.state) ?? "locked";
       element.dataset.state = state;
       element.setAttribute("aria-disabled", state === "locked" ? "true" : "false");
@@ -4999,7 +5004,7 @@ const bundledRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-DU6sDI31.js");
+    const { EditorModeController } = await import("./EditorModeController-DrsGMywZ.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -5024,6 +5029,7 @@ function createAnalytics(config) {
 }
 export {
   Analytics2 as A,
+  ChecklistRenderer as C,
   ExperienceRenderer as E,
   RouteObserver as R,
   builderLinkUrlIsSafe as a,
@@ -5032,15 +5038,16 @@ export {
   computeElementLabel as d,
   sanitizeBuilderHtml as e,
   clearEditorContinuation as f,
-  guideStepRequiresTarget as g,
-  guideInteractionTarget as h,
-  isGuideDefinition as i,
-  getGuideStepPattern as j,
-  guideStepConfigurationErrors as k,
-  findTarget as l,
+  isGuideDefinition as g,
+  guideStepRequiresTarget as h,
+  isChecklistDefinition as i,
+  guideInteractionTarget as j,
+  getGuideStepPattern as k,
+  guideStepConfigurationErrors as l,
   matchesGuideRoute as m,
-  storeEditorContinuation as n,
-  createAnalytics as o,
+  findTarget as n,
+  storeEditorContinuation as o,
+  createAnalytics as p,
   surveyBranchErrors as s
 };
-//# sourceMappingURL=module-DAQ_VUj4.js.map
+//# sourceMappingURL=module-mQBMiSr0.js.map

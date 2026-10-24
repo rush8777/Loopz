@@ -1,3 +1,5 @@
+import type { ChecklistItem } from "../types";
+import type { ChecklistView, OnsiteChecklistContext } from "../checklist/ChecklistMarkup";
 import type { ExperienceContent, SurveyConfig, SurveyStep, SurveyQuestion, WidgetBuilderState, WidgetType } from "../types";
 import { type OnsiteBlock, type OnsiteCell, type OnsiteDocument, type OnsiteSizing } from "../onsite/OnsiteDocument";
 export type CompositionSelection = {
@@ -19,6 +21,7 @@ interface Callbacks {
     onSelectionChange(selection: CompositionSelection): void;
     onValidation(errors: string[]): void;
     onImageStatus?(message: string): void;
+    onPatch?(): void;
 }
 type CellEdge = "top" | "right" | "bottom" | "left";
 /** Structured on-site authoring. It is imported only by the lazy editor bundle. */
@@ -30,6 +33,7 @@ export declare class OnsiteCompositionEditor {
     private guide;
     private callbacks;
     private survey?;
+    private checklist?;
     private document;
     private surface;
     private toolbar;
@@ -58,10 +62,11 @@ export declare class OnsiteCompositionEditor {
     private imageDropTarget;
     private savedRange;
     private moveSource;
-    constructor(root: ShadowRoot, builder: WidgetBuilderState, content: ExperienceContent, widgetType: WidgetType | "anchored_card" | "modal", guide: boolean, callbacks: Callbacks, survey?: {
+    private checklistView;
+    constructor(root: ShadowRoot, builder: WidgetBuilderState, content: ExperienceContent, widgetType: WidgetType | "anchored_card" | "modal" | "checklist", guide: boolean, callbacks: Callbacks, survey?: {
         config: SurveyConfig;
         step: SurveyStep;
-    } | undefined);
+    } | undefined, checklist?: OnsiteChecklistContext | undefined);
     start(): void;
     getDocument(): OnsiteDocument;
     getSelection(): CompositionSelection;
@@ -92,6 +97,16 @@ export declare class OnsiteCompositionEditor {
     move(delta: -1 | 1): boolean;
     /** Move the existing subtree; never regenerate its cell/block/action IDs. */
     moveTo(targetId: string, before?: boolean, sourceId?: string | undefined): boolean;
+    private checklistState;
+    updateChecklistViewWidth(width: number): void;
+    refreshChecklist(): void;
+    setChecklistView(view: ChecklistView): void;
+    getSelectedTask(): ChecklistItem | null;
+    updateChecklist(update: (next: OnsiteChecklistContext) => void): boolean;
+    insertTask(insertion?: {
+        cellId: string;
+        edge: CellEdge;
+    }): boolean;
     private surveyContext;
     private historyState;
     getSelectedQuestion(): SurveyQuestion | null;

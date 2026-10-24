@@ -1,3 +1,6 @@
+import { ChecklistEditor } from "./ChecklistEditor";
+import type { EditorChecklistDefinition } from "../types";
+import { isChecklistDefinition } from "../types";
 import { SurveyEditor } from "./SurveyEditor";
 import { surveyBranchErrors } from "../survey/SurveyLogic";
 import type {
@@ -57,6 +60,8 @@ export class EditorModeController {
   private guide: RuntimeGuideDefinition | null = null;
   private survey: SurveyConfig | null = null;
   private surveyEditor: SurveyEditor | null = null;
+  private checklist: EditorChecklistDefinition | null = null;
+  private checklistEditor: ChecklistEditor | null = null;
   private stepIndex = 0;
   private mode: EditorMode = "design";
   private dirty = false;
@@ -117,12 +122,13 @@ export class EditorModeController {
     let draft: EditorDraft;
     try { draft = await bridge.load(); }
     catch { clearEditorContinuation(); return false; }
-    if (draft.experience.kind === "checklist") { clearEditorContinuation(); return false; }
+    if (draft.experience.kind === "checklist" && draft.experience.builderMode !== "onsite") { clearEditorContinuation(); return false; }
 
     this.bridge = bridge;
     this.session = session;
     this.draft = draft;
-    this.definition = draft.version.definition;
+    this.checklist = isChecklistDefinition(draft.version.definition) ? draft.version.definition : null;
+    this.definition = this.checklist ? checklistEditorAdapter(this.checklist) : draft.version.definition as EditorDefinition;
     this.guide = isGuideDefinition(this.definition) ? this.definition : null;
     this.survey = !this.guide && draft.experience.widgetType === "survey" ? (this.definition as RuntimeWidgetDefinition).survey ?? null : null;
     const selectableSteps = this.guide?.steps ?? this.survey?.steps;
@@ -154,6 +160,9 @@ export class EditorModeController {
       index: () => this.stepIndex, composer: () => this.compositionEditor, canEdit: () => this.mode === "design" && this.saveState !== "expired",
       flush: () => this.flushContent(), changed: () => this.changed(false), error: errors => this.showValidation(errors),
       stepsChanged: index => { this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null; this.stepIndex = index; this.changed(); this.refreshStepBar(); },
+    });
+    if(this.checklist)this.checklistEditor=new ChecklistEditor(this.root,this.checklist,this.draft.references??{guides:[],segments:[]},{
+      composer:()=>this.compositionEditor,canEdit:()=>this.mode==="design"&&this.saveState!=="expired",flush:()=>this.flushContent(),changed:()=>this.changed(false),render:()=>{this.renderPreview();this.syncPanel();},error:errors=>this.showValidation(errors)
     });
     this.bindPanel();
     this.syncPanel();
@@ -560,7 +569,7 @@ export class EditorModeController {
   }
 
   private applyMode(): void {
-    if (this.mode === "navigate") { this.previewGeneration++; this.preview.destroy(); this.previewRendered = false; this.syncPanel(); return; }
+    if (this.mode === "navigate") { this.previewGeneration++; this.checklistEditor?.destroyView(); this.preview.destroy(); this.previewRendered = false; this.syncPanel(); return; }
     this.renderPreview(); this.syncPanel(); if (this.mode === "target") this.startPicker();
   }
 
@@ -634,11 +643,11 @@ export class EditorModeController {
   private captureRecovery(): void {
     if (!this.definition || (!this.dirty && !this.contentEditor?.isComposing() && !this.compositionEditor?.isComposing())) return;
     // Contains only authored data, never the session or access token. No website storage.
-    const definition = JSON.parse(JSON.stringify(this.definition)) as EditorDefinition;
+    const definition = JSON.parse(JSON.stringify(this.checklist ?? this.definition)) as EditorDefinition | EditorChecklistDefinition;
     const snapshot = this.compositionEditor?.snapshot() ?? this.contentEditor?.snapshot();
     if (snapshot) {
-      const part = isGuideDefinition(definition) ? definition.steps[this.stepIndex] : definition.survey ? definition.survey.steps[this.stepIndex] : definition;
-      part.builder = snapshot.builder; part.content = snapshot.content;
+      const part = isGuideDefinition(definition as EditorDefinition) ? (definition as RuntimeGuideDefinition).steps[this.stepIndex] : "survey" in definition && definition.survey ? definition.survey.steps[this.stepIndex] : definition;
+      (part as {builder?:WidgetBuilderState}).builder = snapshot.builder; if(!isChecklistDefinition(part as EditorDefinition | EditorChecklistDefinition)) (part as {content:ExperienceContent}).content = snapshot.content;
     }
     this.recoveryDraft = JSON.stringify({ experienceId: this.draft?.experience.id, revision: this.draft?.version.revision, definition }, null, 2);
   }
@@ -676,7 +685,7 @@ export class EditorModeController {
     }
     if (!this.dirty || !this.bridge || !this.definition) return true;
     const bridge = this.bridge; const generation = this.editGeneration; const lifecycle = this.lifecycle;
-    const definition = JSON.parse(JSON.stringify(this.definition)) as EditorDefinition;
+    const definition = JSON.parse(JSON.stringify(this.checklist ?? this.definition)) as EditorDefinition | EditorChecklistDefinition;
     const revision = this.draft?.version.revision ?? 1;
     this.saveState = "saving"; this.showSaveState();
     const request = bridge.save(definition, revision).then(version => {
@@ -716,6 +725,10 @@ export class EditorModeController {
     this.previewRendered = false;
     this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
     this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
+    if(this.checklist && this.checklistEditor){
+      this.preview.destroy();this.previewRendered=this.checklistEditor.render(this.draft.experience.id,this.draft.version.id,this.mode==="preview");
+      if(this.mode==="design"&&this.previewRendered)this.attachContentEditor();this.updateDiagnostics();return;
+    }
     const definition = this.definition;
     // Editor-only behavior overrides; production renderers and definitions stay unchanged.
     const rendered = JSON.parse(JSON.stringify(definition)) as EditorDefinition;
@@ -756,8 +769,8 @@ export class EditorModeController {
 
   private attachContentEditor(): void {
     if (this.draft?.experience.builderMode !== "onsite" || this.mode !== "design") return;
-    const host = Array.from(document.querySelectorAll<HTMLElement>("[data-movcues-experience]")).find(
-      element => element.dataset.movcuesExperience === this.draft!.experience.id,
+    const host = Array.from(document.querySelectorAll<HTMLElement>("[data-movcues-experience],[data-movcues-checklist]")).find(
+      element => (element.dataset.movcuesExperience ?? element.dataset.movcuesChecklist) === this.draft!.experience.id,
     );
     const builder = this.currentBuilder(); const content = this.currentContent();
     if (!host?.shadowRoot || !builder || !content) return;
@@ -766,12 +779,13 @@ export class EditorModeController {
     if (document.body && !document.body.contains(host)) document.body.appendChild(host);
     this.contentEditor?.destroy(); this.compositionEditor?.destroy();
     try {
-        this.compositionEditor = new OnsiteCompositionEditor(host.shadowRoot, builder, content, this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : this.draft.experience.widgetType ?? "modal", Boolean(this.guide), {
+        this.compositionEditor = new OnsiteCompositionEditor(host.shadowRoot, builder, content, this.checklist ? "checklist" : this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : this.draft.experience.widgetType ?? "modal", Boolean(this.guide), {
+          onPatch: () => { this.checklistEditor?.applyDesign(this.draft!.experience.id); },
           onChange: () => { this.syncOnsiteAnchoredPointer(host.shadowRoot!, builder); this.changed(false); },
           onValidation: errors => this.showValidation(errors),
           onImageStatus: message => this.setText("[data-image-status]", message),
-          onSelectionChange: selection => { this.compositionSelection = selection; this.syncCompositionInspector(); },
-        }, this.survey ? { config: this.survey, step: this.survey.steps[this.stepIndex] } : undefined);
+          onSelectionChange: selection => { if(this.checklist && selection.kind !== "step"){this.root?.querySelector("aside")?.classList.remove("minimized");this.root?.querySelector("[data-minimize]")?.setAttribute("aria-expanded","true");} this.compositionSelection = selection; this.syncCompositionInspector(); },
+        }, this.survey ? { config: this.survey, step: this.survey.steps[this.stepIndex] } : undefined, this.checklist ?? undefined);
         this.compositionEditor.start(); this.syncOnsiteAnchoredPointer(host.shadowRoot, builder); return;
     } catch (error) { this.showValidation([error instanceof Error ? error.message : "This layout could not be converted safely."]); this.compositionEditor = null; }
     this.contentEditor = new OnsiteContentEditor(host.shadowRoot, builder, content, {
@@ -823,7 +837,7 @@ export class EditorModeController {
   }
 
   private syncCompositionInspector(): void {
-    this.surveyEditor?.sync();
+    this.surveyEditor?.sync();this.checklistEditor?.sync();
     if (!this.root) return; const editor = this.compositionEditor; const selection = this.compositionSelection; const inspector = this.root.querySelector<HTMLElement>("[data-composition-inspector]"); if (!inspector) return;
     inspector.hidden = this.mode !== "design" || !editor || !selection; this.root.querySelector<HTMLElement>("[data-content-inspector]")!.hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
     if (!editor || !selection) return; if (selection.kind === "step") this.syncGuideBehavior(); this.setText("[data-composition-label]", selection.label);
@@ -840,6 +854,7 @@ export class EditorModeController {
       this.root.querySelector<HTMLInputElement>("[data-v2-image-src]")!.placeholder = local ? "Added from file; paste a URL to replace" : "https://… (optional)";
       this.setText("[data-choose-image]", block.src ? "Replace image" : "Choose image");
     }
+    this.hideChecklistWidgetControls();
     const undo = this.root.querySelector<HTMLButtonElement>("[data-v2-undo]"); if (undo) undo.disabled = !editor.canUndo(); const redo = this.root.querySelector<HTMLButtonElement>("[data-v2-redo]"); if (redo) redo.disabled = !editor.canRedo();
     this.root.querySelector<HTMLButtonElement>("[data-global-undo]")!.disabled = !editor.canUndo(); this.root.querySelector<HTMLButtonElement>("[data-global-redo]")!.disabled = !editor.canRedo();
   }
@@ -895,7 +910,15 @@ export class EditorModeController {
     this.updateDiagnostics();
     this.syncContentInspector();
     this.syncCompositionInspector();
+    this.hideChecklistWidgetControls();
     this.setText("[data-mode-hint]", this.mode === "design" && this.draft.experience.widgetType === "cursor_follow" ? "Stationary authoring view · Preview tests cursor-follow movement" : this.mode === "design" && this.isTargetedType() && !this.currentTarget() ? "Select a page target in Target mode before editing this anchored card" : this.mode === "design" ? "Click a component to select · Double-click text to edit" : this.mode === "target" ? this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "This experience does not need a page target" : this.mode === "navigate" ? "Customer app interaction is enabled" : "End-user preview · analytics and actions are disabled");
+  }
+
+  private hideChecklistWidgetControls():void {
+    if(!this.checklist||!this.root)return;
+    this.root.querySelectorAll<HTMLElement>('[data-step-only],[data-edge]').forEach(node=>node.hidden=true);
+    const target=this.root.querySelector<HTMLButtonElement>('[data-mode=target]');if(target){target.hidden=true;target.disabled=true;}
+    this.setText('[data-preview-limit]',"Simulated Checklist progress only. No visitor records, Guide launches, navigation or production analytics are sent. Website JavaScript may still have side effects.");
   }
 
   private renderConfigured(targeting: ExperienceTargeting): void {
@@ -1107,6 +1130,7 @@ export class EditorModeController {
     this.picker.cancel();
     this.host?.remove();
     this.surveyEditor?.destroy(); this.surveyEditor = null;
+    this.checklistEditor?.destroy();this.checklistEditor=null;this.checklist=null;
     this.host = null; this.root = null; this.bridge = null; this.session = null; this.draft = null; this.definition = null; this.guide = null; this.survey = null;
     this.saveState = "clean"; this.editGeneration = 0; this.recoveryDraft = null;
     this.dirty = false; this.previewRendered = false; this.saveInFlight = null;
@@ -1154,3 +1178,7 @@ const STYLE = `${BASE_STYLE}
 `;
 
 const GUIDE_STYLE = `.guide-behavior{display:grid;gap:8px;border-top:1px solid #eef0f3;padding-top:10px;margin-top:8px}.guide-behavior [data-guide-config],.guide-behavior [data-guide-missing]{display:grid;gap:7px}.guide-behavior .muted{margin:0;overflow-wrap:anywhere}.guide-preview-controls{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:5px 7px;border-top:1px solid #eef0f3}.guide-preview-controls button{border:1px solid #d7dce3;border-radius:5px;background:#fff;color:#334155;padding:4px 6px;font:11px ui-sans-serif,system-ui;cursor:pointer}.guide-preview-controls small{flex-basis:100%;color:#64748b;font-size:10px}.guide-preview-controls button:disabled{opacity:.4}.guide-preview-controls span{font-size:10px;margin-left:auto}`;
+
+function checklistEditorAdapter(value:EditorChecklistDefinition):EditorDefinition {
+ return {content:{heading:value.title,body:value.description??""},builder:value.builder,design:{width:"sm",theme:{background:"#fff",foreground:"#111827",primary:"#2563eb",borderRadius:"md"}},behavior:{dismissible:false},targeting:{...value.targeting,trigger:{type:"page_load"},frequency:{mode:"once"}}};
+}
