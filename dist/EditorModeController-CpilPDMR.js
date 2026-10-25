@@ -1,4 +1,4 @@
-import { C as ChecklistRenderer, b as builderImageUrlIsSafe, a as builderLinkUrlIsSafe, s as surveyBranchErrors, c as computeElementRole, d as computeElementLabel, e as sanitizeBuilderHtml, E as ExperienceRenderer, R as RouteObserver, f as clearEditorContinuation, i as isChecklistDefinition, g as isGuideDefinition, h as guideStepRequiresTarget, j as guideInteractionTarget, k as getGuideStepPattern, l as guideStepConfigurationErrors, m as matchesGuideRoute, n as findTarget, o as storeEditorContinuation } from "./module-mQBMiSr0.js";
+import { C as ChecklistRenderer, b as builderImageUrlIsSafe, a as builderLinkUrlIsSafe, s as surveyBranchErrors, c as computeElementRole, d as computeElementLabel, e as sanitizeBuilderHtml, E as ExperienceRenderer, R as RouteObserver, f as clearEditorContinuation, i as isChecklistDefinition, g as isGuideDefinition, h as getGuideStepPattern, j as guideStepRequiresTarget, k as guideInteractionTarget, l as guideStepConfigurationErrors, m as matchesGuideRoute, n as findTarget, o as storeEditorContinuation } from "./module-apAQ1BLF.js";
 const esc = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 class ChecklistEditor {
   constructor(root, definition, references, options) {
@@ -3826,7 +3826,7 @@ class EditorModeController {
     this.root = this.host.attachShadow({ mode: "open" });
     this.root.innerHTML = `<style>${STYLE}${GUIDE_STYLE}</style>${this.panelMarkup(this.draft)}`;
     if (this.guide) (_a = this.root.querySelector('[data-inspector="step"]')) == null ? void 0 : _a.insertAdjacentHTML("beforeend", this.guideBehaviorMarkup());
-    if (this.guide) this.root.querySelectorAll("[data-guide] .history-row").forEach((actions) => {
+    if (this.guide) this.root.querySelectorAll("[data-guide] .history-row:not([data-step-bar-actions])").forEach((actions) => {
       var _a2;
       return (_a2 = this.root.querySelector('[data-inspector="step"]')) == null ? void 0 : _a2.append(actions);
     });
@@ -3877,7 +3877,7 @@ class EditorModeController {
   panelMarkup(draft) {
     var _a, _b;
     const selectableSteps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
-    const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-add-step="modal">＋ Modal</button><button type="button" class="secondary-button compact" data-add-step="anchored_card">＋ Anchored</button></div>' : ""}</div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-duplicate-step>Duplicate</button><button type="button" class="secondary-button compact" data-step-left>←</button><button type="button" class="secondary-button compact" data-step-right>→</button><button type="button" class="secondary-button compact" data-delete-step>Delete</button></div>' : ""}</section>` : "";
+    const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><span class="step-drag-handle" data-step-drag-handle title="Drag step bar" aria-hidden="true">⠿</span><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-add-step="modal">＋ Modal</button><button type="button" class="secondary-button compact" data-add-step="anchored_card">＋ Anchored</button></div>' : ""}</div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? `<div class="history-row" data-step-bar-actions><button type="button" class="secondary-button compact step-bar-action" data-add-current-step aria-label="Add step" title="Add a ${getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal" ? "Modal" : "Anchored"} step">＋</button><button type="button" class="secondary-button compact step-bar-action" data-delete-step aria-label="Delete selected step" title="Delete selected step"${this.guide.steps.length <= 1 ? " disabled" : ""}>⌫</button></div><div class="history-row"><button type="button" class="secondary-button compact" data-duplicate-step>Duplicate</button><button type="button" class="secondary-button compact" data-step-left>←</button><button type="button" class="secondary-button compact" data-step-right>→</button></div>` : ""}</section>` : "";
     const designDisabled = draft.experience.builderMode !== "onsite" ? ' disabled title="Content is edited in the GrapesJS Dashboard Builder"' : "";
     return `<div class="editor-toolbar" data-editor-toolbar role="region" aria-label="Movcues editing controls">
       <header data-drag-handle>
@@ -3960,7 +3960,7 @@ class EditorModeController {
     return steps.map((step, index) => `<button class="step" type="button" data-step="${index}" aria-label="Open step ${index + 1}"><span>${index + 1}</span><small>${escapeText("label" in step && typeof step.label === "string" && step.label.trim() ? step.label : "content" in step && step.content.heading.trim() ? step.content.heading : `Step ${index + 1}`)}</small><i data-step-icon>○</i></button>`).join("");
   }
   bindPanel() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z;
     const root = this.root;
     root.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this.setMode(button.dataset.mode)));
     root.querySelectorAll("[data-pick]").forEach((button) => button.addEventListener("click", () => {
@@ -4021,17 +4021,18 @@ class EditorModeController {
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.addEdge(button.dataset.edge);
     }));
     root.querySelectorAll("[data-add-step]").forEach((button) => button.addEventListener("click", () => this.addGuideStep(button.dataset.addStep)));
-    (_o = root.querySelector("[data-duplicate-step]")) == null ? void 0 : _o.addEventListener("click", () => this.duplicateGuideStep());
-    (_p = root.querySelector("[data-delete-step]")) == null ? void 0 : _p.addEventListener("click", () => this.deleteGuideStep());
-    (_q = root.querySelector("[data-step-left]")) == null ? void 0 : _q.addEventListener("click", () => this.moveGuideStep(-1));
-    (_r = root.querySelector("[data-step-right]")) == null ? void 0 : _r.addEventListener("click", () => this.moveGuideStep(1));
-    (_s = root.querySelector("[data-step-name]")) == null ? void 0 : _s.addEventListener("change", (event) => {
+    (_o = root.querySelector("[data-add-current-step]")) == null ? void 0 : _o.addEventListener("click", () => this.addGuideStep(getGuideStepPattern(this.guide.steps[this.stepIndex])));
+    (_p = root.querySelector("[data-duplicate-step]")) == null ? void 0 : _p.addEventListener("click", () => this.duplicateGuideStep());
+    (_q = root.querySelector("[data-delete-step]")) == null ? void 0 : _q.addEventListener("click", () => this.deleteGuideStep());
+    (_r = root.querySelector("[data-step-left]")) == null ? void 0 : _r.addEventListener("click", () => this.moveGuideStep(-1));
+    (_s = root.querySelector("[data-step-right]")) == null ? void 0 : _s.addEventListener("click", () => this.moveGuideStep(1));
+    (_t = root.querySelector("[data-step-name]")) == null ? void 0 : _t.addEventListener("change", (event) => {
       if (!this.guide) return;
       this.guide.steps[this.stepIndex].label = event.currentTarget.value.trim().slice(0, 80) || void 0;
       this.changed();
       this.refreshStepBar();
     });
-    (_t = root.querySelector("[data-edit-component]")) == null ? void 0 : _t.addEventListener("click", () => {
+    (_u = root.querySelector("[data-edit-component]")) == null ? void 0 : _u.addEventListener("click", () => {
       var _a2, _b2;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.editSelected();
       (_b2 = this.contentEditor) == null ? void 0 : _b2.editSelected();
@@ -4048,14 +4049,14 @@ class EditorModeController {
       (_b2 = this.contentEditor) == null ? void 0 : _b2.toggleList(button.dataset.list);
       this.syncContentInspector();
     }));
-    (_u = root.querySelector("[data-text-align]")) == null ? void 0 : _u.addEventListener("change", (event) => {
+    (_v = root.querySelector("[data-text-align]")) == null ? void 0 : _v.addEventListener("change", (event) => {
       var _a2, _b2;
       const value = event.currentTarget.value;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.setAlignment(value);
       (_b2 = this.contentEditor) == null ? void 0 : _b2.setAlignment(value);
       this.syncContentInspector();
     });
-    (_v = root.querySelector("[data-apply-link]")) == null ? void 0 : _v.addEventListener("click", () => {
+    (_w = root.querySelector("[data-apply-link]")) == null ? void 0 : _w.addEventListener("click", () => {
       var _a2, _b2;
       const input = root.querySelector("[data-link-url]");
       const applied = input ? ((_a2 = this.compositionEditor) == null ? void 0 : _a2.applyLink(input.value)) ?? ((_b2 = this.contentEditor) == null ? void 0 : _b2.applyLink(input.value)) : false;
@@ -4065,7 +4066,7 @@ class EditorModeController {
       } else input == null ? void 0 : input.setCustomValidity("");
       this.syncContentInspector();
     });
-    (_w = root.querySelector("[data-apply-image]")) == null ? void 0 : _w.addEventListener("click", () => {
+    (_x = root.querySelector("[data-apply-image]")) == null ? void 0 : _x.addEventListener("click", () => {
       var _a2;
       const source = root.querySelector("[data-image-src]");
       const alt = root.querySelector("[data-image-alt]");
@@ -4073,12 +4074,12 @@ class EditorModeController {
       else source == null ? void 0 : source.setCustomValidity("");
       this.syncContentInspector();
     });
-    (_x = root.querySelector("[data-undo]")) == null ? void 0 : _x.addEventListener("click", () => {
+    (_y = root.querySelector("[data-undo]")) == null ? void 0 : _y.addEventListener("click", () => {
       var _a2;
       (_a2 = this.contentEditor) == null ? void 0 : _a2.undo();
       this.syncContentInspector();
     });
-    (_y = root.querySelector("[data-redo]")) == null ? void 0 : _y.addEventListener("click", () => {
+    (_z = root.querySelector("[data-redo]")) == null ? void 0 : _z.addEventListener("click", () => {
       var _a2;
       (_a2 = this.contentEditor) == null ? void 0 : _a2.redo();
       this.syncContentInspector();
@@ -4117,6 +4118,7 @@ class EditorModeController {
       }
     });
     this.bindDrag();
+    this.bindStepBarDrag();
     this.bindCompositionInspector();
     this.bindGuideBehavior();
     this.onSelect("[data-alignment]", (value) => {
@@ -4624,11 +4626,15 @@ class EditorModeController {
     this.refreshStepBar();
   }
   refreshStepBar() {
-    var _a;
+    var _a, _b, _c;
     const flow = (_a = this.root) == null ? void 0 : _a.querySelector("[data-step-flow]");
     if (!flow) return;
     flow.innerHTML = this.stepButtons();
     flow.querySelectorAll("[data-step]").forEach((button) => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
+    const remove = (_b = this.root) == null ? void 0 : _b.querySelector("[data-step-bar-actions] [data-delete-step]");
+    if (remove) remove.disabled = !this.guide || this.guide.steps.length <= 1;
+    const add = (_c = this.root) == null ? void 0 : _c.querySelector("[data-add-current-step]");
+    if (add && this.guide) add.title = `Add a ${getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal" ? "Modal" : "Anchored"} step`;
     this.syncPanel();
   }
   bindDrag() {
@@ -4650,6 +4656,41 @@ class EditorModeController {
           aside.style.transform = "none";
           aside.style.left = `${Math.max(4, Math.min(innerWidth - rect.width - 4, rect.left + next.clientX - startX))}px`;
           aside.style.top = `${Math.max(4, Math.min(innerHeight - rect.height - 4, rect.top + next.clientY - startY))}px`;
+        });
+      };
+      const stop = () => {
+        cancelAnimationFrame(frame);
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", stop);
+        window.removeEventListener("pointercancel", stop);
+        this.dragCleanup = null;
+      };
+      (_a2 = this.dragCleanup) == null ? void 0 : _a2.call(this);
+      this.dragCleanup = stop;
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", stop);
+      window.addEventListener("pointercancel", stop);
+    });
+  }
+  bindStepBarDrag() {
+    var _a, _b;
+    const handle = (_a = this.root) == null ? void 0 : _a.querySelector("[data-step-drag-handle]");
+    const bar = (_b = this.root) == null ? void 0 : _b.querySelector("[data-guide]");
+    if (!handle || !bar) return;
+    handle.addEventListener("pointerdown", (event) => {
+      var _a2;
+      const rect = bar.getBoundingClientRect();
+      const startX = event.clientX;
+      const startY = event.clientY;
+      let frame = 0;
+      const move = (next) => {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() => {
+          bar.style.right = "auto";
+          bar.style.bottom = "auto";
+          bar.style.transform = "none";
+          bar.style.left = `${Math.max(4, Math.min(innerWidth - rect.width - 4, rect.left + next.clientX - startX))}px`;
+          bar.style.top = `${Math.max(4, Math.min(innerHeight - rect.height - 4, rect.top + next.clientY - startY))}px`;
         });
       };
       const stop = () => {
@@ -5593,10 +5634,10 @@ const BASE_STYLE = `
 const STYLE = `${BASE_STYLE}
 .editor-toolbar{position:fixed;left:50%;transform:translateX(-50%);top:12px;width:min(410px,calc(100vw - 8px));z-index:2147483647;border:1px solid #d7dce3;border-radius:10px;background:#fff;color:#111827;box-shadow:0 8px 24px rgba(15,23,42,.16);font:12px/1.3 ui-sans-serif,system-ui,sans-serif;overflow:hidden}
 .editor-toolbar header{padding:7px 8px;gap:4px;align-items:center}.header-copy>span{display:none}.header-copy strong{font-size:11px}.header-copy small{margin-top:1px;font-size:10px}.header-actions{flex-wrap:wrap;justify-content:flex-end;gap:1px}.header-actions button{width:25px;height:28px;font-size:14px}.header-actions [data-save]{width:38px;font-size:11px}.header-actions button:disabled{opacity:.4;cursor:default}
-.editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .history-row{gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .content-heading>.history-row{display:none}
+.editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-drag-handle{flex:none;padding:2px 1px;color:#94a3b8;font-size:16px;line-height:1;cursor:move;touch-action:none;user-select:none}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .history-row{gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .step-bar-action{width:24px;height:24px;padding:0;font-size:16px;line-height:1}.step-navigator .step-bar-action:disabled{cursor:not-allowed;opacity:.4}.step-navigator .content-heading>.history-row{display:none}
 [data-composition-inspector]>.history-row{display:none}
 @media(max-width:800px){.editor-toolbar{width:min(350px,calc(100vw - 8px))}aside{width:min(300px,calc(100vw - 8px))}}
-@media(max-width:480px){.editor-toolbar{left:4px;top:4px;transform:none}.header-copy strong{font-size:10px}.header-copy small{font-size:9px}.header-actions [data-return-dashboard],.header-actions [data-move-side]{display:none}aside{width:calc(100vw - 8px)}.step-navigator{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:calc(100vw - 8px);box-shadow:0 4px 14px rgba(15,23,42,.12)}.step-navigator>.history-row{display:none}.step-navigator .content-heading{display:none}}
+@media(max-width:480px){.editor-toolbar{left:4px;top:4px;transform:none}.header-copy strong{font-size:10px}.header-copy small{font-size:9px}.header-actions [data-return-dashboard],.header-actions [data-move-side]{display:none}aside{width:calc(100vw - 8px)}.step-navigator{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:calc(100vw - 8px);box-shadow:0 4px 14px rgba(15,23,42,.12)}.step-navigator>.history-row:not([data-step-bar-actions]){display:none}.step-navigator .content-heading{display:none}}
 `;
 const GUIDE_STYLE = `.guide-behavior{display:grid;gap:8px;border-top:1px solid #eef0f3;padding-top:10px;margin-top:8px}.guide-behavior [data-guide-config],.guide-behavior [data-guide-missing]{display:grid;gap:7px}.guide-behavior .muted{margin:0;overflow-wrap:anywhere}.guide-preview-controls{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:5px 7px;border-top:1px solid #eef0f3}.guide-preview-controls button{border:1px solid #d7dce3;border-radius:5px;background:#fff;color:#334155;padding:4px 6px;font:11px ui-sans-serif,system-ui;cursor:pointer}.guide-preview-controls small{flex-basis:100%;color:#64748b;font-size:10px}.guide-preview-controls button:disabled{opacity:.4}.guide-preview-controls span{font-size:10px;margin-left:auto}`;
 function checklistEditorAdapter(value) {
@@ -5605,4 +5646,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-DrsGMywZ.js.map
+//# sourceMappingURL=EditorModeController-CpilPDMR.js.map

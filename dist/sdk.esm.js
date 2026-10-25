@@ -1,4 +1,4 @@
-import { A, p } from "./module-mQBMiSr0.js";
+import { A, p } from "./module-apAQ1BLF.js";
 export {
   A as Analytics,
   p as createAnalytics

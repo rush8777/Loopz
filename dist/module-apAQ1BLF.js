@@ -5004,7 +5004,7 @@ const bundledRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-DrsGMywZ.js");
+    const { EditorModeController } = await import("./EditorModeController-CpilPDMR.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -5039,10 +5039,10 @@ export {
   sanitizeBuilderHtml as e,
   clearEditorContinuation as f,
   isGuideDefinition as g,
-  guideStepRequiresTarget as h,
+  getGuideStepPattern as h,
   isChecklistDefinition as i,
-  guideInteractionTarget as j,
-  getGuideStepPattern as k,
+  guideStepRequiresTarget as j,
+  guideInteractionTarget as k,
   guideStepConfigurationErrors as l,
   matchesGuideRoute as m,
   findTarget as n,
@@ -5050,4 +5050,4 @@ export {
   createAnalytics as p,
   surveyBranchErrors as s
 };
-//# sourceMappingURL=module-mQBMiSr0.js.map
+//# sourceMappingURL=module-apAQ1BLF.js.map

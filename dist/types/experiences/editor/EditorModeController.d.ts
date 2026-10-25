@@ -64,6 +64,7 @@ export declare class EditorModeController {
     private moveGuideStep;
     private refreshStepBar;
     private bindDrag;
+    private bindStepBarDrag;
     private onSelect;
     private onInput;
     private onCheck;
