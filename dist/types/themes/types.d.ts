@@ -44,3 +44,25 @@ export interface ThemeCapturePayload {
         sdkVersion: string;
     };
 }
+export type VisualPresetId = "minimal" | "modern" | "soft" | "dark";
+export interface VisualThemeState {
+    source: "template" | "site" | "preset";
+    preset?: VisualPresetId;
+    templateId?: string;
+    templateTokens: SiteThemeTokens;
+    baseTokens: SiteThemeTokens;
+    overrides: {
+        primary?: string;
+        secondary?: string;
+        background?: string;
+        text?: string;
+        bodyFontFamily?: string;
+        headingFontFamily?: string;
+        bodyFontSize?: number;
+        headingFontSize?: number;
+        buttonRadius?: number;
+        radius?: number;
+        shadow?: ThemeShadow;
+        spacing?: number;
+    };
+}

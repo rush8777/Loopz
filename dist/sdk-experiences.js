@@ -375,6 +375,22 @@ ${ISOLATION_CSS}`;
     card.style.setProperty("--movcues-bg", design.theme.background);
     card.style.setProperty("--movcues-fg", design.theme.foreground);
     card.style.setProperty("--movcues-primary", design.theme.primary);
+    if (design.theme.spacing !== void 0) card.style.setProperty("--movcues-theme-spacing", `${design.theme.spacing}px`);
+    const theme = design.theme.siteTheme;
+    if (theme) {
+      card.style.setProperty("--movcues-surface", theme.colors.surface);
+      card.style.setProperty("--movcues-muted", theme.colors.mutedText);
+      card.style.setProperty("--movcues-border", theme.colors.border);
+      card.style.setProperty("--movcues-primary-fg", theme.colors.primaryForeground);
+      card.style.setProperty("--movcues-font-body", theme.typography.bodyFontFamily);
+      card.style.setProperty("--movcues-font-heading", theme.typography.headingFontFamily);
+      card.style.setProperty("--movcues-font-body-size", `${theme.typography.bodyFontSize}px`);
+      card.style.setProperty("--movcues-font-heading-size", `${theme.typography.headingFontSize}px`);
+      card.style.setProperty("--movcues-theme-radius", `${theme.radii.lg}px`);
+      card.style.setProperty("--movcues-button-radius", `${theme.radii.md}px`);
+      const shadow = theme.shadows.md;
+      card.style.setProperty("--movcues-theme-shadow", `${shadow.x}px ${shadow.y}px ${shadow.blur}px ${shadow.spread}px ${shadow.color}`);
+    }
     card.dataset.width = design.width;
     card.dataset.radius = design.theme.borderRadius;
     if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
@@ -1710,6 +1726,25 @@ ${ISOLATION_CSS}`;
       if (!authoredRoot || surface.querySelectorAll('[data-movcues-checklist-role="root"]').length !== 1) {
         this.destroy();
         return false;
+      }
+      const design = checklist.definition.design, theme = design == null ? void 0 : design.theme.siteTheme;
+      if (design) {
+        authoredRoot.style.setProperty("--movcues-bg", design.theme.background);
+        authoredRoot.style.setProperty("--movcues-fg", design.theme.foreground);
+        authoredRoot.style.setProperty("--movcues-primary", design.theme.primary);
+        if (design.theme.spacing !== void 0) authoredRoot.style.setProperty("--movcues-theme-spacing", `${design.theme.spacing}px`);
+      }
+      if (theme) {
+        const shadow = theme.shadows.md;
+        authoredRoot.style.setProperty("--movcues-surface", theme.colors.surface);
+        authoredRoot.style.setProperty("--movcues-muted", theme.colors.mutedText);
+        authoredRoot.style.setProperty("--movcues-border", theme.colors.border);
+        authoredRoot.style.setProperty("--movcues-primary-fg", theme.colors.primaryForeground);
+        authoredRoot.style.setProperty("--movcues-font-body", theme.typography.bodyFontFamily);
+        authoredRoot.style.setProperty("--movcues-font-heading", theme.typography.headingFontFamily);
+        authoredRoot.style.setProperty("--movcues-theme-radius", `${theme.radii.lg}px`);
+        authoredRoot.style.setProperty("--movcues-button-radius", `${theme.radii.md}px`);
+        authoredRoot.style.setProperty("--movcues-theme-shadow", `${shadow.x}px ${shadow.y}px ${shadow.blur}px ${shadow.spread}px ${shadow.color}`);
       }
       const requiredRoles = ["title", "description", "progress", "items", "launcher-label", "remaining-count", "completion-title", "completion-description", "completion-acknowledge"];
       const requiredViews = ["expanded", "launcher", "completion"];

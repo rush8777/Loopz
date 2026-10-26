@@ -39,7 +39,7 @@ export interface ExperienceSize {
         value?: number;
     };
 }
-import type { SiteThemeTokens } from "../themes/types";
+import type { SiteThemeTokens, VisualThemeState } from "../themes/types";
 export interface ExperienceDesign {
     width: LegacyExperienceWidth;
     size?: ExperienceSize;
@@ -48,6 +48,7 @@ export interface ExperienceDesign {
         foreground: string;
         primary: string;
         borderRadius: "sm" | "md" | "lg";
+        spacing?: number;
         siteTheme?: SiteThemeTokens;
     };
 }
@@ -258,12 +259,22 @@ export interface RuntimeWidgetDefinition {
     builder?: WidgetBuilderState;
     target?: ExperienceTarget;
     survey?: SurveyConfig;
+    visualTheme?: VisualThemeState;
+    template?: {
+        id: string;
+        version: 1;
+    };
 }
 export interface RuntimeGuideDefinition {
     steps: GuideStep[];
     design: ExperienceDesign;
     behavior?: {
         layer?: ExperienceLayer;
+    };
+    visualTheme?: VisualThemeState;
+    template?: {
+        id: string;
+        version: 1;
     };
 }
 export type ChecklistItemAction = {
@@ -311,6 +322,12 @@ export interface RuntimeChecklistDefinition {
         acknowledgeLabel: string;
     };
     builder: WidgetBuilderState;
+    design?: ExperienceDesign;
+    visualTheme?: VisualThemeState;
+    template?: {
+        id: string;
+        version: 1;
+    };
 }
 export interface ChecklistProgress {
     stateId: string;
@@ -368,6 +385,12 @@ export interface EditorDraft {
             id: string;
             name: string;
         }>;
+        stylePresets?: Array<{
+            id: string;
+            name: string;
+            tokens: SiteThemeTokens;
+        }>;
+        siteTheme?: SiteThemeTokens | null;
     };
     experience: {
         id: string;

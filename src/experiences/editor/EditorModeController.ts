@@ -30,6 +30,8 @@ import { OnsiteContentEditor, type OnsiteComponentSelection } from "./OnsiteCont
 import { OnsiteCompositionEditor, type CompositionSelection } from "./OnsiteCompositionEditor";
 import { applyOnsiteDocument, cloneOnsite, createOnsiteDocument, duplicateDocument, onsiteDocumentFromBuilder, type OnsiteBlock, type OnsiteCell } from "../onsite/OnsiteDocument";
 import { guideInteractionTarget, guideStepConfigurationErrors, matchesGuideRoute } from "../runtime/GuideStepLogic";
+import type { SiteThemeTokens, VisualPresetId, VisualThemeState } from "../../themes/types";
+import { EXPERIENCE_PRESETS, resolvedTheme } from "../../themes/ExperienceTheme";
 
 type EditorMode = "design" | "target" | "navigate" | "preview";
 type TargetStatus = "found" | "off-page" | "missing" | "unconfigured";
@@ -74,6 +76,7 @@ export class EditorModeController {
   private currentPath = "";
   private guidePreviewComplete = false;
   private guidePreviewEntryPath = "";
+  private previewDevice: "desktop" | "tablet" | "mobile" = "desktop";
   private persistBeforePageLeave = () => this.updateContinuation();
   private protectUnsavedChanges = (event: BeforeUnloadEvent) => { if (!this.dirty && !this.saveInFlight && !this.contentEditor?.isComposing() && !this.compositionEditor?.isComposing()) return; event.preventDefault(); event.returnValue = ""; };
 
@@ -191,6 +194,7 @@ export class EditorModeController {
         <div class="header-actions"><button type="button" data-global-undo aria-label="Undo">↶</button><button type="button" data-global-redo aria-label="Redo">↷</button><button type="button" data-save aria-label="Save draft">Save</button><button type="button" data-move-side aria-label="Move inspector to other side">⇄</button><button type="button" data-return-dashboard aria-label="Return to dashboard">↗</button><button type="button" data-minimize aria-label="Toggle inspector" aria-expanded="true">☷</button><button type="button" data-close aria-label="Close editor">×</button></div>
       </header>
         <div class="modebar"><button type="button" data-mode="design"${designDisabled}>Design</button><button type="button" data-mode="target">Target</button><button type="button" data-mode="navigate">Navigate</button><button type="button" data-mode="preview">Preview</button></div>
+        <div class="devicebar" aria-label="Widget-only viewport preview"><span>Widget preview</span><button type="button" data-device="desktop">Desktop</button><button type="button" data-device="tablet">Tablet</button><button type="button" data-device="mobile">Mobile</button></div>
         <div class="guide-preview-controls" data-guide-preview hidden><button type="button" data-preview-start>Start Guide</button><button type="button" data-preview-back aria-label="Previous preview step">←</button><button type="button" data-preview-next aria-label="Next preview step">→</button><button type="button" data-preview-reset>Reset</button><button type="button" data-preview-test hidden>Test event</button><span data-preview-step></span><small data-trigger-status role="status" aria-live="polite"></small></div>
       </div>
       ${guideMarkup}
@@ -254,6 +258,16 @@ export class EditorModeController {
         </section>
         <section class="section" data-step-only data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
         <section class="section" data-step-only><div class="eyebrow">Configured</div><dl data-configured></dl></section>
+        <section class="section" data-theme-section>
+          <div class="content-heading"><div><div class="eyebrow">Design system</div><strong>Experience theme</strong></div><button type="button" class="secondary-button compact" data-theme-reset>Reset to theme</button></div>
+          <label>Base style<select data-theme-source><option value="template">Template defaults</option><option value="site">Match my website</option><option value="preset" disabled>Saved style</option><option value="minimal">Minimal</option><option value="modern">Modern</option><option value="soft">Soft</option><option value="dark">Dark</option></select></label>
+          <label>Saved style<select data-saved-style><option value="">Choose saved style…</option>${(draft.references?.stylePresets??[]).map(style=>`<option value="${escapeText(style.id)}">${escapeText(style.name)}</option>`).join("")}</select></label>
+          <label>Primary<input type="color" data-theme-primary></label><label>Secondary / surface<input type="color" data-theme-secondary></label><label>Background<input type="color" data-theme-background></label><label>Text<input type="color" data-theme-text></label>
+          <label>Body font<input type="text" maxlength="200" data-theme-body-font></label><label>Heading font<input type="text" maxlength="200" data-theme-heading-font></label>
+          <label>Body size<div class="number"><input type="number" min="8" max="72" data-theme-body-size><span>px</span></div></label><label>Heading size<div class="number"><input type="number" min="10" max="72" data-theme-heading-size><span>px</span></div></label>
+          <label>Radius<div class="number"><input type="number" min="0" max="48" data-theme-radius><span>px</span></div></label><label>Button radius<div class="number"><input type="number" min="0" max="48" data-theme-button-radius><span>px</span></div></label><label>Shadow<select data-theme-shadow><option value="theme">Theme shadow</option><option value="none">None</option><option value="soft">Soft</option><option value="strong">Strong</option></select></label><label>Spacing<div class="number"><input type="number" min="0" max="64" data-theme-spacing><span>px</span></div></label>
+          <label>Style name<input type="text" maxlength="80" placeholder="My product style" data-style-name></label><div class="history-row"><button type="button" class="secondary-button compact" data-style-save>Save style</button><button type="button" class="secondary-button compact" data-style-rename>Rename</button><button type="button" class="secondary-button compact" data-style-delete>Delete</button></div><p class="muted" data-style-status role="status"></p>
+        </section>
         <details class="section live"><summary>Connection & target status</summary><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></details>
         <p class="hint status-error" role="alert" data-content-error hidden></p>
         <div class="save-recovery" data-save-recovery hidden><button type="button" class="secondary-button" data-retry-save>Retry save</button><button type="button" class="secondary-button" data-reload-draft hidden>Reload latest</button><button type="button" class="secondary-button" data-export-draft>Copy / Export unsaved draft</button><button type="button" class="secondary-button" data-discard-draft>Discard and close</button><span data-recovery-message>Local edits are preserved.</span></div><p class="hint" data-mode-hint></p>
@@ -269,6 +283,7 @@ export class EditorModeController {
   private bindPanel(): void {
     const root = this.root!;
     root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.addEventListener("click", () => this.setMode(button.dataset.mode as EditorMode)));
+    root.querySelectorAll<HTMLButtonElement>("[data-device]").forEach(button=>button.addEventListener("click",()=>{this.previewDevice=button.dataset.device as typeof this.previewDevice;this.applyPreviewDevice();this.syncThemeInspector();}));
     root.querySelectorAll<HTMLButtonElement>("[data-pick]").forEach(button => button.addEventListener("click", () => { if (this.mode !== "target") this.setMode("target"); else this.startPicker(); }));
     root.querySelector<HTMLButtonElement>("[data-pick-layer]")?.addEventListener("click", () => this.startLayerPicker());
     root.querySelectorAll<HTMLButtonElement>("[data-step]").forEach(button => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
@@ -314,6 +329,7 @@ export class EditorModeController {
     });
     this.bindDrag();
     this.bindStepBarDrag();
+    this.bindThemeControls();
 
     this.bindCompositionInspector(); this.bindGuideBehavior();
 
@@ -390,6 +406,46 @@ export class EditorModeController {
     root.querySelector<HTMLButtonElement>("[data-v2-undo]")?.addEventListener("click", () => this.compositionEditor?.undo());
     root.querySelector<HTMLButtonElement>("[data-v2-redo]")?.addEventListener("click", () => this.compositionEditor?.redo());
   }
+
+  private ensureThemeState(): VisualThemeState {
+    const owner = (this.checklist ?? this.definition!) as EditorChecklistDefinition | EditorDefinition;
+    if (owner.visualTheme) return owner.visualTheme;
+    const design = this.checklist?.design ?? this.definition!.design;
+    const base = cloneOnsite(design.theme.siteTheme ?? EXPERIENCE_PRESETS.modern);
+    base.colors.background = design.theme.background; base.colors.text = design.theme.foreground; base.colors.primary = design.theme.primary;
+    owner.visualTheme = { source: "template", templateTokens: cloneOnsite(base), baseTokens: cloneOnsite(base), overrides: {} };
+    if (this.checklist) this.definition!.visualTheme = owner.visualTheme;
+    return owner.visualTheme;
+  }
+
+  private applyVisualTheme(render = true): void {
+    const state=this.ensureThemeState(),tokens=resolvedTheme(state),radius=tokens.radii.md<=6?"sm":tokens.radii.md>=18?"lg":"md";
+    const design=this.checklist?.design??this.definition!.design;
+    design.theme={background:tokens.colors.background,foreground:tokens.colors.text,primary:tokens.colors.primary,borderRadius:radius,...(state.overrides.spacing!==undefined?{spacing:state.overrides.spacing}:{}),siteTheme:tokens};
+    if(this.checklist){this.checklist.design=design;this.checklist.visualTheme=state;this.definition!.design=design;this.definition!.visualTheme=state;}
+    if(render)this.changed();
+  }
+
+  private bindThemeControls():void{
+    const root=this.root!;const state=this.ensureThemeState();this.applyVisualTheme(false);
+    root.querySelector<HTMLSelectElement>('[data-theme-source]')?.addEventListener('change',event=>{const value=(event.currentTarget as HTMLSelectElement).value,state=this.ensureThemeState();if(value==='template'){state.source='template';state.baseTokens=cloneOnsite(state.templateTokens);delete state.preset;}else if(value==='site'){const site=this.draft?.references?.siteTheme;if(!site){this.setText('[data-style-status]','No captured website theme is available.');return;}state.source='site';state.baseTokens=cloneOnsite(site);delete state.preset;}else{state.source='preset';state.preset=value as VisualPresetId;state.baseTokens=cloneOnsite(EXPERIENCE_PRESETS[state.preset]);}this.applyVisualTheme();});
+    const override=(key:keyof VisualThemeState['overrides'],value:string|number|undefined)=>{const next=this.ensureThemeState();if(value===''||value===undefined)delete next.overrides[key];else (next.overrides as Record<string,unknown>)[key]=value;this.applyVisualTheme();};
+    const color=(selector:string,key:keyof VisualThemeState['overrides'])=>root.querySelector<HTMLInputElement>(selector)?.addEventListener('change',event=>override(key,(event.currentTarget as HTMLInputElement).value));
+    const textInput=(selector:string,key:keyof VisualThemeState['overrides'])=>root.querySelector<HTMLInputElement>(selector)?.addEventListener('change',event=>override(key,(event.currentTarget as HTMLInputElement).value.trim()));
+    const number=(selector:string,key:keyof VisualThemeState['overrides'],min:number,max:number)=>root.querySelector<HTMLInputElement>(selector)?.addEventListener('change',event=>{const value=Number((event.currentTarget as HTMLInputElement).value);override(key,Number.isFinite(value)?Math.max(min,Math.min(max,value)):undefined);});
+    color('[data-theme-primary]','primary');color('[data-theme-secondary]','secondary');color('[data-theme-background]','background');color('[data-theme-text]','text');textInput('[data-theme-body-font]','bodyFontFamily');textInput('[data-theme-heading-font]','headingFontFamily');number('[data-theme-body-size]','bodyFontSize',8,72);number('[data-theme-heading-size]','headingFontSize',10,72);number('[data-theme-radius]','radius',0,48);number('[data-theme-button-radius]','buttonRadius',0,48);number('[data-theme-spacing]','spacing',0,64);
+    root.querySelector<HTMLSelectElement>('[data-theme-shadow]')?.addEventListener('change',event=>{const mode=(event.currentTarget as HTMLSelectElement).value;if(mode==='theme')return override('shadow',undefined);if(mode==='none')return override('shadow',{x:0,y:0,blur:0,spread:0,color:'transparent'} as never);const source=this.ensureThemeState().baseTokens.shadows.md;override('shadow',{...source,y:mode==='soft'?Math.min(source.y,10):Math.max(source.y,20),blur:mode==='soft'?Math.min(source.blur,28):Math.max(source.blur,56)} as never);});
+    root.querySelector('[data-theme-reset]')?.addEventListener('click',()=>{this.ensureThemeState().overrides={};this.applyVisualTheme();this.setText('[data-style-status]','Experience overrides reset. Block and cell customizations were preserved.');});
+    root.querySelector<HTMLSelectElement>('[data-saved-style]')?.addEventListener('change',event=>{const style=this.draft?.references?.stylePresets?.find(item=>item.id===(event.currentTarget as HTMLSelectElement).value);if(!style)return;const next=this.ensureThemeState();next.source='preset';delete next.preset;next.baseTokens=cloneOnsite(style.tokens);this.applyVisualTheme();this.setText('[data-style-status]',`Applied ${style.name}.`);});
+    root.querySelector('[data-style-save]')?.addEventListener('click',()=>void this.saveCurrentStyle());root.querySelector('[data-style-rename]')?.addEventListener('click',()=>void this.renameCurrentStyle());root.querySelector('[data-style-delete]')?.addEventListener('click',()=>void this.deleteCurrentStyle());
+  }
+
+  private async saveCurrentStyle():Promise<void>{const name=this.root?.querySelector<HTMLInputElement>('[data-style-name]')?.value.trim();if(!name||!this.bridge)return this.setText('[data-style-status]','Enter a style name.');try{const preset=await this.bridge.saveStyle(name,resolvedTheme(this.ensureThemeState()));const list=this.draft!.references!.stylePresets??(this.draft!.references!.stylePresets=[]);list.unshift(preset);this.refreshStyleOptions(preset.id);this.setText('[data-style-status]','Style saved for this site.');}catch(error){this.setText('[data-style-status]',error instanceof Error?error.message:'Style could not be saved.');}}
+  private async renameCurrentStyle():Promise<void>{const select=this.root?.querySelector<HTMLSelectElement>('[data-saved-style]'),name=this.root?.querySelector<HTMLInputElement>('[data-style-name]')?.value.trim();if(!select?.value||!name||!this.bridge)return this.setText('[data-style-status]','Choose a saved style and enter a new name.');try{const updated=await this.bridge.renameStyle(select.value,name),style=this.draft!.references!.stylePresets?.find(item=>item.id===updated.id);if(style)style.name=updated.name;this.refreshStyleOptions(updated.id);this.setText('[data-style-status]','Style renamed.');}catch{this.setText('[data-style-status]','Style could not be renamed.');}}
+  private async deleteCurrentStyle():Promise<void>{const select=this.root?.querySelector<HTMLSelectElement>('[data-saved-style]');if(!select?.value||!this.bridge)return this.setText('[data-style-status]','Choose a saved style first.');try{await this.bridge.deleteStyle(select.value);this.draft!.references!.stylePresets=this.draft!.references!.stylePresets?.filter(item=>item.id!==select.value)??[];this.refreshStyleOptions();this.setText('[data-style-status]','Style deleted.');}catch{this.setText('[data-style-status]','Style could not be deleted.');}}
+  private refreshStyleOptions(selected=''):void{const select=this.root?.querySelector<HTMLSelectElement>('[data-saved-style]');if(!select)return;select.innerHTML='<option value="">Choose saved style…</option>'+((this.draft?.references?.stylePresets??[]).map(style=>`<option value="${escapeText(style.id)}">${escapeText(style.name)}</option>`).join(''));select.value=selected;}
+
+  private syncThemeInspector():void{if(!this.root||!this.definition)return;const state=this.ensureThemeState(),tokens=resolvedTheme(state);this.setValue('[data-theme-source]',state.source==='preset'&&state.preset?state.preset:state.source);this.setValue('[data-theme-primary]',tokens.colors.primary);this.setValue('[data-theme-secondary]',tokens.colors.surface);this.setValue('[data-theme-background]',tokens.colors.background);this.setValue('[data-theme-text]',tokens.colors.text);this.setValue('[data-theme-body-font]',tokens.typography.bodyFontFamily);this.setValue('[data-theme-heading-font]',tokens.typography.headingFontFamily);this.setValue('[data-theme-body-size]',String(tokens.typography.bodyFontSize));this.setValue('[data-theme-heading-size]',String(tokens.typography.headingFontSize));this.setValue('[data-theme-radius]',String(state.overrides.radius??tokens.radii.md));this.setValue('[data-theme-button-radius]',String(state.overrides.buttonRadius??tokens.radii.md));this.setValue('[data-theme-shadow]',state.overrides.shadow?.color==='transparent'?'none':state.overrides.shadow?'strong':'theme');this.setValue('[data-theme-spacing]',String(state.overrides.spacing??16));this.root.querySelectorAll<HTMLButtonElement>('[data-device]').forEach(button=>button.classList.toggle('active',button.dataset.device===this.previewDevice));}
 
   private guideBehaviorMarkup(): string {
     return `<div class="guide-behavior"><div class="eyebrow">Step behavior</div>
@@ -752,7 +808,7 @@ export class EditorModeController {
     this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
     if(this.checklist && this.checklistEditor){
       this.preview.destroy();this.previewRendered=this.checklistEditor.render(this.draft.experience.id,this.draft.version.id,this.mode==="preview");
-      if(this.mode==="design"&&this.previewRendered)this.attachContentEditor();this.updateDiagnostics();return;
+      this.applyPreviewDevice();if(this.mode==="design"&&this.previewRendered)this.attachContentEditor();this.updateDiagnostics();return;
     }
     const definition = this.definition;
     // Editor-only behavior overrides; production renderers and definitions stay unchanged.
@@ -779,7 +835,7 @@ export class EditorModeController {
         if (generation !== this.previewGeneration || this.saveState === "expired" || !this.root) return;
         const host = Array.from(document.querySelectorAll<HTMLElement>("[data-movcues-experience]")).find(element => element.dataset.movcuesExperience === this.draft?.experience.id);
         host?.shadowRoot?.addEventListener("click", event => { if ((event.target as Element)?.closest?.("a")) { event.preventDefault(); event.stopImmediatePropagation(); } }, true);
-        this.previewRendered = true; if (this.mode === "design") this.attachContentEditor(); this.updateDiagnostics(); },
+        this.previewRendered = true; this.applyPreviewDevice(); if (this.mode === "design") this.attachContentEditor(); this.updateDiagnostics(); },
       onDismiss: () => { this.previewRendered = false; this.setText("[data-trigger-status]", "Preview closed. Start or Reset to try again."); this.updateDiagnostics(); },
       onAction: () => void 0,
       onGuideAdvance: () => { if (this.mode === "preview" && this.guide) this.advanceGuidePreview(1); },
@@ -790,6 +846,13 @@ export class EditorModeController {
       onUnavailable: () => { this.previewRendered = false; this.updateDiagnostics(); },
     }, selectedStepId);
     this.updateDiagnostics();
+  }
+
+  private applyPreviewDevice():void{
+    if(!this.draft)return;const host=Array.from(document.querySelectorAll<HTMLElement>('[data-movcues-experience],[data-movcues-checklist]')).find(element=>(element.dataset.movcuesExperience??element.dataset.movcuesChecklist)===this.draft!.experience.id),surface=host?.shadowRoot?.querySelector<HTMLElement>('.card,.movcues-widget');if(!surface)return;
+    if(surface.dataset.movcuesOriginalMaxWidth===undefined)surface.dataset.movcuesOriginalMaxWidth=surface.style.maxWidth;
+    const width=this.previewDevice==='mobile'?360:this.previewDevice==='tablet'?720:null;
+    if(width){surface.style.maxWidth=`min(${width}px, calc(100vw - 16px))`;surface.dataset.movcuesViewportPreview=this.previewDevice;}else{surface.style.maxWidth=surface.dataset.movcuesOriginalMaxWidth;delete surface.dataset.movcuesViewportPreview;}
   }
 
   private attachContentEditor(): void {
@@ -935,6 +998,7 @@ export class EditorModeController {
     this.updateDiagnostics();
     this.syncContentInspector();
     this.syncCompositionInspector();
+    this.syncThemeInspector();
     this.hideChecklistWidgetControls();
     this.setText("[data-mode-hint]", this.mode === "design" && this.draft.experience.widgetType === "cursor_follow" ? "Stationary authoring view · Preview tests cursor-follow movement" : this.mode === "design" && this.isTargetedType() && !this.currentTarget() ? "Select a page target in Target mode before editing this anchored card" : this.mode === "design" ? "Click a component to select · Double-click text to edit" : this.mode === "target" ? this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "This experience does not need a page target" : this.mode === "navigate" ? "Customer app interaction is enabled" : "End-user preview · analytics and actions are disabled");
   }
@@ -1195,6 +1259,7 @@ const BASE_STYLE = `
 
 const STYLE = `${BASE_STYLE}
 .editor-toolbar{position:fixed;left:50%;transform:translateX(-50%);top:12px;width:min(410px,calc(100vw - 8px));z-index:2147483647;border:1px solid #d7dce3;border-radius:10px;background:#fff;color:#111827;box-shadow:0 8px 24px rgba(15,23,42,.16);font:12px/1.3 ui-sans-serif,system-ui,sans-serif;overflow:hidden}
+.devicebar{display:flex;align-items:center;gap:3px;padding:0 6px 5px;color:#64748b;font-size:9px}.devicebar span{margin-right:auto}.devicebar button{border:1px solid #d7dce3;border-radius:5px;background:#fff;color:#475569;padding:3px 5px;font:9px inherit;cursor:pointer}.devicebar button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}
 .editor-toolbar header{padding:7px 8px;gap:4px;align-items:center}.header-copy>span{display:none}.header-copy strong{font-size:11px}.header-copy small{margin-top:1px;font-size:10px}.header-actions{flex-wrap:wrap;justify-content:flex-end;gap:1px}.header-actions button{width:25px;height:28px;font-size:14px}.header-actions [data-save]{width:38px;font-size:11px}.header-actions button:disabled{opacity:.4;cursor:default}
 .editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-drag-handle{flex:none;padding:2px 1px;color:#94a3b8;font-size:16px;line-height:1;cursor:move;touch-action:none;user-select:none}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .history-row{gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .step-bar-action{width:24px;height:24px;padding:0;font-size:16px;line-height:1}.step-navigator .step-bar-action svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.step-navigator .step-bar-delete{border-color:#fecaca;background:#fff1f2;color:#dc2626}.step-navigator .step-bar-delete:hover{border-color:#fca5a5;background:#fee2e2;color:#b91c1c}.step-navigator .step-bar-action:disabled{cursor:not-allowed;opacity:.4}.step-navigator .content-heading>.history-row{display:none}
 [data-composition-inspector]>.history-row{display:none}
@@ -1205,5 +1270,5 @@ const STYLE = `${BASE_STYLE}
 const GUIDE_STYLE = `.guide-behavior{display:grid;gap:8px;border-top:1px solid #eef0f3;padding-top:10px;margin-top:8px}.guide-behavior [data-guide-config],.guide-behavior [data-guide-missing]{display:grid;gap:7px}.guide-behavior .muted{margin:0;overflow-wrap:anywhere}.guide-preview-controls{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:5px 7px;border-top:1px solid #eef0f3}.guide-preview-controls button{border:1px solid #d7dce3;border-radius:5px;background:#fff;color:#334155;padding:4px 6px;font:11px ui-sans-serif,system-ui;cursor:pointer}.guide-preview-controls small{flex-basis:100%;color:#64748b;font-size:10px}.guide-preview-controls button:disabled{opacity:.4}.guide-preview-controls span{font-size:10px;margin-left:auto}`;
 
 function checklistEditorAdapter(value:EditorChecklistDefinition):EditorDefinition {
- return {content:{heading:value.title,body:value.description??""},builder:value.builder,design:{width:"sm",theme:{background:"#fff",foreground:"#111827",primary:"#2563eb",borderRadius:"md"}},behavior:{dismissible:false},targeting:{...value.targeting,trigger:{type:"page_load"},frequency:{mode:"once"}}};
+ return {content:{heading:value.title,body:value.description??""},builder:value.builder,design:value.design??{width:"sm",theme:{background:"#fff",foreground:"#111827",primary:"#2563eb",borderRadius:"md"}},behavior:{dismissible:false},targeting:{...value.targeting,trigger:{type:"page_load"},frequency:{mode:"once"}},visualTheme:value.visualTheme,template:value.template};
 }

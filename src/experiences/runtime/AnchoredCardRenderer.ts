@@ -39,6 +39,22 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
   card.style.setProperty("--movcues-bg", design.theme.background);
   card.style.setProperty("--movcues-fg", design.theme.foreground);
   card.style.setProperty("--movcues-primary", design.theme.primary);
+  if (design.theme.spacing !== undefined) card.style.setProperty("--movcues-theme-spacing", `${design.theme.spacing}px`);
+  const theme = design.theme.siteTheme;
+  if (theme) {
+    card.style.setProperty("--movcues-surface", theme.colors.surface);
+    card.style.setProperty("--movcues-muted", theme.colors.mutedText);
+    card.style.setProperty("--movcues-border", theme.colors.border);
+    card.style.setProperty("--movcues-primary-fg", theme.colors.primaryForeground);
+    card.style.setProperty("--movcues-font-body", theme.typography.bodyFontFamily);
+    card.style.setProperty("--movcues-font-heading", theme.typography.headingFontFamily);
+    card.style.setProperty("--movcues-font-body-size", `${theme.typography.bodyFontSize}px`);
+    card.style.setProperty("--movcues-font-heading-size", `${theme.typography.headingFontSize}px`);
+    card.style.setProperty("--movcues-theme-radius", `${theme.radii.lg}px`);
+    card.style.setProperty("--movcues-button-radius", `${theme.radii.md}px`);
+    const shadow = theme.shadows.md;
+    card.style.setProperty("--movcues-theme-shadow", `${shadow.x}px ${shadow.y}px ${shadow.blur}px ${shadow.spread}px ${shadow.color}`);
+  }
   card.dataset.width = design.width; card.dataset.radius = design.theme.borderRadius;
   if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
   const mountedBuilder = Boolean(builder && mountBuilderContent(root, card, builder, callbacks, widgetType === "survey"));

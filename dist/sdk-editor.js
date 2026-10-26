@@ -277,6 +277,25 @@ ${ISOLATION_CSS}`;
         this.destroy();
         return false;
       }
+      const design = checklist.definition.design, theme = design == null ? void 0 : design.theme.siteTheme;
+      if (design) {
+        authoredRoot.style.setProperty("--movcues-bg", design.theme.background);
+        authoredRoot.style.setProperty("--movcues-fg", design.theme.foreground);
+        authoredRoot.style.setProperty("--movcues-primary", design.theme.primary);
+        if (design.theme.spacing !== void 0) authoredRoot.style.setProperty("--movcues-theme-spacing", `${design.theme.spacing}px`);
+      }
+      if (theme) {
+        const shadow2 = theme.shadows.md;
+        authoredRoot.style.setProperty("--movcues-surface", theme.colors.surface);
+        authoredRoot.style.setProperty("--movcues-muted", theme.colors.mutedText);
+        authoredRoot.style.setProperty("--movcues-border", theme.colors.border);
+        authoredRoot.style.setProperty("--movcues-primary-fg", theme.colors.primaryForeground);
+        authoredRoot.style.setProperty("--movcues-font-body", theme.typography.bodyFontFamily);
+        authoredRoot.style.setProperty("--movcues-font-heading", theme.typography.headingFontFamily);
+        authoredRoot.style.setProperty("--movcues-theme-radius", `${theme.radii.lg}px`);
+        authoredRoot.style.setProperty("--movcues-button-radius", `${theme.radii.md}px`);
+        authoredRoot.style.setProperty("--movcues-theme-shadow", `${shadow2.x}px ${shadow2.y}px ${shadow2.blur}px ${shadow2.spread}px ${shadow2.color}`);
+      }
       const requiredRoles = ["title", "description", "progress", "items", "launcher-label", "remaining-count", "completion-title", "completion-description", "completion-acknowledge"];
       const requiredViews = ["expanded", "launcher", "completion"];
       if (requiredRoles.some((role) => authoredRoot.querySelectorAll(`[data-movcues-checklist-role="${role}"]`).length !== 1) || requiredViews.some((view2) => authoredRoot.querySelectorAll(`[data-movcues-checklist-view="${view2}"]`).length !== 1)) {
@@ -628,7 +647,7 @@ ${ISOLATION_CSS}`;
   }
   const checklistCopy = (value) => ({ title: value.title, description: value.description ?? "", "launcher-label": value.title, "remaining-count": "", "completion-title": value.completionMessage.title, "completion-description": value.completionMessage.description ?? "" });
   const escapeChecklist = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  const CHECKLIST_CELL_CSS = '.movcues-widget--checklist{width:360px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 32px);overflow:auto;background:var(--movcues-bg,#fff);color:var(--movcues-fg,#111827);border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 12px 40px #0f172a24;font:14px/1.4 ui-sans-serif,system-ui}.movcues-widget [data-movcues-checklist-view]:not(.is-active){display:none!important}.movcues-widget--checklist:has([data-movcues-checklist-view="launcher"].is-active){width:220px}.movcues-widget .movcues-checklist__item{display:flex;align-items:flex-start;gap:10px;width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;color:inherit;text-align:left;cursor:pointer;font:inherit}.movcues-widget .movcues-checklist__copy{display:grid;gap:3px}.movcues-widget [data-movcues-checklist-item-role="title"]{font-weight:600}.movcues-widget [data-movcues-checklist-item-role="description"]{font-size:.9em;color:#64748b}.movcues-widget [data-movcues-checklist-item-role="state"]{display:grid;place-items:center;flex:none;width:22px;height:22px;border:1px solid #94a3b8;border-radius:50%;color:transparent}.movcues-widget [data-state="completed"] [data-movcues-checklist-item-role="state"]{background:#16a34a;border-color:#16a34a;color:#fff}.movcues-widget [data-state="locked"]{opacity:.5;cursor:not-allowed}.movcues-widget .movcues-checklist-progress-track{height:4px;border-radius:4px;background:#e2e8f0;overflow:hidden}.movcues-widget .movcues-checklist-progress-fill{display:block;height:100%;width:var(--movcues-checklist-progress,0%);background:#2563eb}.movcues-widget .movcues-checklist-control{border:1px solid #cbd5e1;border-radius:6px;padding:6px 10px;background:#fff;color:inherit;cursor:pointer;font:inherit}.movcues-widget [data-movcues-checklist-role="completion-acknowledge"]{background:#2563eb;border-color:#2563eb;color:#fff}.movcues-widget [data-movcues-checklist-view="launcher"]{cursor:pointer}.movcues-widget [hidden]{display:none!important}';
+  const CHECKLIST_CELL_CSS = '.movcues-widget--checklist{width:360px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 32px);overflow:auto;background:var(--movcues-bg,#fff);color:var(--movcues-fg,#111827);border:1px solid var(--movcues-border,#e2e8f0);border-radius:var(--movcues-theme-radius,12px);box-shadow:var(--movcues-theme-shadow,0 12px 40px #0f172a24);font:14px/1.4 var(--movcues-font-body,ui-sans-serif,system-ui)}.movcues-widget [data-movcues-checklist-view]:not(.is-active){display:none!important}.movcues-widget--checklist:has([data-movcues-checklist-view="launcher"].is-active){width:220px}.movcues-widget .movcues-checklist__item{display:flex;align-items:flex-start;gap:10px;width:100%;padding:10px;border:1px solid var(--movcues-border,#e2e8f0);border-radius:var(--movcues-button-radius,8px);background:var(--movcues-surface,#f8fafc);color:inherit;text-align:left;cursor:pointer;font:inherit}.movcues-widget .movcues-checklist__copy{display:grid;gap:3px}.movcues-widget [data-movcues-checklist-item-role="title"]{font-weight:600}.movcues-widget [data-movcues-checklist-item-role="description"]{font-size:.9em;color:var(--movcues-muted,#64748b)}.movcues-widget [data-movcues-checklist-item-role="state"]{display:grid;place-items:center;flex:none;width:22px;height:22px;border:1px solid #94a3b8;border-radius:50%;color:transparent}.movcues-widget [data-state="completed"] [data-movcues-checklist-item-role="state"]{background:#16a34a;border-color:#16a34a;color:#fff}.movcues-widget [data-state="locked"]{opacity:.5;cursor:not-allowed}.movcues-widget .movcues-checklist-progress-track{height:4px;border-radius:4px;background:#e2e8f0;overflow:hidden}.movcues-widget .movcues-checklist-progress-fill{display:block;height:100%;width:var(--movcues-checklist-progress,0%);background:var(--movcues-primary,#2563eb)}.movcues-widget .movcues-checklist-control{border:1px solid var(--movcues-border,#cbd5e1);border-radius:var(--movcues-button-radius,6px);padding:6px 10px;background:var(--movcues-surface,#fff);color:inherit;cursor:pointer;font:inherit}.movcues-widget [data-movcues-checklist-role="completion-acknowledge"]{background:var(--movcues-primary,#2563eb);border-color:var(--movcues-primary,#2563eb);color:var(--movcues-primary-fg,#fff)}.movcues-widget [data-movcues-checklist-view="launcher"]{cursor:pointer}.movcues-widget [hidden]{display:none!important}';
   const QUESTION_TYPES = ["single_choice", "multiple_choice", "short_text", "long_text", "rating", "nps"];
   function surveyQuestionMarkup(question, blockId) {
     const label = escape$1(question.label);
@@ -848,13 +867,14 @@ ${ISOLATION_CSS}`;
       if (errors.length) throw new Error(errors.join(" "));
     } else if (survey) throw new Error("Survey cells require document version 3.");
     const css = [
-      ".movcues-widget{box-sizing:border-box;width:100%;max-width:100%;min-width:0;overflow-wrap:anywhere;background:var(--movcues-bg);color:var(--movcues-fg)}",
+      ".movcues-widget{box-sizing:border-box;width:100%;max-width:100%;min-width:0;overflow-wrap:anywhere;padding:var(--movcues-theme-spacing,0);background:var(--movcues-bg);color:var(--movcues-fg);border-color:var(--movcues-border,transparent);border-radius:var(--movcues-theme-radius,inherit);font-family:var(--movcues-font-body,ui-sans-serif,system-ui,sans-serif);font-size:var(--movcues-font-body-size,15px);box-shadow:var(--movcues-theme-shadow,none)}",
       ".movcues-widget *{box-sizing:border-box}",
       ".movcues-widget .movcues-cell{display:flex;min-width:0;max-width:100%}",
       ".movcues-widget .movcues-block{min-width:0;max-width:100%;margin:0}",
       ".movcues-widget .movcues-block img{display:block;max-width:100%}",
-      ".movcues-widget .movcues-button{border:0;font:600 14px/1.2 ui-sans-serif,system-ui,sans-serif;cursor:pointer}",
-      ".movcues-widget .movcues-button--primary{background:var(--movcues-primary);color:#fff}",
+      ".movcues-widget .movcues-heading{font-family:var(--movcues-font-heading,var(--movcues-font-body));font-size:var(--movcues-font-heading-size,inherit)}",
+      ".movcues-widget .movcues-button{min-height:40px;border:0;border-radius:var(--movcues-button-radius,8px);font:600 14px/1.2 var(--movcues-font-body,ui-sans-serif,system-ui,sans-serif);cursor:pointer}",
+      ".movcues-widget .movcues-button--primary{background:var(--movcues-primary);color:var(--movcues-primary-fg,#fff)}",
       ".movcues-widget .movcues-button--secondary{background:transparent;color:inherit}",
       ".movcues-widget .movcues-button--outline{background:transparent;color:inherit;border:1px solid currentColor}",
       ".movcues-widget .movcues-block--full{width:100%}"
@@ -904,16 +924,16 @@ ${ISOLATION_CSS}`;
       return `<div ${attrs}><div data-movcues-checklist-role="progress"></div><div class="movcues-checklist-progress-track"><span class="movcues-checklist-progress-fill"></span></div></div>`;
     }
     if (block.type === "question") {
-      css.push(`${selector}{font:${block.fontSize}px/1.5 ui-sans-serif,system-ui,sans-serif;text-align:${align};${block.color ? `color:${block.color};` : ""}}`);
+      css.push(`${selector}{font:${block.fontSize}px/1.5 var(--movcues-font-body,ui-sans-serif,system-ui,sans-serif);text-align:${align};${block.color ? `color:${block.color};` : ""}}`);
       return surveyQuestionMarkup(survey.questions.find((question) => question.id === block.questionId), block.id);
     }
     if (block.type === "survey_controls") return surveyControlsMarkup(block.id, (survey == null ? void 0 : survey.submitLabel) ?? "Submit");
     if (block.type === "heading") {
-      css.push(`${selector}{font:${block.weight} ${block.fontSize}px/${block.lineHeight ?? 1.25} ui-sans-serif,system-ui,sans-serif;text-align:${align};${block.color ? `color:${block.color};` : ""}}`);
+      css.push(`${selector}{font:${block.weight} ${block.fontSize}px/${block.lineHeight ?? 1.25} var(--movcues-font-heading,ui-sans-serif,system-ui,sans-serif);text-align:${align};${block.color ? `color:${block.color};` : ""}}`);
       return `<h${block.level} class="movcues-block movcues-heading" data-movcues-block-id="${block.id}" data-movcues-content="heading">${sanitizeRichText(block.html)}</h${block.level}>`;
     }
     if (block.type === "text") {
-      css.push(`${selector}{font:${block.weight} ${block.fontSize}px/${block.lineHeight ?? 1.5} ui-sans-serif,system-ui,sans-serif;text-align:${align};white-space:pre-wrap;${block.color ? `color:${block.color};` : ""}}`);
+      css.push(`${selector}{font:${block.weight} ${block.fontSize}px/${block.lineHeight ?? 1.5} var(--movcues-font-body,ui-sans-serif,system-ui,sans-serif);text-align:${align};white-space:pre-wrap;${block.color ? `color:${block.color};` : ""}}`);
       return `<div class="movcues-block movcues-text" data-movcues-block-id="${block.id}" data-movcues-content="body">${sanitizeRichText(block.html)}</div>`;
     }
     if (block.type === "button") {
@@ -2004,6 +2024,22 @@ ${ISOLATION_CSS}`;
     card.style.setProperty("--movcues-bg", design.theme.background);
     card.style.setProperty("--movcues-fg", design.theme.foreground);
     card.style.setProperty("--movcues-primary", design.theme.primary);
+    if (design.theme.spacing !== void 0) card.style.setProperty("--movcues-theme-spacing", `${design.theme.spacing}px`);
+    const theme = design.theme.siteTheme;
+    if (theme) {
+      card.style.setProperty("--movcues-surface", theme.colors.surface);
+      card.style.setProperty("--movcues-muted", theme.colors.mutedText);
+      card.style.setProperty("--movcues-border", theme.colors.border);
+      card.style.setProperty("--movcues-primary-fg", theme.colors.primaryForeground);
+      card.style.setProperty("--movcues-font-body", theme.typography.bodyFontFamily);
+      card.style.setProperty("--movcues-font-heading", theme.typography.headingFontFamily);
+      card.style.setProperty("--movcues-font-body-size", `${theme.typography.bodyFontSize}px`);
+      card.style.setProperty("--movcues-font-heading-size", `${theme.typography.headingFontSize}px`);
+      card.style.setProperty("--movcues-theme-radius", `${theme.radii.lg}px`);
+      card.style.setProperty("--movcues-button-radius", `${theme.radii.md}px`);
+      const shadow2 = theme.shadows.md;
+      card.style.setProperty("--movcues-theme-shadow", `${shadow2.x}px ${shadow2.y}px ${shadow2.blur}px ${shadow2.spread}px ${shadow2.color}`);
+    }
     card.dataset.width = design.width;
     card.dataset.radius = design.theme.borderRadius;
     if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
@@ -3143,6 +3179,21 @@ ${ISOLATION_CSS}`;
       }
       const body = await response.json();
       return body.version;
+    }
+    async saveStyle(name, tokens) {
+      var _a;
+      const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/style-presets`, { method: "POST", headers: this.headers(), credentials: "omit", body: JSON.stringify({ name, tokens }) });
+      if (!response.ok) throw new Error(((_a = await response.json().catch(() => null)) == null ? void 0 : _a.error) ?? "Style could not be saved");
+      return (await response.json()).preset;
+    }
+    async renameStyle(id, name) {
+      const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/style-presets/${encodeURIComponent(id)}`, { method: "PATCH", headers: this.headers(), credentials: "omit", body: JSON.stringify({ name }) });
+      if (!response.ok) throw new Error("Style could not be renamed");
+      return (await response.json()).preset;
+    }
+    async deleteStyle(id) {
+      const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/style-presets/${encodeURIComponent(id)}`, { method: "DELETE", headers: this.headers(), credentials: "omit" });
+      if (!response.ok) throw new Error("Style could not be deleted");
     }
   }
   class DraftConflictError extends Error {
@@ -5587,6 +5638,28 @@ ${ISOLATION_CSS}`;
   function escapeHtmlAttribute(value) {
     return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
   }
+  const shadow = (y, blur, color) => ({ x: 0, y, blur, spread: 0, color });
+  const EXPERIENCE_PRESETS = {
+    minimal: { version: 1, colors: { background: "#ffffff", surface: "#ffffff", text: "#111827", mutedText: "#64748b", primary: "#2563eb", primaryForeground: "#ffffff", border: "#e2e8f0" }, typography: { bodyFontFamily: "ui-sans-serif, system-ui, sans-serif", headingFontFamily: "ui-sans-serif, system-ui, sans-serif", bodyFontSize: 15, headingFontSize: 24, bodyFontWeight: 400, headingFontWeight: 700, bodyLineHeight: 1.5, headingLineHeight: 1.2 }, radii: { sm: 4, md: 8, lg: 12 }, shadows: { sm: shadow(2, 8, "rgba(15,23,42,.08)"), md: shadow(12, 36, "rgba(15,23,42,.16)") } },
+    modern: { version: 1, colors: { background: "#ffffff", surface: "#f8fafc", text: "#0f172a", mutedText: "#64748b", primary: "#4f46e5", primaryForeground: "#ffffff", border: "#e2e8f0" }, typography: { bodyFontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", headingFontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", bodyFontSize: 15, headingFontSize: 28, bodyFontWeight: 400, headingFontWeight: 700, bodyLineHeight: 1.55, headingLineHeight: 1.15 }, radii: { sm: 6, md: 12, lg: 20 }, shadows: { sm: shadow(4, 14, "rgba(15,23,42,.09)"), md: shadow(24, 70, "rgba(15,23,42,.20)") } },
+    soft: { version: 1, colors: { background: "#f8fafc", surface: "#ffffff", text: "#1e293b", mutedText: "#64748b", primary: "#0284c7", primaryForeground: "#ffffff", border: "#dbeafe" }, typography: { bodyFontFamily: "ui-rounded, ui-sans-serif, system-ui, sans-serif", headingFontFamily: "ui-rounded, ui-sans-serif, system-ui, sans-serif", bodyFontSize: 15, headingFontSize: 26, bodyFontWeight: 400, headingFontWeight: 700, bodyLineHeight: 1.6, headingLineHeight: 1.2 }, radii: { sm: 10, md: 16, lg: 24 }, shadows: { sm: shadow(6, 18, "rgba(14,116,144,.10)"), md: shadow(22, 58, "rgba(14,116,144,.16)") } },
+    dark: { version: 1, colors: { background: "#0f172a", surface: "#1e293b", text: "#f8fafc", mutedText: "#cbd5e1", primary: "#818cf8", primaryForeground: "#0f172a", border: "#334155" }, typography: { bodyFontFamily: "ui-sans-serif, system-ui, sans-serif", headingFontFamily: "ui-sans-serif, system-ui, sans-serif", bodyFontSize: 15, headingFontSize: 26, bodyFontWeight: 400, headingFontWeight: 700, bodyLineHeight: 1.55, headingLineHeight: 1.18 }, radii: { sm: 6, md: 12, lg: 18 }, shadows: { sm: shadow(5, 16, "rgba(0,0,0,.28)"), md: shadow(24, 70, "rgba(0,0,0,.42)") } }
+  };
+  function resolvedTheme(state) {
+    const value = structuredClone(state.baseTokens), o = state.overrides;
+    if (o.primary) value.colors.primary = o.primary;
+    if (o.secondary) value.colors.surface = o.secondary;
+    if (o.background) value.colors.background = o.background;
+    if (o.text) value.colors.text = o.text;
+    if (o.bodyFontFamily) value.typography.bodyFontFamily = o.bodyFontFamily;
+    if (o.headingFontFamily) value.typography.headingFontFamily = o.headingFontFamily;
+    if (o.bodyFontSize) value.typography.bodyFontSize = o.bodyFontSize;
+    if (o.headingFontSize) value.typography.headingFontSize = o.headingFontSize;
+    if (o.radius !== void 0) value.radii = { sm: Math.max(0, o.radius / 2), md: o.radius, lg: Math.min(100, o.radius * 1.5) };
+    if (o.buttonRadius !== void 0) value.radii.md = o.buttonRadius;
+    if (o.shadow) value.shadows = { sm: o.shadow, md: o.shadow };
+    return value;
+  }
   class EditorModeController {
     constructor(apiBase) {
       this.apiBase = apiBase;
@@ -5629,6 +5702,7 @@ ${ISOLATION_CSS}`;
       this.currentPath = "";
       this.guidePreviewComplete = false;
       this.guidePreviewEntryPath = "";
+      this.previewDevice = "desktop";
       this.persistBeforePageLeave = () => this.updateContinuation();
       this.protectUnsavedChanges = (event) => {
         var _a, _b;
@@ -5820,9 +5894,9 @@ ${ISOLATION_CSS}`;
       this.fitPanel();
     }
     panelMarkup(draft) {
-      var _a, _b;
+      var _a, _b, _c;
       const selectableSteps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
-      const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><span class="step-drag-handle" data-step-drag-handle title="Drag step bar" aria-hidden="true">⠿</span><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-add-step="modal">＋ Modal</button><button type="button" class="secondary-button compact" data-add-step="anchored_card">＋ Anchored</button></div>' : ""}</div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? `<div class="history-row" data-step-bar-actions><button type="button" class="secondary-button compact step-bar-action" data-add-current-step aria-label="Add step" title="Add a ${getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal" ? "Modal" : "Anchored"} step">＋</button><button type="button" class="secondary-button compact step-bar-action" data-delete-step aria-label="Delete selected step" title="Delete selected step"${this.guide.steps.length <= 1 ? " disabled" : ""}>⌫</button></div><div class="history-row"><button type="button" class="secondary-button compact" data-duplicate-step>Duplicate</button><button type="button" class="secondary-button compact" data-step-left>←</button><button type="button" class="secondary-button compact" data-step-right>→</button></div>` : ""}</section>` : "";
+      const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><span class="step-drag-handle" data-step-drag-handle title="Drag step bar" aria-hidden="true">⠿</span><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-add-step="modal">＋ Modal</button><button type="button" class="secondary-button compact" data-add-step="anchored_card">＋ Anchored</button></div>' : ""}</div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? `<div class="history-row" data-step-bar-actions><button type="button" class="secondary-button compact step-bar-action" data-add-current-step aria-label="Add step" title="Add a ${getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal" ? "Modal" : "Anchored"} step">＋</button><button type="button" class="secondary-button compact step-bar-action step-bar-delete" data-delete-step aria-label="Delete selected step" title="Delete selected step"${this.guide.steps.length <= 1 ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13"/></svg></button></div><div class="history-row"><button type="button" class="secondary-button compact" data-duplicate-step>Duplicate</button><button type="button" class="secondary-button compact" data-step-left>←</button><button type="button" class="secondary-button compact" data-step-right>→</button></div>` : ""}</section>` : "";
       const designDisabled = draft.experience.builderMode !== "onsite" ? ' disabled title="Content is edited in the GrapesJS Dashboard Builder"' : "";
       return `<div class="editor-toolbar" data-editor-toolbar role="region" aria-label="Movcues editing controls">
       <header data-drag-handle>
@@ -5830,6 +5904,7 @@ ${ISOLATION_CSS}`;
         <div class="header-actions"><button type="button" data-global-undo aria-label="Undo">↶</button><button type="button" data-global-redo aria-label="Redo">↷</button><button type="button" data-save aria-label="Save draft">Save</button><button type="button" data-move-side aria-label="Move inspector to other side">⇄</button><button type="button" data-return-dashboard aria-label="Return to dashboard">↗</button><button type="button" data-minimize aria-label="Toggle inspector" aria-expanded="true">☷</button><button type="button" data-close aria-label="Close editor">×</button></div>
       </header>
         <div class="modebar"><button type="button" data-mode="design"${designDisabled}>Design</button><button type="button" data-mode="target">Target</button><button type="button" data-mode="navigate">Navigate</button><button type="button" data-mode="preview">Preview</button></div>
+        <div class="devicebar" aria-label="Widget-only viewport preview"><span>Widget preview</span><button type="button" data-device="desktop">Desktop</button><button type="button" data-device="tablet">Tablet</button><button type="button" data-device="mobile">Mobile</button></div>
         <div class="guide-preview-controls" data-guide-preview hidden><button type="button" data-preview-start>Start Guide</button><button type="button" data-preview-back aria-label="Previous preview step">←</button><button type="button" data-preview-next aria-label="Next preview step">→</button><button type="button" data-preview-reset>Reset</button><button type="button" data-preview-test hidden>Test event</button><span data-preview-step></span><small data-trigger-status role="status" aria-live="polite"></small></div>
       </div>
       ${guideMarkup}
@@ -5893,6 +5968,16 @@ ${ISOLATION_CSS}`;
         </section>
         <section class="section" data-step-only data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
         <section class="section" data-step-only><div class="eyebrow">Configured</div><dl data-configured></dl></section>
+        <section class="section" data-theme-section>
+          <div class="content-heading"><div><div class="eyebrow">Design system</div><strong>Experience theme</strong></div><button type="button" class="secondary-button compact" data-theme-reset>Reset to theme</button></div>
+          <label>Base style<select data-theme-source><option value="template">Template defaults</option><option value="site">Match my website</option><option value="preset" disabled>Saved style</option><option value="minimal">Minimal</option><option value="modern">Modern</option><option value="soft">Soft</option><option value="dark">Dark</option></select></label>
+          <label>Saved style<select data-saved-style><option value="">Choose saved style…</option>${(((_c = draft.references) == null ? void 0 : _c.stylePresets) ?? []).map((style) => `<option value="${escapeText(style.id)}">${escapeText(style.name)}</option>`).join("")}</select></label>
+          <label>Primary<input type="color" data-theme-primary></label><label>Secondary / surface<input type="color" data-theme-secondary></label><label>Background<input type="color" data-theme-background></label><label>Text<input type="color" data-theme-text></label>
+          <label>Body font<input type="text" maxlength="200" data-theme-body-font></label><label>Heading font<input type="text" maxlength="200" data-theme-heading-font></label>
+          <label>Body size<div class="number"><input type="number" min="8" max="72" data-theme-body-size><span>px</span></div></label><label>Heading size<div class="number"><input type="number" min="10" max="72" data-theme-heading-size><span>px</span></div></label>
+          <label>Radius<div class="number"><input type="number" min="0" max="48" data-theme-radius><span>px</span></div></label><label>Button radius<div class="number"><input type="number" min="0" max="48" data-theme-button-radius><span>px</span></div></label><label>Shadow<select data-theme-shadow><option value="theme">Theme shadow</option><option value="none">None</option><option value="soft">Soft</option><option value="strong">Strong</option></select></label><label>Spacing<div class="number"><input type="number" min="0" max="64" data-theme-spacing><span>px</span></div></label>
+          <label>Style name<input type="text" maxlength="80" placeholder="My product style" data-style-name></label><div class="history-row"><button type="button" class="secondary-button compact" data-style-save>Save style</button><button type="button" class="secondary-button compact" data-style-rename>Rename</button><button type="button" class="secondary-button compact" data-style-delete>Delete</button></div><p class="muted" data-style-status role="status"></p>
+        </section>
         <details class="section live"><summary>Connection & target status</summary><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></details>
         <p class="hint status-error" role="alert" data-content-error hidden></p>
         <div class="save-recovery" data-save-recovery hidden><button type="button" class="secondary-button" data-retry-save>Retry save</button><button type="button" class="secondary-button" data-reload-draft hidden>Reload latest</button><button type="button" class="secondary-button" data-export-draft>Copy / Export unsaved draft</button><button type="button" class="secondary-button" data-discard-draft>Discard and close</button><span data-recovery-message>Local edits are preserved.</span></div><p class="hint" data-mode-hint></p>
@@ -5908,6 +5993,11 @@ ${ISOLATION_CSS}`;
       var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z;
       const root = this.root;
       root.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this.setMode(button.dataset.mode)));
+      root.querySelectorAll("[data-device]").forEach((button) => button.addEventListener("click", () => {
+        this.previewDevice = button.dataset.device;
+        this.applyPreviewDevice();
+        this.syncThemeInspector();
+      }));
       root.querySelectorAll("[data-pick]").forEach((button) => button.addEventListener("click", () => {
         if (this.mode !== "target") this.setMode("target");
         else this.startPicker();
@@ -6064,6 +6154,7 @@ ${ISOLATION_CSS}`;
       });
       this.bindDrag();
       this.bindStepBarDrag();
+      this.bindThemeControls();
       this.bindCompositionInspector();
       this.bindGuideBehavior();
       this.onSelect("[data-alignment]", (value) => {
@@ -6329,6 +6420,185 @@ ${ISOLATION_CSS}`;
         var _a2;
         return (_a2 = this.compositionEditor) == null ? void 0 : _a2.redo();
       });
+    }
+    ensureThemeState() {
+      var _a;
+      const owner = this.checklist ?? this.definition;
+      if (owner.visualTheme) return owner.visualTheme;
+      const design = ((_a = this.checklist) == null ? void 0 : _a.design) ?? this.definition.design;
+      const base = cloneOnsite(design.theme.siteTheme ?? EXPERIENCE_PRESETS.modern);
+      base.colors.background = design.theme.background;
+      base.colors.text = design.theme.foreground;
+      base.colors.primary = design.theme.primary;
+      owner.visualTheme = { source: "template", templateTokens: cloneOnsite(base), baseTokens: cloneOnsite(base), overrides: {} };
+      if (this.checklist) this.definition.visualTheme = owner.visualTheme;
+      return owner.visualTheme;
+    }
+    applyVisualTheme(render = true) {
+      var _a;
+      const state = this.ensureThemeState(), tokens = resolvedTheme(state), radius = tokens.radii.md <= 6 ? "sm" : tokens.radii.md >= 18 ? "lg" : "md";
+      const design = ((_a = this.checklist) == null ? void 0 : _a.design) ?? this.definition.design;
+      design.theme = { background: tokens.colors.background, foreground: tokens.colors.text, primary: tokens.colors.primary, borderRadius: radius, ...state.overrides.spacing !== void 0 ? { spacing: state.overrides.spacing } : {}, siteTheme: tokens };
+      if (this.checklist) {
+        this.checklist.design = design;
+        this.checklist.visualTheme = state;
+        this.definition.design = design;
+        this.definition.visualTheme = state;
+      }
+      if (render) this.changed();
+    }
+    bindThemeControls() {
+      var _a, _b, _c, _d, _e, _f, _g;
+      const root = this.root;
+      this.ensureThemeState();
+      this.applyVisualTheme(false);
+      (_a = root.querySelector("[data-theme-source]")) == null ? void 0 : _a.addEventListener("change", (event) => {
+        var _a2, _b2;
+        const value = event.currentTarget.value, state2 = this.ensureThemeState();
+        if (value === "template") {
+          state2.source = "template";
+          state2.baseTokens = cloneOnsite(state2.templateTokens);
+          delete state2.preset;
+        } else if (value === "site") {
+          const site = (_b2 = (_a2 = this.draft) == null ? void 0 : _a2.references) == null ? void 0 : _b2.siteTheme;
+          if (!site) {
+            this.setText("[data-style-status]", "No captured website theme is available.");
+            return;
+          }
+          state2.source = "site";
+          state2.baseTokens = cloneOnsite(site);
+          delete state2.preset;
+        } else {
+          state2.source = "preset";
+          state2.preset = value;
+          state2.baseTokens = cloneOnsite(EXPERIENCE_PRESETS[state2.preset]);
+        }
+        this.applyVisualTheme();
+      });
+      const override = (key, value) => {
+        const next = this.ensureThemeState();
+        if (value === "" || value === void 0) delete next.overrides[key];
+        else next.overrides[key] = value;
+        this.applyVisualTheme();
+      };
+      const color = (selector, key) => {
+        var _a2;
+        return (_a2 = root.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => override(key, event.currentTarget.value));
+      };
+      const textInput = (selector, key) => {
+        var _a2;
+        return (_a2 = root.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => override(key, event.currentTarget.value.trim()));
+      };
+      const number = (selector, key, min, max) => {
+        var _a2;
+        return (_a2 = root.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => {
+          const value = Number(event.currentTarget.value);
+          override(key, Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : void 0);
+        });
+      };
+      color("[data-theme-primary]", "primary");
+      color("[data-theme-secondary]", "secondary");
+      color("[data-theme-background]", "background");
+      color("[data-theme-text]", "text");
+      textInput("[data-theme-body-font]", "bodyFontFamily");
+      textInput("[data-theme-heading-font]", "headingFontFamily");
+      number("[data-theme-body-size]", "bodyFontSize", 8, 72);
+      number("[data-theme-heading-size]", "headingFontSize", 10, 72);
+      number("[data-theme-radius]", "radius", 0, 48);
+      number("[data-theme-button-radius]", "buttonRadius", 0, 48);
+      number("[data-theme-spacing]", "spacing", 0, 64);
+      (_b = root.querySelector("[data-theme-shadow]")) == null ? void 0 : _b.addEventListener("change", (event) => {
+        const mode = event.currentTarget.value;
+        if (mode === "theme") return override("shadow", void 0);
+        if (mode === "none") return override("shadow", { x: 0, y: 0, blur: 0, spread: 0, color: "transparent" });
+        const source = this.ensureThemeState().baseTokens.shadows.md;
+        override("shadow", { ...source, y: mode === "soft" ? Math.min(source.y, 10) : Math.max(source.y, 20), blur: mode === "soft" ? Math.min(source.blur, 28) : Math.max(source.blur, 56) });
+      });
+      (_c = root.querySelector("[data-theme-reset]")) == null ? void 0 : _c.addEventListener("click", () => {
+        this.ensureThemeState().overrides = {};
+        this.applyVisualTheme();
+        this.setText("[data-style-status]", "Experience overrides reset. Block and cell customizations were preserved.");
+      });
+      (_d = root.querySelector("[data-saved-style]")) == null ? void 0 : _d.addEventListener("change", (event) => {
+        var _a2, _b2, _c2;
+        const style = (_c2 = (_b2 = (_a2 = this.draft) == null ? void 0 : _a2.references) == null ? void 0 : _b2.stylePresets) == null ? void 0 : _c2.find((item) => item.id === event.currentTarget.value);
+        if (!style) return;
+        const next = this.ensureThemeState();
+        next.source = "preset";
+        delete next.preset;
+        next.baseTokens = cloneOnsite(style.tokens);
+        this.applyVisualTheme();
+        this.setText("[data-style-status]", `Applied ${style.name}.`);
+      });
+      (_e = root.querySelector("[data-style-save]")) == null ? void 0 : _e.addEventListener("click", () => void this.saveCurrentStyle());
+      (_f = root.querySelector("[data-style-rename]")) == null ? void 0 : _f.addEventListener("click", () => void this.renameCurrentStyle());
+      (_g = root.querySelector("[data-style-delete]")) == null ? void 0 : _g.addEventListener("click", () => void this.deleteCurrentStyle());
+    }
+    async saveCurrentStyle() {
+      var _a, _b;
+      const name = (_b = (_a = this.root) == null ? void 0 : _a.querySelector("[data-style-name]")) == null ? void 0 : _b.value.trim();
+      if (!name || !this.bridge) return this.setText("[data-style-status]", "Enter a style name.");
+      try {
+        const preset = await this.bridge.saveStyle(name, resolvedTheme(this.ensureThemeState()));
+        const list = this.draft.references.stylePresets ?? (this.draft.references.stylePresets = []);
+        list.unshift(preset);
+        this.refreshStyleOptions(preset.id);
+        this.setText("[data-style-status]", "Style saved for this site.");
+      } catch (error) {
+        this.setText("[data-style-status]", error instanceof Error ? error.message : "Style could not be saved.");
+      }
+    }
+    async renameCurrentStyle() {
+      var _a, _b, _c, _d;
+      const select = (_a = this.root) == null ? void 0 : _a.querySelector("[data-saved-style]"), name = (_c = (_b = this.root) == null ? void 0 : _b.querySelector("[data-style-name]")) == null ? void 0 : _c.value.trim();
+      if (!(select == null ? void 0 : select.value) || !name || !this.bridge) return this.setText("[data-style-status]", "Choose a saved style and enter a new name.");
+      try {
+        const updated = await this.bridge.renameStyle(select.value, name), style = (_d = this.draft.references.stylePresets) == null ? void 0 : _d.find((item) => item.id === updated.id);
+        if (style) style.name = updated.name;
+        this.refreshStyleOptions(updated.id);
+        this.setText("[data-style-status]", "Style renamed.");
+      } catch {
+        this.setText("[data-style-status]", "Style could not be renamed.");
+      }
+    }
+    async deleteCurrentStyle() {
+      var _a, _b;
+      const select = (_a = this.root) == null ? void 0 : _a.querySelector("[data-saved-style]");
+      if (!(select == null ? void 0 : select.value) || !this.bridge) return this.setText("[data-style-status]", "Choose a saved style first.");
+      try {
+        await this.bridge.deleteStyle(select.value);
+        this.draft.references.stylePresets = ((_b = this.draft.references.stylePresets) == null ? void 0 : _b.filter((item) => item.id !== select.value)) ?? [];
+        this.refreshStyleOptions();
+        this.setText("[data-style-status]", "Style deleted.");
+      } catch {
+        this.setText("[data-style-status]", "Style could not be deleted.");
+      }
+    }
+    refreshStyleOptions(selected = "") {
+      var _a, _b, _c;
+      const select = (_a = this.root) == null ? void 0 : _a.querySelector("[data-saved-style]");
+      if (!select) return;
+      select.innerHTML = '<option value="">Choose saved style…</option>' + (((_c = (_b = this.draft) == null ? void 0 : _b.references) == null ? void 0 : _c.stylePresets) ?? []).map((style) => `<option value="${escapeText(style.id)}">${escapeText(style.name)}</option>`).join("");
+      select.value = selected;
+    }
+    syncThemeInspector() {
+      var _a;
+      if (!this.root || !this.definition) return;
+      const state = this.ensureThemeState(), tokens = resolvedTheme(state);
+      this.setValue("[data-theme-source]", state.source === "preset" && state.preset ? state.preset : state.source);
+      this.setValue("[data-theme-primary]", tokens.colors.primary);
+      this.setValue("[data-theme-secondary]", tokens.colors.surface);
+      this.setValue("[data-theme-background]", tokens.colors.background);
+      this.setValue("[data-theme-text]", tokens.colors.text);
+      this.setValue("[data-theme-body-font]", tokens.typography.bodyFontFamily);
+      this.setValue("[data-theme-heading-font]", tokens.typography.headingFontFamily);
+      this.setValue("[data-theme-body-size]", String(tokens.typography.bodyFontSize));
+      this.setValue("[data-theme-heading-size]", String(tokens.typography.headingFontSize));
+      this.setValue("[data-theme-radius]", String(state.overrides.radius ?? tokens.radii.md));
+      this.setValue("[data-theme-button-radius]", String(state.overrides.buttonRadius ?? tokens.radii.md));
+      this.setValue("[data-theme-shadow]", ((_a = state.overrides.shadow) == null ? void 0 : _a.color) === "transparent" ? "none" : state.overrides.shadow ? "strong" : "theme");
+      this.setValue("[data-theme-spacing]", String(state.overrides.spacing ?? 16));
+      this.root.querySelectorAll("[data-device]").forEach((button) => button.classList.toggle("active", button.dataset.device === this.previewDevice));
     }
     guideBehaviorMarkup() {
       return `<div class="guide-behavior"><div class="eyebrow">Step behavior</div>
@@ -6939,6 +7209,7 @@ ${ISOLATION_CSS}`;
       if (this.checklist && this.checklistEditor) {
         this.preview.destroy();
         this.previewRendered = this.checklistEditor.render(this.draft.experience.id, this.draft.version.id, this.mode === "preview");
+        this.applyPreviewDevice();
         if (this.mode === "design" && this.previewRendered) this.attachContentEditor();
         this.updateDiagnostics();
         return;
@@ -6986,6 +7257,7 @@ ${ISOLATION_CSS}`;
             }
           }, true);
           this.previewRendered = true;
+          this.applyPreviewDevice();
           if (this.mode === "design") this.attachContentEditor();
           this.updateDiagnostics();
         },
@@ -7017,6 +7289,21 @@ ${ISOLATION_CSS}`;
         }
       }, selectedStepId);
       this.updateDiagnostics();
+    }
+    applyPreviewDevice() {
+      var _a;
+      if (!this.draft) return;
+      const host = Array.from(document.querySelectorAll("[data-movcues-experience],[data-movcues-checklist]")).find((element) => (element.dataset.movcuesExperience ?? element.dataset.movcuesChecklist) === this.draft.experience.id), surface = (_a = host == null ? void 0 : host.shadowRoot) == null ? void 0 : _a.querySelector(".card,.movcues-widget");
+      if (!surface) return;
+      if (surface.dataset.movcuesOriginalMaxWidth === void 0) surface.dataset.movcuesOriginalMaxWidth = surface.style.maxWidth;
+      const width = this.previewDevice === "mobile" ? 360 : this.previewDevice === "tablet" ? 720 : null;
+      if (width) {
+        surface.style.maxWidth = `min(${width}px, calc(100vw - 16px))`;
+        surface.dataset.movcuesViewportPreview = this.previewDevice;
+      } else {
+        surface.style.maxWidth = surface.dataset.movcuesOriginalMaxWidth;
+        delete surface.dataset.movcuesViewportPreview;
+      }
     }
     attachContentEditor() {
       var _a, _b, _c;
@@ -7287,6 +7574,7 @@ ${ISOLATION_CSS}`;
       this.updateDiagnostics();
       this.syncContentInspector();
       this.syncCompositionInspector();
+      this.syncThemeInspector();
       this.hideChecklistWidgetControls();
       this.setText("[data-mode-hint]", this.mode === "design" && this.draft.experience.widgetType === "cursor_follow" ? "Stationary authoring view · Preview tests cursor-follow movement" : this.mode === "design" && this.isTargetedType() && !this.currentTarget() ? "Select a page target in Target mode before editing this anchored card" : this.mode === "design" ? "Click a component to select · Double-click text to edit" : this.mode === "target" ? this.isTargetedType() ? "Select an element · Hold Shift to interact temporarily" : "This experience does not need a page target" : this.mode === "navigate" ? "Customer app interaction is enabled" : "End-user preview · analytics and actions are disabled");
     }
@@ -7578,15 +7866,16 @@ ${ISOLATION_CSS}`;
 `;
   const STYLE = `${BASE_STYLE}
 .editor-toolbar{position:fixed;left:50%;transform:translateX(-50%);top:12px;width:min(410px,calc(100vw - 8px));z-index:2147483647;border:1px solid #d7dce3;border-radius:10px;background:#fff;color:#111827;box-shadow:0 8px 24px rgba(15,23,42,.16);font:12px/1.3 ui-sans-serif,system-ui,sans-serif;overflow:hidden}
+.devicebar{display:flex;align-items:center;gap:3px;padding:0 6px 5px;color:#64748b;font-size:9px}.devicebar span{margin-right:auto}.devicebar button{border:1px solid #d7dce3;border-radius:5px;background:#fff;color:#475569;padding:3px 5px;font:9px inherit;cursor:pointer}.devicebar button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}
 .editor-toolbar header{padding:7px 8px;gap:4px;align-items:center}.header-copy>span{display:none}.header-copy strong{font-size:11px}.header-copy small{margin-top:1px;font-size:10px}.header-actions{flex-wrap:wrap;justify-content:flex-end;gap:1px}.header-actions button{width:25px;height:28px;font-size:14px}.header-actions [data-save]{width:38px;font-size:11px}.header-actions button:disabled{opacity:.4;cursor:default}
-.editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-drag-handle{flex:none;padding:2px 1px;color:#94a3b8;font-size:16px;line-height:1;cursor:move;touch-action:none;user-select:none}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .history-row{gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .step-bar-action{width:24px;height:24px;padding:0;font-size:16px;line-height:1}.step-navigator .step-bar-action:disabled{cursor:not-allowed;opacity:.4}.step-navigator .content-heading>.history-row{display:none}
+.editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-drag-handle{flex:none;padding:2px 1px;color:#94a3b8;font-size:16px;line-height:1;cursor:move;touch-action:none;user-select:none}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .history-row{gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .step-bar-action{width:24px;height:24px;padding:0;font-size:16px;line-height:1}.step-navigator .step-bar-action svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.step-navigator .step-bar-delete{border-color:#fecaca;background:#fff1f2;color:#dc2626}.step-navigator .step-bar-delete:hover{border-color:#fca5a5;background:#fee2e2;color:#b91c1c}.step-navigator .step-bar-action:disabled{cursor:not-allowed;opacity:.4}.step-navigator .content-heading>.history-row{display:none}
 [data-composition-inspector]>.history-row{display:none}
 @media(max-width:800px){.editor-toolbar{width:min(350px,calc(100vw - 8px))}aside{width:min(300px,calc(100vw - 8px))}}
 @media(max-width:480px){.editor-toolbar{left:4px;top:4px;transform:none}.header-copy strong{font-size:10px}.header-copy small{font-size:9px}.header-actions [data-return-dashboard],.header-actions [data-move-side]{display:none}aside{width:calc(100vw - 8px)}.step-navigator{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:calc(100vw - 8px);box-shadow:0 4px 14px rgba(15,23,42,.12)}.step-navigator>.history-row:not([data-step-bar-actions]){display:none}.step-navigator .content-heading{display:none}}
 `;
   const GUIDE_STYLE = `.guide-behavior{display:grid;gap:8px;border-top:1px solid #eef0f3;padding-top:10px;margin-top:8px}.guide-behavior [data-guide-config],.guide-behavior [data-guide-missing]{display:grid;gap:7px}.guide-behavior .muted{margin:0;overflow-wrap:anywhere}.guide-preview-controls{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:5px 7px;border-top:1px solid #eef0f3}.guide-preview-controls button{border:1px solid #d7dce3;border-radius:5px;background:#fff;color:#334155;padding:4px 6px;font:11px ui-sans-serif,system-ui;cursor:pointer}.guide-preview-controls small{flex-basis:100%;color:#64748b;font-size:10px}.guide-preview-controls button:disabled{opacity:.4}.guide-preview-controls span{font-size:10px;margin-left:auto}`;
   function checklistEditorAdapter(value) {
-    return { content: { heading: value.title, body: value.description ?? "" }, builder: value.builder, design: { width: "sm", theme: { background: "#fff", foreground: "#111827", primary: "#2563eb", borderRadius: "md" } }, behavior: { dismissible: false }, targeting: { ...value.targeting, trigger: { type: "page_load" }, frequency: { mode: "once" } } };
+    return { content: { heading: value.title, body: value.description ?? "" }, builder: value.builder, design: value.design ?? { width: "sm", theme: { background: "#fff", foreground: "#111827", primary: "#2563eb", borderRadius: "md" } }, behavior: { dismissible: false }, targeting: { ...value.targeting, trigger: { type: "page_load" }, frequency: { mode: "once" } }, visualTheme: value.visualTheme, template: value.template };
   }
   const runtime = {
     createController: (apiBase) => new EditorModeController(apiBase)
