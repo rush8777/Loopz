@@ -5039,7 +5039,7 @@ const bundledRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-Boaxpi2A.js");
+    const { EditorModeController } = await import("./EditorModeController-PEvwrCrP.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -5072,17 +5072,17 @@ export {
   computeElementRole as c,
   computeElementLabel as d,
   sanitizeBuilderHtml as e,
-  clearEditorContinuation as f,
-  isGuideDefinition as g,
-  getGuideStepPattern as h,
-  isChecklistDefinition as i,
-  guideStepRequiresTarget as j,
-  guideInteractionTarget as k,
-  guideStepConfigurationErrors as l,
+  guideStepRequiresTarget as f,
+  getGuideStepPattern as g,
+  guideStepConfigurationErrors as h,
+  clearEditorContinuation as i,
+  isChecklistDefinition as j,
+  isGuideDefinition as k,
+  guideInteractionTarget as l,
   matchesGuideRoute as m,
   findTarget as n,
   storeEditorContinuation as o,
   createAnalytics as p,
   surveyBranchErrors as s
 };
-//# sourceMappingURL=module-BbfYSRJF.js.map
+//# sourceMappingURL=module-Bzh4ub9a.js.map

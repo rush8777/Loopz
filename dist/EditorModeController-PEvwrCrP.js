@@ -1,4 +1,4 @@
-import { C as ChecklistRenderer, b as builderImageUrlIsSafe, a as builderLinkUrlIsSafe, s as surveyBranchErrors, c as computeElementRole, d as computeElementLabel, e as sanitizeBuilderHtml, E as ExperienceRenderer, R as RouteObserver, f as clearEditorContinuation, i as isChecklistDefinition, g as isGuideDefinition, h as getGuideStepPattern, j as guideStepRequiresTarget, k as guideInteractionTarget, l as guideStepConfigurationErrors, m as matchesGuideRoute, n as findTarget, o as storeEditorContinuation } from "./module-BbfYSRJF.js";
+import { C as ChecklistRenderer, b as builderImageUrlIsSafe, a as builderLinkUrlIsSafe, s as surveyBranchErrors, c as computeElementRole, d as computeElementLabel, e as sanitizeBuilderHtml, g as getGuideStepPattern, f as guideStepRequiresTarget, h as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, i as clearEditorContinuation, j as isChecklistDefinition, k as isGuideDefinition, l as guideInteractionTarget, m as matchesGuideRoute, n as findTarget, o as storeEditorContinuation } from "./module-Bzh4ub9a.js";
 const esc = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 class ChecklistEditor {
   constructor(root, definition, references, options) {
@@ -2366,8 +2366,163 @@ function applyEditorAiProposal(document2, proposal) {
   if (!validation.valid) throw new Error(validation.errors.join(" "));
   return candidate;
 }
+function setDocumentCopy(step, heading, body) {
+  const document2 = onsiteDocumentFromBuilder(step.builder);
+  if (!document2 || !step.builder) throw new Error(`Step ${step.id} has no editable on-site document.`);
+  const blocks = listBlocks(document2.root);
+  const headingBlock = blocks.find((block) => block.type === "heading");
+  if (heading !== void 0 && (headingBlock == null ? void 0 : headingBlock.type) === "heading") headingBlock.html = plainText(heading.slice(0, 160));
+  const bodyBlock = blocks.find((block) => block.type === "text");
+  if (body !== void 0 && (bodyBlock == null ? void 0 : bodyBlock.type) === "text") bodyBlock.html = plainText(body.slice(0, 1e4));
+  const compiled = applyOnsiteDocument(step.builder, document2, getGuideStepPattern(step));
+  step.content = compiled.content;
+}
+function newGuideStep(operation) {
+  var _a;
+  const document2 = createOnsiteDocument(true), builder = { version: 1, projectData: {}, html: "", css: "" };
+  const step = { id: onsiteId("step"), label: ((_a = operation.label) == null ? void 0 : _a.trim().slice(0, 80)) || (operation.pattern === "modal" ? "Modal step" : "Anchored step"), pattern: operation.pattern, content: { heading: "", body: "" }, builder, advance: { type: "button" }, behavior: operation.pattern === "modal" ? { dismissible: true } : { placement: "auto", alignment: "center", offset: 8, pointer: { enabled: true, size: 10 }, dismissible: true } };
+  applyOnsiteDocument(builder, document2, operation.pattern);
+  setDocumentCopy(step, operation.heading, operation.body);
+  return step;
+}
+function normalizePattern(step, pattern) {
+  var _a, _b, _c;
+  step.pattern = pattern;
+  if (pattern === "modal") {
+    delete step.target;
+    (_a = step.presentation) == null ? true : delete _a.missingTarget;
+    if (((_b = step.advance) == null ? void 0 : _b.type) === "element_click" || ((_c = step.advance) == null ? void 0 : _c.type) === "element_hover") step.advance = { type: "button" };
+    step.behavior = { dismissible: step.behavior.dismissible ?? true, backdrop: step.behavior.backdrop, backdropOpacity: step.behavior.backdropOpacity, closeOnBackdrop: step.behavior.closeOnBackdrop };
+  } else step.behavior = { placement: step.behavior.placement ?? "auto", alignment: step.behavior.alignment ?? "center", offset: step.behavior.offset ?? 8, pointer: step.behavior.pointer ?? { enabled: true, size: 10 }, dismissible: step.behavior.dismissible ?? true, layer: step.behavior.layer };
+  if (step.builder) {
+    const document2 = onsiteDocumentFromBuilder(step.builder);
+    if (document2) step.content = applyOnsiteDocument(step.builder, document2, pattern).content;
+  }
+}
+function withPageRuleIds(rules) {
+  return rules.map((rule) => ({ ...cloneOnsite(rule), id: onsiteId("cell") }));
+}
+function applyGuideAiProposal(source, proposal, resolvedTargets = /* @__PURE__ */ new Map()) {
+  if (!proposal.operations.length || proposal.operations.length > 30) throw new Error("AI proposal has an invalid operation count.");
+  const guide = cloneOnsite(source), affected = /* @__PURE__ */ new Set(), withinStep = /* @__PURE__ */ new Map();
+  const step = (id) => {
+    const value = guide.steps.find((item) => item.id === id);
+    if (!value) throw new Error(`Guide step no longer exists: ${id}`);
+    return value;
+  };
+  proposal.operations.forEach((operation, operationIndex) => {
+    var _a, _b, _c, _d, _e;
+    if (["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell"].includes(operation.type)) {
+      const documentOperation = operation;
+      if (!documentOperation.stepId) throw new Error("Within-step operations require a stable step ID.");
+      step(documentOperation.stepId);
+      withinStep.set(documentOperation.stepId, [...withinStep.get(documentOperation.stepId) ?? [], documentOperation]);
+      affected.add(documentOperation.stepId);
+      return;
+    }
+    const guideOperation = operation;
+    if (guideOperation.type === "add_guide_step") {
+      if (guide.steps.length >= 20) throw new Error("A Guide can contain up to 20 steps.");
+      const created = newGuideStep(guideOperation), after = guideOperation.afterStepId ? guide.steps.findIndex((item) => item.id === guideOperation.afterStepId) : guide.steps.length - 1;
+      if (guideOperation.afterStepId && after < 0) throw new Error("The requested insertion step no longer exists.");
+      guide.steps.splice(after + 1, 0, created);
+      affected.add(created.id);
+    } else if (guideOperation.type === "duplicate_guide_step") {
+      if (guide.steps.length >= 20) throw new Error("A Guide can contain up to 20 steps.");
+      const original = step(guideOperation.stepId), copy = cloneOnsite(original);
+      copy.id = onsiteId("step");
+      copy.label = ((_a = guideOperation.label) == null ? void 0 : _a.trim().slice(0, 80)) || `${original.label || original.content.heading || "Step"} copy`;
+      const document2 = onsiteDocumentFromBuilder(copy.builder);
+      if (document2 && copy.builder) copy.content = applyOnsiteDocument(copy.builder, duplicateDocument(document2), getGuideStepPattern(copy)).content;
+      setDocumentCopy(copy, guideOperation.heading, guideOperation.body);
+      const after = guideOperation.afterStepId ? guide.steps.findIndex((item) => item.id === guideOperation.afterStepId) : guide.steps.indexOf(original);
+      if (after < 0) throw new Error("The requested insertion step no longer exists.");
+      guide.steps.splice(after + 1, 0, copy);
+      affected.add(copy.id);
+    } else if (guideOperation.type === "remove_guide_step") {
+      if (guide.steps.length <= 1) throw new Error("The final Guide step cannot be removed.");
+      const index = guide.steps.findIndex((item) => item.id === guideOperation.stepId);
+      if (index < 0) throw new Error("Guide step no longer exists.");
+      guide.steps.splice(index, 1);
+      affected.add(guideOperation.stepId);
+    } else if (guideOperation.type === "move_guide_step") {
+      const value = step(guideOperation.stepId), from = guide.steps.indexOf(value);
+      guide.steps.splice(from, 1);
+      const before = guideOperation.beforeStepId ? guide.steps.findIndex((item) => item.id === guideOperation.beforeStepId) : guide.steps.length;
+      if (before < 0) throw new Error("Move destination no longer exists.");
+      guide.steps.splice(before, 0, value);
+      affected.add(value.id);
+    } else if (guideOperation.type === "update_guide_step") {
+      const value = step(guideOperation.stepId);
+      if (guideOperation.patch.label !== void 0) value.label = guideOperation.patch.label.trim().slice(0, 80) || void 0;
+      if (guideOperation.patch.pattern) normalizePattern(value, guideOperation.patch.pattern);
+      affected.add(value.id);
+    } else if (guideOperation.type === "update_guide_step_behavior") {
+      const value = step(guideOperation.stepId);
+      Object.assign(value.behavior, cloneOnsite(guideOperation.patch));
+      affected.add(value.id);
+    } else if (guideOperation.type === "update_guide_advance") {
+      const value = step(guideOperation.stepId);
+      if ((guideOperation.advance.type === "element_click" || guideOperation.advance.type === "element_hover") && !guideStepRequiresTarget(value)) throw new Error("Website interaction advancement requires an Anchored Card step.");
+      const target = ((_b = value.advance) == null ? void 0 : _b.type) === "element_click" || ((_c = value.advance) == null ? void 0 : _c.type) === "element_hover" ? value.advance.target : void 0;
+      const advance = cloneOnsite(guideOperation.advance);
+      value.advance = advance.type === "route" ? { ...advance, pageRules: withPageRuleIds(advance.pageRules) } : { ...advance, ...target ? { target } : {} };
+      affected.add(value.id);
+    } else if (guideOperation.type === "update_guide_presentation") {
+      const value = step(guideOperation.stepId), { missingTarget, ...presentationPatch } = cloneOnsite(guideOperation.presentation);
+      value.presentation = { ...value.presentation, ...presentationPatch, ...missingTarget && { missingTarget } };
+      if (missingTarget === null && value.presentation) delete value.presentation.missingTarget;
+      affected.add(value.id);
+    } else if (guideOperation.type === "update_guide_targeting") {
+      const patch = cloneOnsite(guideOperation.patch);
+      Object.assign(guide.targeting, patch, patch.pageRules ? { pageRules: withPageRuleIds(patch.pageRules) } : {});
+    } else if (guideOperation.type === "request_guide_target") {
+      const value = step(guideOperation.stepId), target = resolvedTargets.get(operationIndex);
+      if (!target) throw new Error(`Select a ${guideOperation.targetKind === "position" ? "positioning" : "interaction"} target before applying.`);
+      const safe = { ...cloneOnsite(target) };
+      if (guideOperation.targetKind === "position") value.target = safe;
+      else {
+        if (!(((_d = value.advance) == null ? void 0 : _d.type) === "element_click" || ((_e = value.advance) == null ? void 0 : _e.type) === "element_hover")) throw new Error("Configure click or hover advancement before selecting its target.");
+        value.advance.target = safe;
+      }
+      affected.add(value.id);
+    } else throw new Error("Unsupported Guide AI operation.");
+  });
+  for (const [stepId, operations] of withinStep) {
+    const value = step(stepId), document2 = onsiteDocumentFromBuilder(value.builder);
+    if (!document2 || !value.builder) throw new Error(`Step ${stepId} has no editable on-site document.`);
+    const next = applyEditorAiProposal(document2, { summary: proposal.summary, operations });
+    value.content = applyOnsiteDocument(value.builder, next, getGuideStepPattern(value)).content;
+  }
+  const warnings = [];
+  guide.steps.forEach((value, index) => {
+    var _a, _b;
+    warnings.push(...guideStepConfigurationErrors(value, index));
+    if (((_b = (_a = value.presentation) == null ? void 0 : _a.missingTarget) == null ? void 0 : _b.action) === "skip" && index === guide.steps.length - 1) warnings.push(`Step ${index + 1}: Skip cannot be used on the final step.`);
+    const document2 = onsiteDocumentFromBuilder(value.builder);
+    if (!document2 || !validateOnsiteDocument(document2).valid) warnings.push(`Step ${index + 1}: on-site document is invalid.`);
+  });
+  if (warnings.length) throw new Error(warnings.join(" "));
+  return { guide, affectedStepIds: [...affected], order: guide.steps.map((value) => value.id), warnings };
+}
 function editorAiContext(input) {
   return { experience: input.experience, selection: cloneOnsite(input.selection), document: cloneOnsite(input.document), ...input.theme ? { theme: cloneOnsite(input.theme) } : {} };
+}
+function guideAiContext(input) {
+  var _a;
+  const selected = input.guide.steps.find((step) => step.id === input.currentStepId);
+  if (!selected) throw new Error("Selected Guide step no longer exists.");
+  const target = (value) => {
+    var _a2;
+    return value ? { configured: true, label: value.label, reliability: value.reliability, pagePath: (_a2 = value.targetContext) == null ? void 0 : _a2.pagePath } : { configured: false };
+  };
+  const summaries = input.guide.steps.map((step, index) => {
+    const document2 = onsiteDocumentFromBuilder(step.builder), buttons = document2 ? listBlocks(document2.root).filter((block) => block.type === "button").map((block) => ({ id: block.id, label: block.label, action: block.action.type })) : [];
+    return { id: step.id, index, label: step.label, pattern: getGuideStepPattern(step), heading: step.content.heading, description: step.content.body, buttons, advance: step.advance ? { ...cloneOnsite(step.advance), ...step.advance.type === "element_click" || step.advance.type === "element_hover" ? { target: target(step.advance.target ?? step.target) } : {} } : { type: "button" }, presentation: step.presentation, dismissible: step.behavior.dismissible, positionTarget: target(step.target) };
+  });
+  const layer = (_a = input.guide.behavior) == null ? void 0 : _a.layer;
+  const behavior = layer ? { layer: layer.mode === "relative" ? { mode: layer.mode, relation: layer.relation, target: target(layer.target) } : cloneOnsite(layer) } : void 0;
+  return { experience: { ...input.experience, kind: "guide", widgetType: null }, selection: { ...cloneOnsite(input.selection), scope: input.scope ?? "step", stepId: selected.id }, guide: { id: input.experience.id, name: input.experience.name, revision: input.revision, currentStepId: selected.id, totalSteps: input.guide.steps.length, steps: summaries, targeting: cloneOnsite(input.guide.targeting), ...behavior ? { behavior } : {}, theme: cloneOnsite(input.theme ?? null) }, currentDocument: cloneOnsite(onsiteDocumentFromBuilder(selected.builder) ?? null) };
 }
 const BLOCK_LABEL = { checklist_task: "Task", checklist_text: "Checklist text", checklist_control: "Checklist control", checklist_progress: "Progress", question: "Question", survey_controls: "Survey controls", heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
 const HISTORY_LIMIT = 50;
@@ -3828,6 +3983,12 @@ class EditorModeController {
     this.guidePreviewEntryPath = "";
     this.previewDevice = "desktop";
     this.aiProposal = null;
+    this.aiResolvedTargets = /* @__PURE__ */ new Map();
+    this.aiPreviewOriginal = null;
+    this.aiPreviewCandidate = null;
+    this.aiPreviewReturnMode = null;
+    this.guideAiUndo = [];
+    this.guideAiRedo = [];
     this.aiAbort = null;
     this.aiRequestGeneration = 0;
     this.persistBeforePageLeave = () => this.updateContinuation();
@@ -4023,7 +4184,7 @@ class EditorModeController {
   panelMarkup(draft) {
     var _a, _b, _c;
     const selectableSteps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
-    const aiEligible = draft.experience.builderMode === "onsite" && draft.experience.kind === "widget" && draft.experience.widgetType !== "survey";
+    const aiEligible = draft.experience.builderMode === "onsite" && (draft.experience.kind === "guide" || draft.experience.kind === "widget" && draft.experience.widgetType !== "survey");
     const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><span class="step-drag-handle" data-step-drag-handle title="Drag step bar" aria-hidden="true">⠿</span><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-add-step="modal">＋ Modal</button><button type="button" class="secondary-button compact" data-add-step="anchored_card">＋ Anchored</button></div>' : ""}</div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? `<div class="history-row" data-step-bar-actions><button type="button" class="secondary-button compact step-bar-action" data-add-current-step aria-label="Add step" title="Add a ${getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal" ? "Modal" : "Anchored"} step">＋</button><button type="button" class="secondary-button compact step-bar-action step-bar-delete" data-delete-step aria-label="Delete selected step" title="Delete selected step"${this.guide.steps.length <= 1 ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13"/></svg></button></div><div class="history-row"><button type="button" class="secondary-button compact" data-duplicate-step>Duplicate</button><button type="button" class="secondary-button compact" data-step-left>←</button><button type="button" class="secondary-button compact" data-step-right>→</button></div>` : ""}</section>` : "";
     const designDisabled = draft.experience.builderMode !== "onsite" ? ' disabled title="Content is edited in the GrapesJS Dashboard Builder"' : "";
     return `<div class="editor-toolbar" data-editor-toolbar role="region" aria-label="Movcues editing controls">
@@ -4044,7 +4205,7 @@ class EditorModeController {
           <div class="ai-suggestions"><button type="button" data-ai-suggestion="Improve the selected copy while keeping the same meaning.">Improve copy</button><button type="button" data-ai-suggestion="Improve the selected element's visual hierarchy and spacing.">Improve hierarchy</button><button type="button" data-ai-suggestion="Make this widget more concise and mobile friendly.">Mobile polish</button></div>
           <form data-ai-form><textarea data-ai-prompt maxlength="4000" rows="4" placeholder="Describe the change…"></textarea><button type="submit" class="secondary-button" data-ai-send>Generate proposal</button></form>
           <div class="ai-status" data-ai-status role="status" aria-live="polite"></div>
-          <article class="ai-proposal" data-ai-proposal hidden><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Preview only. Nothing changes until you apply it.</p><div class="history-row"><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div></article>
+          <article class="ai-proposal" data-ai-proposal hidden><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Preview only. Nothing changes until you apply it.</p><div class="history-row"><button type="button" class="secondary-button" data-ai-target hidden>Select target</button><button type="button" class="secondary-button" data-ai-preview hidden>Preview Guide</button><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div></article>
         </section>
         <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : this.survey ? "Preview tests the full Survey. No responses, production events or progress are recorded. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
@@ -4127,7 +4288,7 @@ class EditorModeController {
     return steps.map((step, index) => `<button class="step" type="button" data-step="${index}" aria-label="Open step ${index + 1}"><span>${index + 1}</span><small>${escapeText("label" in step && typeof step.label === "string" && step.label.trim() ? step.label : "content" in step && step.content.heading.trim() ? step.content.heading : `Step ${index + 1}`)}</small><i data-step-icon>○</i></button>`).join("");
   }
   bindPanel() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F;
     const root = this.root;
     root.querySelectorAll("[data-inspector-tab]").forEach((button) => button.addEventListener("click", () => this.setInspectorTab(button.dataset.inspectorTab)));
     root.querySelectorAll("[data-ai-suggestion]").forEach((button) => button.addEventListener("click", () => {
@@ -4142,11 +4303,10 @@ class EditorModeController {
       void this.sendAiPrompt();
     });
     (_b = root.querySelector("[data-ai-cancel]")) == null ? void 0 : _b.addEventListener("click", () => this.cancelAiRequest());
-    (_c = root.querySelector("[data-ai-apply]")) == null ? void 0 : _c.addEventListener("click", () => this.applyAiProposal());
-    (_d = root.querySelector("[data-ai-discard]")) == null ? void 0 : _d.addEventListener("click", () => {
-      this.aiProposal = null;
-      this.syncAiPanel();
-    });
+    (_c = root.querySelector("[data-ai-target]")) == null ? void 0 : _c.addEventListener("click", () => this.resolveAiGuideTarget());
+    (_d = root.querySelector("[data-ai-preview]")) == null ? void 0 : _d.addEventListener("click", () => this.previewAiGuideProposal());
+    (_e = root.querySelector("[data-ai-apply]")) == null ? void 0 : _e.addEventListener("click", () => this.applyAiProposal());
+    (_f = root.querySelector("[data-ai-discard]")) == null ? void 0 : _f.addEventListener("click", () => this.discardAiProposal());
     root.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this.setMode(button.dataset.mode)));
     root.querySelectorAll("[data-device]").forEach((button) => button.addEventListener("click", () => {
       this.previewDevice = button.dataset.device;
@@ -4157,52 +4317,42 @@ class EditorModeController {
       if (this.mode !== "target") this.setMode("target");
       else this.startPicker();
     }));
-    (_e = root.querySelector("[data-pick-layer]")) == null ? void 0 : _e.addEventListener("click", () => this.startLayerPicker());
+    (_g = root.querySelector("[data-pick-layer]")) == null ? void 0 : _g.addEventListener("click", () => this.startLayerPicker());
     root.querySelectorAll("[data-step]").forEach((button) => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
-    (_f = root.querySelector("[data-minimize]")) == null ? void 0 : _f.addEventListener("click", () => {
+    (_h = root.querySelector("[data-minimize]")) == null ? void 0 : _h.addEventListener("click", () => {
       const aside = root.querySelector("aside");
       aside.classList.toggle("minimized");
       root.querySelector("[data-minimize]").setAttribute("aria-expanded", String(!aside.classList.contains("minimized")));
     });
-    (_g = root.querySelector("[data-save]")) == null ? void 0 : _g.addEventListener("click", () => void this.persist());
-    (_h = root.querySelector("[data-close]")) == null ? void 0 : _h.addEventListener("click", () => void this.close());
-    (_i = root.querySelector("[data-return-dashboard]")) == null ? void 0 : _i.addEventListener("click", () => {
+    (_i = root.querySelector("[data-save]")) == null ? void 0 : _i.addEventListener("click", () => void this.persist());
+    (_j = root.querySelector("[data-close]")) == null ? void 0 : _j.addEventListener("click", () => void this.close());
+    (_k = root.querySelector("[data-return-dashboard]")) == null ? void 0 : _k.addEventListener("click", () => {
       var _a2;
       (_a2 = window.opener) == null ? void 0 : _a2.focus();
       void this.close();
     });
-    (_j = root.querySelector("[data-retry-save]")) == null ? void 0 : _j.addEventListener("click", () => void this.persist());
-    (_k = root.querySelector("[data-reload-draft]")) == null ? void 0 : _k.addEventListener("click", () => {
+    (_l = root.querySelector("[data-retry-save]")) == null ? void 0 : _l.addEventListener("click", () => void this.persist());
+    (_m = root.querySelector("[data-reload-draft]")) == null ? void 0 : _m.addEventListener("click", () => {
       if (window.confirm("Reloading discards local edits. Copy / Export them first if you need them. Reload latest?")) {
         this.recoveryDraft = null;
         window.location.reload();
       }
     });
-    (_l = root.querySelector("[data-export-draft]")) == null ? void 0 : _l.addEventListener("click", () => this.exportRecovery());
-    (_m = root.querySelector("[data-discard-draft]")) == null ? void 0 : _m.addEventListener("click", () => {
+    (_n = root.querySelector("[data-export-draft]")) == null ? void 0 : _n.addEventListener("click", () => this.exportRecovery());
+    (_o = root.querySelector("[data-discard-draft]")) == null ? void 0 : _o.addEventListener("click", () => {
       if (window.confirm("Discard unsaved edits and close?")) {
         this.recoveryDraft = null;
         this.destroy();
       }
     });
-    (_n = root.querySelector("[data-reset-preview]")) == null ? void 0 : _n.addEventListener("click", () => this.guide ? this.startGuidePreview() : this.renderPreview());
-    (_o = root.querySelector("[data-global-undo]")) == null ? void 0 : _o.addEventListener("click", () => {
-      var _a2, _b2;
-      (_a2 = this.compositionEditor) == null ? void 0 : _a2.undo();
-      (_b2 = this.contentEditor) == null ? void 0 : _b2.undo();
-      this.syncContentInspector();
-    });
-    (_p = root.querySelector("[data-global-redo]")) == null ? void 0 : _p.addEventListener("click", () => {
-      var _a2, _b2;
-      (_a2 = this.compositionEditor) == null ? void 0 : _a2.redo();
-      (_b2 = this.contentEditor) == null ? void 0 : _b2.redo();
-      this.syncContentInspector();
-    });
-    (_q = root.querySelector("[data-move-side]")) == null ? void 0 : _q.addEventListener("click", () => {
+    (_p = root.querySelector("[data-reset-preview]")) == null ? void 0 : _p.addEventListener("click", () => this.guide ? this.startGuidePreview() : this.renderPreview());
+    (_q = root.querySelector("[data-global-undo]")) == null ? void 0 : _q.addEventListener("click", () => this.globalUndo());
+    (_r = root.querySelector("[data-global-redo]")) == null ? void 0 : _r.addEventListener("click", () => this.globalRedo());
+    (_s = root.querySelector("[data-move-side]")) == null ? void 0 : _s.addEventListener("click", () => {
       var _a2;
       return (_a2 = root.querySelector("aside")) == null ? void 0 : _a2.classList.toggle("left-side");
     });
-    (_r = root.querySelector("[data-select-step]")) == null ? void 0 : _r.addEventListener("click", () => {
+    (_t = root.querySelector("[data-select-step]")) == null ? void 0 : _t.addEventListener("click", () => {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.selectStep();
     });
@@ -4211,18 +4361,18 @@ class EditorModeController {
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.addEdge(button.dataset.edge);
     }));
     root.querySelectorAll("[data-add-step]").forEach((button) => button.addEventListener("click", () => this.addGuideStep(button.dataset.addStep)));
-    (_s = root.querySelector("[data-add-current-step]")) == null ? void 0 : _s.addEventListener("click", () => this.addGuideStep(getGuideStepPattern(this.guide.steps[this.stepIndex])));
-    (_t = root.querySelector("[data-duplicate-step]")) == null ? void 0 : _t.addEventListener("click", () => this.duplicateGuideStep());
-    (_u = root.querySelector("[data-delete-step]")) == null ? void 0 : _u.addEventListener("click", () => this.deleteGuideStep());
-    (_v = root.querySelector("[data-step-left]")) == null ? void 0 : _v.addEventListener("click", () => this.moveGuideStep(-1));
-    (_w = root.querySelector("[data-step-right]")) == null ? void 0 : _w.addEventListener("click", () => this.moveGuideStep(1));
-    (_x = root.querySelector("[data-step-name]")) == null ? void 0 : _x.addEventListener("change", (event) => {
+    (_u = root.querySelector("[data-add-current-step]")) == null ? void 0 : _u.addEventListener("click", () => this.addGuideStep(getGuideStepPattern(this.guide.steps[this.stepIndex])));
+    (_v = root.querySelector("[data-duplicate-step]")) == null ? void 0 : _v.addEventListener("click", () => this.duplicateGuideStep());
+    (_w = root.querySelector("[data-delete-step]")) == null ? void 0 : _w.addEventListener("click", () => this.deleteGuideStep());
+    (_x = root.querySelector("[data-step-left]")) == null ? void 0 : _x.addEventListener("click", () => this.moveGuideStep(-1));
+    (_y = root.querySelector("[data-step-right]")) == null ? void 0 : _y.addEventListener("click", () => this.moveGuideStep(1));
+    (_z = root.querySelector("[data-step-name]")) == null ? void 0 : _z.addEventListener("change", (event) => {
       if (!this.guide) return;
       this.guide.steps[this.stepIndex].label = event.currentTarget.value.trim().slice(0, 80) || void 0;
       this.changed();
       this.refreshStepBar();
     });
-    (_y = root.querySelector("[data-edit-component]")) == null ? void 0 : _y.addEventListener("click", () => {
+    (_A = root.querySelector("[data-edit-component]")) == null ? void 0 : _A.addEventListener("click", () => {
       var _a2, _b2;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.editSelected();
       (_b2 = this.contentEditor) == null ? void 0 : _b2.editSelected();
@@ -4239,14 +4389,14 @@ class EditorModeController {
       (_b2 = this.contentEditor) == null ? void 0 : _b2.toggleList(button.dataset.list);
       this.syncContentInspector();
     }));
-    (_z = root.querySelector("[data-text-align]")) == null ? void 0 : _z.addEventListener("change", (event) => {
+    (_B = root.querySelector("[data-text-align]")) == null ? void 0 : _B.addEventListener("change", (event) => {
       var _a2, _b2;
       const value = event.currentTarget.value;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.setAlignment(value);
       (_b2 = this.contentEditor) == null ? void 0 : _b2.setAlignment(value);
       this.syncContentInspector();
     });
-    (_A = root.querySelector("[data-apply-link]")) == null ? void 0 : _A.addEventListener("click", () => {
+    (_C = root.querySelector("[data-apply-link]")) == null ? void 0 : _C.addEventListener("click", () => {
       var _a2, _b2;
       const input = root.querySelector("[data-link-url]");
       const applied = input ? ((_a2 = this.compositionEditor) == null ? void 0 : _a2.applyLink(input.value)) ?? ((_b2 = this.contentEditor) == null ? void 0 : _b2.applyLink(input.value)) : false;
@@ -4256,7 +4406,7 @@ class EditorModeController {
       } else input == null ? void 0 : input.setCustomValidity("");
       this.syncContentInspector();
     });
-    (_B = root.querySelector("[data-apply-image]")) == null ? void 0 : _B.addEventListener("click", () => {
+    (_D = root.querySelector("[data-apply-image]")) == null ? void 0 : _D.addEventListener("click", () => {
       var _a2;
       const source = root.querySelector("[data-image-src]");
       const alt = root.querySelector("[data-image-alt]");
@@ -4264,12 +4414,12 @@ class EditorModeController {
       else source == null ? void 0 : source.setCustomValidity("");
       this.syncContentInspector();
     });
-    (_C = root.querySelector("[data-undo]")) == null ? void 0 : _C.addEventListener("click", () => {
+    (_E = root.querySelector("[data-undo]")) == null ? void 0 : _E.addEventListener("click", () => {
       var _a2;
       (_a2 = this.contentEditor) == null ? void 0 : _a2.undo();
       this.syncContentInspector();
     });
-    (_D = root.querySelector("[data-redo]")) == null ? void 0 : _D.addEventListener("click", () => {
+    (_F = root.querySelector("[data-redo]")) == null ? void 0 : _F.addEventListener("click", () => {
       var _a2;
       (_a2 = this.contentEditor) == null ? void 0 : _a2.redo();
       this.syncContentInspector();
@@ -4286,7 +4436,7 @@ class EditorModeController {
       (_b2 = this.compositionEditor) == null ? void 0 : _b2.rememberSelection();
     }, true);
     root.addEventListener("keydown", (rawEvent) => {
-      var _a2, _b2, _c2, _d2, _e2;
+      var _a2;
       const event = rawEvent;
       if (event.key === "Escape") {
         (_a2 = this.contentEditor) == null ? void 0 : _a2.editSelected();
@@ -4298,13 +4448,8 @@ class EditorModeController {
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)) {
         event.preventDefault();
-        if (event.shiftKey) {
-          (_b2 = this.compositionEditor) == null ? void 0 : _b2.redo();
-          (_c2 = this.contentEditor) == null ? void 0 : _c2.redo();
-        } else {
-          (_d2 = this.compositionEditor) == null ? void 0 : _d2.undo();
-          (_e2 = this.contentEditor) == null ? void 0 : _e2.undo();
-        }
+        if (event.shiftKey) this.globalRedo();
+        else this.globalUndo();
       }
     });
     this.bindDrag();
@@ -5177,8 +5322,12 @@ class EditorModeController {
   pickerIsSelecting() {
     return !!document.querySelector("[data-movcues-picker-overlay]");
   }
-  changed(render = true) {
+  changed(render = true, preserveGuideAiHistory = false) {
     if (this.saveState === "expired") return;
+    if (!preserveGuideAiHistory) {
+      this.guideAiUndo = [];
+      this.guideAiRedo = [];
+    }
     this.dirty = true;
     this.editGeneration++;
     this.updateContinuation();
@@ -5570,7 +5719,7 @@ class EditorModeController {
     if (redo) redo.disabled = !((_b = this.contentEditor) == null ? void 0 : _b.canRedo());
   }
   syncCompositionInspector() {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i;
     (_a = this.surveyEditor) == null ? void 0 : _a.sync();
     (_b = this.checklistEditor) == null ? void 0 : _b.sync();
     if (!this.root) return;
@@ -5578,6 +5727,10 @@ class EditorModeController {
     const selection = this.compositionSelection;
     const inspector = this.root.querySelector("[data-composition-inspector]");
     if (!inspector) return;
+    const globalUndo = this.root.querySelector("[data-global-undo]");
+    const globalRedo = this.root.querySelector("[data-global-redo]");
+    if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !(editor == null ? void 0 : editor.canUndo()) && !((_c = this.contentEditor) == null ? void 0 : _c.canUndo());
+    if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !(editor == null ? void 0 : editor.canRedo()) && !((_d = this.contentEditor) == null ? void 0 : _d.canRedo());
     inspector.hidden = this.mode !== "design" || !editor || !selection;
     this.root.querySelector("[data-content-inspector]").hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
     if (!editor || !selection) return;
@@ -5589,12 +5742,12 @@ class EditorModeController {
     if (selection.kind === "step") this.root.querySelectorAll("[data-step-only]").forEach((group) => {
       group.hidden = group.hasAttribute("data-for") ? !this.isTargetedType() : group.hasAttribute("data-step-summary") ? !this.guide : group.hasAttribute("data-placement-section") ? Boolean(this.guide && getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal") : false;
     });
-    const stepName = (_c = this.root.querySelector("[data-step-name]")) == null ? void 0 : _c.closest("label");
+    const stepName = (_e = this.root.querySelector("[data-step-name]")) == null ? void 0 : _e.closest("label");
     if (stepName) stepName.hidden = !this.guide;
     this.root.querySelectorAll("[data-inspector]").forEach((group) => {
       group.hidden = group.dataset.inspector !== selection.kind;
     });
-    const step = (_d = this.guide) == null ? void 0 : _d.steps[this.stepIndex];
+    const step = (_f = this.guide) == null ? void 0 : _f.steps[this.stepIndex];
     this.setValue("[data-step-name]", (step == null ? void 0 : step.label) ?? (step == null ? void 0 : step.content.heading) ?? "");
     const cell = editor.getSelectedCell();
     if (cell) {
@@ -5605,9 +5758,9 @@ class EditorModeController {
       this.setValue("[data-cell-align]", cell.align);
       this.setValue("[data-cell-gap]", String(cell.gap));
       this.setValue("[data-cell-padding]", String(cell.padding.top));
-      this.setValue("[data-cell-background]", ((_e = cell.style) == null ? void 0 : _e.background) && /^#[0-9a-f]{6}$/i.test(cell.style.background) ? cell.style.background : "#ffffff");
-      this.setValue("[data-cell-border]", String(((_f = cell.style) == null ? void 0 : _f.borderWidth) ?? 0));
-      this.setValue("[data-cell-radius]", String(((_g = cell.style) == null ? void 0 : _g.borderRadius) ?? 0));
+      this.setValue("[data-cell-background]", ((_g = cell.style) == null ? void 0 : _g.background) && /^#[0-9a-f]{6}$/i.test(cell.style.background) ? cell.style.background : "#ffffff");
+      this.setValue("[data-cell-border]", String(((_h = cell.style) == null ? void 0 : _h.borderWidth) ?? 0));
+      this.setValue("[data-cell-radius]", String(((_i = cell.style) == null ? void 0 : _i.borderRadius) ?? 0));
       this.setChecked("[data-cell-stack]", Boolean(cell.responsiveStack));
     }
     const block = editor.getSelectedBlock();
@@ -5666,12 +5819,12 @@ class EditorModeController {
     if (undo) undo.disabled = !editor.canUndo();
     const redo = this.root.querySelector("[data-v2-redo]");
     if (redo) redo.disabled = !editor.canRedo();
-    this.root.querySelector("[data-global-undo]").disabled = !editor.canUndo();
-    this.root.querySelector("[data-global-redo]").disabled = !editor.canRedo();
+    if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !editor.canUndo();
+    if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !editor.canRedo();
   }
   setInspectorTab(tab) {
     var _a, _b;
-    if (!this.root || tab === "ai" && (this.guide || this.survey || this.checklist || ((_a = this.draft) == null ? void 0 : _a.experience.builderMode) !== "onsite")) return;
+    if (!this.root || tab === "ai" && (this.survey || this.checklist || ((_a = this.draft) == null ? void 0 : _a.experience.builderMode) !== "onsite")) return;
     (_b = this.root.querySelector("main")) == null ? void 0 : _b.classList.toggle("ai-mode", tab === "ai");
     this.root.querySelectorAll("[data-inspector-tab]").forEach((button) => button.classList.toggle("active", button.dataset.inspectorTab === tab));
     const panel = this.root.querySelector("[data-ai-panel]");
@@ -5682,22 +5835,33 @@ class EditorModeController {
     var _a;
     if (!this.root) return;
     const selection = this.compositionSelection;
-    this.setText("[data-ai-context]", selection ? `Editing ${selection.label} · ${selection.kind}` : "Choose an element or ask about the whole widget.");
+    this.setText("[data-ai-context]", this.guide ? `Guide · step ${this.stepIndex + 1} of ${this.guide.steps.length}${selection ? ` · ${selection.label}` : ""}` : selection ? `Editing ${selection.label} · ${selection.kind}` : "Choose an element or ask about the whole widget.");
     const proposal = this.root.querySelector("[data-ai-proposal]");
     if (proposal) proposal.hidden = !this.aiProposal;
     if (!this.aiProposal) return;
     this.setText("[data-ai-summary]", this.aiProposal.value.summary);
     const list = this.root.querySelector("[data-ai-operations]");
-    if (list) list.replaceChildren(...this.aiProposal.value.operations.map((operation) => {
+    if (list) list.replaceChildren(...this.aiProposal.value.operations.map((operation, index) => {
+      var _a2;
       const item = document.createElement("li");
-      item.textContent = operation.type.replace(/_/g, " ");
+      const stepId = "stepId" in operation ? operation.stepId : void 0;
+      const step = stepId ? (_a2 = this.guide) == null ? void 0 : _a2.steps.find((value) => value.id === stepId) : void 0;
+      item.textContent = `${operation.type.replace(/_/g, " ")}${step ? ` · ${step.label || step.content.heading || `step ${this.guide.steps.indexOf(step) + 1}`}` : ""}${operation.type === "request_guide_target" && this.aiResolvedTargets.has(index) ? " · target selected" : ""}`;
       return item;
     }));
-    const stale = this.aiProposal.revision !== ((_a = this.draft) == null ? void 0 : _a.version.revision);
+    const stale = this.aiProposal.revision !== ((_a = this.draft) == null ? void 0 : _a.version.revision) || this.aiProposal.generation !== this.editGeneration;
+    const unresolved = this.aiProposal.value.operations.some((operation, index) => operation.type === "request_guide_target" && !this.aiResolvedTargets.has(index));
+    const target = this.root.querySelector("[data-ai-target]");
+    if (target) target.hidden = !this.guide || !unresolved;
+    const preview = this.root.querySelector("[data-ai-preview]");
+    if (preview) {
+      preview.hidden = !this.guide;
+      preview.disabled = stale || unresolved;
+    }
     const apply = this.root.querySelector("[data-ai-apply]");
     if (apply) {
-      apply.disabled = stale;
-      apply.title = stale ? "Draft changed; generate a fresh proposal." : "Apply as one undoable change";
+      apply.disabled = stale || unresolved;
+      apply.title = stale ? "Draft changed; generate a fresh proposal." : unresolved ? "Select each requested website target first." : "Apply as one undoable change";
     }
     if (stale) this.setText("[data-ai-status]", "The draft changed. Discard this proposal and generate a fresh one.");
   }
@@ -5705,7 +5869,8 @@ class EditorModeController {
     var _a, _b, _c;
     const input = (_a = this.root) == null ? void 0 : _a.querySelector("[data-ai-prompt]");
     const prompt = input == null ? void 0 : input.value.trim();
-    if (!prompt || !this.bridge || !this.draft || !this.compositionEditor || !this.compositionSelection || this.guide || this.survey || this.checklist) return;
+    if (!prompt || !this.bridge || !this.draft || !this.compositionEditor || !this.compositionSelection || this.survey || this.checklist) return;
+    if (!this.flushContent() || this.dirty && !await this.persist()) return;
     this.cancelAiRequest();
     const generation = ++this.aiRequestGeneration;
     const abort = new AbortController();
@@ -5715,13 +5880,16 @@ class EditorModeController {
     const cancel = (_c = this.root) == null ? void 0 : _c.querySelector("[data-ai-cancel]");
     if (cancel) cancel.hidden = false;
     this.setText("[data-ai-status]", "Generating a validated proposal…");
+    this.discardAiPreview();
     this.aiProposal = null;
+    this.aiResolvedTargets.clear();
     this.syncAiPanel();
     try {
-      const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context: editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: this.compositionEditor.getDocument() }) }, abort.signal);
+      const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.ensureThemeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: this.compositionEditor.getDocument() });
+      const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context }, abort.signal);
       if (generation !== this.aiRequestGeneration) return;
       this.aiConversationId = response.conversationId;
-      this.aiProposal = response.proposal ? { value: response.proposal, revision: response.revision } : null;
+      this.aiProposal = response.proposal ? { value: response.proposal, revision: response.revision, generation: this.editGeneration } : null;
       this.setText("[data-ai-status]", response.markdown);
       if (response.proposal && input) input.value = "";
       this.syncAiPanel();
@@ -5754,15 +5922,138 @@ class EditorModeController {
   }
   applyAiProposal() {
     var _a;
-    if (!this.aiProposal || !this.draft || this.aiProposal.revision !== this.draft.version.revision) {
+    if (!this.aiProposal || !this.draft || this.aiProposal.revision !== this.draft.version.revision || this.aiProposal.generation !== this.editGeneration) {
       this.syncAiPanel();
       return;
     }
-    if ((_a = this.compositionEditor) == null ? void 0 : _a.applyAiProposal(this.aiProposal.value)) {
-      this.aiProposal = null;
-      this.setText("[data-ai-status]", "Applied. Use Undo to revert the entire proposal.");
-      this.syncAiPanel();
+    if (!this.guide) {
+      if ((_a = this.compositionEditor) == null ? void 0 : _a.applyAiProposal(this.aiProposal.value)) {
+        this.aiProposal = null;
+        this.setText("[data-ai-status]", "Applied. Use Undo to revert the entire proposal.");
+        this.syncAiPanel();
+      }
+      return;
     }
+    try {
+      const before = cloneOnsite(this.aiPreviewOriginal ?? this.guide);
+      const candidate = this.aiPreviewCandidate ?? applyGuideAiProposal(before, this.aiProposal.value, this.aiResolvedTargets).guide;
+      this.guideAiUndo.push(before);
+      if (this.guideAiUndo.length > 20) this.guideAiUndo.shift();
+      this.guideAiRedo = [];
+      this.setGuideDefinition(cloneOnsite(candidate));
+      this.aiPreviewOriginal = null;
+      this.aiPreviewCandidate = null;
+      this.aiPreviewReturnMode = null;
+      this.aiProposal = null;
+      this.aiResolvedTargets.clear();
+      this.changed(true, true);
+      this.refreshStepBar();
+      this.setText("[data-ai-status]", "Applied. Undo restores the complete Guide in one step.");
+      this.syncAiPanel();
+    } catch (error) {
+      this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Guide proposal is invalid.");
+    }
+  }
+  resolveAiGuideTarget() {
+    var _a;
+    if (!this.aiProposal || !this.guide) return;
+    this.discardAiPreview();
+    const operationIndex = this.aiProposal.value.operations.findIndex((operation2, index2) => operation2.type === "request_guide_target" && !this.aiResolvedTargets.has(index2));
+    const operation = this.aiProposal.value.operations[operationIndex];
+    if (!operation || operation.type !== "request_guide_target") return;
+    const index = this.guide.steps.findIndex((step) => step.id === operation.stepId);
+    if (index < 0 || !this.flushContent()) return;
+    this.stepIndex = index;
+    const generation = ++this.selectionGeneration;
+    this.picker.cancel();
+    (_a = this.compositionEditor) == null ? void 0 : _a.destroy();
+    this.compositionEditor = null;
+    this.compositionSelection = null;
+    this.preview.destroy();
+    this.previewRendered = false;
+    this.setText("[data-ai-status]", `Select the website element for this step's ${operation.targetKind === "position" ? "position" : "advance trigger"}. Escape cancels.`);
+    void this.picker.pick().then((target) => {
+      if (generation !== this.selectionGeneration || !target) {
+        this.renderPreview();
+        this.syncPanel();
+        return;
+      }
+      this.aiResolvedTargets.set(operationIndex, { ...target, targetContext: { pagePath: currentPagePath() } });
+      this.renderPreview();
+      this.syncPanel();
+      this.syncAiPanel();
+    });
+  }
+  previewAiGuideProposal() {
+    if (!this.aiProposal || !this.guide || !this.draft || this.aiProposal.revision !== this.draft.version.revision || this.aiProposal.generation !== this.editGeneration) return;
+    try {
+      this.discardAiPreview();
+      const original = cloneOnsite(this.guide);
+      this.aiPreviewReturnMode = this.mode;
+      const result = applyGuideAiProposal(original, this.aiProposal.value, this.aiResolvedTargets);
+      this.aiPreviewOriginal = original;
+      this.aiPreviewCandidate = cloneOnsite(result.guide);
+      this.setGuideDefinition(cloneOnsite(result.guide));
+      this.stepIndex = 0;
+      this.refreshStepBar();
+      this.startGuidePreview();
+      this.setText("[data-ai-status]", "Previewing the complete proposed Guide. Apply or Discard to finish.");
+    } catch (error) {
+      this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Guide proposal is invalid.");
+    }
+  }
+  discardAiPreview() {
+    if (!this.aiPreviewOriginal) return;
+    const returnMode = this.aiPreviewReturnMode;
+    this.setGuideDefinition(this.aiPreviewOriginal);
+    this.aiPreviewOriginal = null;
+    this.aiPreviewCandidate = null;
+    this.aiPreviewReturnMode = null;
+    this.stepIndex = clampStep(this.stepIndex, this.guide.steps.length);
+    this.refreshStepBar();
+    if (returnMode && returnMode !== this.mode) this.setMode(returnMode);
+    else if (this.mode !== "navigate") this.renderPreview();
+  }
+  discardAiProposal() {
+    this.discardAiPreview();
+    this.aiProposal = null;
+    this.aiResolvedTargets.clear();
+    this.setText("[data-ai-status]", "Proposal discarded. No draft changes were made.");
+    this.syncAiPanel();
+  }
+  setGuideDefinition(value) {
+    this.guide = value;
+    this.definition = value;
+  }
+  globalUndo() {
+    var _a, _b;
+    if (this.guide && this.guideAiUndo.length && this.flushContent()) {
+      const previous = this.guideAiUndo.pop();
+      this.guideAiRedo.push(cloneOnsite(this.guide));
+      this.setGuideDefinition(previous);
+      this.stepIndex = clampStep(this.stepIndex, previous.steps.length);
+      this.changed(true, true);
+      this.refreshStepBar();
+      return;
+    }
+    (_a = this.compositionEditor) == null ? void 0 : _a.undo();
+    (_b = this.contentEditor) == null ? void 0 : _b.undo();
+    this.syncContentInspector();
+  }
+  globalRedo() {
+    var _a, _b;
+    if (this.guide && this.guideAiRedo.length && this.flushContent()) {
+      const next = this.guideAiRedo.pop();
+      this.guideAiUndo.push(cloneOnsite(this.guide));
+      this.setGuideDefinition(next);
+      this.stepIndex = clampStep(this.stepIndex, next.steps.length);
+      this.changed(true, true);
+      this.refreshStepBar();
+      return;
+    }
+    (_a = this.compositionEditor) == null ? void 0 : _a.redo();
+    (_b = this.contentEditor) == null ? void 0 : _b.redo();
+    this.syncContentInspector();
   }
   syncPanel() {
     var _a, _b;
@@ -6015,6 +6306,12 @@ class EditorModeController {
     this.cancelAiRequest();
     this.aiProposal = null;
     this.aiConversationId = void 0;
+    this.aiResolvedTargets.clear();
+    this.aiPreviewOriginal = null;
+    this.aiPreviewCandidate = null;
+    this.aiPreviewReturnMode = null;
+    this.guideAiUndo = [];
+    this.guideAiRedo = [];
     clearTimeout(this.expiryTimer);
     clearInterval(this.validationTimer);
     clearTimeout(this.saveTimer);
@@ -6135,4 +6432,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-Boaxpi2A.js.map
+//# sourceMappingURL=EditorModeController-PEvwrCrP.js.map

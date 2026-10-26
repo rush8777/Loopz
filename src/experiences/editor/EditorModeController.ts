@@ -32,7 +32,7 @@ import { applyOnsiteDocument, cloneOnsite, createOnsiteDocument, duplicateDocume
 import { guideInteractionTarget, guideStepConfigurationErrors, matchesGuideRoute } from "../runtime/GuideStepLogic";
 import type { SiteThemeTokens, VisualPresetId, VisualThemeState } from "../../themes/types";
 import { EXPERIENCE_PRESETS, resolvedTheme } from "../../themes/ExperienceTheme";
-import { editorAiContext, type EditorAiProposal } from "./AiEditing";
+import { applyGuideAiProposal, editorAiContext, guideAiContext, type EditorAiProposal } from "./AiEditing";
 
 type EditorMode = "design" | "target" | "navigate" | "preview";
 type TargetStatus = "found" | "off-page" | "missing" | "unconfigured";
@@ -79,7 +79,13 @@ export class EditorModeController {
   private guidePreviewEntryPath = "";
   private previewDevice: "desktop" | "tablet" | "mobile" = "desktop";
   private aiConversationId: string | undefined;
-  private aiProposal: { value: EditorAiProposal; revision: number } | null = null;
+  private aiProposal: { value: EditorAiProposal; revision: number; generation: number } | null = null;
+  private aiResolvedTargets = new Map<number, ExperienceTarget>();
+  private aiPreviewOriginal: (RuntimeGuideDefinition & { targeting: ExperienceTargeting }) | null = null;
+  private aiPreviewCandidate: (RuntimeGuideDefinition & { targeting: ExperienceTargeting }) | null = null;
+  private aiPreviewReturnMode: EditorMode | null = null;
+  private guideAiUndo: Array<RuntimeGuideDefinition & { targeting: ExperienceTargeting }> = [];
+  private guideAiRedo: Array<RuntimeGuideDefinition & { targeting: ExperienceTargeting }> = [];
   private aiAbort: AbortController | null = null;
   private aiRequestGeneration = 0;
   private persistBeforePageLeave = () => this.updateContinuation();
@@ -191,7 +197,7 @@ export class EditorModeController {
 
   private panelMarkup(draft: EditorDraft): string {
     const selectableSteps = this.guide?.steps ?? this.survey?.steps;
-    const aiEligible = draft.experience.builderMode === "onsite" && draft.experience.kind === "widget" && draft.experience.widgetType !== "survey";
+    const aiEligible = draft.experience.builderMode === "onsite" && (draft.experience.kind === "guide" || draft.experience.kind === "widget" && draft.experience.widgetType !== "survey");
     const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><span class="step-drag-handle" data-step-drag-handle title="Drag step bar" aria-hidden="true">⠿</span><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-add-step="modal">＋ Modal</button><button type="button" class="secondary-button compact" data-add-step="anchored_card">＋ Anchored</button></div>' : ""}</div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? `<div class="history-row" data-step-bar-actions><button type="button" class="secondary-button compact step-bar-action" data-add-current-step aria-label="Add step" title="Add a ${getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal" ? "Modal" : "Anchored"} step">＋</button><button type="button" class="secondary-button compact step-bar-action step-bar-delete" data-delete-step aria-label="Delete selected step" title="Delete selected step"${this.guide.steps.length <= 1 ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13"/></svg></button></div><div class="history-row"><button type="button" class="secondary-button compact" data-duplicate-step>Duplicate</button><button type="button" class="secondary-button compact" data-step-left>←</button><button type="button" class="secondary-button compact" data-step-right>→</button></div>` : ""}</section>` : "";
     const designDisabled = draft.experience.builderMode !== "onsite" ? " disabled title=\"Content is edited in the GrapesJS Dashboard Builder\"" : "";
     return `<div class="editor-toolbar" data-editor-toolbar role="region" aria-label="Movcues editing controls">
@@ -212,7 +218,7 @@ export class EditorModeController {
           <div class="ai-suggestions"><button type="button" data-ai-suggestion="Improve the selected copy while keeping the same meaning.">Improve copy</button><button type="button" data-ai-suggestion="Improve the selected element's visual hierarchy and spacing.">Improve hierarchy</button><button type="button" data-ai-suggestion="Make this widget more concise and mobile friendly.">Mobile polish</button></div>
           <form data-ai-form><textarea data-ai-prompt maxlength="4000" rows="4" placeholder="Describe the change…"></textarea><button type="submit" class="secondary-button" data-ai-send>Generate proposal</button></form>
           <div class="ai-status" data-ai-status role="status" aria-live="polite"></div>
-          <article class="ai-proposal" data-ai-proposal hidden><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Preview only. Nothing changes until you apply it.</p><div class="history-row"><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div></article>
+          <article class="ai-proposal" data-ai-proposal hidden><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Preview only. Nothing changes until you apply it.</p><div class="history-row"><button type="button" class="secondary-button" data-ai-target hidden>Select target</button><button type="button" class="secondary-button" data-ai-preview hidden>Preview Guide</button><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div></article>
         </section>
         <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : this.survey ? "Preview tests the full Survey. No responses, production events or progress are recorded. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
@@ -301,8 +307,10 @@ export class EditorModeController {
     root.querySelectorAll<HTMLButtonElement>("[data-ai-suggestion]").forEach(button => button.addEventListener("click", () => { const input = root.querySelector<HTMLTextAreaElement>("[data-ai-prompt]"); if (input) { input.value = button.dataset.aiSuggestion ?? ""; input.focus(); } }));
     root.querySelector<HTMLFormElement>("[data-ai-form]")?.addEventListener("submit", event => { event.preventDefault(); void this.sendAiPrompt(); });
     root.querySelector<HTMLButtonElement>("[data-ai-cancel]")?.addEventListener("click", () => this.cancelAiRequest());
+    root.querySelector<HTMLButtonElement>("[data-ai-target]")?.addEventListener("click", () => this.resolveAiGuideTarget());
+    root.querySelector<HTMLButtonElement>("[data-ai-preview]")?.addEventListener("click", () => this.previewAiGuideProposal());
     root.querySelector<HTMLButtonElement>("[data-ai-apply]")?.addEventListener("click", () => this.applyAiProposal());
-    root.querySelector<HTMLButtonElement>("[data-ai-discard]")?.addEventListener("click", () => { this.aiProposal = null; this.syncAiPanel(); });
+    root.querySelector<HTMLButtonElement>("[data-ai-discard]")?.addEventListener("click", () => this.discardAiProposal());
     root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.addEventListener("click", () => this.setMode(button.dataset.mode as EditorMode)));
     root.querySelectorAll<HTMLButtonElement>("[data-device]").forEach(button=>button.addEventListener("click",()=>{this.previewDevice=button.dataset.device as typeof this.previewDevice;this.applyPreviewDevice();this.syncThemeInspector();}));
     root.querySelectorAll<HTMLButtonElement>("[data-pick]").forEach(button => button.addEventListener("click", () => { if (this.mode !== "target") this.setMode("target"); else this.startPicker(); }));
@@ -320,8 +328,8 @@ export class EditorModeController {
     root.querySelector<HTMLButtonElement>("[data-export-draft]")?.addEventListener("click", () => this.exportRecovery());
     root.querySelector<HTMLButtonElement>("[data-discard-draft]")?.addEventListener("click", () => { if (window.confirm("Discard unsaved edits and close?")) { this.recoveryDraft = null; this.destroy(); } });
     root.querySelector<HTMLButtonElement>("[data-reset-preview]")?.addEventListener("click", () => this.guide ? this.startGuidePreview() : this.renderPreview());
-    root.querySelector<HTMLButtonElement>("[data-global-undo]")?.addEventListener("click", () => { this.compositionEditor?.undo(); this.contentEditor?.undo(); this.syncContentInspector(); });
-    root.querySelector<HTMLButtonElement>("[data-global-redo]")?.addEventListener("click", () => { this.compositionEditor?.redo(); this.contentEditor?.redo(); this.syncContentInspector(); });
+    root.querySelector<HTMLButtonElement>("[data-global-undo]")?.addEventListener("click", () => this.globalUndo());
+    root.querySelector<HTMLButtonElement>("[data-global-redo]")?.addEventListener("click", () => this.globalRedo());
     root.querySelector<HTMLButtonElement>("[data-move-side]")?.addEventListener("click", () => root.querySelector("aside")?.classList.toggle("left-side"));
     root.querySelector<HTMLButtonElement>("[data-select-step]")?.addEventListener("click", () => this.compositionEditor?.selectStep());
     root.querySelectorAll<HTMLButtonElement>("[data-edge]").forEach(button => button.addEventListener("click", () => this.compositionEditor?.addEdge(button.dataset.edge as "top" | "right" | "bottom" | "left")));
@@ -346,7 +354,7 @@ export class EditorModeController {
       const event = rawEvent as KeyboardEvent;
       if (event.key === "Escape") { this.contentEditor?.editSelected(); event.preventDefault(); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void this.persist(); }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); if (event.shiftKey) { this.compositionEditor?.redo(); this.contentEditor?.redo(); } else { this.compositionEditor?.undo(); this.contentEditor?.undo(); } }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); if (event.shiftKey) this.globalRedo(); else this.globalUndo(); }
     });
     this.bindDrag();
     this.bindStepBarDrag();
@@ -704,8 +712,9 @@ export class EditorModeController {
     return !!document.querySelector("[data-movcues-picker-overlay]");
   }
 
-  private changed(render = true): void {
+  private changed(render = true, preserveGuideAiHistory = false): void {
     if (this.saveState === "expired") return;
+    if (!preserveGuideAiHistory) { this.guideAiUndo = []; this.guideAiRedo = []; }
     this.dirty = true; this.editGeneration++;
     this.updateContinuation();
     if (render) this.syncPanel(); else { this.syncContentInspector(); this.syncCompositionInspector(); }
@@ -948,6 +957,9 @@ export class EditorModeController {
   private syncCompositionInspector(): void {
     this.surveyEditor?.sync();this.checklistEditor?.sync();
     if (!this.root) return; const editor = this.compositionEditor; const selection = this.compositionSelection; const inspector = this.root.querySelector<HTMLElement>("[data-composition-inspector]"); if (!inspector) return;
+    const globalUndo = this.root.querySelector<HTMLButtonElement>("[data-global-undo]"); const globalRedo = this.root.querySelector<HTMLButtonElement>("[data-global-redo]");
+    if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !editor?.canUndo() && !this.contentEditor?.canUndo();
+    if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !editor?.canRedo() && !this.contentEditor?.canRedo();
     inspector.hidden = this.mode !== "design" || !editor || !selection; this.root.querySelector<HTMLElement>("[data-content-inspector]")!.hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
     if (!editor || !selection) return; if (selection.kind === "step") this.syncGuideBehavior(); this.setText("[data-composition-label]", selection.label);
     this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { if (selection.kind !== "step") group.hidden = true; });
@@ -965,11 +977,11 @@ export class EditorModeController {
     }
     this.hideChecklistWidgetControls();
     const undo = this.root.querySelector<HTMLButtonElement>("[data-v2-undo]"); if (undo) undo.disabled = !editor.canUndo(); const redo = this.root.querySelector<HTMLButtonElement>("[data-v2-redo]"); if (redo) redo.disabled = !editor.canRedo();
-    this.root.querySelector<HTMLButtonElement>("[data-global-undo]")!.disabled = !editor.canUndo(); this.root.querySelector<HTMLButtonElement>("[data-global-redo]")!.disabled = !editor.canRedo();
+    if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !editor.canUndo(); if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !editor.canRedo();
   }
 
   private setInspectorTab(tab: "properties" | "ai"): void {
-    if (!this.root || (tab === "ai" && (this.guide || this.survey || this.checklist || this.draft?.experience.builderMode !== "onsite"))) return;
+    if (!this.root || (tab === "ai" && (this.survey || this.checklist || this.draft?.experience.builderMode !== "onsite"))) return;
     this.root.querySelector("main")?.classList.toggle("ai-mode", tab === "ai");
     this.root.querySelectorAll<HTMLButtonElement>("[data-inspector-tab]").forEach(button => button.classList.toggle("active", button.dataset.inspectorTab === tab));
     const panel = this.root.querySelector<HTMLElement>("[data-ai-panel]"); if (panel) panel.hidden = tab !== "ai";
@@ -978,27 +990,32 @@ export class EditorModeController {
 
   private syncAiPanel(): void {
     if (!this.root) return; const selection = this.compositionSelection;
-    this.setText("[data-ai-context]", selection ? `Editing ${selection.label} · ${selection.kind}` : "Choose an element or ask about the whole widget.");
+    this.setText("[data-ai-context]", this.guide ? `Guide · step ${this.stepIndex + 1} of ${this.guide.steps.length}${selection ? ` · ${selection.label}` : ""}` : selection ? `Editing ${selection.label} · ${selection.kind}` : "Choose an element or ask about the whole widget.");
     const proposal = this.root.querySelector<HTMLElement>("[data-ai-proposal]"); if (proposal) proposal.hidden = !this.aiProposal;
     if (!this.aiProposal) return;
     this.setText("[data-ai-summary]", this.aiProposal.value.summary);
-    const list = this.root.querySelector<HTMLElement>("[data-ai-operations]"); if (list) list.replaceChildren(...this.aiProposal.value.operations.map(operation => { const item = document.createElement("li"); item.textContent = operation.type.replace(/_/g, " "); return item; }));
-    const stale = this.aiProposal.revision !== this.draft?.version.revision;
-    const apply = this.root.querySelector<HTMLButtonElement>("[data-ai-apply]"); if (apply) { apply.disabled = stale; apply.title = stale ? "Draft changed; generate a fresh proposal." : "Apply as one undoable change"; }
+    const list = this.root.querySelector<HTMLElement>("[data-ai-operations]"); if (list) list.replaceChildren(...this.aiProposal.value.operations.map((operation, index) => { const item = document.createElement("li"); const stepId = "stepId" in operation ? operation.stepId : undefined; const step = stepId ? this.guide?.steps.find(value => value.id === stepId) : undefined; item.textContent = `${operation.type.replace(/_/g, " ")}${step ? ` · ${step.label || step.content.heading || `step ${this.guide!.steps.indexOf(step) + 1}`}` : ""}${operation.type === "request_guide_target" && this.aiResolvedTargets.has(index) ? " · target selected" : ""}`; return item; }));
+    const stale = this.aiProposal.revision !== this.draft?.version.revision || this.aiProposal.generation !== this.editGeneration;
+    const unresolved = this.aiProposal.value.operations.some((operation, index) => operation.type === "request_guide_target" && !this.aiResolvedTargets.has(index));
+    const target = this.root.querySelector<HTMLButtonElement>("[data-ai-target]"); if (target) target.hidden = !this.guide || !unresolved;
+    const preview = this.root.querySelector<HTMLButtonElement>("[data-ai-preview]"); if (preview) { preview.hidden = !this.guide; preview.disabled = stale || unresolved; }
+    const apply = this.root.querySelector<HTMLButtonElement>("[data-ai-apply]"); if (apply) { apply.disabled = stale || unresolved; apply.title = stale ? "Draft changed; generate a fresh proposal." : unresolved ? "Select each requested website target first." : "Apply as one undoable change"; }
     if (stale) this.setText("[data-ai-status]", "The draft changed. Discard this proposal and generate a fresh one.");
   }
 
   private async sendAiPrompt(): Promise<void> {
     const input = this.root?.querySelector<HTMLTextAreaElement>("[data-ai-prompt]"); const prompt = input?.value.trim();
-    if (!prompt || !this.bridge || !this.draft || !this.compositionEditor || !this.compositionSelection || this.guide || this.survey || this.checklist) return;
+    if (!prompt || !this.bridge || !this.draft || !this.compositionEditor || !this.compositionSelection || this.survey || this.checklist) return;
+    if (!this.flushContent() || this.dirty && !await this.persist()) return;
     this.cancelAiRequest(); const generation = ++this.aiRequestGeneration; const abort = new AbortController(); this.aiAbort = abort;
     const send = this.root?.querySelector<HTMLButtonElement>("[data-ai-send]"); if (send) send.disabled = true;
     const cancel = this.root?.querySelector<HTMLButtonElement>("[data-ai-cancel]"); if (cancel) cancel.hidden = false;
-    this.setText("[data-ai-status]", "Generating a validated proposal…"); this.aiProposal = null; this.syncAiPanel();
+    this.setText("[data-ai-status]", "Generating a validated proposal…"); this.discardAiPreview(); this.aiProposal = null; this.aiResolvedTargets.clear(); this.syncAiPanel();
     try {
-      const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context: editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: this.compositionEditor.getDocument() }) }, abort.signal);
+      const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting }, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.ensureThemeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: this.compositionEditor.getDocument() });
+      const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context }, abort.signal);
       if (generation !== this.aiRequestGeneration) return;
-      this.aiConversationId = response.conversationId; this.aiProposal = response.proposal ? { value: response.proposal, revision: response.revision } : null;
+      this.aiConversationId = response.conversationId; this.aiProposal = response.proposal ? { value: response.proposal, revision: response.revision, generation: this.editGeneration } : null;
       this.setText("[data-ai-status]", response.markdown); if (response.proposal && input) input.value = ""; this.syncAiPanel();
     } catch (error) {
       if (generation === this.aiRequestGeneration && !abort.signal.aborted) { if (error instanceof DraftConflictError) this.saveState = "conflict"; if (error instanceof EditorAiRequestError && error.conversationId) this.aiConversationId = error.conversationId; this.setText("[data-ai-status]", error instanceof Error ? error.message : "Movcues AI could not complete this request."); this.showSaveState(); }
@@ -1008,8 +1025,55 @@ export class EditorModeController {
   private cancelAiRequest(): void { if (!this.aiAbort) return; this.aiAbort.abort(); this.aiAbort = null; this.aiRequestGeneration++; this.setText("[data-ai-status]", "Request canceled. Your prompt is still here."); const send = this.root?.querySelector<HTMLButtonElement>("[data-ai-send]"); if (send) send.disabled = false; const cancel = this.root?.querySelector<HTMLButtonElement>("[data-ai-cancel]"); if (cancel) cancel.hidden = true; }
 
   private applyAiProposal(): void {
-    if (!this.aiProposal || !this.draft || this.aiProposal.revision !== this.draft.version.revision) { this.syncAiPanel(); return; }
-    if (this.compositionEditor?.applyAiProposal(this.aiProposal.value)) { this.aiProposal = null; this.setText("[data-ai-status]", "Applied. Use Undo to revert the entire proposal."); this.syncAiPanel(); }
+    if (!this.aiProposal || !this.draft || this.aiProposal.revision !== this.draft.version.revision || this.aiProposal.generation !== this.editGeneration) { this.syncAiPanel(); return; }
+    if (!this.guide) { if (this.compositionEditor?.applyAiProposal(this.aiProposal.value)) { this.aiProposal = null; this.setText("[data-ai-status]", "Applied. Use Undo to revert the entire proposal."); this.syncAiPanel(); } return; }
+    try {
+      const before = cloneOnsite(this.aiPreviewOriginal ?? this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting });
+      const candidate = this.aiPreviewCandidate ?? applyGuideAiProposal(before, this.aiProposal.value, this.aiResolvedTargets).guide;
+      this.guideAiUndo.push(before); if (this.guideAiUndo.length > 20) this.guideAiUndo.shift(); this.guideAiRedo = [];
+      this.setGuideDefinition(cloneOnsite(candidate)); this.aiPreviewOriginal = null; this.aiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.aiProposal = null; this.aiResolvedTargets.clear();
+      this.changed(true, true); this.refreshStepBar(); this.setText("[data-ai-status]", "Applied. Undo restores the complete Guide in one step."); this.syncAiPanel();
+    } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Guide proposal is invalid."); }
+  }
+
+  private resolveAiGuideTarget(): void {
+    if (!this.aiProposal || !this.guide) return; this.discardAiPreview();
+    const operationIndex = this.aiProposal.value.operations.findIndex((operation, index) => operation.type === "request_guide_target" && !this.aiResolvedTargets.has(index));
+    const operation = this.aiProposal.value.operations[operationIndex]; if (!operation || operation.type !== "request_guide_target") return;
+    const index = this.guide.steps.findIndex(step => step.id === operation.stepId); if (index < 0 || !this.flushContent()) return;
+    this.stepIndex = index; const generation = ++this.selectionGeneration; this.picker.cancel(); this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null; this.preview.destroy(); this.previewRendered = false;
+    this.setText("[data-ai-status]", `Select the website element for this step's ${operation.targetKind === "position" ? "position" : "advance trigger"}. Escape cancels.`);
+    void this.picker.pick().then(target => {
+      if (generation !== this.selectionGeneration || !target) { this.renderPreview(); this.syncPanel(); return; }
+      this.aiResolvedTargets.set(operationIndex, { ...target, targetContext: { pagePath: currentPagePath() } }); this.renderPreview(); this.syncPanel(); this.syncAiPanel();
+    });
+  }
+
+  private previewAiGuideProposal(): void {
+    if (!this.aiProposal || !this.guide || !this.draft || this.aiProposal.revision !== this.draft.version.revision || this.aiProposal.generation !== this.editGeneration) return;
+    try {
+      this.discardAiPreview(); const original = cloneOnsite(this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting }); this.aiPreviewReturnMode = this.mode;
+      const result = applyGuideAiProposal(original, this.aiProposal.value, this.aiResolvedTargets); this.aiPreviewOriginal = original; this.aiPreviewCandidate = cloneOnsite(result.guide);
+      this.setGuideDefinition(cloneOnsite(result.guide)); this.stepIndex = 0; this.refreshStepBar(); this.startGuidePreview(); this.setText("[data-ai-status]", "Previewing the complete proposed Guide. Apply or Discard to finish.");
+    } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Guide proposal is invalid."); }
+  }
+
+  private discardAiPreview(): void {
+    if (!this.aiPreviewOriginal) return; const returnMode = this.aiPreviewReturnMode; this.setGuideDefinition(this.aiPreviewOriginal); this.aiPreviewOriginal = null; this.aiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.stepIndex = clampStep(this.stepIndex, this.guide!.steps.length); this.refreshStepBar(); if (returnMode && returnMode !== this.mode) this.setMode(returnMode); else if (this.mode !== "navigate") this.renderPreview();
+  }
+
+  private discardAiProposal(): void { this.discardAiPreview(); this.aiProposal = null; this.aiResolvedTargets.clear(); this.setText("[data-ai-status]", "Proposal discarded. No draft changes were made."); this.syncAiPanel(); }
+
+  private setGuideDefinition(value: RuntimeGuideDefinition & { targeting: ExperienceTargeting }): void { this.guide = value; this.definition = value; }
+
+  private globalUndo(): void {
+    if (this.guide && this.guideAiUndo.length && this.flushContent()) { const previous = this.guideAiUndo.pop()!; this.guideAiRedo.push(cloneOnsite(this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting })); this.setGuideDefinition(previous); this.stepIndex = clampStep(this.stepIndex, previous.steps.length); this.changed(true, true); this.refreshStepBar(); return; }
+    this.compositionEditor?.undo(); this.contentEditor?.undo(); this.syncContentInspector();
+  }
+
+  private globalRedo(): void {
+    if (this.guide && this.guideAiRedo.length && this.flushContent()) { const next = this.guideAiRedo.pop()!; this.guideAiUndo.push(cloneOnsite(this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting })); this.setGuideDefinition(next); this.stepIndex = clampStep(this.stepIndex, next.steps.length); this.changed(true, true); this.refreshStepBar(); return; }
+    this.compositionEditor?.redo(); this.contentEditor?.redo(); this.syncContentInspector();
   }
 
   private syncPanel(): void {
@@ -1261,7 +1325,7 @@ export class EditorModeController {
 
   private teardown(clearContinuation: boolean): void {
     this.lifecycle++;
-    this.cancelAiRequest(); this.aiProposal = null; this.aiConversationId = undefined;
+    this.cancelAiRequest(); this.aiProposal = null; this.aiConversationId = undefined; this.aiResolvedTargets.clear(); this.aiPreviewOriginal = null; this.aiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.guideAiUndo = []; this.guideAiRedo = [];
     clearTimeout(this.expiryTimer);
     clearInterval(this.validationTimer);
     clearTimeout(this.saveTimer);

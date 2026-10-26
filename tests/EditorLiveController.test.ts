@@ -5,6 +5,7 @@ import { EditorModeController } from "../src/experiences/editor/EditorModeContro
 import { ElementPicker } from "../src/experiences/editor/ElementPicker";
 import { TargetSelectorGenerator } from "../src/experiences/editor/TargetSelectorGenerator";
 import { ExperienceRenderer } from "../src/experiences/runtime/ExperienceRenderer";
+import { applyOnsiteDocument, createOnsiteDocument } from "../src/experiences/onsite/OnsiteDocument";
 import type { EditorDraft, ExperienceDesign, ExperienceTargeting, RuntimeWidgetDefinition } from "../src/experiences/types";
 
 const design: ExperienceDesign = { width: "md", theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } };
@@ -450,6 +451,32 @@ describe("live placement editor", () => {
     editorRoot().querySelector<HTMLButtonElement>('[data-add-step="modal"]')!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(3); editorRoot().querySelector<HTMLButtonElement>("[data-duplicate-step]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(4);
     const name = editorRoot().querySelector<HTMLInputElement>("[data-step-name]")!; name.value = "Activation finish"; name.dispatchEvent(new Event("change", { bubbles: true })); editorRoot().querySelector<HTMLButtonElement>("[data-step-left]")!.click(); editorRoot().querySelector<HTMLButtonElement>('[data-step="0"]')!.click(); editorRoot().querySelector<HTMLButtonElement>("[data-delete-step]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(3);
     await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH" && JSON.parse(String(init.body)).definition.steps.length === 3)).toBe(true)); const calls = fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH" && JSON.parse(String(init.body)).definition.steps.length === 3); const saved = JSON.parse(String(calls.at(-1)![1]?.body)); expect(saved.definition.steps).toHaveLength(3); expect(saved.definition.steps.some((step: { label?: string }) => step.label === "Activation finish")).toBe(true); const ids = saved.definition.steps.map((step: { id: string }) => step.id); expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("previews, discards, applies, undoes and redoes a Guide AI transaction", async () => {
+    const draft = guideDraft(); draft.experience.builderMode = "onsite"; if (!("steps" in draft.version.definition)) throw new Error("Guide expected");
+    draft.version.definition.steps.forEach(step => { step.pattern = "modal"; delete step.target; step.builder = { version: 1, projectData: {}, css: "", html: "" }; step.content = applyOnsiteDocument(step.builder, createOnsiteDocument(true), "modal").content; step.behavior = { dismissible: true }; step.advance = { type: "button" }; });
+    const base = editorFetch(draft); let turns = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/ai/chat")) {
+        turns++; const body = JSON.parse(String(init?.body));
+        expect(body.context.guide.steps).toHaveLength(2); expect(body.context.currentDocument.schemaVersion).toBe(2); expect(JSON.stringify(body.context)).not.toMatch(/primarySelector|fallbackSelectors/);
+        return { ok: true, status: 200, json: async () => ({ conversationId: "conversation_1", revision: body.revision, markdown: "Guide proposal ready.", proposal: { summary: "Add a value step", operations: [{ type: "add_guide_step", afterStepId: "one", pattern: "modal", label: "Value", heading: "See the value", body: "A concise benefit." }] } }) };
+      }
+      return base(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock); controller = new EditorModeController("https://api.example.com"); expect(await controller.start("token")).toBe(true);
+    editorRoot().querySelector<HTMLButtonElement>('[data-inspector-tab="ai"]')!.click();
+    const prompt = editorRoot().querySelector<HTMLTextAreaElement>("[data-ai-prompt]")!; prompt.value = "Add a value step";
+    editorRoot().querySelector<HTMLFormElement>("[data-ai-form]")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(editorRoot().querySelector<HTMLElement>("[data-ai-proposal]")?.hidden).toBe(false));
+    editorRoot().querySelector<HTMLButtonElement>("[data-ai-preview]")!.click(); expect({ count: editorRoot().querySelectorAll("[data-step]").length, status: editorRoot().querySelector("[data-ai-status]")?.textContent }).toEqual({ count: 3, status: "Previewing the complete proposed Guide. Apply or Discard to finish." });
+    editorRoot().querySelector<HTMLButtonElement>("[data-ai-discard]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(2);
+    prompt.value = "Add it"; editorRoot().querySelector<HTMLFormElement>("[data-ai-form]")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => { expect(turns).toBe(2); expect(editorRoot().querySelector<HTMLElement>("[data-ai-proposal]")?.hidden).toBe(false); }); editorRoot().querySelector<HTMLButtonElement>("[data-ai-apply]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(3);
+    editorRoot().querySelector<HTMLButtonElement>("[data-global-undo]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(2);
+    editorRoot().querySelector<HTMLButtonElement>("[data-global-redo]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(3);
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH" && JSON.parse(String(init.body)).definition.steps.length === 3)).toBe(true));
   });
 
 });

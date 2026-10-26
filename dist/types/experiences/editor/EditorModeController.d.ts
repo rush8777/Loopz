@@ -43,6 +43,12 @@ export declare class EditorModeController {
     private previewDevice;
     private aiConversationId;
     private aiProposal;
+    private aiResolvedTargets;
+    private aiPreviewOriginal;
+    private aiPreviewCandidate;
+    private aiPreviewReturnMode;
+    private guideAiUndo;
+    private guideAiRedo;
     private aiAbort;
     private aiRequestGeneration;
     private persistBeforePageLeave;
@@ -109,6 +115,13 @@ export declare class EditorModeController {
     private sendAiPrompt;
     private cancelAiRequest;
     private applyAiProposal;
+    private resolveAiGuideTarget;
+    private previewAiGuideProposal;
+    private discardAiPreview;
+    private discardAiProposal;
+    private setGuideDefinition;
+    private globalUndo;
+    private globalRedo;
     private syncPanel;
     private hideChecklistWidgetControls;
     private renderConfigured;
