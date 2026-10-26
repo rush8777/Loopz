@@ -1,5 +1,8 @@
 import type { EditorDraft } from "../types";
 import type { SiteThemeTokens } from "../../themes/types";
+import type { EditorAiProposal } from "./AiEditing";
+
+export interface EditorAiResponse { conversationId: string; revision: number; markdown: string; proposal: EditorAiProposal | null }
 
 export class EditorBridge {
   constructor(private apiBase: string, private sessionId: string, private accessToken: string) {}
@@ -20,6 +23,14 @@ export class EditorBridge {
     const body = await response.json() as { version: EditorDraft["version"] };
     return body.version;
   }
+  async chat(input: { conversationId?: string; prompt: string; revision: number; context: unknown }, signal?: AbortSignal): Promise<EditorAiResponse> {
+    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/ai/chat`, { method: "POST", headers: this.headers(), credentials: "omit", body: JSON.stringify(input), signal });
+    const body = await response.json().catch(() => null) as ({ error?: string; message?: string; currentRevision?: number } & Partial<EditorAiResponse>) | null;
+    if (response.status === 409 && body?.error === "draft_conflict") throw new DraftConflictError(body.currentRevision);
+    if ([401, 403, 404, 410].includes(response.status) && body?.error !== "conversation_not_found") throw new EditorSessionExpiredError();
+    if (!response.ok) throw new EditorAiRequestError(body?.message ?? "Movcues AI could not complete this request.", body?.conversationId);
+    return body as EditorAiResponse;
+  }
   async saveStyle(name: string, tokens: SiteThemeTokens): Promise<{id:string;name:string;tokens:SiteThemeTokens}> {
     const response=await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/style-presets`,{method:"POST",headers:this.headers(),credentials:"omit",body:JSON.stringify({name,tokens})});
     if(!response.ok)throw new Error((await response.json().catch(()=>null) as {error?:string}|null)?.error??"Style could not be saved");return (await response.json() as {preset:{id:string;name:string;tokens:SiteThemeTokens}}).preset;
@@ -34,5 +45,9 @@ export class DraftConflictError extends Error {
 
 export class EditorSessionExpiredError extends Error {
   constructor() { super("Editor session expired"); }
+}
+
+export class EditorAiRequestError extends Error {
+  constructor(message: string, readonly conversationId?: string) { super(message); }
 }
 

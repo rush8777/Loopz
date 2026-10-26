@@ -2,6 +2,7 @@ import type { ChecklistItem } from "../types";
 import type { ChecklistView, OnsiteChecklistContext } from "../checklist/ChecklistMarkup";
 import type { ExperienceContent, SurveyConfig, SurveyStep, SurveyQuestion, WidgetBuilderState, WidgetType } from "../types";
 import { type OnsiteBlock, type OnsiteCell, type OnsiteDocument, type OnsiteSizing } from "../onsite/OnsiteDocument";
+import { type EditorAiProposal } from "./AiEditing";
 export type CompositionSelection = {
     kind: "step";
     label: string;
@@ -76,6 +77,8 @@ export declare class OnsiteCompositionEditor {
     canRedo(): boolean;
     isComposing(): boolean;
     getValidation(): string[];
+    /** Commits an already-reviewed AI proposal as one undoable transaction. */
+    applyAiProposal(proposal: EditorAiProposal): boolean;
     flush(): boolean;
     snapshot(): {
         builder: WidgetBuilderState;

@@ -41,6 +41,10 @@ export declare class EditorModeController {
     private guidePreviewComplete;
     private guidePreviewEntryPath;
     private previewDevice;
+    private aiConversationId;
+    private aiProposal;
+    private aiAbort;
+    private aiRequestGeneration;
     private persistBeforePageLeave;
     private protectUnsavedChanges;
     constructor(apiBase: string);
@@ -100,6 +104,11 @@ export declare class EditorModeController {
     private currentContent;
     private syncContentInspector;
     private syncCompositionInspector;
+    private setInspectorTab;
+    private syncAiPanel;
+    private sendAiPrompt;
+    private cancelAiRequest;
+    private applyAiProposal;
     private syncPanel;
     private hideChecklistWidgetControls;
     private renderConfigured;

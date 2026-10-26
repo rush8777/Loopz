@@ -1,5 +1,12 @@
 import type { EditorDraft } from "../types";
 import type { SiteThemeTokens } from "../../themes/types";
+import type { EditorAiProposal } from "./AiEditing";
+export interface EditorAiResponse {
+    conversationId: string;
+    revision: number;
+    markdown: string;
+    proposal: EditorAiProposal | null;
+}
 export declare class EditorBridge {
     private apiBase;
     private sessionId;
@@ -8,6 +15,12 @@ export declare class EditorBridge {
     private headers;
     load(): Promise<EditorDraft>;
     save(definition: unknown, revision: number): Promise<EditorDraft["version"]>;
+    chat(input: {
+        conversationId?: string;
+        prompt: string;
+        revision: number;
+        context: unknown;
+    }, signal?: AbortSignal): Promise<EditorAiResponse>;
     saveStyle(name: string, tokens: SiteThemeTokens): Promise<{
         id: string;
         name: string;
@@ -26,4 +39,8 @@ export declare class DraftConflictError extends Error {
 }
 export declare class EditorSessionExpiredError extends Error {
     constructor();
+}
+export declare class EditorAiRequestError extends Error {
+    readonly conversationId?: string | undefined;
+    constructor(message: string, conversationId?: string | undefined);
 }

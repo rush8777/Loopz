@@ -40,6 +40,7 @@ import {
 } from "../onsite/OnsiteDocument";
 import { builderLinkUrlIsSafe } from "../runtime/BuilderContentContract";
 import { prepareImageFile } from "./ImageFile";
+import { applyEditorAiProposal, type EditorAiProposal } from "./AiEditing";
 
 export type CompositionSelection =
   | { kind: "step"; label: string }
@@ -170,6 +171,18 @@ export class OnsiteCompositionEditor {
   canRedo(): boolean { return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1 && this.historyState() === this.historyState(this.history[this.historyIndex]); }
   isComposing(): boolean { return this.composing; }
   getValidation(): string[] { return [...validateOnsiteDocument(this.document).errors, ...(this.survey ? validateOnsiteSurveyDocument(this.document, this.surveyContext()!) : []), ...(this.checklist ? validateOnsiteChecklistDocument(this.document,this.checklist) : [])]; }
+
+  /** Commits an already-reviewed AI proposal as one undoable transaction. */
+  applyAiProposal(proposal: EditorAiProposal): boolean {
+    if (this.guide || this.survey || this.checklist || this.composing || !this.beforeTransaction()) return false;
+    try {
+      this.document = applyEditorAiProposal(this.document, proposal);
+      this.commit(this.selection); return true;
+    } catch (error) {
+      const previous = this.history[this.historyIndex]; if (previous) this.document = cloneOnsite(previous.document);
+      this.callbacks.onValidation([error instanceof Error ? error.message : "AI proposal is invalid."]); return false;
+    }
+  }
 
   flush(): boolean {
     if (this.composing) return false;

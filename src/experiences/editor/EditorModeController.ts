@@ -24,7 +24,7 @@ import { clearEditorContinuation, storeEditorContinuation } from "../editorConti
 import { RouteObserver } from "../../dom/RouteObserver";
 import { ExperienceRenderer } from "../runtime/ExperienceRenderer";
 import { findTarget } from "../runtime/AnchoredCardRenderer";
-import { DraftConflictError, EditorBridge, EditorSessionExpiredError } from "./EditorBridge";
+import { DraftConflictError, EditorAiRequestError, EditorBridge, EditorSessionExpiredError } from "./EditorBridge";
 import { ElementPicker } from "./ElementPicker";
 import { OnsiteContentEditor, type OnsiteComponentSelection } from "./OnsiteContentEditor";
 import { OnsiteCompositionEditor, type CompositionSelection } from "./OnsiteCompositionEditor";
@@ -32,6 +32,7 @@ import { applyOnsiteDocument, cloneOnsite, createOnsiteDocument, duplicateDocume
 import { guideInteractionTarget, guideStepConfigurationErrors, matchesGuideRoute } from "../runtime/GuideStepLogic";
 import type { SiteThemeTokens, VisualPresetId, VisualThemeState } from "../../themes/types";
 import { EXPERIENCE_PRESETS, resolvedTheme } from "../../themes/ExperienceTheme";
+import { editorAiContext, type EditorAiProposal } from "./AiEditing";
 
 type EditorMode = "design" | "target" | "navigate" | "preview";
 type TargetStatus = "found" | "off-page" | "missing" | "unconfigured";
@@ -77,6 +78,10 @@ export class EditorModeController {
   private guidePreviewComplete = false;
   private guidePreviewEntryPath = "";
   private previewDevice: "desktop" | "tablet" | "mobile" = "desktop";
+  private aiConversationId: string | undefined;
+  private aiProposal: { value: EditorAiProposal; revision: number } | null = null;
+  private aiAbort: AbortController | null = null;
+  private aiRequestGeneration = 0;
   private persistBeforePageLeave = () => this.updateContinuation();
   private protectUnsavedChanges = (event: BeforeUnloadEvent) => { if (!this.dirty && !this.saveInFlight && !this.contentEditor?.isComposing() && !this.compositionEditor?.isComposing()) return; event.preventDefault(); event.returnValue = ""; };
 
@@ -186,6 +191,7 @@ export class EditorModeController {
 
   private panelMarkup(draft: EditorDraft): string {
     const selectableSteps = this.guide?.steps ?? this.survey?.steps;
+    const aiEligible = draft.experience.builderMode === "onsite" && draft.experience.kind === "widget" && draft.experience.widgetType !== "survey";
     const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><span class="step-drag-handle" data-step-drag-handle title="Drag step bar" aria-hidden="true">⠿</span><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-add-step="modal">＋ Modal</button><button type="button" class="secondary-button compact" data-add-step="anchored_card">＋ Anchored</button></div>' : ""}</div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? `<div class="history-row" data-step-bar-actions><button type="button" class="secondary-button compact step-bar-action" data-add-current-step aria-label="Add step" title="Add a ${getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal" ? "Modal" : "Anchored"} step">＋</button><button type="button" class="secondary-button compact step-bar-action step-bar-delete" data-delete-step aria-label="Delete selected step" title="Delete selected step"${this.guide.steps.length <= 1 ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13"/></svg></button></div><div class="history-row"><button type="button" class="secondary-button compact" data-duplicate-step>Duplicate</button><button type="button" class="secondary-button compact" data-step-left>←</button><button type="button" class="secondary-button compact" data-step-right>→</button></div>` : ""}</section>` : "";
     const designDisabled = draft.experience.builderMode !== "onsite" ? " disabled title=\"Content is edited in the GrapesJS Dashboard Builder\"" : "";
     return `<div class="editor-toolbar" data-editor-toolbar role="region" aria-label="Movcues editing controls">
@@ -199,6 +205,15 @@ export class EditorModeController {
       </div>
       ${guideMarkup}
       <aside aria-label="Contextual inspector"><main>
+        <nav class="inspector-tabs" aria-label="Inspector mode"><button type="button" class="active" data-inspector-tab="properties">Properties</button><button type="button" data-inspector-tab="ai"${aiEligible ? "" : " disabled"}>AI</button></nav>
+        <section class="section ai-panel" data-ai-panel hidden>
+          <div class="content-heading"><div><div class="eyebrow">Movcues AI</div><strong>Design assistant</strong></div><button type="button" class="secondary-button compact" data-ai-cancel hidden>Cancel</button></div>
+          <p class="muted" data-ai-context>Choose an element or ask about the whole widget.</p>
+          <div class="ai-suggestions"><button type="button" data-ai-suggestion="Improve the selected copy while keeping the same meaning.">Improve copy</button><button type="button" data-ai-suggestion="Improve the selected element's visual hierarchy and spacing.">Improve hierarchy</button><button type="button" data-ai-suggestion="Make this widget more concise and mobile friendly.">Mobile polish</button></div>
+          <form data-ai-form><textarea data-ai-prompt maxlength="4000" rows="4" placeholder="Describe the change…"></textarea><button type="submit" class="secondary-button" data-ai-send>Generate proposal</button></form>
+          <div class="ai-status" data-ai-status role="status" aria-live="polite"></div>
+          <article class="ai-proposal" data-ai-proposal hidden><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Preview only. Nothing changes until you apply it.</p><div class="history-row"><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div></article>
+        </section>
         <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : this.survey ? "Preview tests the full Survey. No responses, production events or progress are recorded. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         <section class="section composition-inspector" data-composition-inspector hidden>
@@ -282,6 +297,12 @@ export class EditorModeController {
 
   private bindPanel(): void {
     const root = this.root!;
+    root.querySelectorAll<HTMLButtonElement>("[data-inspector-tab]").forEach(button => button.addEventListener("click", () => this.setInspectorTab(button.dataset.inspectorTab as "properties" | "ai")));
+    root.querySelectorAll<HTMLButtonElement>("[data-ai-suggestion]").forEach(button => button.addEventListener("click", () => { const input = root.querySelector<HTMLTextAreaElement>("[data-ai-prompt]"); if (input) { input.value = button.dataset.aiSuggestion ?? ""; input.focus(); } }));
+    root.querySelector<HTMLFormElement>("[data-ai-form]")?.addEventListener("submit", event => { event.preventDefault(); void this.sendAiPrompt(); });
+    root.querySelector<HTMLButtonElement>("[data-ai-cancel]")?.addEventListener("click", () => this.cancelAiRequest());
+    root.querySelector<HTMLButtonElement>("[data-ai-apply]")?.addEventListener("click", () => this.applyAiProposal());
+    root.querySelector<HTMLButtonElement>("[data-ai-discard]")?.addEventListener("click", () => { this.aiProposal = null; this.syncAiPanel(); });
     root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.addEventListener("click", () => this.setMode(button.dataset.mode as EditorMode)));
     root.querySelectorAll<HTMLButtonElement>("[data-device]").forEach(button=>button.addEventListener("click",()=>{this.previewDevice=button.dataset.device as typeof this.previewDevice;this.applyPreviewDevice();this.syncThemeInspector();}));
     root.querySelectorAll<HTMLButtonElement>("[data-pick]").forEach(button => button.addEventListener("click", () => { if (this.mode !== "target") this.setMode("target"); else this.startPicker(); }));
@@ -872,7 +893,7 @@ export class EditorModeController {
           onChange: () => { this.syncOnsiteAnchoredPointer(host.shadowRoot!, builder); this.changed(false); },
           onValidation: errors => this.showValidation(errors),
           onImageStatus: message => this.setText("[data-image-status]", message),
-          onSelectionChange: selection => { if(this.checklist && selection.kind !== "step"){this.root?.querySelector("aside")?.classList.remove("minimized");this.root?.querySelector("[data-minimize]")?.setAttribute("aria-expanded","true");} this.compositionSelection = selection; this.syncCompositionInspector(); },
+          onSelectionChange: selection => { if(this.checklist && selection.kind !== "step"){this.root?.querySelector("aside")?.classList.remove("minimized");this.root?.querySelector("[data-minimize]")?.setAttribute("aria-expanded","true");} this.compositionSelection = selection; this.syncCompositionInspector(); this.syncAiPanel(); },
         }, this.survey ? { config: this.survey, step: this.survey.steps[this.stepIndex] } : undefined, this.checklist ?? undefined);
         this.compositionEditor.start(); this.syncOnsiteAnchoredPointer(host.shadowRoot, builder); return;
     } catch (error) { this.showValidation([error instanceof Error ? error.message : "This layout could not be converted safely."]); this.compositionEditor = null; }
@@ -945,6 +966,50 @@ export class EditorModeController {
     this.hideChecklistWidgetControls();
     const undo = this.root.querySelector<HTMLButtonElement>("[data-v2-undo]"); if (undo) undo.disabled = !editor.canUndo(); const redo = this.root.querySelector<HTMLButtonElement>("[data-v2-redo]"); if (redo) redo.disabled = !editor.canRedo();
     this.root.querySelector<HTMLButtonElement>("[data-global-undo]")!.disabled = !editor.canUndo(); this.root.querySelector<HTMLButtonElement>("[data-global-redo]")!.disabled = !editor.canRedo();
+  }
+
+  private setInspectorTab(tab: "properties" | "ai"): void {
+    if (!this.root || (tab === "ai" && (this.guide || this.survey || this.checklist || this.draft?.experience.builderMode !== "onsite"))) return;
+    this.root.querySelector("main")?.classList.toggle("ai-mode", tab === "ai");
+    this.root.querySelectorAll<HTMLButtonElement>("[data-inspector-tab]").forEach(button => button.classList.toggle("active", button.dataset.inspectorTab === tab));
+    const panel = this.root.querySelector<HTMLElement>("[data-ai-panel]"); if (panel) panel.hidden = tab !== "ai";
+    if (tab === "ai") this.syncAiPanel();
+  }
+
+  private syncAiPanel(): void {
+    if (!this.root) return; const selection = this.compositionSelection;
+    this.setText("[data-ai-context]", selection ? `Editing ${selection.label} · ${selection.kind}` : "Choose an element or ask about the whole widget.");
+    const proposal = this.root.querySelector<HTMLElement>("[data-ai-proposal]"); if (proposal) proposal.hidden = !this.aiProposal;
+    if (!this.aiProposal) return;
+    this.setText("[data-ai-summary]", this.aiProposal.value.summary);
+    const list = this.root.querySelector<HTMLElement>("[data-ai-operations]"); if (list) list.replaceChildren(...this.aiProposal.value.operations.map(operation => { const item = document.createElement("li"); item.textContent = operation.type.replace(/_/g, " "); return item; }));
+    const stale = this.aiProposal.revision !== this.draft?.version.revision;
+    const apply = this.root.querySelector<HTMLButtonElement>("[data-ai-apply]"); if (apply) { apply.disabled = stale; apply.title = stale ? "Draft changed; generate a fresh proposal." : "Apply as one undoable change"; }
+    if (stale) this.setText("[data-ai-status]", "The draft changed. Discard this proposal and generate a fresh one.");
+  }
+
+  private async sendAiPrompt(): Promise<void> {
+    const input = this.root?.querySelector<HTMLTextAreaElement>("[data-ai-prompt]"); const prompt = input?.value.trim();
+    if (!prompt || !this.bridge || !this.draft || !this.compositionEditor || !this.compositionSelection || this.guide || this.survey || this.checklist) return;
+    this.cancelAiRequest(); const generation = ++this.aiRequestGeneration; const abort = new AbortController(); this.aiAbort = abort;
+    const send = this.root?.querySelector<HTMLButtonElement>("[data-ai-send]"); if (send) send.disabled = true;
+    const cancel = this.root?.querySelector<HTMLButtonElement>("[data-ai-cancel]"); if (cancel) cancel.hidden = false;
+    this.setText("[data-ai-status]", "Generating a validated proposal…"); this.aiProposal = null; this.syncAiPanel();
+    try {
+      const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context: editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: this.compositionEditor.getDocument() }) }, abort.signal);
+      if (generation !== this.aiRequestGeneration) return;
+      this.aiConversationId = response.conversationId; this.aiProposal = response.proposal ? { value: response.proposal, revision: response.revision } : null;
+      this.setText("[data-ai-status]", response.markdown); if (response.proposal && input) input.value = ""; this.syncAiPanel();
+    } catch (error) {
+      if (generation === this.aiRequestGeneration && !abort.signal.aborted) { if (error instanceof DraftConflictError) this.saveState = "conflict"; if (error instanceof EditorAiRequestError && error.conversationId) this.aiConversationId = error.conversationId; this.setText("[data-ai-status]", error instanceof Error ? error.message : "Movcues AI could not complete this request."); this.showSaveState(); }
+    } finally { if (generation === this.aiRequestGeneration) { this.aiAbort = null; if (send) send.disabled = false; if (cancel) cancel.hidden = true; } }
+  }
+
+  private cancelAiRequest(): void { if (!this.aiAbort) return; this.aiAbort.abort(); this.aiAbort = null; this.aiRequestGeneration++; this.setText("[data-ai-status]", "Request canceled. Your prompt is still here."); const send = this.root?.querySelector<HTMLButtonElement>("[data-ai-send]"); if (send) send.disabled = false; const cancel = this.root?.querySelector<HTMLButtonElement>("[data-ai-cancel]"); if (cancel) cancel.hidden = true; }
+
+  private applyAiProposal(): void {
+    if (!this.aiProposal || !this.draft || this.aiProposal.revision !== this.draft.version.revision) { this.syncAiPanel(); return; }
+    if (this.compositionEditor?.applyAiProposal(this.aiProposal.value)) { this.aiProposal = null; this.setText("[data-ai-status]", "Applied. Use Undo to revert the entire proposal."); this.syncAiPanel(); }
   }
 
   private syncPanel(): void {
@@ -1196,6 +1261,7 @@ export class EditorModeController {
 
   private teardown(clearContinuation: boolean): void {
     this.lifecycle++;
+    this.cancelAiRequest(); this.aiProposal = null; this.aiConversationId = undefined;
     clearTimeout(this.expiryTimer);
     clearInterval(this.validationTimer);
     clearTimeout(this.saveTimer);
@@ -1262,6 +1328,7 @@ const STYLE = `${BASE_STYLE}
 .devicebar{display:flex;align-items:center;gap:3px;padding:0 6px 5px;color:#64748b;font-size:9px}.devicebar span{margin-right:auto}.devicebar button{border:1px solid #d7dce3;border-radius:5px;background:#fff;color:#475569;padding:3px 5px;font:9px inherit;cursor:pointer}.devicebar button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}
 .editor-toolbar header{padding:7px 8px;gap:4px;align-items:center}.header-copy>span{display:none}.header-copy strong{font-size:11px}.header-copy small{margin-top:1px;font-size:10px}.header-actions{flex-wrap:wrap;justify-content:flex-end;gap:1px}.header-actions button{width:25px;height:28px;font-size:14px}.header-actions [data-save]{width:38px;font-size:11px}.header-actions button:disabled{opacity:.4;cursor:default}
 .editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-drag-handle{flex:none;padding:2px 1px;color:#94a3b8;font-size:16px;line-height:1;cursor:move;touch-action:none;user-select:none}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .history-row{gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .step-bar-action{width:24px;height:24px;padding:0;font-size:16px;line-height:1}.step-navigator .step-bar-action svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.step-navigator .step-bar-delete{border-color:#fecaca;background:#fff1f2;color:#dc2626}.step-navigator .step-bar-delete:hover{border-color:#fca5a5;background:#fee2e2;color:#b91c1c}.step-navigator .step-bar-action:disabled{cursor:not-allowed;opacity:.4}.step-navigator .content-heading>.history-row{display:none}
+.inspector-tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.inspector-tabs button,.ai-suggestions button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#475569;padding:6px;font:600 11px inherit;cursor:pointer}.inspector-tabs button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.inspector-tabs button:disabled{opacity:.4;cursor:not-allowed}main.ai-mode>:not(.inspector-tabs):not(.ai-panel){display:none!important}.ai-panel textarea{width:100%;resize:vertical;padding:7px;border:1px solid #d7dce3;border-radius:7px;font:12px/1.4 inherit}.ai-panel form{display:grid;gap:6px}.ai-suggestions{display:flex;flex-wrap:wrap;gap:4px}.ai-suggestions button{padding:5px 6px;font-weight:500}.ai-status{white-space:pre-wrap;color:#475569;font-size:11px}.ai-proposal{display:grid;gap:6px;padding:8px;border:1px solid #bfdbfe;border-radius:8px;background:#f8fbff}.ai-proposal ul{margin:0;padding-left:18px;color:#475569;font-size:11px}
 [data-composition-inspector]>.history-row{display:none}
 @media(max-width:800px){.editor-toolbar{width:min(350px,calc(100vw - 8px))}aside{width:min(300px,calc(100vw - 8px))}}
 @media(max-width:480px){.editor-toolbar{left:4px;top:4px;transform:none}.header-copy strong{font-size:10px}.header-copy small{font-size:9px}.header-actions [data-return-dashboard],.header-actions [data-move-side]{display:none}aside{width:calc(100vw - 8px)}.step-navigator{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:calc(100vw - 8px);box-shadow:0 4px 14px rgba(15,23,42,.12)}.step-navigator>.history-row:not([data-step-bar-actions]){display:none}.step-navigator .content-heading{display:none}}

@@ -1,4 +1,4 @@
-import { C as ChecklistRenderer, b as builderImageUrlIsSafe, a as builderLinkUrlIsSafe, s as surveyBranchErrors, c as computeElementRole, d as computeElementLabel, e as sanitizeBuilderHtml, E as ExperienceRenderer, R as RouteObserver, f as clearEditorContinuation, i as isChecklistDefinition, g as isGuideDefinition, h as getGuideStepPattern, j as guideStepRequiresTarget, k as guideInteractionTarget, l as guideStepConfigurationErrors, m as matchesGuideRoute, n as findTarget, o as storeEditorContinuation } from "./module-BqE-YEFz.js";
+import { C as ChecklistRenderer, b as builderImageUrlIsSafe, a as builderLinkUrlIsSafe, s as surveyBranchErrors, c as computeElementRole, d as computeElementLabel, e as sanitizeBuilderHtml, E as ExperienceRenderer, R as RouteObserver, f as clearEditorContinuation, i as isChecklistDefinition, g as isGuideDefinition, h as getGuideStepPattern, j as guideStepRequiresTarget, k as guideInteractionTarget, l as guideStepConfigurationErrors, m as matchesGuideRoute, n as findTarget, o as storeEditorContinuation } from "./module-BbfYSRJF.js";
 const esc = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 class ChecklistEditor {
   constructor(root, definition, references, options) {
@@ -1288,6 +1288,14 @@ class EditorBridge {
     const body = await response.json();
     return body.version;
   }
+  async chat(input, signal) {
+    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/ai/chat`, { method: "POST", headers: this.headers(), credentials: "omit", body: JSON.stringify(input), signal });
+    const body = await response.json().catch(() => null);
+    if (response.status === 409 && (body == null ? void 0 : body.error) === "draft_conflict") throw new DraftConflictError(body.currentRevision);
+    if ([401, 403, 404, 410].includes(response.status) && (body == null ? void 0 : body.error) !== "conversation_not_found") throw new EditorSessionExpiredError();
+    if (!response.ok) throw new EditorAiRequestError((body == null ? void 0 : body.message) ?? "Movcues AI could not complete this request.", body == null ? void 0 : body.conversationId);
+    return body;
+  }
   async saveStyle(name, tokens) {
     var _a;
     const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/style-presets`, { method: "POST", headers: this.headers(), credentials: "omit", body: JSON.stringify({ name, tokens }) });
@@ -1313,6 +1321,12 @@ class DraftConflictError extends Error {
 class EditorSessionExpiredError extends Error {
   constructor() {
     super("Editor session expired");
+  }
+}
+class EditorAiRequestError extends Error {
+  constructor(message, conversationId) {
+    super(message);
+    this.conversationId = conversationId;
   }
 }
 class HighlightOverlay {
@@ -2279,6 +2293,82 @@ async function prepareImageFile(file) {
     URL.revokeObjectURL(url);
   }
 }
+const BLOCK_PATCH_KEYS = /* @__PURE__ */ new Set(["align", "fontSize", "weight", "lineHeight", "color", "label", "variant", "background", "width", "paddingX", "paddingY", "radius", "alt", "fit", "size", "thickness", "icon"]);
+const CELL_PATCH_KEYS = /* @__PURE__ */ new Set(["direction", "sizing", "align", "justify", "gap", "padding", "responsiveStack", "style"]);
+const plainText = (value) => sanitizeRichText(value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]));
+function patchBlock(block, patch) {
+  for (const key of Object.keys(patch)) if (!BLOCK_PATCH_KEYS.has(key)) throw new Error(`Unsupported block property: ${key}`);
+  Object.assign(block, cloneOnsite(patch));
+}
+function patchCell(cell, patch) {
+  for (const key of Object.keys(patch)) if (!CELL_PATCH_KEYS.has(key)) throw new Error(`Unsupported cell property: ${key}`);
+  Object.assign(cell, cloneOnsite(patch));
+}
+function moveCandidate(document2, sourceId, targetId, before = false) {
+  if (sourceId === document2.root.id || sourceId === targetId) throw new Error("The root cell cannot be moved.");
+  const source = findCell(document2, sourceId), target = findCell(document2, targetId), from = parentCell(document2, sourceId);
+  if (!source || !target || !(from == null ? void 0 : from.children) || findCell({ ...document2, root: source }, targetId)) throw new Error("Invalid move target.");
+  from.children.splice(from.children.indexOf(source), 1);
+  if (!from.children.length) delete from.children;
+  if (!target.block && !target.children) target.children = [source];
+  else {
+    const to = parentCell(document2, targetId);
+    if (!(to == null ? void 0 : to.children)) throw new Error("Invalid move target.");
+    to.children.splice(to.children.indexOf(target) + (before ? 0 : 1), 0, source);
+  }
+}
+function applyEditorAiProposal(document2, proposal) {
+  if (document2.schemaVersion !== 2) throw new Error("AI editing is available only for standard widgets.");
+  if (!proposal.operations.length || proposal.operations.length > 30) throw new Error("AI proposal has an invalid operation count.");
+  const candidate = cloneOnsite(document2);
+  for (const operation of proposal.operations) {
+    if (operation.type === "update_text") {
+      const block = findBlock(candidate, operation.blockId);
+      if (!block || block.type !== "heading" && block.type !== "text") throw new Error("Text target no longer exists.");
+      block.html = plainText(operation.text.slice(0, 1e4));
+    } else if (operation.type === "update_block") {
+      const block = findBlock(candidate, operation.blockId);
+      if (!block || block.type === "question" || block.type === "survey_controls" || block.type.startsWith("checklist_")) throw new Error("Block target is unavailable.");
+      patchBlock(block, operation.patch);
+    } else if (operation.type === "update_cell") {
+      const cell = findCell(candidate, operation.cellId);
+      if (!cell) throw new Error("Cell target no longer exists.");
+      patchCell(cell, operation.patch);
+    } else if (operation.type === "update_button_action") {
+      const block = findBlock(candidate, operation.blockId);
+      if ((block == null ? void 0 : block.type) !== "button") throw new Error("Button target no longer exists.");
+      block.action = { id: block.action.id, ...cloneOnsite(operation.action) };
+    } else if (operation.type === "insert_block") {
+      const target = findCell(candidate, operation.targetCellId);
+      if (!target) throw new Error("Insert target no longer exists.");
+      const block = createBlock(operation.blockType);
+      if (operation.text && (block.type === "heading" || block.type === "text")) block.html = plainText(operation.text);
+      if (operation.position === "inside") {
+        if (!target.block && !target.children) target.block = block;
+        else {
+          target.children ?? (target.children = target.block ? [emptyCell(target.block)] : []);
+          delete target.block;
+          target.children.push(emptyCell(block));
+        }
+      } else {
+        const id = insertAdjacentCell(candidate, target.id, operation.position === "before" ? "top" : "bottom");
+        if (!id) throw new Error("Block could not be inserted.");
+        findCell(candidate, id).block = block;
+      }
+    } else if (operation.type === "remove_cell") {
+      if (operation.cellId === candidate.root.id || !removeCell(candidate, operation.cellId)) throw new Error("Cell cannot be removed.");
+    } else if (operation.type === "duplicate_cell") {
+      if (operation.cellId === candidate.root.id || !duplicateCell(candidate, operation.cellId)) throw new Error("Cell cannot be duplicated.");
+    } else if (operation.type === "move_cell") moveCandidate(candidate, operation.cellId, operation.targetCellId, operation.before);
+    else throw new Error("Unsupported AI operation.");
+  }
+  const validation = validateOnsiteDocument(candidate);
+  if (!validation.valid) throw new Error(validation.errors.join(" "));
+  return candidate;
+}
+function editorAiContext(input) {
+  return { experience: input.experience, selection: cloneOnsite(input.selection), document: cloneOnsite(input.document), ...input.theme ? { theme: cloneOnsite(input.theme) } : {} };
+}
 const BLOCK_LABEL = { checklist_task: "Task", checklist_text: "Checklist text", checklist_control: "Checklist control", checklist_progress: "Progress", question: "Question", survey_controls: "Survey controls", heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
 const HISTORY_LIMIT = 50;
 const HISTORY_BYTES = 2e6;
@@ -2766,6 +2856,20 @@ class OnsiteCompositionEditor {
   }
   getValidation() {
     return [...validateOnsiteDocument(this.document).errors, ...this.survey ? validateOnsiteSurveyDocument(this.document, this.surveyContext()) : [], ...this.checklist ? validateOnsiteChecklistDocument(this.document, this.checklist) : []];
+  }
+  /** Commits an already-reviewed AI proposal as one undoable transaction. */
+  applyAiProposal(proposal) {
+    if (this.guide || this.survey || this.checklist || this.composing || !this.beforeTransaction()) return false;
+    try {
+      this.document = applyEditorAiProposal(this.document, proposal);
+      this.commit(this.selection);
+      return true;
+    } catch (error) {
+      const previous = this.history[this.historyIndex];
+      if (previous) this.document = cloneOnsite(previous.document);
+      this.callbacks.onValidation([error instanceof Error ? error.message : "AI proposal is invalid."]);
+      return false;
+    }
   }
   flush() {
     if (this.composing) return false;
@@ -3723,6 +3827,9 @@ class EditorModeController {
     this.guidePreviewComplete = false;
     this.guidePreviewEntryPath = "";
     this.previewDevice = "desktop";
+    this.aiProposal = null;
+    this.aiAbort = null;
+    this.aiRequestGeneration = 0;
     this.persistBeforePageLeave = () => this.updateContinuation();
     this.protectUnsavedChanges = (event) => {
       var _a, _b;
@@ -3916,6 +4023,7 @@ class EditorModeController {
   panelMarkup(draft) {
     var _a, _b, _c;
     const selectableSteps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
+    const aiEligible = draft.experience.builderMode === "onsite" && draft.experience.kind === "widget" && draft.experience.widgetType !== "survey";
     const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><span class="step-drag-handle" data-step-drag-handle title="Drag step bar" aria-hidden="true">⠿</span><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-add-step="modal">＋ Modal</button><button type="button" class="secondary-button compact" data-add-step="anchored_card">＋ Anchored</button></div>' : ""}</div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? `<div class="history-row" data-step-bar-actions><button type="button" class="secondary-button compact step-bar-action" data-add-current-step aria-label="Add step" title="Add a ${getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal" ? "Modal" : "Anchored"} step">＋</button><button type="button" class="secondary-button compact step-bar-action step-bar-delete" data-delete-step aria-label="Delete selected step" title="Delete selected step"${this.guide.steps.length <= 1 ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13"/></svg></button></div><div class="history-row"><button type="button" class="secondary-button compact" data-duplicate-step>Duplicate</button><button type="button" class="secondary-button compact" data-step-left>←</button><button type="button" class="secondary-button compact" data-step-right>→</button></div>` : ""}</section>` : "";
     const designDisabled = draft.experience.builderMode !== "onsite" ? ' disabled title="Content is edited in the GrapesJS Dashboard Builder"' : "";
     return `<div class="editor-toolbar" data-editor-toolbar role="region" aria-label="Movcues editing controls">
@@ -3929,6 +4037,15 @@ class EditorModeController {
       </div>
       ${guideMarkup}
       <aside aria-label="Contextual inspector"><main>
+        <nav class="inspector-tabs" aria-label="Inspector mode"><button type="button" class="active" data-inspector-tab="properties">Properties</button><button type="button" data-inspector-tab="ai"${aiEligible ? "" : " disabled"}>AI</button></nav>
+        <section class="section ai-panel" data-ai-panel hidden>
+          <div class="content-heading"><div><div class="eyebrow">Movcues AI</div><strong>Design assistant</strong></div><button type="button" class="secondary-button compact" data-ai-cancel hidden>Cancel</button></div>
+          <p class="muted" data-ai-context>Choose an element or ask about the whole widget.</p>
+          <div class="ai-suggestions"><button type="button" data-ai-suggestion="Improve the selected copy while keeping the same meaning.">Improve copy</button><button type="button" data-ai-suggestion="Improve the selected element's visual hierarchy and spacing.">Improve hierarchy</button><button type="button" data-ai-suggestion="Make this widget more concise and mobile friendly.">Mobile polish</button></div>
+          <form data-ai-form><textarea data-ai-prompt maxlength="4000" rows="4" placeholder="Describe the change…"></textarea><button type="submit" class="secondary-button" data-ai-send>Generate proposal</button></form>
+          <div class="ai-status" data-ai-status role="status" aria-live="polite"></div>
+          <article class="ai-proposal" data-ai-proposal hidden><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Preview only. Nothing changes until you apply it.</p><div class="history-row"><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div></article>
+        </section>
         <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : this.survey ? "Preview tests the full Survey. No responses, production events or progress are recorded. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         <section class="section composition-inspector" data-composition-inspector hidden>
@@ -4010,8 +4127,26 @@ class EditorModeController {
     return steps.map((step, index) => `<button class="step" type="button" data-step="${index}" aria-label="Open step ${index + 1}"><span>${index + 1}</span><small>${escapeText("label" in step && typeof step.label === "string" && step.label.trim() ? step.label : "content" in step && step.content.heading.trim() ? step.content.heading : `Step ${index + 1}`)}</small><i data-step-icon>○</i></button>`).join("");
   }
   bindPanel() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D;
     const root = this.root;
+    root.querySelectorAll("[data-inspector-tab]").forEach((button) => button.addEventListener("click", () => this.setInspectorTab(button.dataset.inspectorTab)));
+    root.querySelectorAll("[data-ai-suggestion]").forEach((button) => button.addEventListener("click", () => {
+      const input = root.querySelector("[data-ai-prompt]");
+      if (input) {
+        input.value = button.dataset.aiSuggestion ?? "";
+        input.focus();
+      }
+    }));
+    (_a = root.querySelector("[data-ai-form]")) == null ? void 0 : _a.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void this.sendAiPrompt();
+    });
+    (_b = root.querySelector("[data-ai-cancel]")) == null ? void 0 : _b.addEventListener("click", () => this.cancelAiRequest());
+    (_c = root.querySelector("[data-ai-apply]")) == null ? void 0 : _c.addEventListener("click", () => this.applyAiProposal());
+    (_d = root.querySelector("[data-ai-discard]")) == null ? void 0 : _d.addEventListener("click", () => {
+      this.aiProposal = null;
+      this.syncAiPanel();
+    });
     root.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this.setMode(button.dataset.mode)));
     root.querySelectorAll("[data-device]").forEach((button) => button.addEventListener("click", () => {
       this.previewDevice = button.dataset.device;
@@ -4022,52 +4157,52 @@ class EditorModeController {
       if (this.mode !== "target") this.setMode("target");
       else this.startPicker();
     }));
-    (_a = root.querySelector("[data-pick-layer]")) == null ? void 0 : _a.addEventListener("click", () => this.startLayerPicker());
+    (_e = root.querySelector("[data-pick-layer]")) == null ? void 0 : _e.addEventListener("click", () => this.startLayerPicker());
     root.querySelectorAll("[data-step]").forEach((button) => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
-    (_b = root.querySelector("[data-minimize]")) == null ? void 0 : _b.addEventListener("click", () => {
+    (_f = root.querySelector("[data-minimize]")) == null ? void 0 : _f.addEventListener("click", () => {
       const aside = root.querySelector("aside");
       aside.classList.toggle("minimized");
       root.querySelector("[data-minimize]").setAttribute("aria-expanded", String(!aside.classList.contains("minimized")));
     });
-    (_c = root.querySelector("[data-save]")) == null ? void 0 : _c.addEventListener("click", () => void this.persist());
-    (_d = root.querySelector("[data-close]")) == null ? void 0 : _d.addEventListener("click", () => void this.close());
-    (_e = root.querySelector("[data-return-dashboard]")) == null ? void 0 : _e.addEventListener("click", () => {
+    (_g = root.querySelector("[data-save]")) == null ? void 0 : _g.addEventListener("click", () => void this.persist());
+    (_h = root.querySelector("[data-close]")) == null ? void 0 : _h.addEventListener("click", () => void this.close());
+    (_i = root.querySelector("[data-return-dashboard]")) == null ? void 0 : _i.addEventListener("click", () => {
       var _a2;
       (_a2 = window.opener) == null ? void 0 : _a2.focus();
       void this.close();
     });
-    (_f = root.querySelector("[data-retry-save]")) == null ? void 0 : _f.addEventListener("click", () => void this.persist());
-    (_g = root.querySelector("[data-reload-draft]")) == null ? void 0 : _g.addEventListener("click", () => {
+    (_j = root.querySelector("[data-retry-save]")) == null ? void 0 : _j.addEventListener("click", () => void this.persist());
+    (_k = root.querySelector("[data-reload-draft]")) == null ? void 0 : _k.addEventListener("click", () => {
       if (window.confirm("Reloading discards local edits. Copy / Export them first if you need them. Reload latest?")) {
         this.recoveryDraft = null;
         window.location.reload();
       }
     });
-    (_h = root.querySelector("[data-export-draft]")) == null ? void 0 : _h.addEventListener("click", () => this.exportRecovery());
-    (_i = root.querySelector("[data-discard-draft]")) == null ? void 0 : _i.addEventListener("click", () => {
+    (_l = root.querySelector("[data-export-draft]")) == null ? void 0 : _l.addEventListener("click", () => this.exportRecovery());
+    (_m = root.querySelector("[data-discard-draft]")) == null ? void 0 : _m.addEventListener("click", () => {
       if (window.confirm("Discard unsaved edits and close?")) {
         this.recoveryDraft = null;
         this.destroy();
       }
     });
-    (_j = root.querySelector("[data-reset-preview]")) == null ? void 0 : _j.addEventListener("click", () => this.guide ? this.startGuidePreview() : this.renderPreview());
-    (_k = root.querySelector("[data-global-undo]")) == null ? void 0 : _k.addEventListener("click", () => {
+    (_n = root.querySelector("[data-reset-preview]")) == null ? void 0 : _n.addEventListener("click", () => this.guide ? this.startGuidePreview() : this.renderPreview());
+    (_o = root.querySelector("[data-global-undo]")) == null ? void 0 : _o.addEventListener("click", () => {
       var _a2, _b2;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.undo();
       (_b2 = this.contentEditor) == null ? void 0 : _b2.undo();
       this.syncContentInspector();
     });
-    (_l = root.querySelector("[data-global-redo]")) == null ? void 0 : _l.addEventListener("click", () => {
+    (_p = root.querySelector("[data-global-redo]")) == null ? void 0 : _p.addEventListener("click", () => {
       var _a2, _b2;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.redo();
       (_b2 = this.contentEditor) == null ? void 0 : _b2.redo();
       this.syncContentInspector();
     });
-    (_m = root.querySelector("[data-move-side]")) == null ? void 0 : _m.addEventListener("click", () => {
+    (_q = root.querySelector("[data-move-side]")) == null ? void 0 : _q.addEventListener("click", () => {
       var _a2;
       return (_a2 = root.querySelector("aside")) == null ? void 0 : _a2.classList.toggle("left-side");
     });
-    (_n = root.querySelector("[data-select-step]")) == null ? void 0 : _n.addEventListener("click", () => {
+    (_r = root.querySelector("[data-select-step]")) == null ? void 0 : _r.addEventListener("click", () => {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.selectStep();
     });
@@ -4076,18 +4211,18 @@ class EditorModeController {
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.addEdge(button.dataset.edge);
     }));
     root.querySelectorAll("[data-add-step]").forEach((button) => button.addEventListener("click", () => this.addGuideStep(button.dataset.addStep)));
-    (_o = root.querySelector("[data-add-current-step]")) == null ? void 0 : _o.addEventListener("click", () => this.addGuideStep(getGuideStepPattern(this.guide.steps[this.stepIndex])));
-    (_p = root.querySelector("[data-duplicate-step]")) == null ? void 0 : _p.addEventListener("click", () => this.duplicateGuideStep());
-    (_q = root.querySelector("[data-delete-step]")) == null ? void 0 : _q.addEventListener("click", () => this.deleteGuideStep());
-    (_r = root.querySelector("[data-step-left]")) == null ? void 0 : _r.addEventListener("click", () => this.moveGuideStep(-1));
-    (_s = root.querySelector("[data-step-right]")) == null ? void 0 : _s.addEventListener("click", () => this.moveGuideStep(1));
-    (_t = root.querySelector("[data-step-name]")) == null ? void 0 : _t.addEventListener("change", (event) => {
+    (_s = root.querySelector("[data-add-current-step]")) == null ? void 0 : _s.addEventListener("click", () => this.addGuideStep(getGuideStepPattern(this.guide.steps[this.stepIndex])));
+    (_t = root.querySelector("[data-duplicate-step]")) == null ? void 0 : _t.addEventListener("click", () => this.duplicateGuideStep());
+    (_u = root.querySelector("[data-delete-step]")) == null ? void 0 : _u.addEventListener("click", () => this.deleteGuideStep());
+    (_v = root.querySelector("[data-step-left]")) == null ? void 0 : _v.addEventListener("click", () => this.moveGuideStep(-1));
+    (_w = root.querySelector("[data-step-right]")) == null ? void 0 : _w.addEventListener("click", () => this.moveGuideStep(1));
+    (_x = root.querySelector("[data-step-name]")) == null ? void 0 : _x.addEventListener("change", (event) => {
       if (!this.guide) return;
       this.guide.steps[this.stepIndex].label = event.currentTarget.value.trim().slice(0, 80) || void 0;
       this.changed();
       this.refreshStepBar();
     });
-    (_u = root.querySelector("[data-edit-component]")) == null ? void 0 : _u.addEventListener("click", () => {
+    (_y = root.querySelector("[data-edit-component]")) == null ? void 0 : _y.addEventListener("click", () => {
       var _a2, _b2;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.editSelected();
       (_b2 = this.contentEditor) == null ? void 0 : _b2.editSelected();
@@ -4104,14 +4239,14 @@ class EditorModeController {
       (_b2 = this.contentEditor) == null ? void 0 : _b2.toggleList(button.dataset.list);
       this.syncContentInspector();
     }));
-    (_v = root.querySelector("[data-text-align]")) == null ? void 0 : _v.addEventListener("change", (event) => {
+    (_z = root.querySelector("[data-text-align]")) == null ? void 0 : _z.addEventListener("change", (event) => {
       var _a2, _b2;
       const value = event.currentTarget.value;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.setAlignment(value);
       (_b2 = this.contentEditor) == null ? void 0 : _b2.setAlignment(value);
       this.syncContentInspector();
     });
-    (_w = root.querySelector("[data-apply-link]")) == null ? void 0 : _w.addEventListener("click", () => {
+    (_A = root.querySelector("[data-apply-link]")) == null ? void 0 : _A.addEventListener("click", () => {
       var _a2, _b2;
       const input = root.querySelector("[data-link-url]");
       const applied = input ? ((_a2 = this.compositionEditor) == null ? void 0 : _a2.applyLink(input.value)) ?? ((_b2 = this.contentEditor) == null ? void 0 : _b2.applyLink(input.value)) : false;
@@ -4121,7 +4256,7 @@ class EditorModeController {
       } else input == null ? void 0 : input.setCustomValidity("");
       this.syncContentInspector();
     });
-    (_x = root.querySelector("[data-apply-image]")) == null ? void 0 : _x.addEventListener("click", () => {
+    (_B = root.querySelector("[data-apply-image]")) == null ? void 0 : _B.addEventListener("click", () => {
       var _a2;
       const source = root.querySelector("[data-image-src]");
       const alt = root.querySelector("[data-image-alt]");
@@ -4129,12 +4264,12 @@ class EditorModeController {
       else source == null ? void 0 : source.setCustomValidity("");
       this.syncContentInspector();
     });
-    (_y = root.querySelector("[data-undo]")) == null ? void 0 : _y.addEventListener("click", () => {
+    (_C = root.querySelector("[data-undo]")) == null ? void 0 : _C.addEventListener("click", () => {
       var _a2;
       (_a2 = this.contentEditor) == null ? void 0 : _a2.undo();
       this.syncContentInspector();
     });
-    (_z = root.querySelector("[data-redo]")) == null ? void 0 : _z.addEventListener("click", () => {
+    (_D = root.querySelector("[data-redo]")) == null ? void 0 : _D.addEventListener("click", () => {
       var _a2;
       (_a2 = this.contentEditor) == null ? void 0 : _a2.redo();
       this.syncContentInspector();
@@ -5357,6 +5492,7 @@ class EditorModeController {
           }
           this.compositionSelection = selection;
           this.syncCompositionInspector();
+          this.syncAiPanel();
         }
       }, this.survey ? { config: this.survey, step: this.survey.steps[this.stepIndex] } : void 0, this.checklist ?? void 0);
       this.compositionEditor.start();
@@ -5532,6 +5668,101 @@ class EditorModeController {
     if (redo) redo.disabled = !editor.canRedo();
     this.root.querySelector("[data-global-undo]").disabled = !editor.canUndo();
     this.root.querySelector("[data-global-redo]").disabled = !editor.canRedo();
+  }
+  setInspectorTab(tab) {
+    var _a, _b;
+    if (!this.root || tab === "ai" && (this.guide || this.survey || this.checklist || ((_a = this.draft) == null ? void 0 : _a.experience.builderMode) !== "onsite")) return;
+    (_b = this.root.querySelector("main")) == null ? void 0 : _b.classList.toggle("ai-mode", tab === "ai");
+    this.root.querySelectorAll("[data-inspector-tab]").forEach((button) => button.classList.toggle("active", button.dataset.inspectorTab === tab));
+    const panel = this.root.querySelector("[data-ai-panel]");
+    if (panel) panel.hidden = tab !== "ai";
+    if (tab === "ai") this.syncAiPanel();
+  }
+  syncAiPanel() {
+    var _a;
+    if (!this.root) return;
+    const selection = this.compositionSelection;
+    this.setText("[data-ai-context]", selection ? `Editing ${selection.label} · ${selection.kind}` : "Choose an element or ask about the whole widget.");
+    const proposal = this.root.querySelector("[data-ai-proposal]");
+    if (proposal) proposal.hidden = !this.aiProposal;
+    if (!this.aiProposal) return;
+    this.setText("[data-ai-summary]", this.aiProposal.value.summary);
+    const list = this.root.querySelector("[data-ai-operations]");
+    if (list) list.replaceChildren(...this.aiProposal.value.operations.map((operation) => {
+      const item = document.createElement("li");
+      item.textContent = operation.type.replace(/_/g, " ");
+      return item;
+    }));
+    const stale = this.aiProposal.revision !== ((_a = this.draft) == null ? void 0 : _a.version.revision);
+    const apply = this.root.querySelector("[data-ai-apply]");
+    if (apply) {
+      apply.disabled = stale;
+      apply.title = stale ? "Draft changed; generate a fresh proposal." : "Apply as one undoable change";
+    }
+    if (stale) this.setText("[data-ai-status]", "The draft changed. Discard this proposal and generate a fresh one.");
+  }
+  async sendAiPrompt() {
+    var _a, _b, _c;
+    const input = (_a = this.root) == null ? void 0 : _a.querySelector("[data-ai-prompt]");
+    const prompt = input == null ? void 0 : input.value.trim();
+    if (!prompt || !this.bridge || !this.draft || !this.compositionEditor || !this.compositionSelection || this.guide || this.survey || this.checklist) return;
+    this.cancelAiRequest();
+    const generation = ++this.aiRequestGeneration;
+    const abort = new AbortController();
+    this.aiAbort = abort;
+    const send = (_b = this.root) == null ? void 0 : _b.querySelector("[data-ai-send]");
+    if (send) send.disabled = true;
+    const cancel = (_c = this.root) == null ? void 0 : _c.querySelector("[data-ai-cancel]");
+    if (cancel) cancel.hidden = false;
+    this.setText("[data-ai-status]", "Generating a validated proposal…");
+    this.aiProposal = null;
+    this.syncAiPanel();
+    try {
+      const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context: editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: this.compositionEditor.getDocument() }) }, abort.signal);
+      if (generation !== this.aiRequestGeneration) return;
+      this.aiConversationId = response.conversationId;
+      this.aiProposal = response.proposal ? { value: response.proposal, revision: response.revision } : null;
+      this.setText("[data-ai-status]", response.markdown);
+      if (response.proposal && input) input.value = "";
+      this.syncAiPanel();
+    } catch (error) {
+      if (generation === this.aiRequestGeneration && !abort.signal.aborted) {
+        if (error instanceof DraftConflictError) this.saveState = "conflict";
+        if (error instanceof EditorAiRequestError && error.conversationId) this.aiConversationId = error.conversationId;
+        this.setText("[data-ai-status]", error instanceof Error ? error.message : "Movcues AI could not complete this request.");
+        this.showSaveState();
+      }
+    } finally {
+      if (generation === this.aiRequestGeneration) {
+        this.aiAbort = null;
+        if (send) send.disabled = false;
+        if (cancel) cancel.hidden = true;
+      }
+    }
+  }
+  cancelAiRequest() {
+    var _a, _b;
+    if (!this.aiAbort) return;
+    this.aiAbort.abort();
+    this.aiAbort = null;
+    this.aiRequestGeneration++;
+    this.setText("[data-ai-status]", "Request canceled. Your prompt is still here.");
+    const send = (_a = this.root) == null ? void 0 : _a.querySelector("[data-ai-send]");
+    if (send) send.disabled = false;
+    const cancel = (_b = this.root) == null ? void 0 : _b.querySelector("[data-ai-cancel]");
+    if (cancel) cancel.hidden = true;
+  }
+  applyAiProposal() {
+    var _a;
+    if (!this.aiProposal || !this.draft || this.aiProposal.revision !== this.draft.version.revision) {
+      this.syncAiPanel();
+      return;
+    }
+    if ((_a = this.compositionEditor) == null ? void 0 : _a.applyAiProposal(this.aiProposal.value)) {
+      this.aiProposal = null;
+      this.setText("[data-ai-status]", "Applied. Use Undo to revert the entire proposal.");
+      this.syncAiPanel();
+    }
   }
   syncPanel() {
     var _a, _b;
@@ -5781,6 +6012,9 @@ class EditorModeController {
   teardown(clearContinuation) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
     this.lifecycle++;
+    this.cancelAiRequest();
+    this.aiProposal = null;
+    this.aiConversationId = void 0;
     clearTimeout(this.expiryTimer);
     clearInterval(this.validationTimer);
     clearTimeout(this.saveTimer);
@@ -5889,6 +6123,7 @@ const STYLE = `${BASE_STYLE}
 .devicebar{display:flex;align-items:center;gap:3px;padding:0 6px 5px;color:#64748b;font-size:9px}.devicebar span{margin-right:auto}.devicebar button{border:1px solid #d7dce3;border-radius:5px;background:#fff;color:#475569;padding:3px 5px;font:9px inherit;cursor:pointer}.devicebar button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}
 .editor-toolbar header{padding:7px 8px;gap:4px;align-items:center}.header-copy>span{display:none}.header-copy strong{font-size:11px}.header-copy small{margin-top:1px;font-size:10px}.header-actions{flex-wrap:wrap;justify-content:flex-end;gap:1px}.header-actions button{width:25px;height:28px;font-size:14px}.header-actions [data-save]{width:38px;font-size:11px}.header-actions button:disabled{opacity:.4;cursor:default}
 .editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-drag-handle{flex:none;padding:2px 1px;color:#94a3b8;font-size:16px;line-height:1;cursor:move;touch-action:none;user-select:none}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .history-row{gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .step-bar-action{width:24px;height:24px;padding:0;font-size:16px;line-height:1}.step-navigator .step-bar-action svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.step-navigator .step-bar-delete{border-color:#fecaca;background:#fff1f2;color:#dc2626}.step-navigator .step-bar-delete:hover{border-color:#fca5a5;background:#fee2e2;color:#b91c1c}.step-navigator .step-bar-action:disabled{cursor:not-allowed;opacity:.4}.step-navigator .content-heading>.history-row{display:none}
+.inspector-tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.inspector-tabs button,.ai-suggestions button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#475569;padding:6px;font:600 11px inherit;cursor:pointer}.inspector-tabs button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.inspector-tabs button:disabled{opacity:.4;cursor:not-allowed}main.ai-mode>:not(.inspector-tabs):not(.ai-panel){display:none!important}.ai-panel textarea{width:100%;resize:vertical;padding:7px;border:1px solid #d7dce3;border-radius:7px;font:12px/1.4 inherit}.ai-panel form{display:grid;gap:6px}.ai-suggestions{display:flex;flex-wrap:wrap;gap:4px}.ai-suggestions button{padding:5px 6px;font-weight:500}.ai-status{white-space:pre-wrap;color:#475569;font-size:11px}.ai-proposal{display:grid;gap:6px;padding:8px;border:1px solid #bfdbfe;border-radius:8px;background:#f8fbff}.ai-proposal ul{margin:0;padding-left:18px;color:#475569;font-size:11px}
 [data-composition-inspector]>.history-row{display:none}
 @media(max-width:800px){.editor-toolbar{width:min(350px,calc(100vw - 8px))}aside{width:min(300px,calc(100vw - 8px))}}
 @media(max-width:480px){.editor-toolbar{left:4px;top:4px;transform:none}.header-copy strong{font-size:10px}.header-copy small{font-size:9px}.header-actions [data-return-dashboard],.header-actions [data-move-side]{display:none}aside{width:calc(100vw - 8px)}.step-navigator{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:calc(100vw - 8px);box-shadow:0 4px 14px rgba(15,23,42,.12)}.step-navigator>.history-row:not([data-step-bar-actions]){display:none}.step-navigator .content-heading{display:none}}
@@ -5900,4 +6135,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-_tOew_rD.js.map
+//# sourceMappingURL=EditorModeController-Boaxpi2A.js.map
