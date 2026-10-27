@@ -8,6 +8,12 @@ const references: NonNullable<EditorDraft["references"]> = { guides: [{ id: "gui
 function source(): EditorChecklistDefinition { const f = structuredClone(fixture), builder: WidgetBuilderState = { version: 1, projectData: {}, html: "", css: "" }, definition = { ...f.definition, targeting: { pageRules: [], audience: { type: "all" }, priority: 0 }, builder } as EditorChecklistDefinition; applyOnsiteDocument(builder, f.document as OnsiteDocument, "checklist", undefined, definition); return definition; }
 
 describe("Checklist AI editing", () => {
+  it("generates a complete five-task Checklist with fresh IDs and synchronized task blocks", () => {
+    const tasks = ["Create a workspace", "Invite teammates", "Create a project", "Take the product tour", "Ship the first update"].map((title, index) => ({ title, description: `Step ${index + 1}`, action: { type: "navigate" as const, url: `/setup/${index + 1}` }, completion: { type: "item_clicked" as const } }));
+    const result = applyChecklistAiProposal(source(), { summary: "Generate onboarding", operations: [{ type: "generate_checklist", title: "Launch your workspace", description: "Five quick steps", items: tasks }] }, references), document = onsiteDocumentFromBuilder(result.definition.builder)!;
+    expect(result.definition).toMatchObject({ title: "Launch your workspace", description: "Five quick steps" }); expect(result.definition.items.map(item => item.title)).toEqual(tasks.map(item => item.title)); expect(result.definition.items).toHaveLength(5); expect(result.definition.items.some(item => ["item_one", "item_two", "item_three"].includes(item.id))).toBe(false); expect(new Set(result.definition.items.map(item => item.id)).size).toBe(5); expect(validateOnsiteChecklistDocument(document, result.definition)).toEqual([]);
+  });
+
   it("creates, duplicates, reorders and removes canonical tasks with synchronized visual references", () => {
     const original = source(), result = applyChecklistAiProposal(original, { summary: "Improve tasks", operations: [
       { type: "add_checklist_task", afterItemId: "item_one", item: { title: "Invite teammates", action: { type: "navigate", url: "/settings/team" }, completion: { type: "item_clicked" } } },
