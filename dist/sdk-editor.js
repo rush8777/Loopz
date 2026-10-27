@@ -736,9 +736,9 @@ ${ISOLATION_CSS}`;
   }
   function createOnsiteDocument(guide = false) {
     const heading = emptyCell(createBlock("heading", guide));
-    const text = emptyCell(createBlock("text", guide));
+    const text2 = emptyCell(createBlock("text", guide));
     const button = emptyCell(createBlock("button", guide));
-    return { schemaVersion: 2, id: onsiteId("document"), root: { ...emptyCell(), direction: "column", gap: 12, padding: { top: 20, right: 20, bottom: 20, left: 20 }, children: [heading, text, button] } };
+    return { schemaVersion: 2, id: onsiteId("document"), root: { ...emptyCell(), direction: "column", gap: 12, padding: { top: 20, right: 20, bottom: 20, left: 20 }, children: [heading, text2, button] } };
   }
   function createOnsiteSurveyDocument(questions, content) {
     const document2 = createOnsiteDocument();
@@ -885,13 +885,13 @@ ${ISOLATION_CSS}`;
     css.push('@media(max-width:480px){.movcues-widget [data-movcues-responsive-stack="true"]{flex-direction:column!important}.movcues-widget [data-movcues-sizing="fixed"]{max-width:100%!important}.movcues-widget .movcues-button{min-height:40px}.movcues-widget img{height:auto!important}}');
     const blocks = listBlocks(document2.root);
     const firstHeading = blocks.find((block) => block.type === "heading");
-    const text = blocks.filter((block) => block.type === "text").map((block) => richTextToPlain(block.html)).join("\n").slice(0, 2e3);
+    const text2 = blocks.filter((block) => block.type === "text").map((block) => richTextToPlain(block.html)).join("\n").slice(0, 2e3);
     const actions = blocks.filter((block) => block.type === "button");
     const actionBindings = Object.fromEntries(actions.map((block) => [block.action.id, block.action]));
     const legacy = actions.slice(0, 2).map((block) => ({ label: block.label, type: block.action.type === "previous_step" ? "dismiss" : block.action.type, ..."url" in block.action ? { url: block.action.url } : {}, ..."eventName" in block.action ? { eventName: block.action.eventName } : {} }));
     const content = {
       heading: checklist ? checklist.title : firstHeading ? richTextToPlain(firstHeading.html).slice(0, 160) : "",
-      body: checklist ? checklist.description ?? "" : text,
+      body: checklist ? checklist.description ?? "" : text2,
       ...legacy[0] ? { primaryAction: legacy[0] } : {},
       ...((_a = legacy[1]) == null ? void 0 : _a.type) === "dismiss" ? { secondaryAction: { label: legacy[1].label, type: "dismiss" } } : {}
     };
@@ -3269,9 +3269,9 @@ ${ISOLATION_CSS}`;
   const MAX_LABEL_LENGTH = 60;
   const OVERRIDE_ATTR = "data-movcues-name";
   const detector = new SensitiveElementDetector();
-  function clean(text) {
-    if (!text) return void 0;
-    const trimmed = text.replace(/\s+/g, " ").trim();
+  function clean(text2) {
+    if (!text2) return void 0;
+    const trimmed = text2.replace(/\s+/g, " ").trim();
     if (!trimmed) return void 0;
     return trimmed.length > MAX_LABEL_LENGTH ? `${trimmed.slice(0, MAX_LABEL_LENGTH - 1)}…` : trimmed;
   }
@@ -3290,8 +3290,8 @@ ${ISOLATION_CSS}`;
       if (cleaned) return cleaned;
     }
     if (!detector.isWithinPrivateSubtree(el)) {
-      const text = clean(el.textContent);
-      if (text) return text;
+      const text2 = clean(el.textContent);
+      if (text2) return text2;
     }
     const alt = clean(el.getAttribute("alt"));
     if (alt) return alt;
@@ -3743,14 +3743,14 @@ ${ISOLATION_CSS}`;
         var _a, _b;
         if (!this.isEditing() || this.composing) return;
         const paste = event;
-        const text = (_a = paste.clipboardData) == null ? void 0 : _a.getData("text/plain");
-        if (text === void 0) return;
+        const text2 = (_a = paste.clipboardData) == null ? void 0 : _a.getData("text/plain");
+        if (text2 === void 0) return;
         const range2 = editorRange(this.root);
         if (!range2 || !((_b = this.selected) == null ? void 0 : _b.contains(range2.commonAncestorContainer))) return;
         paste.preventDefault();
         this.beforeOperation();
         range2.deleteContents();
-        const node = document.createTextNode(text);
+        const node = document.createTextNode(text2);
         range2.insertNode(node);
         range2.setStartAfter(node);
         range2.collapse(true);
@@ -4073,11 +4073,11 @@ ${ISOLATION_CSS}`;
       for (const marker of ["heading", "body", "primary", "secondary"]) {
         const element = (_a = this.surface) == null ? void 0 : _a.querySelector(`[data-movcues-content="${marker}"],[data-movcues-action-id="${marker}"]`);
         if (!element) continue;
-        const text = componentPlainText(element);
-        if (marker === "heading" || marker === "body") content[marker] = text;
+        const text2 = componentPlainText(element);
+        if (marker === "heading" || marker === "body") content[marker] = text2;
         else {
           const action = marker === "primary" ? content.primaryAction : content.secondaryAction;
-          if (action) action.label = text;
+          if (action) action.label = text2;
         }
       }
       return { builder: { ...this.builder, html: this.serialize() }, content };
@@ -4160,9 +4160,9 @@ ${ISOLATION_CSS}`;
         nodes.push(this.selected.firstChild);
       }
       const locate = (offset) => {
-        for (const text of nodes) {
-          if (offset <= text.length) return [text, offset];
-          offset -= text.length;
+        for (const text2 of nodes) {
+          if (offset <= text2.length) return [text2, offset];
+          offset -= text2.length;
         }
         const last = nodes[nodes.length - 1];
         return [last, last.length];
@@ -4298,7 +4298,7 @@ ${ISOLATION_CSS}`;
     }
   }
   function applyEditorAiProposal(document2, proposal) {
-    if (document2.schemaVersion !== 2) throw new Error("AI editing is available only for standard widgets.");
+    if (document2.schemaVersion !== 2 && document2.schemaVersion !== 3) throw new Error("AI editing requires an on-site document.");
     if (!proposal.operations.length || proposal.operations.length > 30) throw new Error("AI proposal has an invalid operation count.");
     const candidate = cloneOnsite(document2);
     for (const operation of proposal.operations) {
@@ -4742,10 +4742,10 @@ ${ISOLATION_CSS}`;
         const range2 = editorRange(this.root);
         if (!range2 || !target.contains(range2.commonAncestorContainer)) return;
         event.preventDefault();
-        const text = document.createTextNode(event.clipboardData.getData("text/plain"));
+        const text2 = document.createTextNode(event.clipboardData.getData("text/plain"));
         range2.deleteContents();
-        range2.insertNode(text);
-        range2.setStartAfter(text);
+        range2.insertNode(text2);
+        range2.setStartAfter(text2);
         range2.collapse(true);
         setEditorRange(this.root, range2);
         target.dispatchEvent(new Event("input", { bubbles: true }));
@@ -5919,6 +5919,306 @@ ${ISOLATION_CSS}`;
     if (o.shadow) value.shadows = { sm: o.shadow, md: o.shadow };
     return value;
   }
+  const text = (value, max) => sanitizeRichText(value.trim().slice(0, max).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]));
+  const isDocumentOperation = (operation) => ["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell"].includes(operation.type);
+  function questionFromInput(input, id = onsiteId("question")) {
+    var _a;
+    const base = { id, label: input.label.trim().slice(0, 500), required: input.required ?? false };
+    if (input.type === "single_choice" || input.type === "multiple_choice") return { ...base, type: input.type, options: input.options.map((option) => ({ id: onsiteId("option"), label: option.label.trim().slice(0, 200) })) };
+    if (input.type === "short_text" || input.type === "long_text") return { ...base, type: input.type, placeholder: ((_a = input.placeholder) == null ? void 0 : _a.slice(0, 500)) ?? "", maxLength: input.maxLength ?? (input.type === "short_text" ? 200 : 2e3) };
+    if (input.type === "rating") return { ...base, type: input.type, min: input.min, max: input.max };
+    return { ...base, type: "nps" };
+  }
+  function documentFor(step) {
+    const document2 = onsiteDocumentFromBuilder(step.builder);
+    if (!document2 || document2.schemaVersion !== 3 || !step.builder) throw new Error(`Survey step ${step.id} has no editable schema-v3 document.`);
+    return document2;
+  }
+  function referenceCell(document2, questionId) {
+    let result = null;
+    const walk = (cell) => {
+      var _a, _b;
+      if (((_a = cell.block) == null ? void 0 : _a.type) === "question" && cell.block.questionId === questionId) result = cell;
+      (_b = cell.children) == null ? void 0 : _b.forEach(walk);
+    };
+    walk(document2.root);
+    return result;
+  }
+  function controlsCell(document2) {
+    let result = null;
+    const walk = (cell) => {
+      var _a, _b;
+      if (((_a = cell.block) == null ? void 0 : _a.type) === "survey_controls") result = cell;
+      (_b = cell.children) == null ? void 0 : _b.forEach(walk);
+    };
+    walk(document2.root);
+    return result;
+  }
+  function insertQuestionReference(document2, questionId, afterQuestionId) {
+    const target = afterQuestionId ? referenceCell(document2, afterQuestionId) : controlsCell(document2);
+    if (!target) throw new Error("Survey question insertion point no longer exists.");
+    const parent = parentCell(document2, target.id);
+    if (!(parent == null ? void 0 : parent.children)) throw new Error("Survey question insertion point is invalid.");
+    const index = parent.children.indexOf(target) + (afterQuestionId ? 1 : 0);
+    parent.children.splice(index, 0, { ...emptyCell({ id: onsiteId("block"), type: "question", questionId, fontSize: 14 }), sizing: { mode: "hug" } });
+  }
+  function removeQuestionReference(document2, questionId) {
+    const cell = referenceCell(document2, questionId);
+    if (!cell || !removeCell(document2, cell.id)) throw new Error("Survey question reference no longer exists.");
+  }
+  function moveQuestionReference(document2, questionId, beforeQuestionId) {
+    const source = referenceCell(document2, questionId), target = beforeQuestionId ? referenceCell(document2, beforeQuestionId) : controlsCell(document2);
+    if (!source || !target || source === target) throw new Error("Survey question move target is invalid.");
+    const from = parentCell(document2, source.id), to = parentCell(document2, target.id);
+    if (!(from == null ? void 0 : from.children) || !(to == null ? void 0 : to.children)) throw new Error("Survey question move target is invalid.");
+    from.children.splice(from.children.indexOf(source), 1);
+    to.children.splice(to.children.indexOf(target), 0, source);
+  }
+  function setStepCopy(step, patch, submitLabel) {
+    const document2 = documentFor(step), blocks = listBlocks(document2.root);
+    if (patch.heading !== void 0) {
+      step.content.heading = patch.heading.trim().slice(0, 500);
+      const block = blocks.find((value) => value.type === "heading");
+      if ((block == null ? void 0 : block.type) === "heading") block.html = text(patch.heading, 500);
+    }
+    if (patch.body !== void 0) {
+      step.content.body = patch.body.trim().slice(0, 1e4);
+      const block = blocks.find((value) => value.type === "text");
+      if ((block == null ? void 0 : block.type) === "text") block.html = text(patch.body, 1e4);
+    }
+    step.content = applyOnsiteDocument(step.builder, document2, "survey", { questions: step.questions, submitLabel }).content;
+  }
+  function compileStep(step, submitLabel) {
+    const document2 = documentFor(step), generic = validateOnsiteDocument(document2), survey = validateOnsiteSurveyDocument(document2, { questions: step.questions });
+    const errors = [...surveyQuestionErrors(step.questions), ...generic.errors, ...survey];
+    if (errors.length) throw new Error(errors.join(" "));
+    step.content = applyOnsiteDocument(step.builder, document2, "survey", { questions: step.questions, submitLabel }).content;
+  }
+  function referencedByBranch(survey, predicate) {
+    return survey.steps.some((step) => {
+      var _a;
+      return (_a = step.branching) == null ? void 0 : _a.rules.some(predicate);
+    });
+  }
+  function ensureSurvey(definition) {
+    if (!definition.survey) throw new Error("This definition is not a Survey.");
+    return definition.survey;
+  }
+  function applySurveyAiProposal(source, proposal) {
+    var _a, _b, _c, _d;
+    if (!proposal.operations.length || proposal.operations.length > 30) throw new Error("AI proposal has an invalid operation count.");
+    const definition = cloneOnsite(source), survey = ensureSurvey(definition), affected = /* @__PURE__ */ new Set(), warnings = [], withinStep = /* @__PURE__ */ new Map();
+    const step = (id) => {
+      const value = survey.steps.find((item) => item.id === id);
+      if (!value) throw new Error(`Survey step no longer exists: ${id}`);
+      return value;
+    };
+    const question = (owner, id) => {
+      const value = owner.questions.find((item) => item.id === id);
+      if (!value) throw new Error(`Survey question no longer exists: ${id}`);
+      return value;
+    };
+    for (const operation of proposal.operations) {
+      if (isDocumentOperation(operation)) {
+        if (!operation.stepId) throw new Error("Survey layout operations require a stable step ID.");
+        step(operation.stepId);
+        withinStep.set(operation.stepId, [...withinStep.get(operation.stepId) ?? [], operation]);
+        affected.add(operation.stepId);
+        continue;
+      }
+      if (operation.type === "add_survey_step") {
+        if (survey.steps.length >= 20) throw new Error("A Survey can contain up to 20 steps.");
+        const questions = (operation.questions ?? []).map((value) => questionFromInput(value));
+        const created = { id: onsiteId("step"), content: { heading: operation.heading.trim().slice(0, 500), body: ((_a = operation.body) == null ? void 0 : _a.trim().slice(0, 1e4)) ?? "" }, questions, builder: { version: 1, projectData: {}, html: "", css: "" } };
+        created.content = applyOnsiteDocument(created.builder, createOnsiteSurveyDocument(questions, created.content), "survey", { questions, submitLabel: survey.submitLabel }).content;
+        const index = operation.afterStepId ? survey.steps.findIndex((value) => value.id === operation.afterStepId) : survey.steps.length - 1;
+        if (operation.afterStepId && index < 0) throw new Error("Survey step insertion point no longer exists.");
+        survey.steps.splice(index + 1, 0, created);
+        affected.add(created.id);
+      } else if (operation.type === "duplicate_survey_step") {
+        if (survey.steps.length >= 20) throw new Error("A Survey can contain up to 20 steps.");
+        const original = step(operation.stepId), copy = duplicateSurveyStep(original, survey.submitLabel);
+        const index = operation.afterStepId ? survey.steps.findIndex((value) => value.id === operation.afterStepId) : survey.steps.indexOf(original);
+        if (index < 0) throw new Error("Survey step insertion point no longer exists.");
+        survey.steps.splice(index + 1, 0, copy);
+        affected.add(copy.id);
+      } else if (operation.type === "remove_survey_step") {
+        if (survey.steps.length <= 1) throw new Error("The final Survey step cannot be removed.");
+        const inbound = referencedByBranch(survey, (rule) => rule.nextStepId === operation.stepId);
+        if (inbound && !operation.removeBranchRules) throw new Error("This step is a branch destination. Explicitly allow removal of dependent branch rules.");
+        if (inbound) {
+          survey.steps.forEach((value) => {
+            if (value.branching) {
+              value.branching.rules = value.branching.rules.filter((rule) => rule.nextStepId !== operation.stepId);
+              if (value.branching.defaultNextStepId === operation.stepId) delete value.branching.defaultNextStepId;
+            }
+          });
+          warnings.push("Dependent branch destinations were removed with the Survey step.");
+        }
+        survey.steps.splice(survey.steps.indexOf(step(operation.stepId)), 1);
+        affected.add(operation.stepId);
+        warnings.push("A Survey step and its questions were removed.");
+      } else if (operation.type === "move_survey_step") {
+        const value = step(operation.stepId);
+        survey.steps.splice(survey.steps.indexOf(value), 1);
+        const index = operation.beforeStepId ? survey.steps.findIndex((item) => item.id === operation.beforeStepId) : survey.steps.length;
+        if (index < 0) throw new Error("Survey step move destination no longer exists.");
+        survey.steps.splice(index, 0, value);
+        affected.add(value.id);
+        warnings.push("Survey step order changed; branch paths were revalidated.");
+      } else if (operation.type === "update_survey_step") setStepCopy(step(operation.stepId), operation.patch, survey.submitLabel), affected.add(operation.stepId);
+      else if (operation.type === "add_survey_question") {
+        const owner = step(operation.stepId);
+        if (owner.questions.length >= 20) throw new Error("A Survey step can contain up to 20 questions.");
+        if (operation.afterQuestionId) question(owner, operation.afterQuestionId);
+        const created = questionFromInput(operation.question), index = operation.afterQuestionId ? owner.questions.findIndex((value) => value.id === operation.afterQuestionId) + 1 : owner.questions.length;
+        owner.questions.splice(index, 0, created);
+        insertQuestionReference(documentFor(owner), created.id, operation.afterQuestionId);
+        affected.add(owner.id);
+      } else if (operation.type === "duplicate_survey_question") {
+        const owner = step(operation.stepId);
+        if (owner.questions.length >= 20) throw new Error("A Survey step can contain up to 20 questions.");
+        const original = question(owner, operation.questionId), copy = cloneOnsite(original);
+        copy.id = onsiteId("question");
+        if (copy.type === "single_choice" || copy.type === "multiple_choice") copy.options.forEach((value) => {
+          value.id = onsiteId("option");
+        });
+        const afterId = operation.afterQuestionId ?? original.id;
+        question(owner, afterId);
+        owner.questions.splice(owner.questions.findIndex((value) => value.id === afterId) + 1, 0, copy);
+        insertQuestionReference(documentFor(owner), copy.id, afterId);
+        affected.add(owner.id);
+      } else if (operation.type === "remove_survey_question") {
+        const owner = step(operation.stepId);
+        question(owner, operation.questionId);
+        const dependent = (_b = owner.branching) == null ? void 0 : _b.rules.some((rule) => rule.questionId === operation.questionId);
+        if (dependent && !operation.removeBranchRules) throw new Error("This question controls branching. Explicitly allow removal of dependent branch rules.");
+        if (dependent) {
+          owner.branching.rules = owner.branching.rules.filter((rule) => rule.questionId !== operation.questionId);
+          warnings.push("Dependent branch rules were removed with the Survey question.");
+        }
+        owner.questions = owner.questions.filter((value) => value.id !== operation.questionId);
+        removeQuestionReference(documentFor(owner), operation.questionId);
+        affected.add(owner.id);
+        warnings.push("A Survey question and any collected value for it were removed.");
+      } else if (operation.type === "move_survey_question") {
+        const owner = step(operation.stepId), value = question(owner, operation.questionId);
+        if (operation.beforeQuestionId) question(owner, operation.beforeQuestionId);
+        owner.questions.splice(owner.questions.indexOf(value), 1);
+        const index = operation.beforeQuestionId ? owner.questions.findIndex((item) => item.id === operation.beforeQuestionId) : owner.questions.length;
+        owner.questions.splice(index, 0, value);
+        moveQuestionReference(documentFor(owner), value.id, operation.beforeQuestionId);
+        affected.add(owner.id);
+      } else if (operation.type === "update_survey_question") {
+        const owner = step(operation.stepId), value = question(owner, operation.questionId), patch = operation.patch;
+        if (patch.label !== void 0) value.label = patch.label.trim().slice(0, 500);
+        if (patch.required !== void 0) value.required = patch.required;
+        if (value.type === "short_text" || value.type === "long_text") {
+          if (patch.placeholder !== void 0) value.placeholder = patch.placeholder.slice(0, 500);
+          if (patch.maxLength !== void 0) value.maxLength = patch.maxLength;
+        }
+        if (value.type === "rating") {
+          if (patch.min !== void 0) value.min = patch.min;
+          if (patch.max !== void 0) value.max = patch.max;
+        }
+        affected.add(owner.id);
+      } else if (operation.type === "change_survey_question_type") {
+        const owner = step(operation.stepId), value = question(owner, operation.questionId), replacement = questionFromInput(operation.question, value.id), oldRules = ((_c = owner.branching) == null ? void 0 : _c.rules) ?? [];
+        owner.questions.splice(owner.questions.indexOf(value), 1, replacement);
+        const invalid = surveyBranchErrors(survey);
+        if (invalid.length && oldRules.some((rule) => rule.questionId === value.id)) {
+          if (!operation.removeInvalidBranchRules) throw new Error("Changing this question type invalidates branching. Explicitly allow removal of dependent rules.");
+          owner.branching.rules = oldRules.filter((rule) => rule.questionId !== value.id);
+          warnings.push("Branch rules using the converted question were removed.");
+        }
+        warnings.push(`Question type changed from ${value.type} to ${replacement.type}; existing answers may no longer be comparable.`);
+        affected.add(owner.id);
+      } else if (["add_survey_option", "update_survey_option", "remove_survey_option", "move_survey_option"].includes(operation.type)) {
+        const op = operation, owner = step(op.stepId), value = question(owner, op.questionId);
+        if (value.type !== "single_choice" && value.type !== "multiple_choice") throw new Error("Options are available only on choice questions.");
+        if (op.type === "add_survey_option") {
+          if (value.options.length >= 20) throw new Error("A choice question supports up to 20 options.");
+          const index = op.afterOptionId ? value.options.findIndex((item) => item.id === op.afterOptionId) + 1 : value.options.length;
+          if (op.afterOptionId && index === 0) throw new Error("Survey option insertion point no longer exists.");
+          value.options.splice(index, 0, { id: onsiteId("option"), label: op.label.trim().slice(0, 200) });
+        } else {
+          const index = value.options.findIndex((item) => item.id === op.optionId);
+          if (index < 0) throw new Error("Survey option no longer exists.");
+          if (op.type === "update_survey_option") value.options[index].label = op.label.trim().slice(0, 200);
+          else if (op.type === "move_survey_option") {
+            const [item] = value.options.splice(index, 1), destination = op.beforeOptionId ? value.options.findIndex((option) => option.id === op.beforeOptionId) : value.options.length;
+            if (destination < 0) throw new Error("Survey option move destination no longer exists.");
+            value.options.splice(destination, 0, item);
+          } else {
+            const dependent = (_d = owner.branching) == null ? void 0 : _d.rules.some((rule) => rule.questionId === value.id && rule.value === op.optionId);
+            if (dependent && !op.removeBranchRules) throw new Error("This option controls branching. Explicitly allow removal of dependent branch rules.");
+            if (dependent) {
+              owner.branching.rules = owner.branching.rules.filter((rule) => !(rule.questionId === value.id && rule.value === op.optionId));
+              warnings.push("Dependent branch rules were removed with the Survey option.");
+            }
+            value.options.splice(index, 1);
+            warnings.push("A Survey option and its answer value were removed.");
+          }
+        }
+        affected.add(owner.id);
+      } else if (operation.type === "update_survey_branching") {
+        const owner = step(operation.stepId);
+        owner.branching = operation.branching ? cloneOnsite(operation.branching) : void 0;
+        affected.add(owner.id);
+        warnings.push("Survey branching changed; visitor paths may differ.");
+      } else if (operation.type === "remove_survey_branch_rule") {
+        const owner = step(operation.stepId);
+        if (!owner.branching || operation.ruleIndex < 0 || operation.ruleIndex >= owner.branching.rules.length) throw new Error("Survey branch rule no longer exists.");
+        owner.branching.rules.splice(operation.ruleIndex, 1);
+        affected.add(owner.id);
+        warnings.push("A Survey branch rule was removed.");
+      } else if (operation.type === "update_survey_configuration") {
+        Object.assign(survey, cloneOnsite(operation.patch));
+        if (operation.patch.submitLabel !== void 0) survey.submitLabel = operation.patch.submitLabel.trim().slice(0, 80);
+        warnings.push("Survey-wide configuration changed.");
+      } else throw new Error("Unsupported Survey AI operation.");
+    }
+    for (const [stepId, operations] of withinStep) {
+      const owner = step(stepId), document2 = applyEditorAiProposal(documentFor(owner), { summary: proposal.summary, operations });
+      owner.content = applyOnsiteDocument(owner.builder, document2, "survey", { questions: owner.questions, submitLabel: survey.submitLabel }).content;
+      affected.add(stepId);
+    }
+    if (survey.steps.length < 1 || survey.steps.length > 20) throw new Error("A Survey must contain 1–20 steps.");
+    const ids = /* @__PURE__ */ new Set();
+    for (const owner of survey.steps) {
+      if (ids.has(owner.id)) throw new Error("Survey step IDs must be unique.");
+      ids.add(owner.id);
+      for (const value of owner.questions) {
+        if (ids.has(value.id)) throw new Error("Survey question IDs must be unique.");
+        ids.add(value.id);
+        if (value.type === "single_choice" || value.type === "multiple_choice") for (const option of value.options) {
+          if (ids.has(option.id)) throw new Error("Survey option IDs must be unique.");
+          ids.add(option.id);
+        }
+      }
+      compileStep(owner, survey.submitLabel);
+    }
+    const branchErrors = surveyBranchErrors(survey);
+    if (branchErrors.length) throw new Error(branchErrors.join(" "));
+    return { definition, affectedStepIds: [...affected], order: survey.steps.map((value) => value.id), warnings };
+  }
+  function surveyAiContext(input) {
+    const survey = ensureSurvey(input.definition), current = survey.steps.find((step) => step.id === input.currentStepId);
+    if (!current) throw new Error("Current Survey step no longer exists.");
+    const document2 = documentFor(current);
+    return {
+      experience: { ...input.experience, kind: "widget", widgetType: "survey" },
+      revision: input.revision,
+      scope: input.scope ?? (input.selection.kind === "step" ? "survey" : "step"),
+      currentStepId: current.id,
+      selection: cloneOnsite(input.selection),
+      configuration: { showProgress: survey.showProgress, allowBack: survey.allowBack, submitLabel: survey.submitLabel },
+      steps: survey.steps.map((step) => ({ id: step.id, heading: step.content.heading, body: step.content.body, questions: cloneOnsite(step.questions), branching: cloneOnsite(step.branching) })),
+      currentDocument: { schemaVersion: document2.schemaVersion, id: document2.id, root: cloneOnsite(document2.root) },
+      targeting: cloneOnsite(input.definition.targeting),
+      visualTheme: cloneOnsite(input.definition.visualTheme)
+    };
+  }
   class EditorModeController {
     constructor(apiBase) {
       this.apiBase = apiBase;
@@ -5969,6 +6269,10 @@ ${ISOLATION_CSS}`;
       this.aiPreviewReturnMode = null;
       this.guideAiUndo = [];
       this.guideAiRedo = [];
+      this.surveyAiPreviewOriginal = null;
+      this.surveyAiPreviewCandidate = null;
+      this.surveyAiUndo = [];
+      this.surveyAiRedo = [];
       this.aiAbort = null;
       this.aiRequestGeneration = 0;
       this.persistBeforePageLeave = () => this.updateContinuation();
@@ -6284,7 +6588,7 @@ ${ISOLATION_CSS}`;
       });
       (_b = root.querySelector("[data-ai-cancel]")) == null ? void 0 : _b.addEventListener("click", () => this.cancelAiRequest());
       (_c = root.querySelector("[data-ai-target]")) == null ? void 0 : _c.addEventListener("click", () => this.resolveAiGuideTarget());
-      (_d = root.querySelector("[data-ai-preview]")) == null ? void 0 : _d.addEventListener("click", () => this.previewAiGuideProposal());
+      (_d = root.querySelector("[data-ai-preview]")) == null ? void 0 : _d.addEventListener("click", () => this.survey ? this.previewAiSurveyProposal() : this.previewAiGuideProposal());
       (_e = root.querySelector("[data-ai-apply]")) == null ? void 0 : _e.addEventListener("click", () => this.applyAiProposal());
       (_f = root.querySelector("[data-ai-discard]")) == null ? void 0 : _f.addEventListener("click", () => this.discardAiProposal());
       root.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this.setMode(button.dataset.mode)));
@@ -7302,11 +7606,13 @@ ${ISOLATION_CSS}`;
     pickerIsSelecting() {
       return !!document.querySelector("[data-movcues-picker-overlay]");
     }
-    changed(render = true, preserveGuideAiHistory = false) {
+    changed(render = true, preserveAiHistory = false) {
       if (this.saveState === "expired") return;
-      if (!preserveGuideAiHistory) {
+      if (!preserveAiHistory) {
         this.guideAiUndo = [];
         this.guideAiRedo = [];
+        this.surveyAiUndo = [];
+        this.surveyAiRedo = [];
       }
       this.dirty = true;
       this.editGeneration++;
@@ -7709,8 +8015,8 @@ ${ISOLATION_CSS}`;
       if (!inspector) return;
       const globalUndo = this.root.querySelector("[data-global-undo]");
       const globalRedo = this.root.querySelector("[data-global-redo]");
-      if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !(editor == null ? void 0 : editor.canUndo()) && !((_c = this.contentEditor) == null ? void 0 : _c.canUndo());
-      if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !(editor == null ? void 0 : editor.canRedo()) && !((_d = this.contentEditor) == null ? void 0 : _d.canRedo());
+      if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !this.surveyAiUndo.length && !(editor == null ? void 0 : editor.canUndo()) && !((_c = this.contentEditor) == null ? void 0 : _c.canUndo());
+      if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !this.surveyAiRedo.length && !(editor == null ? void 0 : editor.canRedo()) && !((_d = this.contentEditor) == null ? void 0 : _d.canRedo());
       inspector.hidden = this.mode !== "design" || !editor || !selection;
       this.root.querySelector("[data-content-inspector]").hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
       if (!editor || !selection) return;
@@ -7799,12 +8105,12 @@ ${ISOLATION_CSS}`;
       if (undo) undo.disabled = !editor.canUndo();
       const redo = this.root.querySelector("[data-v2-redo]");
       if (redo) redo.disabled = !editor.canRedo();
-      if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !editor.canUndo();
-      if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !editor.canRedo();
+      if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !this.surveyAiUndo.length && !editor.canUndo();
+      if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !this.surveyAiRedo.length && !editor.canRedo();
     }
     setInspectorTab(tab) {
       var _a, _b;
-      if (!this.root || tab === "ai" && (this.survey || this.checklist || ((_a = this.draft) == null ? void 0 : _a.experience.builderMode) !== "onsite")) return;
+      if (!this.root || tab === "ai" && (this.checklist || ((_a = this.draft) == null ? void 0 : _a.experience.builderMode) !== "onsite")) return;
       (_b = this.root.querySelector("main")) == null ? void 0 : _b.classList.toggle("ai-mode", tab === "ai");
       this.root.querySelectorAll("[data-inspector-tab]").forEach((button) => button.classList.toggle("active", button.dataset.inspectorTab === tab));
       const panel = this.root.querySelector("[data-ai-panel]");
@@ -7815,27 +8121,39 @@ ${ISOLATION_CSS}`;
       var _a;
       if (!this.root) return;
       const selection = this.compositionSelection;
-      this.setText("[data-ai-context]", this.guide ? `Guide · step ${this.stepIndex + 1} of ${this.guide.steps.length}${selection ? ` · ${selection.label}` : ""}` : selection ? `Editing ${selection.label} · ${selection.kind}` : "Choose an element or ask about the whole widget.");
+      this.setText("[data-ai-context]", this.guide ? `Guide · step ${this.stepIndex + 1} of ${this.guide.steps.length}${selection ? ` · ${selection.label}` : ""}` : this.survey ? `Survey · step ${this.stepIndex + 1} of ${this.survey.steps.length}${selection ? ` · ${selection.label}` : ""}` : selection ? `Editing ${selection.label} · ${selection.kind}` : "Choose an element or ask about the whole widget.");
       const proposal = this.root.querySelector("[data-ai-proposal]");
       if (proposal) proposal.hidden = !this.aiProposal;
       if (!this.aiProposal) return;
       this.setText("[data-ai-summary]", this.aiProposal.value.summary);
       const list = this.root.querySelector("[data-ai-operations]");
-      if (list) list.replaceChildren(...this.aiProposal.value.operations.map((operation, index) => {
-        var _a2;
-        const item = document.createElement("li");
-        const stepId = "stepId" in operation ? operation.stepId : void 0;
-        const step = stepId ? (_a2 = this.guide) == null ? void 0 : _a2.steps.find((value) => value.id === stepId) : void 0;
-        item.textContent = `${operation.type.replace(/_/g, " ")}${step ? ` · ${step.label || step.content.heading || `step ${this.guide.steps.indexOf(step) + 1}`}` : ""}${operation.type === "request_guide_target" && this.aiResolvedTargets.has(index) ? " · target selected" : ""}`;
-        return item;
-      }));
+      if (list) {
+        const items = this.aiProposal.value.operations.map((operation, index) => {
+          var _a2, _b;
+          const item = document.createElement("li");
+          const stepId = "stepId" in operation ? operation.stepId : void 0;
+          const steps = ((_a2 = this.guide) == null ? void 0 : _a2.steps.map((value) => ({ id: value.id, label: value.label || value.content.heading }))) ?? ((_b = this.survey) == null ? void 0 : _b.steps.map((value) => ({ id: value.id, label: value.content.heading }))) ?? [];
+          const stepIndex = stepId ? steps.findIndex((value) => value.id === stepId) : -1;
+          item.textContent = `${operation.type.replace(/_/g, " ")}${stepIndex >= 0 ? ` · ${steps[stepIndex].label || `step ${stepIndex + 1}`}` : ""}${operation.type === "request_guide_target" && this.aiResolvedTargets.has(index) ? " · target selected" : ""}`;
+          return item;
+        });
+        if (this.survey && this.definition) try {
+          for (const warning of applySurveyAiProposal(this.definition, this.aiProposal.value).warnings) {
+            const item = document.createElement("li");
+            item.textContent = `Warning · ${warning}`;
+            items.push(item);
+          }
+        } catch {
+        }
+        list.replaceChildren(...items);
+      }
       const stale = this.aiProposal.revision !== ((_a = this.draft) == null ? void 0 : _a.version.revision) || this.aiProposal.generation !== this.editGeneration;
       const unresolved = this.aiProposal.value.operations.some((operation, index) => operation.type === "request_guide_target" && !this.aiResolvedTargets.has(index));
       const target = this.root.querySelector("[data-ai-target]");
       if (target) target.hidden = !this.guide || !unresolved;
       const preview = this.root.querySelector("[data-ai-preview]");
       if (preview) {
-        preview.hidden = !this.guide;
+        preview.hidden = !this.guide && !this.survey;
         preview.disabled = stale || unresolved;
       }
       const apply = this.root.querySelector("[data-ai-apply]");
@@ -7849,7 +8167,7 @@ ${ISOLATION_CSS}`;
       var _a, _b, _c;
       const input = (_a = this.root) == null ? void 0 : _a.querySelector("[data-ai-prompt]");
       const prompt = input == null ? void 0 : input.value.trim();
-      if (!prompt || !this.bridge || !this.draft || !this.compositionEditor || !this.compositionSelection || this.survey || this.checklist) return;
+      if (!prompt || !this.bridge || !this.draft || !this.compositionEditor || !this.compositionSelection || this.checklist) return;
       if (!this.flushContent() || this.dirty && !await this.persist()) return;
       this.cancelAiRequest();
       const generation = ++this.aiRequestGeneration;
@@ -7865,7 +8183,7 @@ ${ISOLATION_CSS}`;
       this.aiResolvedTargets.clear();
       this.syncAiPanel();
       try {
-        const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.ensureThemeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: this.compositionEditor.getDocument() });
+        const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.ensureThemeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : this.survey ? surveyAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, definition: this.definition, currentStepId: this.survey.steps[this.stepIndex].id, selection: this.compositionSelection, scope: this.compositionSelection.kind === "step" ? "survey" : "step" }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: this.compositionEditor.getDocument() });
         const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context }, abort.signal);
         if (generation !== this.aiRequestGeneration) return;
         this.aiConversationId = response.conversationId;
@@ -7904,6 +8222,27 @@ ${ISOLATION_CSS}`;
       var _a;
       if (!this.aiProposal || !this.draft || this.aiProposal.revision !== this.draft.version.revision || this.aiProposal.generation !== this.editGeneration) {
         this.syncAiPanel();
+        return;
+      }
+      if (this.survey) {
+        try {
+          const before = cloneOnsite(this.surveyAiPreviewOriginal ?? this.definition);
+          const candidate = this.surveyAiPreviewCandidate ?? applySurveyAiProposal(before, this.aiProposal.value).definition;
+          this.surveyAiUndo.push(before);
+          if (this.surveyAiUndo.length > 20) this.surveyAiUndo.shift();
+          this.surveyAiRedo = [];
+          this.setSurveyDefinition(cloneOnsite(candidate));
+          this.surveyAiPreviewOriginal = null;
+          this.surveyAiPreviewCandidate = null;
+          this.aiPreviewReturnMode = null;
+          this.aiProposal = null;
+          this.changed(true, true);
+          this.refreshStepBar();
+          this.setText("[data-ai-status]", "Applied. Undo restores the complete Survey in one step.");
+          this.syncAiPanel();
+        } catch (error) {
+          this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Survey proposal is invalid.");
+        }
         return;
       }
       if (!this.guide) {
@@ -7983,6 +8322,18 @@ ${ISOLATION_CSS}`;
       }
     }
     discardAiPreview() {
+      if (this.surveyAiPreviewOriginal) {
+        const returnMode2 = this.aiPreviewReturnMode;
+        this.setSurveyDefinition(this.surveyAiPreviewOriginal);
+        this.surveyAiPreviewOriginal = null;
+        this.surveyAiPreviewCandidate = null;
+        this.aiPreviewReturnMode = null;
+        this.stepIndex = clampStep(this.stepIndex, this.survey.steps.length);
+        this.refreshStepBar();
+        if (returnMode2 && returnMode2 !== this.mode) this.setMode(returnMode2);
+        else if (this.mode !== "navigate") this.renderPreview();
+        return;
+      }
       if (!this.aiPreviewOriginal) return;
       const returnMode = this.aiPreviewReturnMode;
       this.setGuideDefinition(this.aiPreviewOriginal);
@@ -8005,6 +8356,27 @@ ${ISOLATION_CSS}`;
       this.guide = value;
       this.definition = value;
     }
+    setSurveyDefinition(value) {
+      this.definition = value;
+      this.survey = value.survey ?? null;
+    }
+    previewAiSurveyProposal() {
+      if (!this.aiProposal || !this.survey || !this.draft || this.aiProposal.revision !== this.draft.version.revision || this.aiProposal.generation !== this.editGeneration) return;
+      try {
+        this.discardAiPreview();
+        const original = cloneOnsite(this.definition), result = applySurveyAiProposal(original, this.aiProposal.value);
+        this.aiPreviewReturnMode = this.mode;
+        this.surveyAiPreviewOriginal = original;
+        this.surveyAiPreviewCandidate = cloneOnsite(result.definition);
+        this.setSurveyDefinition(cloneOnsite(result.definition));
+        this.stepIndex = 0;
+        this.refreshStepBar();
+        this.setMode("preview");
+        this.setText("[data-ai-status]", `Previewing the complete proposed Survey.${result.warnings.length ? ` ${result.warnings.join(" ")}` : ""} Apply or Discard to finish.`);
+      } catch (error) {
+        this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Survey proposal is invalid.");
+      }
+    }
     globalUndo() {
       var _a, _b;
       if (this.guide && this.guideAiUndo.length && this.flushContent()) {
@@ -8012,6 +8384,15 @@ ${ISOLATION_CSS}`;
         this.guideAiRedo.push(cloneOnsite(this.guide));
         this.setGuideDefinition(previous);
         this.stepIndex = clampStep(this.stepIndex, previous.steps.length);
+        this.changed(true, true);
+        this.refreshStepBar();
+        return;
+      }
+      if (this.survey && this.surveyAiUndo.length && this.flushContent()) {
+        const previous = this.surveyAiUndo.pop();
+        this.surveyAiRedo.push(cloneOnsite(this.definition));
+        this.setSurveyDefinition(previous);
+        this.stepIndex = clampStep(this.stepIndex, this.survey.steps.length);
         this.changed(true, true);
         this.refreshStepBar();
         return;
@@ -8027,6 +8408,15 @@ ${ISOLATION_CSS}`;
         this.guideAiUndo.push(cloneOnsite(this.guide));
         this.setGuideDefinition(next);
         this.stepIndex = clampStep(this.stepIndex, next.steps.length);
+        this.changed(true, true);
+        this.refreshStepBar();
+        return;
+      }
+      if (this.survey && this.surveyAiRedo.length && this.flushContent()) {
+        const next = this.surveyAiRedo.pop();
+        this.surveyAiUndo.push(cloneOnsite(this.definition));
+        this.setSurveyDefinition(next);
+        this.stepIndex = clampStep(this.stepIndex, this.survey.steps.length);
         this.changed(true, true);
         this.refreshStepBar();
         return;
@@ -8289,9 +8679,13 @@ ${ISOLATION_CSS}`;
       this.aiResolvedTargets.clear();
       this.aiPreviewOriginal = null;
       this.aiPreviewCandidate = null;
+      this.surveyAiPreviewOriginal = null;
+      this.surveyAiPreviewCandidate = null;
       this.aiPreviewReturnMode = null;
       this.guideAiUndo = [];
       this.guideAiRedo = [];
+      this.surveyAiUndo = [];
+      this.surveyAiRedo = [];
       clearTimeout(this.expiryTimer);
       clearInterval(this.validationTimer);
       clearTimeout(this.saveTimer);

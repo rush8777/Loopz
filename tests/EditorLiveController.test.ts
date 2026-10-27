@@ -5,7 +5,7 @@ import { EditorModeController } from "../src/experiences/editor/EditorModeContro
 import { ElementPicker } from "../src/experiences/editor/ElementPicker";
 import { TargetSelectorGenerator } from "../src/experiences/editor/TargetSelectorGenerator";
 import { ExperienceRenderer } from "../src/experiences/runtime/ExperienceRenderer";
-import { applyOnsiteDocument, createOnsiteDocument } from "../src/experiences/onsite/OnsiteDocument";
+import { applyOnsiteDocument, createOnsiteDocument, createOnsiteSurveyDocument } from "../src/experiences/onsite/OnsiteDocument";
 import type { EditorDraft, ExperienceDesign, ExperienceTargeting, RuntimeWidgetDefinition } from "../src/experiences/types";
 
 const design: ExperienceDesign = { width: "md", theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } };
@@ -479,6 +479,16 @@ describe("live placement editor", () => {
     await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH" && JSON.parse(String(init.body)).definition.steps.length === 3)).toBe(true));
   });
 
+  it("previews, discards, applies, undoes and redoes a Survey AI transaction", async () => {
+    const draft = surveyDraft(), base = editorFetch(draft); let turns = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/ai/chat")) { turns++; const body = JSON.parse(String(init?.body)); expect(body.context.steps).toHaveLength(2); expect(body.context.currentDocument.schemaVersion).toBe(3); expect(JSON.stringify(body.context)).not.toMatch(/visitor|primarySelector|fallbackSelectors/); return { ok: true, status: 200, json: async () => ({ conversationId: "survey_conversation", revision: body.revision, markdown: "Survey proposal ready.", proposal: { summary: "Add a follow-up", operations: [{ type: "add_survey_step", afterStepId: "survey_two", heading: "Anything else?", body: "One final thought", questions: [{ type: "long_text", label: "What should we improve?" }] }] } }) }; } return base(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock); controller = new EditorModeController("https://api.example.com"); expect(await controller.start("token")).toBe(true); editorRoot().querySelector<HTMLButtonElement>('[data-inspector-tab="ai"]')!.click(); const prompt = editorRoot().querySelector<HTMLTextAreaElement>("[data-ai-prompt]")!; prompt.value = "Add a follow-up"; editorRoot().querySelector<HTMLFormElement>("[data-ai-form]")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await vi.waitFor(() => expect(editorRoot().querySelector<HTMLElement>("[data-ai-proposal]")?.hidden).toBe(false));
+    editorRoot().querySelector<HTMLButtonElement>("[data-ai-preview]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(3); expect(editorRoot().querySelector("[data-ai-status]")?.textContent).toMatch(/Previewing the complete proposed Survey/); editorRoot().querySelector<HTMLButtonElement>("[data-ai-discard]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(2);
+    prompt.value = "Add it"; editorRoot().querySelector<HTMLFormElement>("[data-ai-form]")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await vi.waitFor(() => { expect(turns).toBe(2); expect(editorRoot().querySelector<HTMLElement>("[data-ai-proposal]")?.hidden).toBe(false); }); editorRoot().querySelector<HTMLButtonElement>("[data-ai-apply]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(3); editorRoot().querySelector<HTMLButtonElement>("[data-global-undo]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(2); editorRoot().querySelector<HTMLButtonElement>("[data-global-redo]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(3);
+  });
+
 });
 
 function editorFetch(draft: EditorDraft) {
@@ -504,6 +514,11 @@ function guideDraft(): EditorDraft {
     { id: "one", content: { heading: "First step", body: "One" }, target: { primarySelector: "#first", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true, placement: "bottom" } },
     { id: "two", content: { heading: "Second step", body: "Two" }, advance: { type: "route", pageRules: [{ id: "settings", kind: "include", operator: "equals", value: "/settings" }] }, target: { primarySelector: "#second", fallbackSelectors: [], reliability: "moderate" }, behavior: { dismissible: false, placement: "right" } },
   ] } } };
+}
+
+function surveyDraft(): EditorDraft {
+  const makeStep = (id: string, heading: string) => { const questions = [{ id: `question_${id}`, type: "short_text" as const, label: "Your feedback", maxLength: 200 }], builder = { version: 1 as const, projectData: {}, html: "", css: "" }, content = { heading, body: "Help us improve" }; return { id, questions, builder, content: applyOnsiteDocument(builder, createOnsiteSurveyDocument(questions, content), "survey", { questions, submitLabel: "Send" }).content }; };
+  return { experience: { id: "survey_1", name: "Research", kind: "widget", widgetType: "survey", builderMode: "onsite" }, version: { id: "v_survey", versionNumber: 1, revision: 1, definition: { content: { heading: "Research", body: "" }, design, behavior: { dismissible: true }, targeting, survey: { steps: [makeStep("survey_one", "First"), makeStep("survey_two", "Second")], showProgress: true, allowBack: true, submitLabel: "Send" } } } };
 }
 
 function onsiteDraft(): EditorDraft {

@@ -55,7 +55,7 @@ function moveCandidate(document: OnsiteDocument, sourceId: string, targetId: str
 
 /** Applies a complete AI proposal to a clone. The live document is untouched unless every operation validates. */
 export function applyEditorAiProposal(document: OnsiteDocument, proposal: EditorAiProposal): OnsiteDocument {
-  if (document.schemaVersion !== 2) throw new Error("AI editing is available only for standard widgets.");
+  if (document.schemaVersion !== 2 && document.schemaVersion !== 3) throw new Error("AI editing requires an on-site document.");
   if (!proposal.operations.length || proposal.operations.length > 30) throw new Error("AI proposal has an invalid operation count.");
   const candidate = cloneOnsite(document);
   for (const operation of proposal.operations) {

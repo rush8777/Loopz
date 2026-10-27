@@ -49,6 +49,10 @@ export declare class EditorModeController {
     private aiPreviewReturnMode;
     private guideAiUndo;
     private guideAiRedo;
+    private surveyAiPreviewOriginal;
+    private surveyAiPreviewCandidate;
+    private surveyAiUndo;
+    private surveyAiRedo;
     private aiAbort;
     private aiRequestGeneration;
     private persistBeforePageLeave;
@@ -120,6 +124,8 @@ export declare class EditorModeController {
     private discardAiPreview;
     private discardAiProposal;
     private setGuideDefinition;
+    private setSurveyDefinition;
+    private previewAiSurveyProposal;
     private globalUndo;
     private globalRedo;
     private syncPanel;
