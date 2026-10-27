@@ -34,6 +34,7 @@ import type { SiteThemeTokens, VisualPresetId, VisualThemeState } from "../../th
 import { EXPERIENCE_PRESETS, resolvedTheme } from "../../themes/ExperienceTheme";
 import { applyGuideAiProposal, editorAiContext, guideAiContext, type EditorAiProposal } from "./AiEditing";
 import { applySurveyAiProposal, surveyAiContext, type SurveyAiProposal } from "./SurveyAiEditing";
+import { applyChecklistAiProposal, checklistAiContext, type ChecklistAiProposal } from "./ChecklistAiEditing";
 
 type EditorMode = "design" | "target" | "navigate" | "preview";
 type TargetStatus = "found" | "off-page" | "missing" | "unconfigured";
@@ -80,7 +81,7 @@ export class EditorModeController {
   private guidePreviewEntryPath = "";
   private previewDevice: "desktop" | "tablet" | "mobile" = "desktop";
   private aiConversationId: string | undefined;
-  private aiProposal: { value: EditorAiProposal | SurveyAiProposal; revision: number; generation: number } | null = null;
+  private aiProposal: { value: EditorAiProposal | SurveyAiProposal | ChecklistAiProposal; revision: number; generation: number; selectionKey: string } | null = null;
   private aiResolvedTargets = new Map<number, ExperienceTarget>();
   private aiPreviewOriginal: (RuntimeGuideDefinition & { targeting: ExperienceTargeting }) | null = null;
   private aiPreviewCandidate: (RuntimeGuideDefinition & { targeting: ExperienceTargeting }) | null = null;
@@ -91,6 +92,10 @@ export class EditorModeController {
   private surveyAiPreviewCandidate: (RuntimeWidgetDefinition & { targeting: ExperienceTargeting }) | null = null;
   private surveyAiUndo: Array<RuntimeWidgetDefinition & { targeting: ExperienceTargeting }> = [];
   private surveyAiRedo: Array<RuntimeWidgetDefinition & { targeting: ExperienceTargeting }> = [];
+  private checklistAiPreviewOriginal: EditorChecklistDefinition | null = null;
+  private checklistAiPreviewCandidate: EditorChecklistDefinition | null = null;
+  private checklistAiUndo: EditorChecklistDefinition[] = [];
+  private checklistAiRedo: EditorChecklistDefinition[] = [];
   private aiAbort: AbortController | null = null;
   private aiRequestGeneration = 0;
   private persistBeforePageLeave = () => this.updateContinuation();
@@ -313,7 +318,7 @@ export class EditorModeController {
     root.querySelector<HTMLFormElement>("[data-ai-form]")?.addEventListener("submit", event => { event.preventDefault(); void this.sendAiPrompt(); });
     root.querySelector<HTMLButtonElement>("[data-ai-cancel]")?.addEventListener("click", () => this.cancelAiRequest());
     root.querySelector<HTMLButtonElement>("[data-ai-target]")?.addEventListener("click", () => this.resolveAiGuideTarget());
-    root.querySelector<HTMLButtonElement>("[data-ai-preview]")?.addEventListener("click", () => this.survey ? this.previewAiSurveyProposal() : this.previewAiGuideProposal());
+    root.querySelector<HTMLButtonElement>("[data-ai-preview]")?.addEventListener("click", () => this.checklist ? this.previewAiChecklistProposal() : this.survey ? this.previewAiSurveyProposal() : this.previewAiGuideProposal());
     root.querySelector<HTMLButtonElement>("[data-ai-apply]")?.addEventListener("click", () => this.applyAiProposal());
     root.querySelector<HTMLButtonElement>("[data-ai-discard]")?.addEventListener("click", () => this.discardAiProposal());
     root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.addEventListener("click", () => this.setMode(button.dataset.mode as EditorMode)));
@@ -719,7 +724,7 @@ export class EditorModeController {
 
   private changed(render = true, preserveAiHistory = false): void {
     if (this.saveState === "expired") return;
-    if (!preserveAiHistory) { this.guideAiUndo = []; this.guideAiRedo = []; this.surveyAiUndo = []; this.surveyAiRedo = []; }
+    if (!preserveAiHistory) { this.guideAiUndo = []; this.guideAiRedo = []; this.surveyAiUndo = []; this.surveyAiRedo = []; this.checklistAiUndo = []; this.checklistAiRedo = []; }
     this.dirty = true; this.editGeneration++;
     this.updateContinuation();
     if (render) this.syncPanel(); else { this.syncContentInspector(); this.syncCompositionInspector(); }
@@ -963,8 +968,8 @@ export class EditorModeController {
     this.surveyEditor?.sync();this.checklistEditor?.sync();
     if (!this.root) return; const editor = this.compositionEditor; const selection = this.compositionSelection; const inspector = this.root.querySelector<HTMLElement>("[data-composition-inspector]"); if (!inspector) return;
     const globalUndo = this.root.querySelector<HTMLButtonElement>("[data-global-undo]"); const globalRedo = this.root.querySelector<HTMLButtonElement>("[data-global-redo]");
-    if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !this.surveyAiUndo.length && !editor?.canUndo() && !this.contentEditor?.canUndo();
-    if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !this.surveyAiRedo.length && !editor?.canRedo() && !this.contentEditor?.canRedo();
+    if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !this.surveyAiUndo.length && !this.checklistAiUndo.length && !editor?.canUndo() && !this.contentEditor?.canUndo();
+    if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !this.surveyAiRedo.length && !this.checklistAiRedo.length && !editor?.canRedo() && !this.contentEditor?.canRedo();
     inspector.hidden = this.mode !== "design" || !editor || !selection; this.root.querySelector<HTMLElement>("[data-content-inspector]")!.hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
     if (!editor || !selection) return; if (selection.kind === "step") this.syncGuideBehavior(); this.setText("[data-composition-label]", selection.label);
     this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { if (selection.kind !== "step") group.hidden = true; });
@@ -982,11 +987,11 @@ export class EditorModeController {
     }
     this.hideChecklistWidgetControls();
     const undo = this.root.querySelector<HTMLButtonElement>("[data-v2-undo]"); if (undo) undo.disabled = !editor.canUndo(); const redo = this.root.querySelector<HTMLButtonElement>("[data-v2-redo]"); if (redo) redo.disabled = !editor.canRedo();
-    if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !this.surveyAiUndo.length && !editor.canUndo(); if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !this.surveyAiRedo.length && !editor.canRedo();
+    if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !this.surveyAiUndo.length && !this.checklistAiUndo.length && !editor.canUndo(); if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !this.surveyAiRedo.length && !this.checklistAiRedo.length && !editor.canRedo();
   }
 
   private setInspectorTab(tab: "properties" | "ai"): void {
-    if (!this.root || (tab === "ai" && (this.checklist || this.draft?.experience.builderMode !== "onsite"))) return;
+    if (!this.root || (tab === "ai" && this.draft?.experience.builderMode !== "onsite")) return;
     this.root.querySelector("main")?.classList.toggle("ai-mode", tab === "ai");
     this.root.querySelectorAll<HTMLButtonElement>("[data-inspector-tab]").forEach(button => button.classList.toggle("active", button.dataset.inspectorTab === tab));
     const panel = this.root.querySelector<HTMLElement>("[data-ai-panel]"); if (panel) panel.hidden = tab !== "ai";
@@ -995,32 +1000,32 @@ export class EditorModeController {
 
   private syncAiPanel(): void {
     if (!this.root) return; const selection = this.compositionSelection;
-    this.setText("[data-ai-context]", this.guide ? `Guide · step ${this.stepIndex + 1} of ${this.guide.steps.length}${selection ? ` · ${selection.label}` : ""}` : this.survey ? `Survey · step ${this.stepIndex + 1} of ${this.survey.steps.length}${selection ? ` · ${selection.label}` : ""}` : selection ? `Editing ${selection.label} · ${selection.kind}` : "Choose an element or ask about the whole widget.");
+    this.setText("[data-ai-context]", this.guide ? `Guide · step ${this.stepIndex + 1} of ${this.guide.steps.length}${selection ? ` · ${selection.label}` : ""}` : this.survey ? `Survey · step ${this.stepIndex + 1} of ${this.survey.steps.length}${selection ? ` · ${selection.label}` : ""}` : this.checklist ? `Checklist · ${this.checklistEditor?.getView() ?? "expanded"}${selection ? ` · ${selection.label}` : ""}` : selection ? `Editing ${selection.label} · ${selection.kind}` : "Choose an element or ask about the whole widget.");
     const proposal = this.root.querySelector<HTMLElement>("[data-ai-proposal]"); if (proposal) proposal.hidden = !this.aiProposal;
     if (!this.aiProposal) return;
     this.setText("[data-ai-summary]", this.aiProposal.value.summary);
-    const list = this.root.querySelector<HTMLElement>("[data-ai-operations]"); if (list) { const items = this.aiProposal.value.operations.map((operation, index) => { const item = document.createElement("li"); const stepId = "stepId" in operation ? operation.stepId : undefined; const steps = this.guide?.steps.map(value => ({ id: value.id, label: value.label || value.content.heading })) ?? this.survey?.steps.map(value => ({ id: value.id, label: value.content.heading })) ?? []; const stepIndex = stepId ? steps.findIndex(value => value.id === stepId) : -1; item.textContent = `${operation.type.replace(/_/g, " ")}${stepIndex >= 0 ? ` · ${steps[stepIndex].label || `step ${stepIndex + 1}`}` : ""}${operation.type === "request_guide_target" && this.aiResolvedTargets.has(index) ? " · target selected" : ""}`; return item; }); if (this.survey && this.definition) try { for (const warning of applySurveyAiProposal(this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }, this.aiProposal.value as SurveyAiProposal).warnings) { const item = document.createElement("li"); item.textContent = `Warning · ${warning}`; items.push(item); } } catch { /* The backend normally rejects invalid proposals; Apply reports any late validation error. */ } list.replaceChildren(...items); }
-    const stale = this.aiProposal.revision !== this.draft?.version.revision || this.aiProposal.generation !== this.editGeneration;
+    const list = this.root.querySelector<HTMLElement>("[data-ai-operations]"); if (list) { const items = this.aiProposal.value.operations.map((operation, index) => { const item = document.createElement("li"); const stepId = "stepId" in operation ? operation.stepId : undefined; const steps = this.guide?.steps.map(value => ({ id: value.id, label: value.label || value.content.heading })) ?? this.survey?.steps.map(value => ({ id: value.id, label: value.content.heading })) ?? []; const stepIndex = stepId ? steps.findIndex(value => value.id === stepId) : -1; item.textContent = `${operation.type.replace(/_/g, " ")}${stepIndex >= 0 ? ` · ${steps[stepIndex].label || `step ${stepIndex + 1}`}` : ""}${operation.type === "request_guide_target" && this.aiResolvedTargets.has(index) ? " · target selected" : ""}`; return item; }); try { const warnings = this.survey && this.definition ? applySurveyAiProposal(this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }, this.aiProposal.value as SurveyAiProposal).warnings : this.checklist ? applyChecklistAiProposal(this.checklist, this.aiProposal.value as ChecklistAiProposal, this.draft?.references ?? { guides: [], segments: [] }).warnings : []; for (const warning of warnings) { const item = document.createElement("li"); item.textContent = `Warning · ${warning}`; items.push(item); } } catch { /* Apply reports any late validation error. */ } list.replaceChildren(...items); }
+    const stale = this.aiProposalIsStale();
     const unresolved = this.aiProposal.value.operations.some((operation, index) => operation.type === "request_guide_target" && !this.aiResolvedTargets.has(index));
     const target = this.root.querySelector<HTMLButtonElement>("[data-ai-target]"); if (target) target.hidden = !this.guide || !unresolved;
-    const preview = this.root.querySelector<HTMLButtonElement>("[data-ai-preview]"); if (preview) { preview.hidden = !this.guide && !this.survey; preview.disabled = stale || unresolved; }
+    const preview = this.root.querySelector<HTMLButtonElement>("[data-ai-preview]"); if (preview) { preview.hidden = !this.guide && !this.survey && !this.checklist; preview.disabled = stale || unresolved; }
     const apply = this.root.querySelector<HTMLButtonElement>("[data-ai-apply]"); if (apply) { apply.disabled = stale || unresolved; apply.title = stale ? "Draft changed; generate a fresh proposal." : unresolved ? "Select each requested website target first." : "Apply as one undoable change"; }
     if (stale) this.setText("[data-ai-status]", "The draft changed. Discard this proposal and generate a fresh one.");
   }
 
   private async sendAiPrompt(): Promise<void> {
     const input = this.root?.querySelector<HTMLTextAreaElement>("[data-ai-prompt]"); const prompt = input?.value.trim();
-    if (!prompt || !this.bridge || !this.draft || !this.compositionEditor || !this.compositionSelection || this.checklist) return;
+    if (!prompt || !this.bridge || !this.draft || !this.compositionEditor || !this.compositionSelection) return;
     if (!this.flushContent() || this.dirty && !await this.persist()) return;
     this.cancelAiRequest(); const generation = ++this.aiRequestGeneration; const abort = new AbortController(); this.aiAbort = abort;
     const send = this.root?.querySelector<HTMLButtonElement>("[data-ai-send]"); if (send) send.disabled = true;
     const cancel = this.root?.querySelector<HTMLButtonElement>("[data-ai-cancel]"); if (cancel) cancel.hidden = false;
     this.setText("[data-ai-status]", "Generating a validated proposal…"); this.discardAiPreview(); this.aiProposal = null; this.aiResolvedTargets.clear(); this.syncAiPanel();
     try {
-      const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting }, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.ensureThemeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : this.survey ? surveyAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, definition: this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }, currentStepId: this.survey.steps[this.stepIndex].id, selection: this.compositionSelection, scope: this.compositionSelection.kind === "step" ? "survey" : "step" }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: this.compositionEditor.getDocument() });
+      const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting }, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.ensureThemeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : this.survey ? surveyAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, definition: this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }, currentStepId: this.survey.steps[this.stepIndex].id, selection: this.compositionSelection, scope: this.compositionSelection.kind === "step" ? "survey" : "step" }) : this.checklist ? checklistAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, checklist: this.checklist, references: this.draft.references ?? { guides: [], segments: [] }, selection: this.compositionSelection, currentView: this.checklistEditor?.getView() ?? "expanded", theme: resolvedTheme(this.ensureThemeState()) }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: this.compositionEditor.getDocument() });
       const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context }, abort.signal);
       if (generation !== this.aiRequestGeneration) return;
-      this.aiConversationId = response.conversationId; this.aiProposal = response.proposal ? { value: response.proposal as EditorAiProposal | SurveyAiProposal, revision: response.revision, generation: this.editGeneration } : null;
+      this.aiConversationId = response.conversationId; this.aiProposal = response.proposal ? { value: response.proposal as EditorAiProposal | SurveyAiProposal | ChecklistAiProposal, revision: response.revision, generation: this.editGeneration, selectionKey: this.aiSelectionKey() } : null;
       this.setText("[data-ai-status]", response.markdown); if (response.proposal && input) input.value = ""; this.syncAiPanel();
     } catch (error) {
       if (generation === this.aiRequestGeneration && !abort.signal.aborted) { if (error instanceof DraftConflictError) this.saveState = "conflict"; if (error instanceof EditorAiRequestError && error.conversationId) this.aiConversationId = error.conversationId; this.setText("[data-ai-status]", error instanceof Error ? error.message : "Movcues AI could not complete this request."); this.showSaveState(); }
@@ -1030,7 +1035,8 @@ export class EditorModeController {
   private cancelAiRequest(): void { if (!this.aiAbort) return; this.aiAbort.abort(); this.aiAbort = null; this.aiRequestGeneration++; this.setText("[data-ai-status]", "Request canceled. Your prompt is still here."); const send = this.root?.querySelector<HTMLButtonElement>("[data-ai-send]"); if (send) send.disabled = false; const cancel = this.root?.querySelector<HTMLButtonElement>("[data-ai-cancel]"); if (cancel) cancel.hidden = true; }
 
   private applyAiProposal(): void {
-    if (!this.aiProposal || !this.draft || this.aiProposal.revision !== this.draft.version.revision || this.aiProposal.generation !== this.editGeneration) { this.syncAiPanel(); return; }
+    if (!this.aiProposal || !this.draft || this.aiProposalIsStale()) { this.syncAiPanel(); return; }
+    if (this.checklist) { try { const before = cloneOnsite(this.checklistAiPreviewOriginal ?? this.checklist), candidate = this.checklistAiPreviewCandidate ?? applyChecklistAiProposal(before, this.aiProposal.value as ChecklistAiProposal, this.draft.references ?? { guides: [], segments: [] }).definition; this.checklistAiUndo.push(before); if (this.checklistAiUndo.length > 20) this.checklistAiUndo.shift(); this.checklistAiRedo = []; this.setChecklistDefinition(cloneOnsite(candidate)); this.checklistAiPreviewOriginal = null; this.checklistAiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.aiProposal = null; this.changed(true, true); this.setText("[data-ai-status]", "Applied. Undo restores the complete Checklist in one step."); this.syncAiPanel(); } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Checklist proposal is invalid."); } return; }
     if (this.survey) {
       try { const before = cloneOnsite(this.surveyAiPreviewOriginal ?? this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }); const candidate = this.surveyAiPreviewCandidate ?? applySurveyAiProposal(before, this.aiProposal.value as SurveyAiProposal).definition; this.surveyAiUndo.push(before); if (this.surveyAiUndo.length > 20) this.surveyAiUndo.shift(); this.surveyAiRedo = []; this.setSurveyDefinition(cloneOnsite(candidate)); this.surveyAiPreviewOriginal = null; this.surveyAiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.aiProposal = null; this.changed(true, true); this.refreshStepBar(); this.setText("[data-ai-status]", "Applied. Undo restores the complete Survey in one step."); this.syncAiPanel(); } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Survey proposal is invalid."); } return;
     }
@@ -1067,6 +1073,7 @@ export class EditorModeController {
   }
 
   private discardAiPreview(): void {
+    if (this.checklistAiPreviewOriginal) { const returnMode = this.aiPreviewReturnMode; this.setChecklistDefinition(this.checklistAiPreviewOriginal); this.checklistAiPreviewOriginal = null; this.checklistAiPreviewCandidate = null; this.aiPreviewReturnMode = null; if (returnMode && returnMode !== this.mode) this.setMode(returnMode); else if (this.mode !== "navigate") this.renderPreview(); return; }
     if (this.surveyAiPreviewOriginal) { const returnMode = this.aiPreviewReturnMode; this.setSurveyDefinition(this.surveyAiPreviewOriginal); this.surveyAiPreviewOriginal = null; this.surveyAiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.stepIndex = clampStep(this.stepIndex, this.survey!.steps.length); this.refreshStepBar(); if (returnMode && returnMode !== this.mode) this.setMode(returnMode); else if (this.mode !== "navigate") this.renderPreview(); return; }
     if (!this.aiPreviewOriginal) return; const returnMode = this.aiPreviewReturnMode; this.setGuideDefinition(this.aiPreviewOriginal); this.aiPreviewOriginal = null; this.aiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.stepIndex = clampStep(this.stepIndex, this.guide!.steps.length); this.refreshStepBar(); if (returnMode && returnMode !== this.mode) this.setMode(returnMode); else if (this.mode !== "navigate") this.renderPreview();
   }
@@ -1077,6 +1084,13 @@ export class EditorModeController {
 
   private setSurveyDefinition(value: RuntimeWidgetDefinition & { targeting: ExperienceTargeting }): void { this.definition = value; this.survey = value.survey ?? null; }
 
+  private setChecklistDefinition(value: EditorChecklistDefinition): void { this.checklist = value; this.definition = checklistEditorAdapter(value); this.checklistEditor?.setDefinition(value); }
+
+  private previewAiChecklistProposal(): void { if (!this.aiProposal || !this.checklist || !this.draft || this.aiProposalIsStale()) return; try { this.discardAiPreview(); const original = cloneOnsite(this.checklist), result = applyChecklistAiProposal(original, this.aiProposal.value as ChecklistAiProposal, this.draft.references ?? { guides: [], segments: [] }); this.aiPreviewReturnMode = this.mode; this.checklistAiPreviewOriginal = original; this.checklistAiPreviewCandidate = cloneOnsite(result.definition); this.setChecklistDefinition(cloneOnsite(result.definition)); this.setMode("preview"); this.setText("[data-ai-status]", `Previewing the complete proposed Checklist.${result.warnings.length ? ` ${result.warnings.join(" ")}` : ""} Apply or Discard to finish.`); } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Checklist proposal is invalid."); } }
+
+  private aiSelectionKey(): string { return JSON.stringify({ selection: this.compositionSelection, checklistView: this.checklistEditor?.getView() }); }
+  private aiProposalIsStale(): boolean { return !this.aiProposal || this.aiProposal.revision !== this.draft?.version.revision || this.aiProposal.generation !== this.editGeneration || !this.aiPreviewOriginal && !this.surveyAiPreviewOriginal && !this.checklistAiPreviewOriginal && this.aiProposal.selectionKey !== this.aiSelectionKey(); }
+
   private previewAiSurveyProposal(): void {
     if (!this.aiProposal || !this.survey || !this.draft || this.aiProposal.revision !== this.draft.version.revision || this.aiProposal.generation !== this.editGeneration) return;
     try { this.discardAiPreview(); const original = cloneOnsite(this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }), result = applySurveyAiProposal(original, this.aiProposal.value as SurveyAiProposal); this.aiPreviewReturnMode = this.mode; this.surveyAiPreviewOriginal = original; this.surveyAiPreviewCandidate = cloneOnsite(result.definition); this.setSurveyDefinition(cloneOnsite(result.definition)); this.stepIndex = 0; this.refreshStepBar(); this.setMode("preview"); this.setText("[data-ai-status]", `Previewing the complete proposed Survey.${result.warnings.length ? ` ${result.warnings.join(" ")}` : ""} Apply or Discard to finish.`); }
@@ -1086,12 +1100,14 @@ export class EditorModeController {
   private globalUndo(): void {
     if (this.guide && this.guideAiUndo.length && this.flushContent()) { const previous = this.guideAiUndo.pop()!; this.guideAiRedo.push(cloneOnsite(this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting })); this.setGuideDefinition(previous); this.stepIndex = clampStep(this.stepIndex, previous.steps.length); this.changed(true, true); this.refreshStepBar(); return; }
     if (this.survey && this.surveyAiUndo.length && this.flushContent()) { const previous = this.surveyAiUndo.pop()!; this.surveyAiRedo.push(cloneOnsite(this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting })); this.setSurveyDefinition(previous); this.stepIndex = clampStep(this.stepIndex, this.survey!.steps.length); this.changed(true, true); this.refreshStepBar(); return; }
+    if (this.checklist && this.checklistAiUndo.length && this.flushContent()) { const previous = this.checklistAiUndo.pop()!; this.checklistAiRedo.push(cloneOnsite(this.checklist)); this.setChecklistDefinition(previous); this.changed(true, true); return; }
     this.compositionEditor?.undo(); this.contentEditor?.undo(); this.syncContentInspector();
   }
 
   private globalRedo(): void {
     if (this.guide && this.guideAiRedo.length && this.flushContent()) { const next = this.guideAiRedo.pop()!; this.guideAiUndo.push(cloneOnsite(this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting })); this.setGuideDefinition(next); this.stepIndex = clampStep(this.stepIndex, next.steps.length); this.changed(true, true); this.refreshStepBar(); return; }
     if (this.survey && this.surveyAiRedo.length && this.flushContent()) { const next = this.surveyAiRedo.pop()!; this.surveyAiUndo.push(cloneOnsite(this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting })); this.setSurveyDefinition(next); this.stepIndex = clampStep(this.stepIndex, this.survey!.steps.length); this.changed(true, true); this.refreshStepBar(); return; }
+    if (this.checklist && this.checklistAiRedo.length && this.flushContent()) { const next = this.checklistAiRedo.pop()!; this.checklistAiUndo.push(cloneOnsite(this.checklist)); this.setChecklistDefinition(next); this.changed(true, true); return; }
     this.compositionEditor?.redo(); this.contentEditor?.redo(); this.syncContentInspector();
   }
 
@@ -1344,7 +1360,7 @@ export class EditorModeController {
 
   private teardown(clearContinuation: boolean): void {
     this.lifecycle++;
-    this.cancelAiRequest(); this.aiProposal = null; this.aiConversationId = undefined; this.aiResolvedTargets.clear(); this.aiPreviewOriginal = null; this.aiPreviewCandidate = null; this.surveyAiPreviewOriginal = null; this.surveyAiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.guideAiUndo = []; this.guideAiRedo = []; this.surveyAiUndo = []; this.surveyAiRedo = [];
+    this.cancelAiRequest(); this.aiProposal = null; this.aiConversationId = undefined; this.aiResolvedTargets.clear(); this.aiPreviewOriginal = null; this.aiPreviewCandidate = null; this.surveyAiPreviewOriginal = null; this.surveyAiPreviewCandidate = null; this.checklistAiPreviewOriginal = null; this.checklistAiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.guideAiUndo = []; this.guideAiRedo = []; this.surveyAiUndo = []; this.surveyAiRedo = []; this.checklistAiUndo = []; this.checklistAiRedo = [];
     clearTimeout(this.expiryTimer);
     clearInterval(this.validationTimer);
     clearTimeout(this.saveTimer);

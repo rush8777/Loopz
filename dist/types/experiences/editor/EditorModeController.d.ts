@@ -53,6 +53,10 @@ export declare class EditorModeController {
     private surveyAiPreviewCandidate;
     private surveyAiUndo;
     private surveyAiRedo;
+    private checklistAiPreviewOriginal;
+    private checklistAiPreviewCandidate;
+    private checklistAiUndo;
+    private checklistAiRedo;
     private aiAbort;
     private aiRequestGeneration;
     private persistBeforePageLeave;
@@ -125,6 +129,10 @@ export declare class EditorModeController {
     private discardAiProposal;
     private setGuideDefinition;
     private setSurveyDefinition;
+    private setChecklistDefinition;
+    private previewAiChecklistProposal;
+    private aiSelectionKey;
+    private aiProposalIsStale;
     private previewAiSurveyProposal;
     private globalUndo;
     private globalRedo;

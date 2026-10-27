@@ -1,4 +1,5 @@
 import type { EditorDraft, RuntimeChecklistDefinition } from '../types';
+import type { ChecklistView } from '../checklist/ChecklistMarkup';
 import type { OnsiteCompositionEditor } from './OnsiteCompositionEditor';
 interface Options {
     composer(): OnsiteCompositionEditor | null;
@@ -29,6 +30,8 @@ export declare class ChecklistEditor {
     private host;
     private closeMobileInspector;
     private transition;
+    getView(): ChecklistView;
+    setDefinition(value: RuntimeChecklistDefinition): void;
     private onChange;
     private onClick;
     private value;

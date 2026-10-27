@@ -49,6 +49,8 @@ export class ChecklistEditor {
   private host(id:string):HTMLElement|null{return Array.from(document.querySelectorAll<HTMLElement>('[data-movcues-checklist]')).find(host=>host.dataset.movcuesChecklist===id)??null;}
   private closeMobileInspector():void{if(innerWidth>480)return;this.root.querySelector('aside')?.classList.add('minimized');this.root.querySelector('[data-minimize]')?.setAttribute('aria-expanded','false');}
   private transition(view:ChecklistView):void{this.view=view;this.options.render();}
+  getView():ChecklistView{return this.view;}
+  setDefinition(value:RuntimeChecklistDefinition):void{this.definition=value;}
   private onChange=(event:Event):void=>{
     const input=event.target as HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement;if(!input.matches('[data-checklist-view]')&&!this.options.canEdit())return;
     if(input.matches('[data-checklist-view]')){if(this.options.flush()){this.view=input.value as ChecklistView;this.closeMobileInspector();this.options.render();}return;}
