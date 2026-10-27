@@ -1,4 +1,4 @@
-import { type OnsiteBlock, type OnsiteButtonAction, type OnsiteDocument } from "../onsite/OnsiteDocument";
+import { type OnsiteBlock, type OnsiteButtonAction, type OnsiteCell, type OnsiteDocument } from "../onsite/OnsiteDocument";
 import type { CompositionSelection } from "./OnsiteCompositionEditor";
 import { type ExperienceTarget, type ExperienceTargeting, type GuidePresentation, type GuideStep, type RuntimeGuideDefinition } from "../types";
 export type EditorAiOperation = {
@@ -42,7 +42,83 @@ export type EditorAiOperation = {
     cellId: string;
     targetCellId: string;
     before?: boolean;
+} | {
+    type: "redesign_layout";
+    stepId?: string;
+    layout: UiLayoutGroup;
 };
+export interface UiCellDesign {
+    sizing?: OnsiteCell["sizing"];
+    align?: OnsiteCell["align"];
+    justify?: OnsiteCell["justify"];
+    gap?: number;
+    padding?: Partial<OnsiteCell["padding"]>;
+    responsiveStack?: boolean;
+    style?: OnsiteCell["style"];
+}
+export interface UiTextDesign {
+    align?: "left" | "center" | "right";
+    fontSize?: number;
+    weight?: 400 | 500 | 600 | 700;
+    lineHeight?: number;
+    color?: string;
+}
+export type UiLayoutNode = ({
+    type: "group";
+    direction?: "row" | "column";
+    children: UiLayoutNode[];
+} & UiCellDesign) | ({
+    type: "heading";
+    text: string;
+    level?: 1 | 2 | 3 | 4;
+} & UiTextDesign) | ({
+    type: "text";
+    text: string;
+} & UiTextDesign) | {
+    type: "button";
+    label: string;
+    action: Omit<OnsiteButtonAction, "id">;
+    align?: "left" | "center" | "right";
+    variant?: "primary" | "secondary" | "outline";
+    background?: string;
+    color?: string;
+    radius?: number;
+    paddingX?: number;
+    paddingY?: number;
+    width?: "hug" | "full";
+} | {
+    type: "image";
+    alt?: string;
+    fit?: "contain" | "cover";
+    width?: number;
+    height?: number;
+    radius?: number;
+    align?: "left" | "center" | "right";
+} | {
+    type: "divider";
+    orientation?: "horizontal" | "vertical";
+    thickness?: number;
+    color?: string;
+} | {
+    type: "spacer";
+    size?: number;
+} | {
+    type: "icon";
+    icon: "check" | "star" | "rocket" | "heart" | "info" | "warning" | "sparkles" | "arrow";
+    size?: number;
+    color?: string;
+    align?: "left" | "center" | "right";
+} | {
+    type: "survey_questions";
+    fontSize?: number;
+    color?: string;
+    gap?: number;
+} | {
+    type: "survey_controls";
+};
+export type UiLayoutGroup = Extract<UiLayoutNode, {
+    type: "group";
+}>;
 export type GuideAiOperation = {
     type: "add_guide_step";
     afterStepId?: string;
@@ -121,6 +197,7 @@ export interface GuideAiApplyResult {
     order: string[];
     warnings: string[];
 }
+export declare function materializeUiLayout(source: OnsiteDocument, layout: UiLayoutGroup): OnsiteDocument;
 /** Applies a complete AI proposal to a clone. The live document is untouched unless every operation validates. */
 export declare function applyEditorAiProposal(document: OnsiteDocument, proposal: EditorAiProposal): OnsiteDocument;
 /** Applies Guide and within-step operations to one clone. No caller state is mutated on failure. */

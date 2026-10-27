@@ -1,4 +1,4 @@
-import { C as ChecklistRenderer, b as builderImageUrlIsSafe, a as builderLinkUrlIsSafe, s as surveyBranchErrors, c as computeElementRole, d as computeElementLabel, e as sanitizeBuilderHtml, g as getGuideStepPattern, f as guideStepRequiresTarget, h as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, i as clearEditorContinuation, j as isChecklistDefinition, k as isGuideDefinition, l as guideInteractionTarget, m as matchesGuideRoute, n as findTarget, o as storeEditorContinuation } from "./module-Cg1NUxWX.js";
+import { C as ChecklistRenderer, b as builderImageUrlIsSafe, a as builderLinkUrlIsSafe, s as surveyBranchErrors, c as computeElementRole, d as computeElementLabel, e as sanitizeBuilderHtml, g as getGuideStepPattern, f as guideStepRequiresTarget, h as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, i as clearEditorContinuation, j as isChecklistDefinition, k as isGuideDefinition, l as guideInteractionTarget, m as matchesGuideRoute, n as findTarget, o as storeEditorContinuation } from "./module-WkmIWaJb.js";
 const esc = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 class ChecklistEditor {
   constructor(root, definition, references, options) {
@@ -2323,12 +2323,52 @@ function moveCandidate(document2, sourceId, targetId, before = false) {
     to.children.splice(to.children.indexOf(target) + (before ? 0 : 1), 0, source);
   }
 }
+const completePadding = (value) => ({ top: (value == null ? void 0 : value.top) ?? 0, right: (value == null ? void 0 : value.right) ?? 0, bottom: (value == null ? void 0 : value.bottom) ?? 0, left: (value == null ? void 0 : value.left) ?? 0 });
+function designedCell(design, children, block) {
+  return { ...emptyCell(block), direction: design.direction ?? "column", sizing: design.sizing ?? { mode: "hug" }, align: design.align ?? "stretch", justify: design.justify ?? "start", gap: design.gap ?? 12, padding: completePadding(design.padding), ...design.responsiveStack !== void 0 ? { responsiveStack: design.responsiveStack } : {}, ...design.style ? { style: cloneOnsite(design.style) } : {}, ...children ? { children } : {} };
+}
+function designedBlock(node) {
+  var _a;
+  if (node.type === "heading") return { id: onsiteId("block"), type: "heading", html: plainText(node.text.slice(0, 1e4)), level: node.level ?? 2, fontSize: node.fontSize ?? 28, weight: node.weight ?? 700, lineHeight: node.lineHeight ?? 1.2, ...node.color ? { color: node.color } : {}, ...node.align ? { align: node.align } : {} };
+  if (node.type === "text") return { id: onsiteId("block"), type: "text", html: plainText(node.text.slice(0, 1e4)), fontSize: node.fontSize ?? 15, weight: node.weight ?? 400, lineHeight: node.lineHeight ?? 1.5, ...node.color ? { color: node.color } : {}, ...node.align ? { align: node.align } : {} };
+  if (node.type === "button") return { id: onsiteId("block"), type: "button", label: node.label.slice(0, 80), action: { id: onsiteId("action"), ...cloneOnsite(node.action) }, variant: node.variant ?? "primary", radius: node.radius ?? 10, paddingX: node.paddingX ?? 18, paddingY: node.paddingY ?? 10, width: node.width ?? "hug", ...node.background ? { background: node.background } : {}, ...node.color ? { color: node.color } : {}, ...node.align ? { align: node.align } : {} };
+  if (node.type === "image") return { id: onsiteId("block"), type: "image", src: "", alt: ((_a = node.alt) == null ? void 0 : _a.slice(0, 500)) ?? "", fit: node.fit ?? "cover", width: node.width ?? 100, ...node.height !== void 0 ? { height: node.height } : {}, radius: node.radius ?? 12, align: node.align ?? "center" };
+  if (node.type === "divider") return { id: onsiteId("block"), type: "divider", orientation: node.orientation ?? "horizontal", thickness: node.thickness ?? 1, color: node.color ?? "#dbe2ea" };
+  if (node.type === "spacer") return { id: onsiteId("block"), type: "spacer", size: node.size ?? 24 };
+  return { id: onsiteId("block"), type: "icon", icon: node.icon, size: node.size ?? 32, ...node.color ? { color: node.color } : {}, ...node.align ? { align: node.align } : {} };
+}
+function materializeUiLayout(source, layout) {
+  const questionIds = listBlocks(source.root).filter((block) => block.type === "question").map((block) => block.questionId);
+  let questionsMarker = 0, controlsMarker = 0;
+  const make = (node, depth) => {
+    if (depth > 8) throw new Error("AI layout exceeds the maximum nesting depth.");
+    if (node.type === "group") return [designedCell(node, node.children.flatMap((child) => make(child, depth + 1)))];
+    if (node.type === "survey_questions") {
+      questionsMarker++;
+      return questionIds.map((questionId) => designedCell({ gap: node.gap }, void 0, { id: onsiteId("block"), type: "question", questionId, fontSize: node.fontSize ?? 14, ...node.color ? { color: node.color } : {} }));
+    }
+    if (node.type === "survey_controls") {
+      controlsMarker++;
+      return [designedCell({}, void 0, { id: onsiteId("block"), type: "survey_controls" })];
+    }
+    return [designedCell({}, void 0, designedBlock(node))];
+  };
+  const root = make(layout, 0)[0];
+  root.id = source.root.id;
+  if (source.schemaVersion === 3 && (questionsMarker !== 1 || controlsMarker !== 1)) throw new Error("A redesigned Survey needs exactly one questions region and one navigation region.");
+  if (source.schemaVersion === 2 && (questionsMarker || controlsMarker)) throw new Error("Survey regions are not available in this experience.");
+  return { schemaVersion: source.schemaVersion, id: source.id, root };
+}
 function applyEditorAiProposal(document2, proposal) {
-  if (document2.schemaVersion !== 2 && document2.schemaVersion !== 3) throw new Error("AI editing requires an on-site document.");
+  if (![2, 3, 4].includes(document2.schemaVersion)) throw new Error("AI editing requires an on-site document.");
   if (!proposal.operations.length || proposal.operations.length > 30) throw new Error("AI proposal has an invalid operation count.");
   const candidate = cloneOnsite(document2);
   for (const operation of proposal.operations) {
-    if (operation.type === "update_text") {
+    if (operation.type === "redesign_layout") {
+      if (candidate.schemaVersion === 4) throw new Error("Use the protected Checklist redesign operation for Checklist views.");
+      const redesigned = materializeUiLayout(candidate, operation.layout);
+      candidate.root = redesigned.root;
+    } else if (operation.type === "update_text") {
       const block = findBlock(candidate, operation.blockId);
       if (!block || block.type !== "heading" && block.type !== "text") throw new Error("Text target no longer exists.");
       block.html = plainText(operation.text.slice(0, 1e4));
@@ -2418,7 +2458,7 @@ function applyGuideAiProposal(source, proposal, resolvedTargets = /* @__PURE__ *
   };
   proposal.operations.forEach((operation, operationIndex) => {
     var _a, _b, _c, _d, _e;
-    if (["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell"].includes(operation.type)) {
+    if (["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell", "redesign_layout"].includes(operation.type)) {
       const documentOperation = operation;
       if (!documentOperation.stepId) throw new Error("Within-step operations require a stable step ID.");
       step(documentOperation.stepId);
@@ -3946,7 +3986,7 @@ function resolvedTheme(state) {
   return value;
 }
 const text = (value, max) => sanitizeRichText(value.trim().slice(0, max).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]));
-const isDocumentOperation$1 = (operation) => ["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell"].includes(operation.type);
+const isDocumentOperation$1 = (operation) => ["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell", "redesign_layout"].includes(operation.type);
 function questionFromInput(input, id = onsiteId("question")) {
   var _a;
   const base = { id, label: input.label.trim().slice(0, 500), required: input.required ?? false };
@@ -4031,7 +4071,7 @@ function ensureSurvey(definition) {
   return definition.survey;
 }
 function applySurveyAiProposal(source, proposal) {
-  var _a, _b, _c, _d;
+  var _a, _b, _c, _d, _e;
   if (!proposal.operations.length || proposal.operations.length > 30) throw new Error("AI proposal has an invalid operation count.");
   const definition = cloneOnsite(source), survey = ensureSurvey(definition), affected = /* @__PURE__ */ new Set(), warnings = [], withinStep = /* @__PURE__ */ new Map();
   const step = (id) => {
@@ -4148,8 +4188,17 @@ function applySurveyAiProposal(source, proposal) {
         if (patch.max !== void 0) value.max = patch.max;
       }
       affected.add(owner.id);
+    } else if (operation.type === "update_survey_question_style") {
+      const owner = step(operation.stepId);
+      question(owner, operation.questionId);
+      const cell = referenceCell(documentFor$1(owner), operation.questionId);
+      if (((_c = cell == null ? void 0 : cell.block) == null ? void 0 : _c.type) !== "question") throw new Error("Survey question style target no longer exists.");
+      if (operation.patch.fontSize !== void 0) cell.block.fontSize = operation.patch.fontSize;
+      if (operation.patch.color !== void 0) cell.block.color = operation.patch.color;
+      if (operation.patch.align !== void 0) cell.block.align = operation.patch.align;
+      affected.add(owner.id);
     } else if (operation.type === "change_survey_question_type") {
-      const owner = step(operation.stepId), value = question(owner, operation.questionId), replacement = questionFromInput(operation.question, value.id), oldRules = ((_c = owner.branching) == null ? void 0 : _c.rules) ?? [];
+      const owner = step(operation.stepId), value = question(owner, operation.questionId), replacement = questionFromInput(operation.question, value.id), oldRules = ((_d = owner.branching) == null ? void 0 : _d.rules) ?? [];
       owner.questions.splice(owner.questions.indexOf(value), 1, replacement);
       const invalid = surveyBranchErrors(survey);
       if (invalid.length && oldRules.some((rule) => rule.questionId === value.id)) {
@@ -4176,7 +4225,7 @@ function applySurveyAiProposal(source, proposal) {
           if (destination < 0) throw new Error("Survey option move destination no longer exists.");
           value.options.splice(destination, 0, item);
         } else {
-          const dependent = (_d = owner.branching) == null ? void 0 : _d.rules.some((rule) => rule.questionId === value.id && rule.value === op.optionId);
+          const dependent = (_e = owner.branching) == null ? void 0 : _e.rules.some((rule) => rule.questionId === value.id && rule.value === op.optionId);
           if (dependent && !op.removeBranchRules) throw new Error("This option controls branching. Explicitly allow removal of dependent branch rules.");
           if (dependent) {
             owner.branching.rules = owner.branching.rules.filter((rule) => !(rule.questionId === value.id && rule.value === op.optionId));
@@ -4289,6 +4338,64 @@ function moveReference(document2, itemId, beforeItemId) {
   container.children.splice(container.children.indexOf(source), 1);
   container.children.splice(target ? container.children.indexOf(target) : container.children.length, 0, source);
 }
+function applyCellDesign(cell, design) {
+  if (design.sizing) cell.sizing = cloneOnsite(design.sizing);
+  if (design.align) cell.align = design.align;
+  if (design.justify) cell.justify = design.justify;
+  if (design.gap !== void 0) cell.gap = design.gap;
+  if (design.padding) cell.padding = { ...cell.padding, ...cloneOnsite(design.padding) };
+  if (design.responsiveStack !== void 0) cell.responsiveStack = design.responsiveStack;
+  if (design.style) cell.style = cloneOnsite(design.style);
+}
+function applyChecklistBlockDesign(block, design) {
+  if (!design) return;
+  if (design.align) block.align = design.align;
+  const visual = block;
+  if (design.fontSize !== void 0) visual.fontSize = design.fontSize;
+  if (design.color !== void 0) visual.color = design.color;
+  if (design.indicator !== void 0 && block.type === "checklist_task") block.indicator = design.indicator;
+}
+function redesignChecklist(document2, design) {
+  const views = new Map((document2.root.children ?? []).map((cell) => [cell.checklistRole, cell])), blocks = listBlocks(document2.root);
+  const cellForBlock = (block) => {
+    let result = null;
+    const visit = (cell) => {
+      var _a, _b;
+      if (((_a = cell.block) == null ? void 0 : _a.id) === block.id) result = cell;
+      (_b = cell.children) == null ? void 0 : _b.forEach(visit);
+    };
+    visit(document2.root);
+    return result;
+  };
+  const roleCell = (role) => {
+    const block = blocks.find((value) => value.type === "checklist_progress" ? role === "progress" : (value.type === "checklist_text" || value.type === "checklist_control") && value.role === role);
+    const cell = block ? cellForBlock(block) : null;
+    if (!cell) throw new Error(`Checklist component is missing: ${role}`);
+    return cell;
+  };
+  const decoration = (nodes = []) => {
+    if (!nodes.length) return [];
+    const fake = { schemaVersion: 2, id: onsiteId("document"), root: emptyCell() };
+    return materializeUiLayout(fake, { type: "group", children: nodes }).root.children ?? [];
+  };
+  const expanded = views.get("expanded"), launcher = views.get("launcher"), completion = views.get("completion"), items = views.get("items") ?? itemContainer(document2);
+  if (!expanded || !launcher || !completion || !items) throw new Error("Checklist visual states are incomplete.");
+  const configureView = (cell, viewDesign, required) => {
+    applyCellDesign(cell, viewDesign);
+    if (viewDesign.width !== void 0) cell.checklistWidth = viewDesign.width;
+    cell.children = [...decoration(viewDesign.before), ...required, ...decoration(viewDesign.after)];
+  };
+  configureView(expanded, design.views.expanded, [roleCell("title"), roleCell("description"), roleCell("progress"), items, roleCell("collapse"), roleCell("dismiss")]);
+  configureView(launcher, design.views.launcher, [roleCell("launcher-label"), roleCell("remaining-count")]);
+  configureView(completion, design.views.completion, [roleCell("completion-title"), roleCell("completion-description"), roleCell("completion-acknowledge")]);
+  applyCellDesign(items, design.items ?? {});
+  for (const block of listBlocks(document2.root)) {
+    if (block.type === "checklist_task") applyChecklistBlockDesign(block, design.task);
+    else if (block.type === "checklist_progress") applyChecklistBlockDesign(block, design.progress);
+    else if (block.type === "checklist_control") applyChecklistBlockDesign(block, design.control);
+    else if (block.type === "checklist_text") applyChecklistBlockDesign(block, { title: design.title, description: design.description, "launcher-label": design.launcherLabel, "remaining-count": design.remainingCount, "completion-title": design.completionTitle, "completion-description": design.completionDescription }[block.role]);
+  }
+}
 function validateResource(item, references, warnings) {
   if (item.action.type === "launch_guide") {
     const experienceId = item.action.experienceId, guide = references.guides.find((value) => value.id === experienceId);
@@ -4394,6 +4501,7 @@ function applyChecklistAiProposal(source, proposal, references) {
       Object.assign(definition.behavior, cloneOnsite(operation.patch));
       if (operation.patch.order && operation.patch.order !== oldOrder) warnings.push("Checklist progression order changed.");
     } else if (operation.type === "update_checklist_completion_message") Object.assign(definition.completionMessage, cloneOnsite(operation.patch));
+    else if (operation.type === "redesign_checklist_views") redesignChecklist(document2, cloneOnsite(operation.design));
     else if (operation.type === "update_checklist_visual_state") {
       const view = (_c = document2.root.children) == null ? void 0 : _c.find((cell) => cell.checklistRole === operation.view);
       if (!view) throw new Error(`Checklist visual state is missing: ${operation.view}`);
@@ -4687,7 +4795,7 @@ class EditorModeController {
         <section class="section ai-panel" data-ai-panel hidden>
           <div class="content-heading"><div><div class="eyebrow">Movcues AI</div><strong>Design assistant</strong></div><button type="button" class="secondary-button compact" data-ai-cancel hidden>Cancel</button></div>
           <p class="muted" data-ai-context>Choose an element or ask about the whole widget.</p>
-          <div class="ai-suggestions"><button type="button" data-ai-suggestion="Improve the selected copy while keeping the same meaning.">Improve copy</button><button type="button" data-ai-suggestion="Improve the selected element's visual hierarchy and spacing.">Improve hierarchy</button><button type="button" data-ai-suggestion="Make this widget more concise and mobile friendly.">Mobile polish</button></div>
+          <div class="ai-suggestions"><button type="button" data-ai-suggestion="Redesign the selected experience into a polished onboarding UI. Improve the layout, hierarchy, spacing, styling, and useful elements while preserving valid Movcues behavior.">Redesign UI</button><button type="button" data-ai-suggestion="Improve the selected copy while keeping the same meaning.">Improve copy</button><button type="button" data-ai-suggestion="Make this experience polished and mobile friendly, including its layout and controls.">Mobile polish</button></div>
           <form data-ai-form><textarea data-ai-prompt maxlength="4000" rows="4" placeholder="Describe the change…"></textarea><button type="submit" class="secondary-button" data-ai-send>Generate proposal</button></form>
           <div class="ai-status" data-ai-status role="status" aria-live="polite"></div>
           <article class="ai-proposal" data-ai-proposal hidden><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Preview only. Nothing changes until you apply it.</p><div class="history-row"><button type="button" class="secondary-button" data-ai-target hidden>Select target</button><button type="button" class="secondary-button" data-ai-preview hidden>Preview Guide</button><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div></article>
@@ -7086,4 +7194,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-2k0QHjkP.js.map
+//# sourceMappingURL=EditorModeController-CCFZCOsj.js.map

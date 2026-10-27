@@ -15,7 +15,22 @@ export type EditorAiOperation =
   | { type: "insert_block"; stepId?: string; targetCellId: string; position: "inside" | "before" | "after"; blockType: "heading" | "text" | "button" | "image" | "divider" | "spacer" | "icon"; text?: string }
   | { type: "remove_cell"; stepId?: string; cellId: string }
   | { type: "duplicate_cell"; stepId?: string; cellId: string }
-  | { type: "move_cell"; stepId?: string; cellId: string; targetCellId: string; before?: boolean };
+  | { type: "move_cell"; stepId?: string; cellId: string; targetCellId: string; before?: boolean }
+  | { type: "redesign_layout"; stepId?: string; layout: UiLayoutGroup };
+export interface UiCellDesign { sizing?: OnsiteCell["sizing"]; align?: OnsiteCell["align"]; justify?: OnsiteCell["justify"]; gap?: number; padding?: Partial<OnsiteCell["padding"]>; responsiveStack?: boolean; style?: OnsiteCell["style"] }
+export interface UiTextDesign { align?: "left" | "center" | "right"; fontSize?: number; weight?: 400 | 500 | 600 | 700; lineHeight?: number; color?: string }
+export type UiLayoutNode =
+  | ({ type: "group"; direction?: "row" | "column"; children: UiLayoutNode[] } & UiCellDesign)
+  | ({ type: "heading"; text: string; level?: 1 | 2 | 3 | 4 } & UiTextDesign)
+  | ({ type: "text"; text: string } & UiTextDesign)
+  | { type: "button"; label: string; action: Omit<OnsiteButtonAction, "id">; align?: "left" | "center" | "right"; variant?: "primary" | "secondary" | "outline"; background?: string; color?: string; radius?: number; paddingX?: number; paddingY?: number; width?: "hug" | "full" }
+  | { type: "image"; alt?: string; fit?: "contain" | "cover"; width?: number; height?: number; radius?: number; align?: "left" | "center" | "right" }
+  | { type: "divider"; orientation?: "horizontal" | "vertical"; thickness?: number; color?: string }
+  | { type: "spacer"; size?: number }
+  | { type: "icon"; icon: "check" | "star" | "rocket" | "heart" | "info" | "warning" | "sparkles" | "arrow"; size?: number; color?: string; align?: "left" | "center" | "right" }
+  | { type: "survey_questions"; fontSize?: number; color?: string; gap?: number }
+  | { type: "survey_controls" };
+export type UiLayoutGroup = Extract<UiLayoutNode, { type: "group" }>;
 export type GuideAiOperation =
   | { type: "add_guide_step"; afterStepId?: string; pattern: "modal" | "anchored_card"; label?: string; heading: string; body: string }
   | { type: "duplicate_guide_step"; stepId: string; afterStepId?: string; label?: string; heading?: string; body?: string }
@@ -53,13 +68,45 @@ function moveCandidate(document: OnsiteDocument, sourceId: string, targetId: str
   else { const to = parentCell(document, targetId); if (!to?.children) throw new Error("Invalid move target."); to.children.splice(to.children.indexOf(target) + (before ? 0 : 1), 0, source); }
 }
 
+const completePadding = (value?: Partial<OnsiteCell["padding"]>): OnsiteCell["padding"] => ({ top: value?.top ?? 0, right: value?.right ?? 0, bottom: value?.bottom ?? 0, left: value?.left ?? 0 });
+function designedCell(design: UiCellDesign & { direction?: "row" | "column" }, children?: OnsiteCell[], block?: OnsiteBlock): OnsiteCell {
+  return { ...emptyCell(block), direction: design.direction ?? "column", sizing: design.sizing ?? { mode: "hug" }, align: design.align ?? "stretch", justify: design.justify ?? "start", gap: design.gap ?? 12, padding: completePadding(design.padding), ...(design.responsiveStack !== undefined ? { responsiveStack: design.responsiveStack } : {}), ...(design.style ? { style: cloneOnsite(design.style) } : {}), ...(children ? { children } : {}) };
+}
+function designedBlock(node: Exclude<UiLayoutNode, UiLayoutGroup | { type: "survey_questions" } | { type: "survey_controls" }>): OnsiteBlock {
+  if (node.type === "heading") return { id: onsiteId("block"), type: "heading", html: plainText(node.text.slice(0, 10_000)), level: node.level ?? 2, fontSize: node.fontSize ?? 28, weight: node.weight ?? 700, lineHeight: node.lineHeight ?? 1.2, ...(node.color ? { color: node.color } : {}), ...(node.align ? { align: node.align } : {}) };
+  if (node.type === "text") return { id: onsiteId("block"), type: "text", html: plainText(node.text.slice(0, 10_000)), fontSize: node.fontSize ?? 15, weight: node.weight ?? 400, lineHeight: node.lineHeight ?? 1.5, ...(node.color ? { color: node.color } : {}), ...(node.align ? { align: node.align } : {}) };
+  if (node.type === "button") return { id: onsiteId("block"), type: "button", label: node.label.slice(0, 80), action: { id: onsiteId("action"), ...cloneOnsite(node.action) } as OnsiteButtonAction, variant: node.variant ?? "primary", radius: node.radius ?? 10, paddingX: node.paddingX ?? 18, paddingY: node.paddingY ?? 10, width: node.width ?? "hug", ...(node.background ? { background: node.background } : {}), ...(node.color ? { color: node.color } : {}), ...(node.align ? { align: node.align } : {}) };
+  if (node.type === "image") return { id: onsiteId("block"), type: "image", src: "", alt: node.alt?.slice(0, 500) ?? "", fit: node.fit ?? "cover", width: node.width ?? 100, ...(node.height !== undefined ? { height: node.height } : {}), radius: node.radius ?? 12, align: node.align ?? "center" };
+  if (node.type === "divider") return { id: onsiteId("block"), type: "divider", orientation: node.orientation ?? "horizontal", thickness: node.thickness ?? 1, color: node.color ?? "#dbe2ea" };
+  if (node.type === "spacer") return { id: onsiteId("block"), type: "spacer", size: node.size ?? 24 };
+  return { id: onsiteId("block"), type: "icon", icon: node.icon, size: node.size ?? 32, ...(node.color ? { color: node.color } : {}), ...(node.align ? { align: node.align } : {}) };
+}
+export function materializeUiLayout(source: OnsiteDocument, layout: UiLayoutGroup): OnsiteDocument {
+  const questionIds = listBlocks(source.root).filter((block): block is Extract<OnsiteBlock, { type: "question" }> => block.type === "question").map(block => block.questionId);
+  let questionsMarker = 0, controlsMarker = 0;
+  const make = (node: UiLayoutNode, depth: number): OnsiteCell[] => {
+    if (depth > 8) throw new Error("AI layout exceeds the maximum nesting depth.");
+    if (node.type === "group") return [designedCell(node, node.children.flatMap(child => make(child, depth + 1)))];
+    if (node.type === "survey_questions") { questionsMarker++; return questionIds.map(questionId => designedCell({ gap: node.gap }, undefined, { id: onsiteId("block"), type: "question", questionId, fontSize: node.fontSize ?? 14, ...(node.color ? { color: node.color } : {}) })); }
+    if (node.type === "survey_controls") { controlsMarker++; return [designedCell({}, undefined, { id: onsiteId("block"), type: "survey_controls" })]; }
+    return [designedCell({}, undefined, designedBlock(node))];
+  };
+  const root = make(layout, 0)[0]; root.id = source.root.id;
+  if (source.schemaVersion === 3 && (questionsMarker !== 1 || controlsMarker !== 1)) throw new Error("A redesigned Survey needs exactly one questions region and one navigation region.");
+  if (source.schemaVersion === 2 && (questionsMarker || controlsMarker)) throw new Error("Survey regions are not available in this experience.");
+  return { schemaVersion: source.schemaVersion, id: source.id, root };
+}
+
 /** Applies a complete AI proposal to a clone. The live document is untouched unless every operation validates. */
 export function applyEditorAiProposal(document: OnsiteDocument, proposal: EditorAiProposal): OnsiteDocument {
-  if (document.schemaVersion !== 2 && document.schemaVersion !== 3) throw new Error("AI editing requires an on-site document.");
+  if (![2, 3, 4].includes(document.schemaVersion)) throw new Error("AI editing requires an on-site document.");
   if (!proposal.operations.length || proposal.operations.length > 30) throw new Error("AI proposal has an invalid operation count.");
   const candidate = cloneOnsite(document);
   for (const operation of proposal.operations) {
-    if (operation.type === "update_text") {
+    if (operation.type === "redesign_layout") {
+      if (candidate.schemaVersion === 4) throw new Error("Use the protected Checklist redesign operation for Checklist views.");
+      const redesigned = materializeUiLayout(candidate, operation.layout); candidate.root = redesigned.root;
+    } else if (operation.type === "update_text") {
       const block = findBlock(candidate, operation.blockId); if (!block || (block.type !== "heading" && block.type !== "text")) throw new Error("Text target no longer exists.");
       block.html = plainText(operation.text.slice(0, 10_000));
     } else if (operation.type === "update_block") {
@@ -124,7 +171,7 @@ export function applyGuideAiProposal(source: RuntimeGuideDefinition & { targetin
   const guide = cloneOnsite(source), affected = new Set<string>(), withinStep = new Map<string, EditorAiOperation[]>();
   const step = (id: string) => { const value = guide.steps.find(item => item.id === id); if (!value) throw new Error(`Guide step no longer exists: ${id}`); return value; };
   proposal.operations.forEach((operation, operationIndex) => {
-    if (["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell"].includes(operation.type)) {
+    if (["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell", "redesign_layout"].includes(operation.type)) {
       const documentOperation = operation as EditorAiOperation; if (!documentOperation.stepId) throw new Error("Within-step operations require a stable step ID."); step(documentOperation.stepId);
       withinStep.set(documentOperation.stepId, [...(withinStep.get(documentOperation.stepId) ?? []), documentOperation]); affected.add(documentOperation.stepId); return;
     }

@@ -37,13 +37,21 @@ describe("Survey AI editing", () => {
     const source = definition(), document = onsiteDocumentFromBuilder(source.survey!.steps[0].builder)!, heading = listBlocks(document.root).find(block => block.type === "heading")!;
     const result = applySurveyAiProposal(source, { summary: "Improve survey", operations: [
       { type: "update_text", stepId: "step_one", blockId: heading.id, text: "Choose <carefully>" },
+      { type: "update_survey_question_style", stepId: "step_one", questionId: "question_choice", patch: { fontSize: 17, color: "#1d4ed8", align: "left" } },
       { type: "update_survey_option", stepId: "step_one", questionId: "question_choice", optionId: "option_pro", label: "Professional" },
       { type: "update_survey_branching", stepId: "step_one", branching: { rules: [{ questionId: "question_choice", operator: "equals", value: "option_free", nextStepId: "step_two" }] } },
       { type: "update_survey_configuration", patch: { allowBack: false, submitLabel: "Finish" } },
     ] });
     expect(source.survey!.submitLabel).toBe("Send"); expect(result.definition.survey).toMatchObject({ allowBack: false, submitLabel: "Finish" });
     expect(listBlocks(onsiteDocumentFromBuilder(result.definition.survey!.steps[0].builder)!.root).find(block => block.type === "heading")).toMatchObject({ html: "Choose &lt;carefully&gt;" });
+    expect(listBlocks(onsiteDocumentFromBuilder(result.definition.survey!.steps[0].builder)!.root).find(block => block.type === "question")).toMatchObject({ fontSize: 17, color: "#1d4ed8", align: "left" });
     expect(result.warnings.join(" ")).toMatch(/branching changed|configuration changed/i);
+  });
+
+  it("redesigns a Survey step while preserving canonical questions and protected controls", () => {
+    const source = definition(), result = applySurveyAiProposal(source, { summary: "Redesign survey", operations: [{ type: "redesign_layout", stepId: "step_one", layout: { type: "group", gap: 16, padding: { top: 28, right: 24, bottom: 24, left: 24 }, style: { background: "#ffffff", borderColor: "#bfdbfe", borderWidth: 1, borderRadius: 20 }, children: [{ type: "icon", icon: "sparkles", size: 30, color: "#2563eb" }, { type: "heading", text: "Help us personalize your experience", fontSize: 26 }, { type: "text", text: "This takes less than a minute.", color: "#64748b" }, { type: "survey_questions", fontSize: 16, color: "#0f172a", gap: 14 }, { type: "survey_controls" }] } }] });
+    const owner = result.definition.survey!.steps[0], document = onsiteDocumentFromBuilder(owner.builder)!; expect(owner.questions.map(question => question.id)).toEqual(["question_choice"]); expect(listBlocks(document.root).map(block => block.type)).toEqual(["icon", "heading", "text", "question", "survey_controls"]); expect(validateOnsiteSurveyDocument(document, { questions: owner.questions, submitLabel: "Send" })).toEqual([]);
+    expect(() => applySurveyAiProposal(source, { summary: "Invalid", operations: [{ type: "redesign_layout", stepId: "step_one", layout: { type: "group", children: [{ type: "heading", text: "Missing controls" }, { type: "survey_questions" }] } }] })).toThrow(/navigation region/);
   });
 
   it("requires explicit approval before removing branch dependencies and remains atomic", () => {

@@ -27,6 +27,7 @@ export type SurveyAiOperation =
   | { type: "remove_survey_question"; stepId: string; questionId: string; removeBranchRules?: boolean }
   | { type: "move_survey_question"; stepId: string; questionId: string; beforeQuestionId?: string }
   | { type: "update_survey_question"; stepId: string; questionId: string; patch: { label?: string; required?: boolean; placeholder?: string; maxLength?: number; min?: number; max?: number } }
+  | { type: "update_survey_question_style"; stepId: string; questionId: string; patch: { fontSize?: number; color?: string; align?: "left" | "center" | "right" } }
   | { type: "change_survey_question_type"; stepId: string; questionId: string; question: SurveyQuestionInput; removeInvalidBranchRules?: boolean }
   | { type: "add_survey_option"; stepId: string; questionId: string; afterOptionId?: string; label: string }
   | { type: "update_survey_option"; stepId: string; questionId: string; optionId: string; label: string }
@@ -40,7 +41,7 @@ export interface SurveyAiProposal extends Omit<EditorAiProposal, "operations"> {
 export interface SurveyAiApplyResult { definition: RuntimeWidgetDefinition & { targeting: ExperienceTargeting }; affectedStepIds: string[]; order: string[]; warnings: string[] }
 
 const text = (value: string, max: number) => sanitizeRichText(value.trim().slice(0, max).replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!));
-const isDocumentOperation = (operation: EditorAiOperation | SurveyAiOperation): operation is EditorAiOperation => ["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell"].includes(operation.type);
+const isDocumentOperation = (operation: EditorAiOperation | SurveyAiOperation): operation is EditorAiOperation => ["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell", "redesign_layout"].includes(operation.type);
 
 function questionFromInput(input: SurveyQuestionInput, id = onsiteId("question")): SurveyQuestion {
   const base = { id, label: input.label.trim().slice(0, 500), required: input.required ?? false };
@@ -143,6 +144,8 @@ export function applySurveyAiProposal(source: RuntimeWidgetDefinition & { target
       const owner = step(operation.stepId), value = question(owner, operation.questionId), patch = operation.patch; if (patch.label !== undefined) value.label = patch.label.trim().slice(0, 500); if (patch.required !== undefined) value.required = patch.required;
       if (value.type === "short_text" || value.type === "long_text") { if (patch.placeholder !== undefined) value.placeholder = patch.placeholder.slice(0, 500); if (patch.maxLength !== undefined) value.maxLength = patch.maxLength; }
       if (value.type === "rating") { if (patch.min !== undefined) value.min = patch.min; if (patch.max !== undefined) value.max = patch.max; } affected.add(owner.id);
+    } else if (operation.type === "update_survey_question_style") {
+      const owner = step(operation.stepId); question(owner, operation.questionId); const cell = referenceCell(documentFor(owner), operation.questionId); if (cell?.block?.type !== "question") throw new Error("Survey question style target no longer exists."); if (operation.patch.fontSize !== undefined) cell.block.fontSize = operation.patch.fontSize; if (operation.patch.color !== undefined) cell.block.color = operation.patch.color; if (operation.patch.align !== undefined) cell.block.align = operation.patch.align; affected.add(owner.id);
     } else if (operation.type === "change_survey_question_type") {
       const owner = step(operation.stepId), value = question(owner, operation.questionId), replacement = questionFromInput(operation.question, value.id), oldRules = owner.branching?.rules ?? []; owner.questions.splice(owner.questions.indexOf(value), 1, replacement);
       const invalid = surveyBranchErrors(survey); if (invalid.length && oldRules.some(rule => rule.questionId === value.id)) { if (!operation.removeInvalidBranchRules) throw new Error("Changing this question type invalidates branching. Explicitly allow removal of dependent rules."); owner.branching!.rules = oldRules.filter(rule => rule.questionId !== value.id); warnings.push("Branch rules using the converted question were removed."); } warnings.push(`Question type changed from ${value.type} to ${replacement.type}; existing answers may no longer be comparable.`); affected.add(owner.id);

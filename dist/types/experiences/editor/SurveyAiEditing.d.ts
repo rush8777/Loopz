@@ -83,6 +83,15 @@ export type SurveyAiOperation = {
         max?: number;
     };
 } | {
+    type: "update_survey_question_style";
+    stepId: string;
+    questionId: string;
+    patch: {
+        fontSize?: number;
+        color?: string;
+        align?: "left" | "center" | "right";
+    };
+} | {
     type: "change_survey_question_type";
     stepId: string;
     questionId: string;

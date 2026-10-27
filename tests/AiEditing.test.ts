@@ -28,6 +28,14 @@ describe("editor AI operations", () => {
     expect(listBlocks(result.root)[2]).toMatchObject({ label: "Start now", radius: 12 });
   });
 
+  it("rebuilds a complete Widget layout with client-owned IDs and valid button behavior", () => {
+    const source = createOnsiteDocument(), result = applyEditorAiProposal(source, { summary: "Redesign onboarding", operations: [{ type: "redesign_layout", layout: { type: "group", gap: 18, padding: { top: 28, right: 28, bottom: 28, left: 28 }, style: { background: "#f8fafc", borderColor: "#cbd5e1", borderWidth: 1, borderRadius: 18 }, children: [
+      { type: "icon", icon: "rocket", size: 38, color: "#2563eb", align: "center" }, { type: "heading", text: "Welcome aboard", fontSize: 30, color: "#0f172a", align: "center" }, { type: "text", text: "Complete your setup in a few focused steps.", color: "#475569", align: "center" },
+      { type: "group", direction: "row", gap: 10, responsiveStack: true, children: [{ type: "button", label: "Start setup", action: { type: "track_event", eventName: "onboarding_started" }, width: "full", radius: 12 }, { type: "button", label: "Maybe later", action: { type: "dismiss" }, variant: "outline", width: "full", radius: 12 }] },
+    ] } }] });
+    const blocks = listBlocks(result.root), buttons = blocks.filter(block => block.type === "button"); expect(blocks.map(block => block.type)).toEqual(["icon", "heading", "text", "button", "button"]); expect(buttons).toHaveLength(2); expect(buttons[0]).toMatchObject({ action: { type: "track_event", eventName: "onboarding_started" } }); expect((buttons[0] as any).action.id).toMatch(/^action_/); expect((buttons[1] as any).action.id).not.toBe((buttons[0] as any).action.id); expect(source.root.children).toHaveLength(3);
+  });
+
   it("rejects the whole proposal when any operation is invalid", () => {
     const source = createOnsiteDocument(); const before = JSON.stringify(source);
     expect(() => applyEditorAiProposal(source, { summary: "Unsafe", operations: [

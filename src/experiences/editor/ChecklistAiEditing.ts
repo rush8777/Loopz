@@ -1,10 +1,18 @@
 import type { CompositionSelection } from "./OnsiteCompositionEditor";
-import { applyEditorAiProposal, type EditorAiOperation, type EditorAiProposal } from "./AiEditing";
+import { applyEditorAiProposal, materializeUiLayout, type EditorAiOperation, type EditorAiProposal, type UiCellDesign, type UiLayoutNode } from "./AiEditing";
 import { applyOnsiteDocument, cloneOnsite, emptyCell, findBlock, listBlocks, onsiteDocumentFromBuilder, onsiteId, parentCell, removeCell, validateOnsiteChecklistDocument, validateOnsiteDocument, type OnsiteCell, type OnsiteDocument } from "../onsite/OnsiteDocument";
 import type { ChecklistItem, EditorChecklistDefinition, EditorDraft } from "../types";
 import type { ChecklistView } from "../checklist/ChecklistMarkup";
 
 export type ChecklistItemInput = Omit<ChecklistItem, "id">;
+export interface ChecklistViewDesign extends UiCellDesign { width?: number; before?: UiLayoutNode[]; after?: UiLayoutNode[] }
+export interface ChecklistBlockDesign { align?: "left" | "center" | "right"; fontSize?: number; color?: string; indicator?: "check" | "star" | "rocket" | "heart" | "info" | "warning" | "sparkles" | "arrow" }
+export interface ChecklistVisualDesign {
+  views: { expanded: ChecklistViewDesign; launcher: ChecklistViewDesign; completion: ChecklistViewDesign };
+  title?: ChecklistBlockDesign; description?: ChecklistBlockDesign; progress?: ChecklistBlockDesign; task?: ChecklistBlockDesign;
+  launcherLabel?: ChecklistBlockDesign; remainingCount?: ChecklistBlockDesign; completionTitle?: ChecklistBlockDesign; completionDescription?: ChecklistBlockDesign;
+  control?: ChecklistBlockDesign; items?: UiCellDesign;
+}
 export type ChecklistAiOperation =
   | { type: "generate_checklist"; title?: string; description?: string; items: ChecklistItemInput[] }
   | { type: "add_checklist_task"; afterItemId?: string; item: ChecklistItemInput }
@@ -17,7 +25,8 @@ export type ChecklistAiOperation =
   | { type: "update_checklist_behavior"; patch: Partial<EditorChecklistDefinition["behavior"]> }
   | { type: "update_checklist_completion_message"; patch: Partial<EditorChecklistDefinition["completionMessage"]> }
   | { type: "update_checklist_visual_state"; view: ChecklistView; width: number }
-  | { type: "update_checklist_style"; blockId: string; patch: { fontSize?: number; color?: string; indicator?: "check" | "star" | "rocket" | "heart" | "info" | "warning" | "sparkles" | "arrow"; text?: string } };
+  | { type: "update_checklist_style"; blockId: string; patch: { fontSize?: number; color?: string; indicator?: "check" | "star" | "rocket" | "heart" | "info" | "warning" | "sparkles" | "arrow"; text?: string } }
+  | { type: "redesign_checklist_views"; design: ChecklistVisualDesign };
 export interface ChecklistAiProposal extends Omit<EditorAiProposal, "operations"> { operations: Array<EditorAiOperation | ChecklistAiOperation> }
 export interface ChecklistAiApplyResult { definition: EditorChecklistDefinition; affectedItemIds: string[]; order: string[]; warnings: string[] }
 
@@ -31,6 +40,33 @@ function itemContainer(document: OnsiteDocument): OnsiteCell | null { let found:
 function insertReference(document: OnsiteDocument, itemId: string, afterItemId?: string): void { const container = itemContainer(document); if (!container?.children) throw new Error("Checklist task container is missing."); const target = afterItemId ? itemCell(document, afterItemId) : null; if (afterItemId && (!target || parentCell(document, target.id) !== container)) throw new Error("Checklist task insertion point no longer exists."); const cell = { ...emptyCell({ id: onsiteId("block"), type: "checklist_task", itemId, fontSize: 14, indicator: "check" }), sizing: { mode: "hug" } as const }; container.children.splice(target ? container.children.indexOf(target) + 1 : container.children.length, 0, cell); }
 function removeReference(document: OnsiteDocument, itemId: string): void { const cell = itemCell(document, itemId); if (!cell || !removeCell(document, cell.id)) throw new Error("Checklist task reference no longer exists."); }
 function moveReference(document: OnsiteDocument, itemId: string, beforeItemId?: string): void { const container = itemContainer(document), source = itemCell(document, itemId), target = beforeItemId ? itemCell(document, beforeItemId) : null; if (!container?.children || !source || parentCell(document, source.id) !== container || beforeItemId && (!target || parentCell(document, target.id) !== container)) throw new Error("Checklist task move target is invalid."); container.children.splice(container.children.indexOf(source), 1); container.children.splice(target ? container.children.indexOf(target) : container.children.length, 0, source); }
+
+function applyCellDesign(cell: OnsiteCell, design: UiCellDesign): void {
+  if (design.sizing) cell.sizing = cloneOnsite(design.sizing); if (design.align) cell.align = design.align; if (design.justify) cell.justify = design.justify; if (design.gap !== undefined) cell.gap = design.gap;
+  if (design.padding) cell.padding = { ...cell.padding, ...cloneOnsite(design.padding) }; if (design.responsiveStack !== undefined) cell.responsiveStack = design.responsiveStack; if (design.style) cell.style = cloneOnsite(design.style);
+}
+function applyChecklistBlockDesign(block: ReturnType<typeof listBlocks>[number], design?: ChecklistBlockDesign): void {
+  if (!design) return; if (design.align) block.align = design.align; const visual = block as typeof block & { fontSize?: number; color?: string };
+  if (design.fontSize !== undefined) visual.fontSize = design.fontSize; if (design.color !== undefined) visual.color = design.color; if (design.indicator !== undefined && block.type === "checklist_task") block.indicator = design.indicator;
+}
+function redesignChecklist(document: OnsiteDocument, design: ChecklistVisualDesign): void {
+  const views = new Map((document.root.children ?? []).map(cell => [cell.checklistRole, cell])), blocks = listBlocks(document.root);
+  const cellForBlock = (block: (typeof blocks)[number]) => { let result: OnsiteCell | null = null; const visit = (cell: OnsiteCell) => { if (cell.block?.id === block.id) result = cell; cell.children?.forEach(visit); }; visit(document.root); return result; };
+  const roleCell = (role: string) => { const block = blocks.find(value => value.type === "checklist_progress" ? role === "progress" : (value.type === "checklist_text" || value.type === "checklist_control") && value.role === role); const cell = block ? cellForBlock(block) : null; if (!cell) throw new Error(`Checklist component is missing: ${role}`); return cell; };
+  const decoration = (nodes: UiLayoutNode[] = []) => { if (!nodes.length) return []; const fake: OnsiteDocument = { schemaVersion: 2, id: onsiteId("document"), root: emptyCell() }; return materializeUiLayout(fake, { type: "group", children: nodes }).root.children ?? []; };
+  const expanded = views.get("expanded"), launcher = views.get("launcher"), completion = views.get("completion"), items = views.get("items") ?? itemContainer(document); if (!expanded || !launcher || !completion || !items) throw new Error("Checklist visual states are incomplete.");
+  const configureView = (cell: OnsiteCell, viewDesign: ChecklistViewDesign, required: OnsiteCell[]) => { applyCellDesign(cell, viewDesign); if (viewDesign.width !== undefined) cell.checklistWidth = viewDesign.width; cell.children = [...decoration(viewDesign.before), ...required, ...decoration(viewDesign.after)]; };
+  configureView(expanded, design.views.expanded, [roleCell("title"), roleCell("description"), roleCell("progress"), items, roleCell("collapse"), roleCell("dismiss")]);
+  configureView(launcher, design.views.launcher, [roleCell("launcher-label"), roleCell("remaining-count")]);
+  configureView(completion, design.views.completion, [roleCell("completion-title"), roleCell("completion-description"), roleCell("completion-acknowledge")]);
+  applyCellDesign(items, design.items ?? {});
+  for (const block of listBlocks(document.root)) {
+    if (block.type === "checklist_task") applyChecklistBlockDesign(block, design.task);
+    else if (block.type === "checklist_progress") applyChecklistBlockDesign(block, design.progress);
+    else if (block.type === "checklist_control") applyChecklistBlockDesign(block, design.control);
+    else if (block.type === "checklist_text") applyChecklistBlockDesign(block, ({ title: design.title, description: design.description, "launcher-label": design.launcherLabel, "remaining-count": design.remainingCount, "completion-title": design.completionTitle, "completion-description": design.completionDescription })[block.role]);
+  }
+}
 
 function validateResource(item: ChecklistItem, references: NonNullable<EditorDraft["references"]>, warnings: string[]): void {
   if (item.action.type === "launch_guide") { const experienceId = item.action.experienceId, guide = references.guides.find(value => value.id === experienceId); if (!guide) throw new Error(`Unknown site Guide: ${experienceId}`); if (guide.status !== "published") warnings.push(`Guide “${guide.name}” is not published and cannot currently launch for visitors.`); }
@@ -65,6 +101,7 @@ export function applyChecklistAiProposal(source: EditorChecklistDefinition, prop
     } else if (operation.type === "update_checklist_task_completion") { const value = item(operation.itemId); value.completion = cloneOnsite(operation.completion); affected.add(value.id); warnings.push("A task completion condition changed; visitor progress behavior may differ.");
     } else if (operation.type === "update_checklist_behavior") { const oldOrder = definition.behavior.order; Object.assign(definition.behavior, cloneOnsite(operation.patch)); if (operation.patch.order && operation.patch.order !== oldOrder) warnings.push("Checklist progression order changed."); }
     else if (operation.type === "update_checklist_completion_message") Object.assign(definition.completionMessage, cloneOnsite(operation.patch));
+    else if (operation.type === "redesign_checklist_views") redesignChecklist(document, cloneOnsite(operation.design));
     else if (operation.type === "update_checklist_visual_state") { const view = document.root.children?.find(cell => cell.checklistRole === operation.view); if (!view) throw new Error(`Checklist visual state is missing: ${operation.view}`); view.checklistWidth = operation.width; }
     else if (operation.type === "update_checklist_style") { const block = findBlock(document, operation.blockId); if (!block || !block.type.startsWith("checklist_")) throw new Error("Checklist style target no longer exists."); const patch = operation.patch, visual = block as typeof block & { fontSize: number; color?: string }; if (patch.fontSize !== undefined) visual.fontSize = patch.fontSize; if (patch.color !== undefined) visual.color = patch.color; if (block.type === "checklist_task" && patch.indicator !== undefined) block.indicator = patch.indicator; if (block.type === "checklist_text" && patch.text !== undefined) block.text = patch.text.slice(0, 200); }
     else throw new Error("Unsupported Checklist AI operation.");
