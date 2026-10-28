@@ -3,6 +3,7 @@ import { applyEditorAiProposal, type EditorAiOperation, type EditorAiProposal } 
 import { applyOnsiteDocument, cloneOnsite, emptyCell, findBlock, listBlocks, onsiteDocumentFromBuilder, onsiteId, parentCell, removeCell, validateOnsiteChecklistDocument, validateOnsiteDocument, type OnsiteCell, type OnsiteDocument } from "../onsite/OnsiteDocument";
 import type { ChecklistItem, EditorChecklistDefinition, EditorDraft } from "../types";
 import type { ChecklistView } from "../checklist/ChecklistMarkup";
+import { applySourceMarkup, sourceContext, type ReplaceMarkupOperation } from "./SourceAuthoring";
 
 export type ChecklistItemInput = Omit<ChecklistItem, "id">;
 export type ChecklistAiOperation =
@@ -52,6 +53,15 @@ export function applyChecklistAiProposal(source: EditorChecklistDefinition, prop
   if (!proposal.operations.length || proposal.operations.length > 30) throw new Error("AI proposal has an invalid operation count.");
   const definition = cloneOnsite(source), document = cloneOnsite(documentFor(definition)), affected = new Set<string>(), warnings: string[] = [], visual: EditorAiOperation[] = [];
   const item = (id: string) => { const value = definition.items.find(entry => entry.id === id); if (!value) throw new Error(`Checklist task no longer exists: ${id}`); return value; };
+  const replacement = proposal.operations.find((operation): operation is ReplaceMarkupOperation => operation.type === "replace_markup");
+  if (replacement) {
+    if (proposal.operations.length !== 1 || replacement.stepId) throw new Error("A Checklist source replacement must be one atomic widget-scoped operation.");
+    definition.items.forEach(value => validateResource(value, references, warnings));
+    const content = { heading: definition.title, body: definition.description ?? "" };
+    applySourceMarkup(definition.builder, content, replacement, { widgetType: "checklist", guide: false, checklist: { items: definition.items.map(value => ({ id: value.id })) } });
+    definition.title = content.heading; definition.description = content.body || undefined;
+    return { definition, affectedItemIds: definition.items.map(value => value.id), order: definition.items.map(value => value.id), warnings: [...new Set([...warnings, "This Checklist now uses Source mode; protected tasks, views, and completion controls remain canonical."])] };
+  }
   for (const operation of proposal.operations) {
     if (isDocumentOperation(operation)) { visual.push(operation); continue; }
     if (operation.type === "generate_checklist") {
@@ -76,5 +86,5 @@ export function applyChecklistAiProposal(source: EditorChecklistDefinition, prop
 
 export function checklistAiContext(input: { experience: { id: string; name: string; builderMode: "onsite" }; revision: number; checklist: EditorChecklistDefinition; references: NonNullable<EditorDraft["references"]>; selection: CompositionSelection; currentView: ChecklistView; theme?: unknown }): Record<string, unknown> {
   const document = documentFor(input.checklist), blockId = input.selection.kind === "block" ? input.selection.blockId : undefined, selected = blockId ? listBlocks(document.root).find(block => block.id === blockId) : undefined, selectedItemId = selected?.type === "checklist_task" ? selected.itemId : undefined;
-  return { experience: { ...input.experience, kind: "checklist", widgetType: null }, revision: input.revision, currentView: input.currentView, selection: cloneOnsite(input.selection), selectedItemId, checklist: { title: input.checklist.title, description: input.checklist.description, totalTasks: input.checklist.items.length, behavior: cloneOnsite(input.checklist.behavior), completionMessage: cloneOnsite(input.checklist.completionMessage), items: input.checklist.items.map((item, index) => ({ ...cloneOnsite(item), position: index })) }, resources: { guides: input.references.guides.map(value => ({ id: value.id, name: value.name, status: value.status })), segments: input.references.segments.map(value => ({ id: value.id, name: value.name })) }, currentDocument: cloneOnsite(document), targeting: cloneOnsite(input.checklist.targeting), theme: cloneOnsite(input.theme) };
+  return { experience: { ...input.experience, kind: "checklist", widgetType: null }, revision: input.revision, currentView: input.currentView, selection: cloneOnsite(input.selection), selectedItemId, checklist: { title: input.checklist.title, description: input.checklist.description, totalTasks: input.checklist.items.length, behavior: cloneOnsite(input.checklist.behavior), completionMessage: cloneOnsite(input.checklist.completionMessage), items: input.checklist.items.map((item, index) => ({ ...cloneOnsite(item), position: index })) }, resources: { guides: input.references.guides.map(value => ({ id: value.id, name: value.name, status: value.status })), segments: input.references.segments.map(value => ({ id: value.id, name: value.name })) }, currentDocument: cloneOnsite(document), source: sourceContext(input.checklist.builder, false), targeting: cloneOnsite(input.checklist.targeting), theme: cloneOnsite(input.theme) };
 }

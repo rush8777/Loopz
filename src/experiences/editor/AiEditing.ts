@@ -6,6 +6,7 @@ import {
 import type { CompositionSelection } from "./OnsiteCompositionEditor";
 import { guideStepConfigurationErrors } from "../runtime/GuideStepLogic";
 import { getGuideStepPattern, guideStepRequiresTarget, type ExperienceTarget, type ExperienceTargeting, type GuideAdvance, type GuidePresentation, type GuideStep, type RuntimeGuideDefinition, type WidgetBuilderState } from "../types";
+import { applySourceMarkup, sourceContext, type ReplaceMarkupOperation } from "./SourceAuthoring";
 
 export type EditorAiOperation =
   | { type: "update_text"; stepId?: string; blockId: string; text: string }
@@ -15,7 +16,8 @@ export type EditorAiOperation =
   | { type: "insert_block"; stepId?: string; targetCellId: string; position: "inside" | "before" | "after"; blockType: "heading" | "text" | "button" | "image" | "divider" | "spacer" | "icon"; text?: string }
   | { type: "remove_cell"; stepId?: string; cellId: string }
   | { type: "duplicate_cell"; stepId?: string; cellId: string }
-  | { type: "move_cell"; stepId?: string; cellId: string; targetCellId: string; before?: boolean };
+  | { type: "move_cell"; stepId?: string; cellId: string; targetCellId: string; before?: boolean }
+  | ReplaceMarkupOperation;
 export type GuideAiOperation =
   | { type: "add_guide_step"; afterStepId?: string; pattern: "modal" | "anchored_card"; label?: string; heading: string; body: string }
   | { type: "duplicate_guide_step"; stepId: string; afterStepId?: string; label?: string; heading?: string; body?: string }
@@ -59,6 +61,7 @@ export function applyEditorAiProposal(document: OnsiteDocument, proposal: Editor
   if (!proposal.operations.length || proposal.operations.length > 30) throw new Error("AI proposal has an invalid operation count.");
   const candidate = cloneOnsite(document);
   for (const operation of proposal.operations) {
+    if (operation.type === "replace_markup") throw new Error("Source proposals must be applied to the complete builder.");
     if (operation.type === "update_text") {
       const block = findBlock(candidate, operation.blockId); if (!block || (block.type !== "heading" && block.type !== "text")) throw new Error("Text target no longer exists.");
       block.html = plainText(operation.text.slice(0, 10_000));
@@ -123,6 +126,13 @@ export function applyGuideAiProposal(source: RuntimeGuideDefinition & { targetin
   if (!proposal.operations.length || proposal.operations.length > 30) throw new Error("AI proposal has an invalid operation count.");
   const guide = cloneOnsite(source), affected = new Set<string>(), withinStep = new Map<string, EditorAiOperation[]>();
   const step = (id: string) => { const value = guide.steps.find(item => item.id === id); if (!value) throw new Error(`Guide step no longer exists: ${id}`); return value; };
+  const replacement = proposal.operations.find((operation): operation is ReplaceMarkupOperation => operation.type === "replace_markup");
+  if (replacement) {
+    if (proposal.operations.length !== 1 || !replacement.stepId) throw new Error("A source replacement must be one atomic step-scoped operation.");
+    const owner = step(replacement.stepId); if (!owner.builder) throw new Error("Guide step has no builder source.");
+    applySourceMarkup(owner.builder, owner.content, replacement, { widgetType: getGuideStepPattern(owner), guide: true });
+    return { guide, affectedStepIds: [owner.id], order: guide.steps.map(value => value.id), warnings: ["This step now uses Source mode; cell controls are disabled until a recoverable conversion is available."] };
+  }
   proposal.operations.forEach((operation, operationIndex) => {
     if (["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell"].includes(operation.type)) {
       const documentOperation = operation as EditorAiOperation; if (!documentOperation.stepId) throw new Error("Within-step operations require a stable step ID."); step(documentOperation.stepId);
@@ -172,8 +182,8 @@ export function applyGuideAiProposal(source: RuntimeGuideDefinition & { targetin
   return { guide, affectedStepIds: [...affected], order: guide.steps.map(value => value.id), warnings };
 }
 
-export function editorAiContext(input: { experience: { id: string; name: string; widgetType: string | null; builderMode: "onsite" }; selection: CompositionSelection; document: OnsiteDocument; theme?: Record<string, string | number | boolean | null> }) {
-  return { experience: input.experience, selection: cloneOnsite(input.selection), document: cloneOnsite(input.document), ...(input.theme ? { theme: cloneOnsite(input.theme) } : {}) };
+export function editorAiContext(input: { experience: { id: string; name: string; widgetType: string | null; builderMode: "onsite" }; selection: CompositionSelection; document: OnsiteDocument; builder?: WidgetBuilderState; theme?: Record<string, string | number | boolean | null> }) {
+  return { experience: input.experience, selection: cloneOnsite(input.selection), document: cloneOnsite(input.document), ...(input.builder ? { source: sourceContext(input.builder, false) } : {}), ...(input.theme ? { theme: cloneOnsite(input.theme) } : {}) };
 }
 
 export function guideAiContext(input: { experience: { id: string; name: string; builderMode: "onsite" }; revision: number; guide: RuntimeGuideDefinition & { targeting: ExperienceTargeting }; currentStepId: string; selection: CompositionSelection; theme?: unknown; scope?: "guide" | "step" }) {
@@ -185,5 +195,5 @@ export function guideAiContext(input: { experience: { id: string; name: string; 
   });
   const layer = input.guide.behavior?.layer;
   const behavior = layer ? { layer: layer.mode === "relative" ? { mode: layer.mode, relation: layer.relation, target: target(layer.target) } : cloneOnsite(layer) } : undefined;
-  return { experience: { ...input.experience, kind: "guide" as const, widgetType: null }, selection: { ...cloneOnsite(input.selection), scope: input.scope ?? "step", stepId: selected.id }, guide: { id: input.experience.id, name: input.experience.name, revision: input.revision, currentStepId: selected.id, totalSteps: input.guide.steps.length, steps: summaries, targeting: cloneOnsite(input.guide.targeting), ...(behavior ? { behavior } : {}), theme: cloneOnsite(input.theme ?? null) }, currentDocument: cloneOnsite(onsiteDocumentFromBuilder(selected.builder) ?? null) };
+  return { experience: { ...input.experience, kind: "guide" as const, widgetType: null }, selection: { ...cloneOnsite(input.selection), scope: input.scope ?? "step", stepId: selected.id }, guide: { id: input.experience.id, name: input.experience.name, revision: input.revision, currentStepId: selected.id, totalSteps: input.guide.steps.length, steps: summaries, targeting: cloneOnsite(input.guide.targeting), ...(behavior ? { behavior } : {}), theme: cloneOnsite(input.theme ?? null) }, currentDocument: cloneOnsite(onsiteDocumentFromBuilder(selected.builder) ?? null), ...(selected.builder ? { source: sourceContext(selected.builder, true) } : {}) };
 }

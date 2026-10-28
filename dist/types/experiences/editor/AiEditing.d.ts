@@ -1,6 +1,7 @@
 import { type OnsiteBlock, type OnsiteButtonAction, type OnsiteDocument } from "../onsite/OnsiteDocument";
 import type { CompositionSelection } from "./OnsiteCompositionEditor";
-import { type ExperienceTarget, type ExperienceTargeting, type GuidePresentation, type GuideStep, type RuntimeGuideDefinition } from "../types";
+import { type ExperienceTarget, type ExperienceTargeting, type GuidePresentation, type GuideStep, type RuntimeGuideDefinition, type WidgetBuilderState } from "../types";
+import { type ReplaceMarkupOperation } from "./SourceAuthoring";
 export type EditorAiOperation = {
     type: "update_text";
     stepId?: string;
@@ -42,7 +43,7 @@ export type EditorAiOperation = {
     cellId: string;
     targetCellId: string;
     before?: boolean;
-};
+} | ReplaceMarkupOperation;
 export type GuideAiOperation = {
     type: "add_guide_step";
     afterStepId?: string;
@@ -136,9 +137,17 @@ export declare function editorAiContext(input: {
     };
     selection: CompositionSelection;
     document: OnsiteDocument;
+    builder?: WidgetBuilderState;
     theme?: Record<string, string | number | boolean | null>;
 }): {
     theme?: Record<string, string | number | boolean | null> | undefined;
+    source?: {
+        html: string;
+        css: string;
+        authoringSurface: "source" | "onsite";
+        actionBindings: {};
+        supportedActions: readonly ["dismiss", "next_step", "previous_step", "open_url", "track_event"] | readonly ["dismiss", "open_url", "track_event"];
+    } | undefined;
     experience: {
         id: string;
         name: string;
@@ -163,6 +172,13 @@ export declare function guideAiContext(input: {
     theme?: unknown;
     scope?: "guide" | "step";
 }): {
+    source?: {
+        html: string;
+        css: string;
+        authoringSurface: "source" | "onsite";
+        actionBindings: {};
+        supportedActions: readonly ["dismiss", "next_step", "previous_step", "open_url", "track_event"] | readonly ["dismiss", "open_url", "track_event"];
+    } | undefined;
     experience: {
         kind: "guide";
         widgetType: null;

@@ -4279,6 +4279,78 @@ ${ISOLATION_CSS}`;
       URL.revokeObjectURL(url);
     }
   }
+  const actionIdPattern = /^[A-Za-z][A-Za-z0-9_-]{2,63}$/;
+  function parse(html) {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    return template;
+  }
+  function validateSourceMarkup(operation, options) {
+    var _a;
+    const errors = [];
+    if (operation.html.length > 1e5 || operation.css.length > 1e5) errors.push("Source proposal is too large.");
+    if (safeScopedBuilderCss(operation.css) === null) errors.push("Source CSS is unsafe or contains an unscoped selector.");
+    const template = parse(operation.html), elements = Array.from(template.content.querySelectorAll("*"));
+    for (const element of elements) {
+      if (!BUILDER_ALLOWED_TAGS.has(element.tagName) && !(options.survey && BUILDER_SURVEY_INPUT_TAGS.has(element.tagName))) errors.push(`Unsupported element: ${element.tagName.toLowerCase()}`);
+      for (const attribute of Array.from(element.attributes)) if (!BUILDER_ALLOWED_ATTRIBUTES.has(attribute.name) || /^on/i.test(attribute.name)) errors.push(`Unsupported attribute: ${attribute.name}`);
+      if (element instanceof HTMLImageElement && !builderImageUrlIsSafe(element.getAttribute("src") ?? "")) errors.push("Unsafe image URL.");
+      if (element instanceof HTMLAnchorElement && !builderLinkUrlIsSafe(element.getAttribute("href") ?? "")) errors.push("Unsafe link URL.");
+      if (element instanceof HTMLInputElement && !builderInputTypeIsSafe(element.type)) errors.push("Unsafe input type.");
+    }
+    const roots = elements.filter((element) => element.classList.contains("movcues-widget"));
+    if (roots.length !== 1) errors.push("Source HTML must contain exactly one .movcues-widget root.");
+    const topLevelElements = Array.from(template.content.children);
+    if (topLevelElements.length !== 1 || topLevelElements[0] !== roots[0] || Array.from(template.content.childNodes).some((node) => {
+      var _a2;
+      return node.nodeType === Node.TEXT_NODE && ((_a2 = node.textContent) == null ? void 0 : _a2.trim());
+    })) errors.push("The .movcues-widget root must be the sole top-level element.");
+    if (((_a = roots[0]) == null ? void 0 : _a.dataset.movcuesWidgetType) !== options.widgetType) errors.push("The widget root type cannot be changed.");
+    if (roots[0] && !roots[0].dataset.movcuesDocumentVersion) errors.push("The widget root document version must be preserved.");
+    const ids = elements.map((element) => element.id).filter(Boolean);
+    if (new Set(ids).size !== ids.length) errors.push("Source HTML contains duplicate IDs.");
+    const buttons = elements.filter((element) => element instanceof HTMLButtonElement && !element.dataset.movcuesSurveyAction && !element.dataset.movcuesChecklistRole && !element.dataset.movcuesChecklistItemRole);
+    const actionIds = buttons.map((button) => button.dataset.movcuesActionId ?? "");
+    if (actionIds.some((value) => !actionIdPattern.test(value)) || new Set(actionIds).size !== actionIds.length) errors.push("Every ordinary button needs one unique valid action ID.");
+    const bindings = Object.keys(operation.actionBindings);
+    if (bindings.length !== actionIds.length || actionIds.some((value) => !(value in operation.actionBindings))) errors.push("Button actions and action bindings must match exactly.");
+    for (const action of Object.values(operation.actionBindings)) {
+      if (!options.guide && (action.type === "next_step" || action.type === "previous_step")) errors.push(`${action.type} is only supported by Guides.`);
+      if (action.type === "open_url" && !/^https?:\/\//i.test(action.url)) errors.push("Open URL actions must use HTTP(S).");
+      if (action.type === "track_event" && (!action.eventName.trim() || /[\u0000-\u001f\u007f]/.test(action.eventName))) errors.push("Track-event action is invalid.");
+    }
+    if (options.survey) {
+      for (const question of options.survey.questions) {
+        const matches2 = elements.filter((element) => element.dataset.movcuesQuestionId === question.id);
+        if (matches2.length !== 1 || matches2[0].dataset.movcuesQuestionType !== question.type) errors.push(`Survey question ${question.id} was changed or removed.`);
+      }
+      if (elements.filter((element) => element.hasAttribute("data-movcues-survey-controls")).length !== 1 || elements.filter((element) => element.dataset.movcuesSurveyAction === "submit").length !== 1) errors.push("Survey controls and submission must be preserved.");
+    }
+    if (options.checklist) {
+      for (const role of ["root", "title", "items", "progress", "launcher-label", "remaining-count", "completion-title", "completion-description", "completion-acknowledge"]) if (elements.filter((element) => element.dataset.movcuesChecklistRole === role).length !== 1) errors.push(`Checklist role ${role} must be preserved.`);
+      for (const item of options.checklist.items) if (elements.filter((element) => element.dataset.movcuesChecklistItemId === item.id).length !== 1) errors.push(`Checklist item ${item.id} must be preserved.`);
+    }
+    return [...new Set(errors)];
+  }
+  function applySourceMarkup(builder, content, operation, options) {
+    const errors = validateSourceMarkup(operation, options);
+    if (errors.length) throw new Error(errors.join(" "));
+    const previous = builder.projectData.movcues && typeof builder.projectData.movcues === "object" ? builder.projectData.movcues : {};
+    builder.html = operation.html;
+    builder.css = operation.css;
+    builder.projectData = { ...builder.projectData, movcues: { ...previous, authoringSurface: "source", sourceVersion: 1, actionBindings: structuredClone(operation.actionBindings) } };
+    const template = parse(operation.html), heading = template.content.querySelector('[data-movcues-content="heading"]'), body = template.content.querySelector('[data-movcues-content="body"]');
+    if (heading) content.heading = (heading.textContent ?? "").trim().slice(0, 500);
+    if (body) content.body = (body.textContent ?? "").trim().slice(0, 1e4);
+  }
+  function sourceContext(builder, guide) {
+    const movcues = builder.projectData.movcues && typeof builder.projectData.movcues === "object" ? builder.projectData.movcues : {};
+    return { html: builder.html, css: builder.css, authoringSurface: movcues.authoringSurface === "source" ? "source" : "onsite", actionBindings: structuredClone(movcues.actionBindings ?? {}), supportedActions: guide ? ["dismiss", "next_step", "previous_step", "open_url", "track_event"] : ["dismiss", "open_url", "track_event"] };
+  }
+  function isSourceAuthored(builder) {
+    const movcues = builder == null ? void 0 : builder.projectData.movcues;
+    return Boolean(movcues && typeof movcues === "object" && movcues.authoringSurface === "source");
+  }
   const BLOCK_PATCH_KEYS = /* @__PURE__ */ new Set(["align", "fontSize", "weight", "lineHeight", "color", "label", "variant", "background", "width", "paddingX", "paddingY", "radius", "alt", "fit", "size", "thickness", "icon"]);
   const CELL_PATCH_KEYS = /* @__PURE__ */ new Set(["direction", "sizing", "align", "justify", "gap", "padding", "responsiveStack", "style"]);
   const plainText = (value) => sanitizeRichText(value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]));
@@ -4308,6 +4380,7 @@ ${ISOLATION_CSS}`;
     if (!proposal.operations.length || proposal.operations.length > 30) throw new Error("AI proposal has an invalid operation count.");
     const candidate = cloneOnsite(document2);
     for (const operation of proposal.operations) {
+      if (operation.type === "replace_markup") throw new Error("Source proposals must be applied to the complete builder.");
       if (operation.type === "update_text") {
         const block = findBlock(candidate, operation.blockId);
         if (!block || block.type !== "heading" && block.type !== "text") throw new Error("Text target no longer exists.");
@@ -4396,6 +4469,14 @@ ${ISOLATION_CSS}`;
       if (!value) throw new Error(`Guide step no longer exists: ${id}`);
       return value;
     };
+    const replacement = proposal.operations.find((operation) => operation.type === "replace_markup");
+    if (replacement) {
+      if (proposal.operations.length !== 1 || !replacement.stepId) throw new Error("A source replacement must be one atomic step-scoped operation.");
+      const owner = step(replacement.stepId);
+      if (!owner.builder) throw new Error("Guide step has no builder source.");
+      applySourceMarkup(owner.builder, owner.content, replacement, { widgetType: getGuideStepPattern(owner), guide: true });
+      return { guide, affectedStepIds: [owner.id], order: guide.steps.map((value) => value.id), warnings: ["This step now uses Source mode; cell controls are disabled until a recoverable conversion is available."] };
+    }
     proposal.operations.forEach((operation, operationIndex) => {
       var _a, _b, _c, _d, _e;
       if (["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell"].includes(operation.type)) {
@@ -4492,7 +4573,7 @@ ${ISOLATION_CSS}`;
     return { guide, affectedStepIds: [...affected], order: guide.steps.map((value) => value.id), warnings };
   }
   function editorAiContext(input) {
-    return { experience: input.experience, selection: cloneOnsite(input.selection), document: cloneOnsite(input.document), ...input.theme ? { theme: cloneOnsite(input.theme) } : {} };
+    return { experience: input.experience, selection: cloneOnsite(input.selection), document: cloneOnsite(input.document), ...input.builder ? { source: sourceContext(input.builder, false) } : {}, ...input.theme ? { theme: cloneOnsite(input.theme) } : {} };
   }
   function guideAiContext(input) {
     var _a;
@@ -4508,7 +4589,7 @@ ${ISOLATION_CSS}`;
     });
     const layer = (_a = input.guide.behavior) == null ? void 0 : _a.layer;
     const behavior = layer ? { layer: layer.mode === "relative" ? { mode: layer.mode, relation: layer.relation, target: target(layer.target) } : cloneOnsite(layer) } : void 0;
-    return { experience: { ...input.experience, kind: "guide", widgetType: null }, selection: { ...cloneOnsite(input.selection), scope: input.scope ?? "step", stepId: selected.id }, guide: { id: input.experience.id, name: input.experience.name, revision: input.revision, currentStepId: selected.id, totalSteps: input.guide.steps.length, steps: summaries, targeting: cloneOnsite(input.guide.targeting), ...behavior ? { behavior } : {}, theme: cloneOnsite(input.theme ?? null) }, currentDocument: cloneOnsite(onsiteDocumentFromBuilder(selected.builder) ?? null) };
+    return { experience: { ...input.experience, kind: "guide", widgetType: null }, selection: { ...cloneOnsite(input.selection), scope: input.scope ?? "step", stepId: selected.id }, guide: { id: input.experience.id, name: input.experience.name, revision: input.revision, currentStepId: selected.id, totalSteps: input.guide.steps.length, steps: summaries, targeting: cloneOnsite(input.guide.targeting), ...behavior ? { behavior } : {}, theme: cloneOnsite(input.theme ?? null) }, currentDocument: cloneOnsite(onsiteDocumentFromBuilder(selected.builder) ?? null), ...selected.builder ? { source: sourceContext(selected.builder, true) } : {} };
   }
   const BLOCK_LABEL = { checklist_task: "Task", checklist_text: "Checklist text", checklist_control: "Checklist control", checklist_progress: "Progress", question: "Question", survey_controls: "Survey controls", heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
   const HISTORY_LIMIT = 50;
@@ -6024,6 +6105,16 @@ ${ISOLATION_CSS}`;
       if (!value) throw new Error(`Survey question no longer exists: ${id}`);
       return value;
     };
+    const replacement = proposal.operations.find((operation) => operation.type === "replace_markup");
+    if (replacement) {
+      if (proposal.operations.length !== 1 || !replacement.stepId) throw new Error("A Survey source replacement must be one atomic step-scoped operation.");
+      const owner = step(replacement.stepId);
+      if (!owner.builder) throw new Error("Survey step has no builder source.");
+      applySourceMarkup(owner.builder, owner.content, replacement, { widgetType: "survey", guide: false, survey: { questions: owner.questions.map((question2) => ({ id: question2.id, type: question2.type })) } });
+      const branchErrors2 = surveyBranchErrors(survey);
+      if (branchErrors2.length) throw new Error(branchErrors2.join(" "));
+      return { definition, affectedStepIds: [owner.id], order: survey.steps.map((value) => value.id), warnings: ["This Survey step now uses Source mode; its protected questions and controls remain canonical."] };
+    }
     for (const operation of proposal.operations) {
       if (isDocumentOperation$1(operation)) {
         if (!operation.stepId) throw new Error("Survey layout operations require a stable step ID.");
@@ -6129,15 +6220,15 @@ ${ISOLATION_CSS}`;
         }
         affected.add(owner.id);
       } else if (operation.type === "change_survey_question_type") {
-        const owner = step(operation.stepId), value = question(owner, operation.questionId), replacement = questionFromInput(operation.question, value.id), oldRules = ((_c = owner.branching) == null ? void 0 : _c.rules) ?? [];
-        owner.questions.splice(owner.questions.indexOf(value), 1, replacement);
+        const owner = step(operation.stepId), value = question(owner, operation.questionId), replacement2 = questionFromInput(operation.question, value.id), oldRules = ((_c = owner.branching) == null ? void 0 : _c.rules) ?? [];
+        owner.questions.splice(owner.questions.indexOf(value), 1, replacement2);
         const invalid = surveyBranchErrors(survey);
         if (invalid.length && oldRules.some((rule) => rule.questionId === value.id)) {
           if (!operation.removeInvalidBranchRules) throw new Error("Changing this question type invalidates branching. Explicitly allow removal of dependent rules.");
           owner.branching.rules = oldRules.filter((rule) => rule.questionId !== value.id);
           warnings.push("Branch rules using the converted question were removed.");
         }
-        warnings.push(`Question type changed from ${value.type} to ${replacement.type}; existing answers may no longer be comparable.`);
+        warnings.push(`Question type changed from ${value.type} to ${replacement2.type}; existing answers may no longer be comparable.`);
         affected.add(owner.id);
       } else if (["add_survey_option", "update_survey_option", "remove_survey_option", "move_survey_option"].includes(operation.type)) {
         const op = operation, owner = step(op.stepId), value = question(owner, op.questionId);
@@ -6221,6 +6312,7 @@ ${ISOLATION_CSS}`;
       configuration: { showProgress: survey.showProgress, allowBack: survey.allowBack, submitLabel: survey.submitLabel },
       steps: survey.steps.map((step) => ({ id: step.id, heading: step.content.heading, body: step.content.body, questions: cloneOnsite(step.questions), branching: cloneOnsite(step.branching) })),
       currentDocument: { schemaVersion: document2.schemaVersion, id: document2.id, root: cloneOnsite(document2.root) },
+      ...current.builder ? { source: sourceContext(current.builder, false) } : {},
       targeting: cloneOnsite(input.definition.targeting),
       visualTheme: cloneOnsite(input.definition.visualTheme)
     };
@@ -6308,6 +6400,16 @@ ${ISOLATION_CSS}`;
       if (!value) throw new Error(`Checklist task no longer exists: ${id}`);
       return value;
     };
+    const replacement = proposal.operations.find((operation) => operation.type === "replace_markup");
+    if (replacement) {
+      if (proposal.operations.length !== 1 || replacement.stepId) throw new Error("A Checklist source replacement must be one atomic widget-scoped operation.");
+      definition.items.forEach((value) => validateResource(value, references, warnings));
+      const content = { heading: definition.title, body: definition.description ?? "" };
+      applySourceMarkup(definition.builder, content, replacement, { widgetType: "checklist", guide: false, checklist: { items: definition.items.map((value) => ({ id: value.id })) } });
+      definition.title = content.heading;
+      definition.description = content.body || void 0;
+      return { definition, affectedItemIds: definition.items.map((value) => value.id), order: definition.items.map((value) => value.id), warnings: [.../* @__PURE__ */ new Set([...warnings, "This Checklist now uses Source mode; protected tasks, views, and completion controls remain canonical."])] };
+    }
     for (const operation of proposal.operations) {
       if (isDocumentOperation(operation)) {
         visual.push(operation);
@@ -6394,7 +6496,7 @@ ${ISOLATION_CSS}`;
   }
   function checklistAiContext(input) {
     const document2 = documentFor(input.checklist), blockId = input.selection.kind === "block" ? input.selection.blockId : void 0, selected = blockId ? listBlocks(document2.root).find((block) => block.id === blockId) : void 0, selectedItemId = (selected == null ? void 0 : selected.type) === "checklist_task" ? selected.itemId : void 0;
-    return { experience: { ...input.experience, kind: "checklist", widgetType: null }, revision: input.revision, currentView: input.currentView, selection: cloneOnsite(input.selection), selectedItemId, checklist: { title: input.checklist.title, description: input.checklist.description, totalTasks: input.checklist.items.length, behavior: cloneOnsite(input.checklist.behavior), completionMessage: cloneOnsite(input.checklist.completionMessage), items: input.checklist.items.map((item, index) => ({ ...cloneOnsite(item), position: index })) }, resources: { guides: input.references.guides.map((value) => ({ id: value.id, name: value.name, status: value.status })), segments: input.references.segments.map((value) => ({ id: value.id, name: value.name })) }, currentDocument: cloneOnsite(document2), targeting: cloneOnsite(input.checklist.targeting), theme: cloneOnsite(input.theme) };
+    return { experience: { ...input.experience, kind: "checklist", widgetType: null }, revision: input.revision, currentView: input.currentView, selection: cloneOnsite(input.selection), selectedItemId, checklist: { title: input.checklist.title, description: input.checklist.description, totalTasks: input.checklist.items.length, behavior: cloneOnsite(input.checklist.behavior), completionMessage: cloneOnsite(input.checklist.completionMessage), items: input.checklist.items.map((item, index) => ({ ...cloneOnsite(item), position: index })) }, resources: { guides: input.references.guides.map((value) => ({ id: value.id, name: value.name, status: value.status })), segments: input.references.segments.map((value) => ({ id: value.id, name: value.name })) }, currentDocument: cloneOnsite(document2), source: sourceContext(input.checklist.builder, false), targeting: cloneOnsite(input.checklist.targeting), theme: cloneOnsite(input.theme) };
   }
   class EditorModeController {
     constructor(apiBase) {
@@ -6454,6 +6556,10 @@ ${ISOLATION_CSS}`;
       this.checklistAiPreviewCandidate = null;
       this.checklistAiUndo = [];
       this.checklistAiRedo = [];
+      this.widgetAiPreviewOriginal = null;
+      this.widgetAiPreviewCandidate = null;
+      this.widgetAiUndo = [];
+      this.widgetAiRedo = [];
       this.aiAbort = null;
       this.aiRequestGeneration = 0;
       this.persistBeforePageLeave = () => this.updateContinuation();
@@ -6649,7 +6755,7 @@ ${ISOLATION_CSS}`;
     panelMarkup(draft) {
       var _a, _b, _c;
       const selectableSteps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
-      const aiEligible = draft.experience.builderMode === "onsite" && (draft.experience.kind === "guide" || draft.experience.kind === "widget" && draft.experience.widgetType !== "survey");
+      const aiEligible = draft.experience.builderMode === "onsite" && ["guide", "widget", "checklist"].includes(draft.experience.kind);
       const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><span class="step-drag-handle" data-step-drag-handle title="Drag step bar" aria-hidden="true">⠿</span><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-add-step="modal">＋ Modal</button><button type="button" class="secondary-button compact" data-add-step="anchored_card">＋ Anchored</button></div>' : ""}</div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? `<div class="history-row" data-step-bar-actions><button type="button" class="secondary-button compact step-bar-action" data-add-current-step aria-label="Add step" title="Add a ${getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal" ? "Modal" : "Anchored"} step">＋</button><button type="button" class="secondary-button compact step-bar-action step-bar-delete" data-delete-step aria-label="Delete selected step" title="Delete selected step"${this.guide.steps.length <= 1 ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13"/></svg></button></div><div class="history-row"><button type="button" class="secondary-button compact" data-duplicate-step>Duplicate</button><button type="button" class="secondary-button compact" data-step-left>←</button><button type="button" class="secondary-button compact" data-step-right>→</button></div>` : ""}</section>` : "";
       const designDisabled = draft.experience.builderMode !== "onsite" ? ' disabled title="Content is edited in the GrapesJS Dashboard Builder"' : "";
       return `<div class="editor-toolbar" data-editor-toolbar role="region" aria-label="Movcues editing controls">
@@ -6769,7 +6875,7 @@ ${ISOLATION_CSS}`;
       });
       (_b = root.querySelector("[data-ai-cancel]")) == null ? void 0 : _b.addEventListener("click", () => this.cancelAiRequest());
       (_c = root.querySelector("[data-ai-target]")) == null ? void 0 : _c.addEventListener("click", () => this.resolveAiGuideTarget());
-      (_d = root.querySelector("[data-ai-preview]")) == null ? void 0 : _d.addEventListener("click", () => this.checklist ? this.previewAiChecklistProposal() : this.survey ? this.previewAiSurveyProposal() : this.previewAiGuideProposal());
+      (_d = root.querySelector("[data-ai-preview]")) == null ? void 0 : _d.addEventListener("click", () => this.checklist ? this.previewAiChecklistProposal() : this.survey ? this.previewAiSurveyProposal() : this.guide ? this.previewAiGuideProposal() : this.previewAiWidgetSourceProposal());
       (_e = root.querySelector("[data-ai-apply]")) == null ? void 0 : _e.addEventListener("click", () => this.applyAiProposal());
       (_f = root.querySelector("[data-ai-discard]")) == null ? void 0 : _f.addEventListener("click", () => this.discardAiProposal());
       root.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this.setMode(button.dataset.mode)));
@@ -8079,7 +8185,7 @@ ${ISOLATION_CSS}`;
       }
     }
     attachContentEditor() {
-      var _a, _b, _c;
+      var _a, _b, _c, _d, _e;
       if (((_a = this.draft) == null ? void 0 : _a.experience.builderMode) !== "onsite" || this.mode !== "design") return;
       const host = Array.from(document.querySelectorAll("[data-movcues-experience],[data-movcues-checklist]")).find(
         (element) => (element.dataset.movcuesExperience ?? element.dataset.movcuesChecklist) === this.draft.experience.id
@@ -8090,6 +8196,25 @@ ${ISOLATION_CSS}`;
       if (document.body && !document.body.contains(host)) document.body.appendChild(host);
       (_b = this.contentEditor) == null ? void 0 : _b.destroy();
       (_c = this.compositionEditor) == null ? void 0 : _c.destroy();
+      if (isSourceAuthored(builder)) {
+        this.contentEditor = null;
+        this.compositionEditor = null;
+        this.componentSelection = null;
+        this.compositionSelection = { kind: "step", label: "Source-authored widget" };
+        (_d = this.root) == null ? void 0 : _d.querySelectorAll("main button:not([data-inspector-tab]):not([data-ai-panel] *),main input:not([data-ai-panel] *),main select:not([data-ai-panel] *)").forEach((control) => {
+          if (!control.disabled) {
+            control.disabled = true;
+            control.dataset.movcuesSourceDisabled = "";
+          }
+        });
+        this.setText("[data-mode-hint]", "Source mode · full HTML/CSS is preserved exactly; use Movcues AI to redesign it.");
+        this.syncAiPanel();
+        return;
+      }
+      (_e = this.root) == null ? void 0 : _e.querySelectorAll("[data-movcues-source-disabled]").forEach((control) => {
+        control.disabled = false;
+        delete control.dataset.movcuesSourceDisabled;
+      });
       try {
         this.compositionEditor = new OnsiteCompositionEditor(host.shadowRoot, builder, content, this.checklist ? "checklist" : this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : this.draft.experience.widgetType ?? "modal", Boolean(this.guide), {
           onPatch: () => {
@@ -8103,10 +8228,10 @@ ${ISOLATION_CSS}`;
           onValidation: (errors) => this.showValidation(errors),
           onImageStatus: (message) => this.setText("[data-image-status]", message),
           onSelectionChange: (selection) => {
-            var _a2, _b2, _c2, _d;
+            var _a2, _b2, _c2, _d2;
             if (this.checklist && selection.kind !== "step") {
               (_b2 = (_a2 = this.root) == null ? void 0 : _a2.querySelector("aside")) == null ? void 0 : _b2.classList.remove("minimized");
-              (_d = (_c2 = this.root) == null ? void 0 : _c2.querySelector("[data-minimize]")) == null ? void 0 : _d.setAttribute("aria-expanded", "true");
+              (_d2 = (_c2 = this.root) == null ? void 0 : _c2.querySelector("[data-minimize]")) == null ? void 0 : _d2.setAttribute("aria-expanded", "true");
             }
             this.compositionSelection = selection;
             this.syncCompositionInspector();
@@ -8198,8 +8323,8 @@ ${ISOLATION_CSS}`;
       if (!inspector) return;
       const globalUndo = this.root.querySelector("[data-global-undo]");
       const globalRedo = this.root.querySelector("[data-global-redo]");
-      if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !this.surveyAiUndo.length && !this.checklistAiUndo.length && !(editor == null ? void 0 : editor.canUndo()) && !((_c = this.contentEditor) == null ? void 0 : _c.canUndo());
-      if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !this.surveyAiRedo.length && !this.checklistAiRedo.length && !(editor == null ? void 0 : editor.canRedo()) && !((_d = this.contentEditor) == null ? void 0 : _d.canRedo());
+      if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !this.surveyAiUndo.length && !this.checklistAiUndo.length && !this.widgetAiUndo.length && !(editor == null ? void 0 : editor.canUndo()) && !((_c = this.contentEditor) == null ? void 0 : _c.canUndo());
+      if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !this.surveyAiRedo.length && !this.checklistAiRedo.length && !this.widgetAiRedo.length && !(editor == null ? void 0 : editor.canRedo()) && !((_d = this.contentEditor) == null ? void 0 : _d.canRedo());
       inspector.hidden = this.mode !== "design" || !editor || !selection;
       this.root.querySelector("[data-content-inspector]").hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
       if (!editor || !selection) return;
@@ -8288,8 +8413,8 @@ ${ISOLATION_CSS}`;
       if (undo) undo.disabled = !editor.canUndo();
       const redo = this.root.querySelector("[data-v2-redo]");
       if (redo) redo.disabled = !editor.canRedo();
-      if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !this.surveyAiUndo.length && !this.checklistAiUndo.length && !editor.canUndo();
-      if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !this.surveyAiRedo.length && !this.checklistAiRedo.length && !editor.canRedo();
+      if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !this.surveyAiUndo.length && !this.checklistAiUndo.length && !this.widgetAiUndo.length && !editor.canUndo();
+      if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !this.surveyAiRedo.length && !this.checklistAiRedo.length && !this.widgetAiRedo.length && !editor.canRedo();
     }
     setInspectorTab(tab) {
       var _a, _b;
@@ -8335,9 +8460,11 @@ ${ISOLATION_CSS}`;
       const unresolved = this.aiProposal.value.operations.some((operation, index) => operation.type === "request_guide_target" && !this.aiResolvedTargets.has(index));
       const target = this.root.querySelector("[data-ai-target]");
       if (target) target.hidden = !this.guide || !unresolved;
+      const sourceProposal = this.aiProposal.value.operations.some((operation) => operation.type === "replace_markup");
       const preview = this.root.querySelector("[data-ai-preview]");
       if (preview) {
-        preview.hidden = !this.guide && !this.survey && !this.checklist;
+        preview.hidden = !this.guide && !this.survey && !this.checklist && !sourceProposal;
+        preview.textContent = sourceProposal ? "Preview design" : this.guide ? "Preview Guide" : "Preview";
         preview.disabled = stale || unresolved;
       }
       const apply = this.root.querySelector("[data-ai-apply]");
@@ -8351,7 +8478,8 @@ ${ISOLATION_CSS}`;
       var _a, _b, _c, _d;
       const input = (_a = this.root) == null ? void 0 : _a.querySelector("[data-ai-prompt]");
       const prompt = input == null ? void 0 : input.value.trim();
-      if (!prompt || !this.bridge || !this.draft || !this.compositionEditor || !this.compositionSelection) return;
+      const builder = this.currentBuilder(), sourceMode = isSourceAuthored(builder);
+      if (!prompt || !this.bridge || !this.draft || !builder || !this.compositionSelection || !this.compositionEditor && !sourceMode) return;
       if (!this.flushContent() || this.dirty && !await this.persist()) return;
       this.cancelAiRequest();
       const generation = ++this.aiRequestGeneration;
@@ -8367,7 +8495,9 @@ ${ISOLATION_CSS}`;
       this.aiResolvedTargets.clear();
       this.syncAiPanel();
       try {
-        const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.ensureThemeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : this.survey ? surveyAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, definition: this.definition, currentStepId: this.survey.steps[this.stepIndex].id, selection: this.compositionSelection, scope: this.compositionSelection.kind === "step" ? "survey" : "step" }) : this.checklist ? checklistAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, checklist: this.checklist, references: this.draft.references ?? { guides: [], segments: [] }, selection: this.compositionSelection, currentView: ((_d = this.checklistEditor) == null ? void 0 : _d.getView()) ?? "expanded", theme: resolvedTheme(this.ensureThemeState()) }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: this.compositionEditor.getDocument() });
+        const document2 = onsiteDocumentFromBuilder(builder);
+        if (!document2) throw new Error("This draft has no recoverable on-site document.");
+        const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.ensureThemeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : this.survey ? surveyAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, definition: this.definition, currentStepId: this.survey.steps[this.stepIndex].id, selection: this.compositionSelection, scope: this.compositionSelection.kind === "step" ? "survey" : "step" }) : this.checklist ? checklistAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, checklist: this.checklist, references: this.draft.references ?? { guides: [], segments: [] }, selection: this.compositionSelection, currentView: ((_d = this.checklistEditor) == null ? void 0 : _d.getView()) ?? "expanded", theme: resolvedTheme(this.ensureThemeState()) }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: document2, builder });
         const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context }, abort.signal);
         if (generation !== this.aiRequestGeneration) return;
         this.aiConversationId = response.conversationId;
@@ -8449,6 +8579,25 @@ ${ISOLATION_CSS}`;
         return;
       }
       if (!this.guide) {
+        if (this.aiProposal.value.operations.some((operation) => operation.type === "replace_markup")) {
+          try {
+            const before = cloneOnsite(this.widgetAiPreviewOriginal ?? this.definition), candidate = this.widgetAiPreviewCandidate ?? this.applyWidgetSourceProposal(before);
+            this.widgetAiUndo.push(before);
+            if (this.widgetAiUndo.length > 20) this.widgetAiUndo.shift();
+            this.widgetAiRedo = [];
+            this.definition = cloneOnsite(candidate);
+            this.widgetAiPreviewOriginal = null;
+            this.widgetAiPreviewCandidate = null;
+            this.aiPreviewReturnMode = null;
+            this.aiProposal = null;
+            this.changed(true, true);
+            this.setText("[data-ai-status]", "Applied atomically. This widget is now in Source mode; Undo restores the prior structured design.");
+            this.syncAiPanel();
+          } catch (error) {
+            this.setText("[data-ai-status]", error instanceof Error ? error.message : "The source proposal is invalid.");
+          }
+          return;
+        }
         if ((_a = this.compositionEditor) == null ? void 0 : _a.applyAiProposal(this.aiProposal.value)) {
           this.aiProposal = null;
           this.setText("[data-ai-status]", "Applied. Use Undo to revert the entire proposal.");
@@ -8525,6 +8674,16 @@ ${ISOLATION_CSS}`;
       }
     }
     discardAiPreview() {
+      if (this.widgetAiPreviewOriginal) {
+        const returnMode2 = this.aiPreviewReturnMode;
+        this.definition = this.widgetAiPreviewOriginal;
+        this.widgetAiPreviewOriginal = null;
+        this.widgetAiPreviewCandidate = null;
+        this.aiPreviewReturnMode = null;
+        if (returnMode2 && returnMode2 !== this.mode) this.setMode(returnMode2);
+        else if (this.mode !== "navigate") this.renderPreview();
+        return;
+      }
       if (this.checklistAiPreviewOriginal) {
         const returnMode2 = this.aiPreviewReturnMode;
         this.setChecklistDefinition(this.checklistAiPreviewOriginal);
@@ -8579,6 +8738,30 @@ ${ISOLATION_CSS}`;
       this.definition = checklistEditorAdapter(value);
       (_a = this.checklistEditor) == null ? void 0 : _a.setDefinition(value);
     }
+    applyWidgetSourceProposal(source) {
+      if (!this.aiProposal || !this.draft || this.guide || this.survey || this.checklist) throw new Error("Source proposal target is unavailable.");
+      const operations = this.aiProposal.value.operations, operation = operations[0];
+      if (operations.length !== 1 || (operation == null ? void 0 : operation.type) !== "replace_markup" || operation.stepId) throw new Error("A widget source replacement must be one atomic widget-scoped operation.");
+      const candidate = cloneOnsite(source);
+      if (!candidate.builder) throw new Error("Widget has no builder source.");
+      applySourceMarkup(candidate.builder, candidate.content, operation, { widgetType: this.draft.experience.widgetType ?? "modal", guide: false });
+      return candidate;
+    }
+    previewAiWidgetSourceProposal() {
+      if (!this.aiProposal || !this.draft || !this.definition || this.aiProposalIsStale()) return;
+      try {
+        this.discardAiPreview();
+        const original = cloneOnsite(this.definition), candidate = this.applyWidgetSourceProposal(original);
+        this.aiPreviewReturnMode = this.mode;
+        this.widgetAiPreviewOriginal = original;
+        this.widgetAiPreviewCandidate = cloneOnsite(candidate);
+        this.definition = cloneOnsite(candidate);
+        this.setMode("preview");
+        this.setText("[data-ai-status]", "Previewing the complete source-authored design. Apply or Discard to finish.");
+      } catch (error) {
+        this.setText("[data-ai-status]", error instanceof Error ? error.message : "The source proposal is invalid.");
+      }
+    }
     previewAiChecklistProposal() {
       if (!this.aiProposal || !this.checklist || !this.draft || this.aiProposalIsStale()) return;
       try {
@@ -8600,7 +8783,7 @@ ${ISOLATION_CSS}`;
     }
     aiProposalIsStale() {
       var _a;
-      return !this.aiProposal || this.aiProposal.revision !== ((_a = this.draft) == null ? void 0 : _a.version.revision) || this.aiProposal.generation !== this.editGeneration || !this.aiPreviewOriginal && !this.surveyAiPreviewOriginal && !this.checklistAiPreviewOriginal && this.aiProposal.selectionKey !== this.aiSelectionKey();
+      return !this.aiProposal || this.aiProposal.revision !== ((_a = this.draft) == null ? void 0 : _a.version.revision) || this.aiProposal.generation !== this.editGeneration || !this.aiPreviewOriginal && !this.surveyAiPreviewOriginal && !this.checklistAiPreviewOriginal && !this.widgetAiPreviewOriginal && this.aiProposal.selectionKey !== this.aiSelectionKey();
     }
     previewAiSurveyProposal() {
       if (!this.aiProposal || !this.survey || !this.draft || this.aiProposal.revision !== this.draft.version.revision || this.aiProposal.generation !== this.editGeneration) return;
@@ -8621,6 +8804,13 @@ ${ISOLATION_CSS}`;
     }
     globalUndo() {
       var _a, _b;
+      if (!this.guide && !this.survey && !this.checklist && this.widgetAiUndo.length && this.flushContent()) {
+        const previous = this.widgetAiUndo.pop();
+        this.widgetAiRedo.push(cloneOnsite(this.definition));
+        this.definition = previous;
+        this.changed(true, true);
+        return;
+      }
       if (this.guide && this.guideAiUndo.length && this.flushContent()) {
         const previous = this.guideAiUndo.pop();
         this.guideAiRedo.push(cloneOnsite(this.guide));
@@ -8652,6 +8842,13 @@ ${ISOLATION_CSS}`;
     }
     globalRedo() {
       var _a, _b;
+      if (!this.guide && !this.survey && !this.checklist && this.widgetAiRedo.length && this.flushContent()) {
+        const next = this.widgetAiRedo.pop();
+        this.widgetAiUndo.push(cloneOnsite(this.definition));
+        this.definition = next;
+        this.changed(true, true);
+        return;
+      }
       if (this.guide && this.guideAiRedo.length && this.flushContent()) {
         const next = this.guideAiRedo.pop();
         this.guideAiUndo.push(cloneOnsite(this.guide));
@@ -8939,6 +9136,8 @@ ${ISOLATION_CSS}`;
       this.surveyAiPreviewCandidate = null;
       this.checklistAiPreviewOriginal = null;
       this.checklistAiPreviewCandidate = null;
+      this.widgetAiPreviewOriginal = null;
+      this.widgetAiPreviewCandidate = null;
       this.aiPreviewReturnMode = null;
       this.guideAiUndo = [];
       this.guideAiRedo = [];
@@ -8946,6 +9145,8 @@ ${ISOLATION_CSS}`;
       this.surveyAiRedo = [];
       this.checklistAiUndo = [];
       this.checklistAiRedo = [];
+      this.widgetAiUndo = [];
+      this.widgetAiRedo = [];
       clearTimeout(this.expiryTimer);
       clearInterval(this.validationTimer);
       clearTimeout(this.saveTimer);

@@ -5039,7 +5039,7 @@ const bundledRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-2k0QHjkP.js");
+    const { EditorModeController } = await import("./EditorModeController-D6DmTEba.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -5064,6 +5064,7 @@ function createAnalytics(config) {
 }
 export {
   Analytics2 as A,
+  BUILDER_ALLOWED_TAGS as B,
   ChecklistRenderer as C,
   ExperienceRenderer as E,
   RouteObserver as R,
@@ -5072,17 +5073,21 @@ export {
   computeElementRole as c,
   computeElementLabel as d,
   sanitizeBuilderHtml as e,
-  guideStepRequiresTarget as f,
-  getGuideStepPattern as g,
-  guideStepConfigurationErrors as h,
-  clearEditorContinuation as i,
-  isChecklistDefinition as j,
-  isGuideDefinition as k,
-  guideInteractionTarget as l,
-  matchesGuideRoute as m,
-  findTarget as n,
-  storeEditorContinuation as o,
-  createAnalytics as p,
-  surveyBranchErrors as s
+  safeScopedBuilderCss as f,
+  BUILDER_SURVEY_INPUT_TAGS as g,
+  BUILDER_ALLOWED_ATTRIBUTES as h,
+  builderInputTypeIsSafe as i,
+  getGuideStepPattern as j,
+  guideStepRequiresTarget as k,
+  guideStepConfigurationErrors as l,
+  clearEditorContinuation as m,
+  isChecklistDefinition as n,
+  isGuideDefinition as o,
+  guideInteractionTarget as p,
+  matchesGuideRoute as q,
+  findTarget as r,
+  surveyBranchErrors as s,
+  storeEditorContinuation as t,
+  createAnalytics as u
 };
-//# sourceMappingURL=module-Cg1NUxWX.js.map
+//# sourceMappingURL=module-DoLRUH-t.js.map

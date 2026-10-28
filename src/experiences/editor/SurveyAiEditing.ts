@@ -9,6 +9,7 @@ import { surveyBranchErrors } from "../survey/SurveyLogic";
 import { surveyQuestionErrors } from "../survey/SurveyMarkup";
 import type { ExperienceTargeting, RuntimeWidgetDefinition, SurveyBranching, SurveyConfig, SurveyQuestion, SurveyStep } from "../types";
 import { duplicateSurveyStep } from "./SurveyEditing";
+import { applySourceMarkup, sourceContext, type ReplaceMarkupOperation } from "./SourceAuthoring";
 
 export type SurveyQuestionInput =
   | { type: "single_choice" | "multiple_choice"; label: string; required?: boolean; options: Array<{ label: string }> }
@@ -111,6 +112,14 @@ export function applySurveyAiProposal(source: RuntimeWidgetDefinition & { target
   const definition = cloneOnsite(source), survey = ensureSurvey(definition), affected = new Set<string>(), warnings: string[] = [], withinStep = new Map<string, EditorAiOperation[]>();
   const step = (id: string) => { const value = survey.steps.find(item => item.id === id); if (!value) throw new Error(`Survey step no longer exists: ${id}`); return value; };
   const question = (owner: SurveyStep, id: string) => { const value = owner.questions.find(item => item.id === id); if (!value) throw new Error(`Survey question no longer exists: ${id}`); return value; };
+  const replacement = proposal.operations.find((operation): operation is ReplaceMarkupOperation => operation.type === "replace_markup");
+  if (replacement) {
+    if (proposal.operations.length !== 1 || !replacement.stepId) throw new Error("A Survey source replacement must be one atomic step-scoped operation.");
+    const owner = step(replacement.stepId); if (!owner.builder) throw new Error("Survey step has no builder source.");
+    applySourceMarkup(owner.builder, owner.content, replacement, { widgetType: "survey", guide: false, survey: { questions: owner.questions.map(question => ({ id: question.id, type: question.type })) } });
+    const branchErrors = surveyBranchErrors(survey); if (branchErrors.length) throw new Error(branchErrors.join(" "));
+    return { definition, affectedStepIds: [owner.id], order: survey.steps.map(value => value.id), warnings: ["This Survey step now uses Source mode; its protected questions and controls remain canonical."] };
+  }
 
   for (const operation of proposal.operations) {
     if (isDocumentOperation(operation)) { if (!operation.stepId) throw new Error("Survey layout operations require a stable step ID."); step(operation.stepId); withinStep.set(operation.stepId, [...(withinStep.get(operation.stepId) ?? []), operation]); affected.add(operation.stepId); continue; }
@@ -169,6 +178,6 @@ export function surveyAiContext(input: { experience: { id: string; name: string;
     experience: { ...input.experience, kind: "widget", widgetType: "survey" }, revision: input.revision, scope: input.scope ?? (input.selection.kind === "step" ? "survey" : "step"), currentStepId: current.id,
     selection: cloneOnsite(input.selection), configuration: { showProgress: survey.showProgress, allowBack: survey.allowBack, submitLabel: survey.submitLabel },
     steps: survey.steps.map(step => ({ id: step.id, heading: step.content.heading, body: step.content.body, questions: cloneOnsite(step.questions), branching: cloneOnsite(step.branching) })),
-    currentDocument: { schemaVersion: document.schemaVersion, id: document.id, root: cloneOnsite(document.root) }, targeting: cloneOnsite(input.definition.targeting), visualTheme: cloneOnsite(input.definition.visualTheme),
+    currentDocument: { schemaVersion: document.schemaVersion, id: document.id, root: cloneOnsite(document.root) }, ...(current.builder ? { source: sourceContext(current.builder, false) } : {}), targeting: cloneOnsite(input.definition.targeting), visualTheme: cloneOnsite(input.definition.visualTheme),
   };
 }

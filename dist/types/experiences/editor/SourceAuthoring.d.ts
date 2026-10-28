@@ -1,0 +1,41 @@
+import type { ExperienceContent, WidgetBuilderState } from "../types";
+export type SourceAction = {
+    type: "dismiss" | "next_step" | "previous_step";
+} | {
+    type: "open_url";
+    url: string;
+} | {
+    type: "track_event";
+    eventName: string;
+};
+export interface ReplaceMarkupOperation {
+    type: "replace_markup";
+    stepId?: string;
+    html: string;
+    css: string;
+    actionBindings: Record<string, SourceAction>;
+}
+export declare function validateSourceMarkup(operation: ReplaceMarkupOperation, options: {
+    widgetType: string;
+    guide: boolean;
+    survey?: {
+        questions: Array<{
+            id: string;
+            type: string;
+        }>;
+    };
+    checklist?: {
+        items: Array<{
+            id: string;
+        }>;
+    };
+}): string[];
+export declare function applySourceMarkup(builder: WidgetBuilderState, content: ExperienceContent, operation: ReplaceMarkupOperation, options: Parameters<typeof validateSourceMarkup>[1]): void;
+export declare function sourceContext(builder: WidgetBuilderState, guide: boolean): {
+    html: string;
+    css: string;
+    authoringSurface: "source" | "onsite";
+    actionBindings: {};
+    supportedActions: readonly ["dismiss", "next_step", "previous_step", "open_url", "track_event"] | readonly ["dismiss", "open_url", "track_event"];
+};
+export declare function isSourceAuthored(builder?: WidgetBuilderState): boolean;
