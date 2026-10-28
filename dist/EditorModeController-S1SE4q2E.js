@@ -1,4 +1,4 @@
-import { C as ChecklistRenderer, b as builderImageUrlIsSafe, a as builderLinkUrlIsSafe, s as surveyBranchErrors, c as computeElementRole, d as computeElementLabel, e as sanitizeBuilderHtml, g as getGuideStepPattern, f as guideStepRequiresTarget, h as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, i as clearEditorContinuation, j as isChecklistDefinition, k as isGuideDefinition, l as guideInteractionTarget, m as matchesGuideRoute, n as findTarget, o as storeEditorContinuation } from "./module-WkmIWaJb.js";
+import { C as ChecklistRenderer, b as builderImageUrlIsSafe, a as builderLinkUrlIsSafe, s as surveyBranchErrors, c as computeElementRole, d as computeElementLabel, e as sanitizeBuilderHtml, g as getGuideStepPattern, f as guideStepRequiresTarget, h as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, i as clearEditorContinuation, j as isChecklistDefinition, k as isGuideDefinition, l as guideInteractionTarget, m as matchesGuideRoute, n as findTarget, o as storeEditorContinuation } from "./module-BLlNbkiY.js";
 const esc = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 class ChecklistEditor {
   constructor(root, definition, references, options) {
@@ -1299,7 +1299,7 @@ class EditorBridge {
     const body = await response.json().catch(() => null);
     if (response.status === 409 && (body == null ? void 0 : body.error) === "draft_conflict") throw new DraftConflictError(body.currentRevision);
     if ([401, 403, 404, 410].includes(response.status) && (body == null ? void 0 : body.error) !== "conversation_not_found") throw new EditorSessionExpiredError();
-    if (!response.ok) throw new EditorAiRequestError((body == null ? void 0 : body.message) ?? "Movcues AI could not complete this request.", body == null ? void 0 : body.conversationId);
+    if (!response.ok) throw new EditorAiRequestError((body == null ? void 0 : body.message) ?? ((body == null ? void 0 : body.failureCode) ? `AI request failed: ${body.failureCode}` : "Movcues AI could not complete this request."), body == null ? void 0 : body.conversationId);
     return body;
   }
   async saveStyle(name, tokens) {
@@ -7194,4 +7194,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-CCFZCOsj.js.map
+//# sourceMappingURL=EditorModeController-S1SE4q2E.js.map

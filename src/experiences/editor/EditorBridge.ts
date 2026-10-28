@@ -25,10 +25,10 @@ export class EditorBridge {
   }
   async chat(input: { conversationId?: string; prompt: string; revision: number; context: unknown }, signal?: AbortSignal): Promise<EditorAiResponse> {
     const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/ai/chat`, { method: "POST", headers: this.headers(), credentials: "omit", body: JSON.stringify(input), signal });
-    const body = await response.json().catch(() => null) as ({ error?: string; message?: string; currentRevision?: number } & Partial<EditorAiResponse>) | null;
+    const body = await response.json().catch(() => null) as ({ error?: string; message?: string; failureCode?: string; currentRevision?: number } & Partial<EditorAiResponse>) | null;
     if (response.status === 409 && body?.error === "draft_conflict") throw new DraftConflictError(body.currentRevision);
     if ([401, 403, 404, 410].includes(response.status) && body?.error !== "conversation_not_found") throw new EditorSessionExpiredError();
-    if (!response.ok) throw new EditorAiRequestError(body?.message ?? "Movcues AI could not complete this request.", body?.conversationId);
+    if (!response.ok) throw new EditorAiRequestError(body?.message ?? (body?.failureCode ? `AI request failed: ${body.failureCode}` : "Movcues AI could not complete this request."), body?.conversationId);
     return body as EditorAiResponse;
   }
   async saveStyle(name: string, tokens: SiteThemeTokens): Promise<{id:string;name:string;tokens:SiteThemeTokens}> {

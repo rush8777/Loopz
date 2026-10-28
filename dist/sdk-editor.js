@@ -3191,7 +3191,7 @@ ${ISOLATION_CSS}`;
       const body = await response.json().catch(() => null);
       if (response.status === 409 && (body == null ? void 0 : body.error) === "draft_conflict") throw new DraftConflictError(body.currentRevision);
       if ([401, 403, 404, 410].includes(response.status) && (body == null ? void 0 : body.error) !== "conversation_not_found") throw new EditorSessionExpiredError();
-      if (!response.ok) throw new EditorAiRequestError((body == null ? void 0 : body.message) ?? "Movcues AI could not complete this request.", body == null ? void 0 : body.conversationId);
+      if (!response.ok) throw new EditorAiRequestError((body == null ? void 0 : body.message) ?? ((body == null ? void 0 : body.failureCode) ? `AI request failed: ${body.failureCode}` : "Movcues AI could not complete this request."), body == null ? void 0 : body.conversationId);
       return body;
     }
     async saveStyle(name, tokens) {
