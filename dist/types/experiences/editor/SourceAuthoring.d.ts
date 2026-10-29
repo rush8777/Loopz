@@ -38,4 +38,9 @@ export declare function sourceContext(builder: WidgetBuilderState, guide: boolea
     actionBindings: {};
     supportedActions: readonly ["dismiss", "next_step", "previous_step", "open_url", "track_event"] | readonly ["dismiss", "open_url", "track_event"];
 };
+/**
+ * Keep the structured document useful to the AI without duplicating large inline
+ * images that are already present, byte-for-byte, in sourceContext().html.
+ */
+export declare function aiDocumentContext<T>(value: T): T;
 export declare function isSourceAuthored(builder?: WidgetBuilderState): boolean;

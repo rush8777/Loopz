@@ -18,7 +18,7 @@
   const BUILDER_SURVEY_INPUT_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA"]);
   const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "aria-required", "alt", "src", "href", "target", "rel", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-document-version", "data-movcues-node-id", "data-movcues-block-id", "data-movcues-sizing", "data-movcues-responsive-stack", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
   const BUILDER_BLOCKED_TAGS = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO|SOURCE)$/i;
-  const BUILDER_UNSAFE_CSS = /@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i;
+  const BUILDER_UNSAFE_CSS = /@(?:import|charset|namespace|layer|supports|keyframes)\b|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding|(?:^|[;{}])\s*(?:animation|transition)\s*:|url\s*\(/i;
   function builderImageUrlIsSafe(value) {
     return !value || !/[\u0000-\u0020\u007f]/.test(value) && /^(https?:\/\/|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(value);
   }

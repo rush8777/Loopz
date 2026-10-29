@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyEditorAiProposal, applyGuideAiProposal, editorAiContext, guideAiContext } from "../src/experiences/editor/AiEditing";
-import { applyOnsiteDocument, createOnsiteDocument, listBlocks, onsiteDocumentFromBuilder } from "../src/experiences/onsite/OnsiteDocument";
+import { applyOnsiteDocument, createBlock, createOnsiteDocument, emptyCell, listBlocks, onsiteDocumentFromBuilder } from "../src/experiences/onsite/OnsiteDocument";
 import type { EditorDefinition, ExperienceTarget, GuideStep, WidgetBuilderState } from "../src/experiences/types";
 
 function guideStep(id: string, pattern: "modal" | "anchored_card" = "modal"): GuideStep {
@@ -54,6 +54,21 @@ describe("editor AI operations", () => {
     expect(context.currentDocument?.id).toBe(document.id);
     expect(JSON.stringify(context)).not.toMatch(/#secret-target|#secret-layer|data-secret|primarySelector|fallbackSelectors/);
     expect(context.guide.steps[1].positionTarget).toMatchObject({ configured: true, label: "Billing", pagePath: "/settings" });
+  });
+
+  it("keeps inline images in source HTML without duplicating them in the structured AI context", () => {
+    const source = guide(); if (!("steps" in source)) throw new Error("fixture");
+    const selected = source.steps[0], document = onsiteDocumentFromBuilder(selected.builder)!;
+    const image = createBlock("image"); if (image.type !== "image") throw new Error("image fixture");
+    document.root.children!.unshift(emptyCell(image));
+    const inlineImage = `data:image/png;base64,${btoa(`\x89PNG\r\n\x1a\n${"A".repeat(44_900)}`)}`;
+    image.src = inlineImage;
+    applyOnsiteDocument(selected.builder!, document, "modal");
+    const context = guideAiContext({ experience: { id: "guide_1", name: "Onboarding", builderMode: "onsite" }, revision: 4, guide: source, currentStepId: selected.id, selection: { kind: "cell", label: "Widget", cellId: document.root.id } });
+    expect(context.source?.html).toContain(inlineImage);
+    expect(JSON.stringify(context.currentDocument)).not.toContain(inlineImage);
+    expect(JSON.stringify(context.currentDocument)).toContain("inline image data omitted from structured context");
+    expect(JSON.stringify(context).length).toBeLessThan(120_000);
   });
 
   it("applies structural, within-step, advance and targeting operations as one Guide transaction", () => {

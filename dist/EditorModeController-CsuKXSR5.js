@@ -1,4 +1,4 @@
-import { C as ChecklistRenderer, b as builderImageUrlIsSafe, a as builderLinkUrlIsSafe, s as surveyBranchErrors, c as computeElementRole, d as computeElementLabel, e as sanitizeBuilderHtml, f as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, g as BUILDER_SURVEY_INPUT_TAGS, h as BUILDER_ALLOWED_ATTRIBUTES, i as builderInputTypeIsSafe, j as getGuideStepPattern, k as guideStepRequiresTarget, l as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, m as clearEditorContinuation, n as isChecklistDefinition, o as isGuideDefinition, p as guideInteractionTarget, q as matchesGuideRoute, r as findTarget, t as storeEditorContinuation } from "./module-DoLRUH-t.js";
+import { C as ChecklistRenderer, b as builderImageUrlIsSafe, a as builderLinkUrlIsSafe, s as surveyBranchErrors, c as computeElementRole, d as computeElementLabel, e as sanitizeBuilderHtml, f as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, g as BUILDER_SURVEY_INPUT_TAGS, h as BUILDER_ALLOWED_ATTRIBUTES, i as builderInputTypeIsSafe, j as getGuideStepPattern, k as guideStepRequiresTarget, l as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, m as clearEditorContinuation, n as isChecklistDefinition, o as isGuideDefinition, p as guideInteractionTarget, q as matchesGuideRoute, r as findTarget, t as storeEditorContinuation } from "./module-CoQnHQDM.js";
 const esc = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 class ChecklistEditor {
   constructor(root, definition, references, options) {
@@ -1268,6 +1268,16 @@ class SurveyEditor {
 function escape(value) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
+function editorAiErrorMessage(body) {
+  var _a, _b;
+  if (body == null ? void 0 : body.message) return body.message;
+  if (!(body == null ? void 0 : body.error)) return "Movcues AI could not complete this request.";
+  const details = [
+    ...((_a = body.details) == null ? void 0 : _a.formErrors) ?? [],
+    ...Object.entries(((_b = body.details) == null ? void 0 : _b.fieldErrors) ?? {}).flatMap(([field, errors]) => errors.map((error) => `${field}: ${error}`))
+  ].join(" ");
+  return `AI request rejected: ${body.error}${details ? ` — ${details}` : ""}`;
+}
 class EditorBridge {
   constructor(apiBase, sessionId, accessToken) {
     this.apiBase = apiBase;
@@ -1299,7 +1309,7 @@ class EditorBridge {
     const body = await response.json().catch(() => null);
     if (response.status === 409 && (body == null ? void 0 : body.error) === "draft_conflict") throw new DraftConflictError(body.currentRevision);
     if ([401, 403, 404, 410].includes(response.status) && (body == null ? void 0 : body.error) !== "conversation_not_found") throw new EditorSessionExpiredError();
-    if (!response.ok) throw new EditorAiRequestError((body == null ? void 0 : body.message) ?? "Movcues AI could not complete this request.", body == null ? void 0 : body.conversationId);
+    if (!response.ok) throw new EditorAiRequestError(editorAiErrorMessage(body), body == null ? void 0 : body.conversationId);
     return body;
   }
   async saveStyle(name, tokens) {
@@ -2367,6 +2377,23 @@ function sourceContext(builder, guide) {
   const movcues = builder.projectData.movcues && typeof builder.projectData.movcues === "object" ? builder.projectData.movcues : {};
   return { html: builder.html, css: builder.css, authoringSurface: movcues.authoringSurface === "source" ? "source" : "onsite", actionBindings: structuredClone(movcues.actionBindings ?? {}), supportedActions: guide ? ["dismiss", "next_step", "previous_step", "open_url", "track_event"] : ["dismiss", "open_url", "track_event"] };
 }
+function aiDocumentContext(value) {
+  const clone = structuredClone(value);
+  const visit = (node) => {
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    for (const [key, item] of Object.entries(node)) {
+      if (key === "src" && typeof item === "string" && /^data:image\//i.test(item)) {
+        node[key] = `[inline image data omitted from structured context; ${item.length} characters; preserve the image from source HTML]`;
+      } else visit(item);
+    }
+  };
+  visit(clone);
+  return clone;
+}
 function isSourceAuthored(builder) {
   const movcues = builder == null ? void 0 : builder.projectData.movcues;
   return Boolean(movcues && typeof movcues === "object" && movcues.authoringSurface === "source");
@@ -2593,7 +2620,7 @@ function applyGuideAiProposal(source, proposal, resolvedTargets = /* @__PURE__ *
   return { guide, affectedStepIds: [...affected], order: guide.steps.map((value) => value.id), warnings };
 }
 function editorAiContext(input) {
-  return { experience: input.experience, selection: cloneOnsite(input.selection), document: cloneOnsite(input.document), ...input.builder ? { source: sourceContext(input.builder, false) } : {}, ...input.theme ? { theme: cloneOnsite(input.theme) } : {} };
+  return { experience: input.experience, selection: cloneOnsite(input.selection), document: aiDocumentContext(input.document), ...input.builder ? { source: sourceContext(input.builder, false) } : {}, ...input.theme ? { theme: cloneOnsite(input.theme) } : {} };
 }
 function guideAiContext(input) {
   var _a;
@@ -2609,7 +2636,7 @@ function guideAiContext(input) {
   });
   const layer = (_a = input.guide.behavior) == null ? void 0 : _a.layer;
   const behavior = layer ? { layer: layer.mode === "relative" ? { mode: layer.mode, relation: layer.relation, target: target(layer.target) } : cloneOnsite(layer) } : void 0;
-  return { experience: { ...input.experience, kind: "guide", widgetType: null }, selection: { ...cloneOnsite(input.selection), scope: input.scope ?? "step", stepId: selected.id }, guide: { id: input.experience.id, name: input.experience.name, revision: input.revision, currentStepId: selected.id, totalSteps: input.guide.steps.length, steps: summaries, targeting: cloneOnsite(input.guide.targeting), ...behavior ? { behavior } : {}, theme: cloneOnsite(input.theme ?? null) }, currentDocument: cloneOnsite(onsiteDocumentFromBuilder(selected.builder) ?? null), ...selected.builder ? { source: sourceContext(selected.builder, true) } : {} };
+  return { experience: { ...input.experience, kind: "guide", widgetType: null }, selection: { ...cloneOnsite(input.selection), scope: input.scope ?? "step", stepId: selected.id }, guide: { id: input.experience.id, name: input.experience.name, revision: input.revision, currentStepId: selected.id, totalSteps: input.guide.steps.length, steps: summaries, targeting: cloneOnsite(input.guide.targeting), ...behavior ? { behavior } : {}, theme: cloneOnsite(input.theme ?? null) }, currentDocument: aiDocumentContext(onsiteDocumentFromBuilder(selected.builder) ?? null), ...selected.builder ? { source: sourceContext(selected.builder, true) } : {} };
 }
 const BLOCK_LABEL = { checklist_task: "Task", checklist_text: "Checklist text", checklist_control: "Checklist control", checklist_progress: "Progress", question: "Question", survey_controls: "Survey controls", heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
 const HISTORY_LIMIT = 50;
@@ -4331,7 +4358,7 @@ function surveyAiContext(input) {
     selection: cloneOnsite(input.selection),
     configuration: { showProgress: survey.showProgress, allowBack: survey.allowBack, submitLabel: survey.submitLabel },
     steps: survey.steps.map((step) => ({ id: step.id, heading: step.content.heading, body: step.content.body, questions: cloneOnsite(step.questions), branching: cloneOnsite(step.branching) })),
-    currentDocument: { schemaVersion: document2.schemaVersion, id: document2.id, root: cloneOnsite(document2.root) },
+    currentDocument: aiDocumentContext({ schemaVersion: document2.schemaVersion, id: document2.id, root: document2.root }),
     ...current.builder ? { source: sourceContext(current.builder, false) } : {},
     targeting: cloneOnsite(input.definition.targeting),
     visualTheme: cloneOnsite(input.definition.visualTheme)
@@ -4516,7 +4543,7 @@ function applyChecklistAiProposal(source, proposal, references) {
 }
 function checklistAiContext(input) {
   const document2 = documentFor(input.checklist), blockId = input.selection.kind === "block" ? input.selection.blockId : void 0, selected = blockId ? listBlocks(document2.root).find((block) => block.id === blockId) : void 0, selectedItemId = (selected == null ? void 0 : selected.type) === "checklist_task" ? selected.itemId : void 0;
-  return { experience: { ...input.experience, kind: "checklist", widgetType: null }, revision: input.revision, currentView: input.currentView, selection: cloneOnsite(input.selection), selectedItemId, checklist: { title: input.checklist.title, description: input.checklist.description, totalTasks: input.checklist.items.length, behavior: cloneOnsite(input.checklist.behavior), completionMessage: cloneOnsite(input.checklist.completionMessage), items: input.checklist.items.map((item, index) => ({ ...cloneOnsite(item), position: index })) }, resources: { guides: input.references.guides.map((value) => ({ id: value.id, name: value.name, status: value.status })), segments: input.references.segments.map((value) => ({ id: value.id, name: value.name })) }, currentDocument: cloneOnsite(document2), source: sourceContext(input.checklist.builder, false), targeting: cloneOnsite(input.checklist.targeting), theme: cloneOnsite(input.theme) };
+  return { experience: { ...input.experience, kind: "checklist", widgetType: null }, revision: input.revision, currentView: input.currentView, selection: cloneOnsite(input.selection), selectedItemId, checklist: { title: input.checklist.title, description: input.checklist.description, totalTasks: input.checklist.items.length, behavior: cloneOnsite(input.checklist.behavior), completionMessage: cloneOnsite(input.checklist.completionMessage), items: input.checklist.items.map((item, index) => ({ ...cloneOnsite(item), position: index })) }, resources: { guides: input.references.guides.map((value) => ({ id: value.id, name: value.name, status: value.status })), segments: input.references.segments.map((value) => ({ id: value.id, name: value.name })) }, currentDocument: aiDocumentContext(document2), source: sourceContext(input.checklist.builder, false), targeting: cloneOnsite(input.checklist.targeting), theme: cloneOnsite(input.theme) };
 }
 class EditorModeController {
   constructor(apiBase) {
@@ -7287,4 +7314,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-D6DmTEba.js.map
+//# sourceMappingURL=EditorModeController-CsuKXSR5.js.map

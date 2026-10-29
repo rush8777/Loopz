@@ -4,7 +4,7 @@
   const BUILDER_SURVEY_INPUT_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA"]);
   const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "aria-required", "alt", "src", "href", "target", "rel", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-document-version", "data-movcues-node-id", "data-movcues-block-id", "data-movcues-sizing", "data-movcues-responsive-stack", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
   const BUILDER_BLOCKED_TAGS = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|FORM|INPUT|TEXTAREA|SELECT|VIDEO|AUDIO|SOURCE)$/i;
-  const BUILDER_UNSAFE_CSS = /@import|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding/i;
+  const BUILDER_UNSAFE_CSS = /@(?:import|charset|namespace|layer|supports|keyframes)\b|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding|(?:^|[;{}])\s*(?:animation|transition)\s*:|url\s*\(/i;
   function builderImageUrlIsSafe(value) {
     return !value || !/[\u0000-\u0020\u007f]/.test(value) && /^(https?:\/\/|data:image\/(?:png|gif|jpeg|webp);base64,|\/)/i.test(value);
   }
@@ -3160,6 +3160,16 @@ ${ISOLATION_CSS}`;
   .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--movcues-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--movcues-hotspot);border-radius:50%;animation:movcues-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes movcues-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
   .movcues-survey-question.has-error{outline:2px solid #fecaca;outline-offset:6px;border-radius:6px}.movcues-survey-validation{color:#b91c1c}:where(.movcues-survey-option.is-selected){border-color:var(--movcues-primary);background:color-mix(in srgb,var(--movcues-primary) 12%,white)}.movcues-survey-input{font:inherit}
 `;
+  function editorAiErrorMessage(body) {
+    var _a, _b;
+    if (body == null ? void 0 : body.message) return body.message;
+    if (!(body == null ? void 0 : body.error)) return "Movcues AI could not complete this request.";
+    const details = [
+      ...((_a = body.details) == null ? void 0 : _a.formErrors) ?? [],
+      ...Object.entries(((_b = body.details) == null ? void 0 : _b.fieldErrors) ?? {}).flatMap(([field, errors]) => errors.map((error) => `${field}: ${error}`))
+    ].join(" ");
+    return `AI request rejected: ${body.error}${details ? ` — ${details}` : ""}`;
+  }
   class EditorBridge {
     constructor(apiBase, sessionId, accessToken) {
       this.apiBase = apiBase;
@@ -3191,7 +3201,7 @@ ${ISOLATION_CSS}`;
       const body = await response.json().catch(() => null);
       if (response.status === 409 && (body == null ? void 0 : body.error) === "draft_conflict") throw new DraftConflictError(body.currentRevision);
       if ([401, 403, 404, 410].includes(response.status) && (body == null ? void 0 : body.error) !== "conversation_not_found") throw new EditorSessionExpiredError();
-      if (!response.ok) throw new EditorAiRequestError((body == null ? void 0 : body.message) ?? "Movcues AI could not complete this request.", body == null ? void 0 : body.conversationId);
+      if (!response.ok) throw new EditorAiRequestError(editorAiErrorMessage(body), body == null ? void 0 : body.conversationId);
       return body;
     }
     async saveStyle(name, tokens) {
@@ -4347,6 +4357,23 @@ ${ISOLATION_CSS}`;
     const movcues = builder.projectData.movcues && typeof builder.projectData.movcues === "object" ? builder.projectData.movcues : {};
     return { html: builder.html, css: builder.css, authoringSurface: movcues.authoringSurface === "source" ? "source" : "onsite", actionBindings: structuredClone(movcues.actionBindings ?? {}), supportedActions: guide ? ["dismiss", "next_step", "previous_step", "open_url", "track_event"] : ["dismiss", "open_url", "track_event"] };
   }
+  function aiDocumentContext(value) {
+    const clone = structuredClone(value);
+    const visit = (node) => {
+      if (Array.isArray(node)) {
+        node.forEach(visit);
+        return;
+      }
+      if (!node || typeof node !== "object") return;
+      for (const [key, item] of Object.entries(node)) {
+        if (key === "src" && typeof item === "string" && /^data:image\//i.test(item)) {
+          node[key] = `[inline image data omitted from structured context; ${item.length} characters; preserve the image from source HTML]`;
+        } else visit(item);
+      }
+    };
+    visit(clone);
+    return clone;
+  }
   function isSourceAuthored(builder) {
     const movcues = builder == null ? void 0 : builder.projectData.movcues;
     return Boolean(movcues && typeof movcues === "object" && movcues.authoringSurface === "source");
@@ -4573,7 +4600,7 @@ ${ISOLATION_CSS}`;
     return { guide, affectedStepIds: [...affected], order: guide.steps.map((value) => value.id), warnings };
   }
   function editorAiContext(input) {
-    return { experience: input.experience, selection: cloneOnsite(input.selection), document: cloneOnsite(input.document), ...input.builder ? { source: sourceContext(input.builder, false) } : {}, ...input.theme ? { theme: cloneOnsite(input.theme) } : {} };
+    return { experience: input.experience, selection: cloneOnsite(input.selection), document: aiDocumentContext(input.document), ...input.builder ? { source: sourceContext(input.builder, false) } : {}, ...input.theme ? { theme: cloneOnsite(input.theme) } : {} };
   }
   function guideAiContext(input) {
     var _a;
@@ -4589,7 +4616,7 @@ ${ISOLATION_CSS}`;
     });
     const layer = (_a = input.guide.behavior) == null ? void 0 : _a.layer;
     const behavior = layer ? { layer: layer.mode === "relative" ? { mode: layer.mode, relation: layer.relation, target: target(layer.target) } : cloneOnsite(layer) } : void 0;
-    return { experience: { ...input.experience, kind: "guide", widgetType: null }, selection: { ...cloneOnsite(input.selection), scope: input.scope ?? "step", stepId: selected.id }, guide: { id: input.experience.id, name: input.experience.name, revision: input.revision, currentStepId: selected.id, totalSteps: input.guide.steps.length, steps: summaries, targeting: cloneOnsite(input.guide.targeting), ...behavior ? { behavior } : {}, theme: cloneOnsite(input.theme ?? null) }, currentDocument: cloneOnsite(onsiteDocumentFromBuilder(selected.builder) ?? null), ...selected.builder ? { source: sourceContext(selected.builder, true) } : {} };
+    return { experience: { ...input.experience, kind: "guide", widgetType: null }, selection: { ...cloneOnsite(input.selection), scope: input.scope ?? "step", stepId: selected.id }, guide: { id: input.experience.id, name: input.experience.name, revision: input.revision, currentStepId: selected.id, totalSteps: input.guide.steps.length, steps: summaries, targeting: cloneOnsite(input.guide.targeting), ...behavior ? { behavior } : {}, theme: cloneOnsite(input.theme ?? null) }, currentDocument: aiDocumentContext(onsiteDocumentFromBuilder(selected.builder) ?? null), ...selected.builder ? { source: sourceContext(selected.builder, true) } : {} };
   }
   const BLOCK_LABEL = { checklist_task: "Task", checklist_text: "Checklist text", checklist_control: "Checklist control", checklist_progress: "Progress", question: "Question", survey_controls: "Survey controls", heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
   const HISTORY_LIMIT = 50;
@@ -6311,7 +6338,7 @@ ${ISOLATION_CSS}`;
       selection: cloneOnsite(input.selection),
       configuration: { showProgress: survey.showProgress, allowBack: survey.allowBack, submitLabel: survey.submitLabel },
       steps: survey.steps.map((step) => ({ id: step.id, heading: step.content.heading, body: step.content.body, questions: cloneOnsite(step.questions), branching: cloneOnsite(step.branching) })),
-      currentDocument: { schemaVersion: document2.schemaVersion, id: document2.id, root: cloneOnsite(document2.root) },
+      currentDocument: aiDocumentContext({ schemaVersion: document2.schemaVersion, id: document2.id, root: document2.root }),
       ...current.builder ? { source: sourceContext(current.builder, false) } : {},
       targeting: cloneOnsite(input.definition.targeting),
       visualTheme: cloneOnsite(input.definition.visualTheme)
@@ -6496,7 +6523,7 @@ ${ISOLATION_CSS}`;
   }
   function checklistAiContext(input) {
     const document2 = documentFor(input.checklist), blockId = input.selection.kind === "block" ? input.selection.blockId : void 0, selected = blockId ? listBlocks(document2.root).find((block) => block.id === blockId) : void 0, selectedItemId = (selected == null ? void 0 : selected.type) === "checklist_task" ? selected.itemId : void 0;
-    return { experience: { ...input.experience, kind: "checklist", widgetType: null }, revision: input.revision, currentView: input.currentView, selection: cloneOnsite(input.selection), selectedItemId, checklist: { title: input.checklist.title, description: input.checklist.description, totalTasks: input.checklist.items.length, behavior: cloneOnsite(input.checklist.behavior), completionMessage: cloneOnsite(input.checklist.completionMessage), items: input.checklist.items.map((item, index) => ({ ...cloneOnsite(item), position: index })) }, resources: { guides: input.references.guides.map((value) => ({ id: value.id, name: value.name, status: value.status })), segments: input.references.segments.map((value) => ({ id: value.id, name: value.name })) }, currentDocument: cloneOnsite(document2), source: sourceContext(input.checklist.builder, false), targeting: cloneOnsite(input.checklist.targeting), theme: cloneOnsite(input.theme) };
+    return { experience: { ...input.experience, kind: "checklist", widgetType: null }, revision: input.revision, currentView: input.currentView, selection: cloneOnsite(input.selection), selectedItemId, checklist: { title: input.checklist.title, description: input.checklist.description, totalTasks: input.checklist.items.length, behavior: cloneOnsite(input.checklist.behavior), completionMessage: cloneOnsite(input.checklist.completionMessage), items: input.checklist.items.map((item, index) => ({ ...cloneOnsite(item), position: index })) }, resources: { guides: input.references.guides.map((value) => ({ id: value.id, name: value.name, status: value.status })), segments: input.references.segments.map((value) => ({ id: value.id, name: value.name })) }, currentDocument: aiDocumentContext(document2), source: sourceContext(input.checklist.builder, false), targeting: cloneOnsite(input.checklist.targeting), theme: cloneOnsite(input.theme) };
   }
   class EditorModeController {
     constructor(apiBase) {

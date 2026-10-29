@@ -4,6 +4,23 @@ import type { EditorAiProposal } from "./AiEditing";
 
 export interface EditorAiResponse { conversationId: string; revision: number; markdown: string; proposal: EditorAiProposal | null }
 
+interface EditorAiErrorBody extends Partial<EditorAiResponse> {
+  error?: string;
+  message?: string;
+  currentRevision?: number;
+  details?: { formErrors?: string[]; fieldErrors?: Record<string, string[]> };
+}
+
+function editorAiErrorMessage(body: EditorAiErrorBody | null): string {
+  if (body?.message) return body.message;
+  if (!body?.error) return "Movcues AI could not complete this request.";
+  const details = [
+    ...(body.details?.formErrors ?? []),
+    ...Object.entries(body.details?.fieldErrors ?? {}).flatMap(([field, errors]) => errors.map(error => `${field}: ${error}`)),
+  ].join(" ");
+  return `AI request rejected: ${body.error}${details ? ` — ${details}` : ""}`;
+}
+
 export class EditorBridge {
   constructor(private apiBase: string, private sessionId: string, private accessToken: string) {}
   private headers() { return { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}` }; }
@@ -25,10 +42,10 @@ export class EditorBridge {
   }
   async chat(input: { conversationId?: string; prompt: string; revision: number; context: unknown }, signal?: AbortSignal): Promise<EditorAiResponse> {
     const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/ai/chat`, { method: "POST", headers: this.headers(), credentials: "omit", body: JSON.stringify(input), signal });
-    const body = await response.json().catch(() => null) as ({ error?: string; message?: string; currentRevision?: number } & Partial<EditorAiResponse>) | null;
+    const body = await response.json().catch(() => null) as EditorAiErrorBody | null;
     if (response.status === 409 && body?.error === "draft_conflict") throw new DraftConflictError(body.currentRevision);
     if ([401, 403, 404, 410].includes(response.status) && body?.error !== "conversation_not_found") throw new EditorSessionExpiredError();
-    if (!response.ok) throw new EditorAiRequestError(body?.message ?? "Movcues AI could not complete this request.", body?.conversationId);
+    if (!response.ok) throw new EditorAiRequestError(editorAiErrorMessage(body), body?.conversationId);
     return body as EditorAiResponse;
   }
   async saveStyle(name: string, tokens: SiteThemeTokens): Promise<{id:string;name:string;tokens:SiteThemeTokens}> {

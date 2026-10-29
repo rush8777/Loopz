@@ -19,6 +19,8 @@ describe("SDK source authoring", () => {
 
   it("rejects unscoped CSS and broken action bindings before preview", () => {
     expect(validateSourceMarkup({ type: "replace_markup", html, css: "button{color:red}", actionBindings: {} }, { widgetType: "modal", guide: true }).length).toBeGreaterThan(0);
+    for (const unsafe of ["@import url(https://example.com/theme.css);", ".movcues-widget{transition:opacity .2s}", ".movcues-widget{animation:fade 1s}", ".movcues-widget{background-image:url(https://example.com/bg.png)}", "@keyframes fade{from{opacity:0}to{opacity:1}}"])
+      expect(validateSourceMarkup({ type: "replace_markup", html, css: unsafe, actionBindings: {} }, { widgetType: "modal", guide: true }).join(" ")).toMatch(/unsafe|scoped/i);
   });
 
   it("applies a Guide source redesign atomically to only the selected step", () => {

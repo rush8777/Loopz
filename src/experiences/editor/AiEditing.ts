@@ -6,7 +6,7 @@ import {
 import type { CompositionSelection } from "./OnsiteCompositionEditor";
 import { guideStepConfigurationErrors } from "../runtime/GuideStepLogic";
 import { getGuideStepPattern, guideStepRequiresTarget, type ExperienceTarget, type ExperienceTargeting, type GuideAdvance, type GuidePresentation, type GuideStep, type RuntimeGuideDefinition, type WidgetBuilderState } from "../types";
-import { applySourceMarkup, sourceContext, type ReplaceMarkupOperation } from "./SourceAuthoring";
+import { aiDocumentContext, applySourceMarkup, sourceContext, type ReplaceMarkupOperation } from "./SourceAuthoring";
 
 export type EditorAiOperation =
   | { type: "update_text"; stepId?: string; blockId: string; text: string }
@@ -183,7 +183,7 @@ export function applyGuideAiProposal(source: RuntimeGuideDefinition & { targetin
 }
 
 export function editorAiContext(input: { experience: { id: string; name: string; widgetType: string | null; builderMode: "onsite" }; selection: CompositionSelection; document: OnsiteDocument; builder?: WidgetBuilderState; theme?: Record<string, string | number | boolean | null> }) {
-  return { experience: input.experience, selection: cloneOnsite(input.selection), document: cloneOnsite(input.document), ...(input.builder ? { source: sourceContext(input.builder, false) } : {}), ...(input.theme ? { theme: cloneOnsite(input.theme) } : {}) };
+  return { experience: input.experience, selection: cloneOnsite(input.selection), document: aiDocumentContext(input.document), ...(input.builder ? { source: sourceContext(input.builder, false) } : {}), ...(input.theme ? { theme: cloneOnsite(input.theme) } : {}) };
 }
 
 export function guideAiContext(input: { experience: { id: string; name: string; builderMode: "onsite" }; revision: number; guide: RuntimeGuideDefinition & { targeting: ExperienceTargeting }; currentStepId: string; selection: CompositionSelection; theme?: unknown; scope?: "guide" | "step" }) {
@@ -195,5 +195,5 @@ export function guideAiContext(input: { experience: { id: string; name: string; 
   });
   const layer = input.guide.behavior?.layer;
   const behavior = layer ? { layer: layer.mode === "relative" ? { mode: layer.mode, relation: layer.relation, target: target(layer.target) } : cloneOnsite(layer) } : undefined;
-  return { experience: { ...input.experience, kind: "guide" as const, widgetType: null }, selection: { ...cloneOnsite(input.selection), scope: input.scope ?? "step", stepId: selected.id }, guide: { id: input.experience.id, name: input.experience.name, revision: input.revision, currentStepId: selected.id, totalSteps: input.guide.steps.length, steps: summaries, targeting: cloneOnsite(input.guide.targeting), ...(behavior ? { behavior } : {}), theme: cloneOnsite(input.theme ?? null) }, currentDocument: cloneOnsite(onsiteDocumentFromBuilder(selected.builder) ?? null), ...(selected.builder ? { source: sourceContext(selected.builder, true) } : {}) };
+  return { experience: { ...input.experience, kind: "guide" as const, widgetType: null }, selection: { ...cloneOnsite(input.selection), scope: input.scope ?? "step", stepId: selected.id }, guide: { id: input.experience.id, name: input.experience.name, revision: input.revision, currentStepId: selected.id, totalSteps: input.guide.steps.length, steps: summaries, targeting: cloneOnsite(input.guide.targeting), ...(behavior ? { behavior } : {}), theme: cloneOnsite(input.theme ?? null) }, currentDocument: aiDocumentContext(onsiteDocumentFromBuilder(selected.builder) ?? null), ...(selected.builder ? { source: sourceContext(selected.builder, true) } : {}) };
 }

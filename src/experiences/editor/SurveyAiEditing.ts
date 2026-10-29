@@ -9,7 +9,7 @@ import { surveyBranchErrors } from "../survey/SurveyLogic";
 import { surveyQuestionErrors } from "../survey/SurveyMarkup";
 import type { ExperienceTargeting, RuntimeWidgetDefinition, SurveyBranching, SurveyConfig, SurveyQuestion, SurveyStep } from "../types";
 import { duplicateSurveyStep } from "./SurveyEditing";
-import { applySourceMarkup, sourceContext, type ReplaceMarkupOperation } from "./SourceAuthoring";
+import { aiDocumentContext, applySourceMarkup, sourceContext, type ReplaceMarkupOperation } from "./SourceAuthoring";
 
 export type SurveyQuestionInput =
   | { type: "single_choice" | "multiple_choice"; label: string; required?: boolean; options: Array<{ label: string }> }
@@ -178,6 +178,6 @@ export function surveyAiContext(input: { experience: { id: string; name: string;
     experience: { ...input.experience, kind: "widget", widgetType: "survey" }, revision: input.revision, scope: input.scope ?? (input.selection.kind === "step" ? "survey" : "step"), currentStepId: current.id,
     selection: cloneOnsite(input.selection), configuration: { showProgress: survey.showProgress, allowBack: survey.allowBack, submitLabel: survey.submitLabel },
     steps: survey.steps.map(step => ({ id: step.id, heading: step.content.heading, body: step.content.body, questions: cloneOnsite(step.questions), branching: cloneOnsite(step.branching) })),
-    currentDocument: { schemaVersion: document.schemaVersion, id: document.id, root: cloneOnsite(document.root) }, ...(current.builder ? { source: sourceContext(current.builder, false) } : {}), targeting: cloneOnsite(input.definition.targeting), visualTheme: cloneOnsite(input.definition.visualTheme),
+    currentDocument: aiDocumentContext({ schemaVersion: document.schemaVersion, id: document.id, root: document.root }), ...(current.builder ? { source: sourceContext(current.builder, false) } : {}), targeting: cloneOnsite(input.definition.targeting), visualTheme: cloneOnsite(input.definition.visualTheme),
   };
 }

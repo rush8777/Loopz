@@ -64,4 +64,23 @@ export function sourceContext(builder: WidgetBuilderState, guide: boolean) {
   return { html: builder.html, css: builder.css, authoringSurface: movcues.authoringSurface === "source" ? "source" as const : "onsite" as const, actionBindings: structuredClone(movcues.actionBindings ?? {}), supportedActions: guide ? ["dismiss", "next_step", "previous_step", "open_url", "track_event"] as const : ["dismiss", "open_url", "track_event"] as const };
 }
 
+/**
+ * Keep the structured document useful to the AI without duplicating large inline
+ * images that are already present, byte-for-byte, in sourceContext().html.
+ */
+export function aiDocumentContext<T>(value: T): T {
+  const clone = structuredClone(value);
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) { node.forEach(visit); return; }
+    if (!node || typeof node !== "object") return;
+    for (const [key, item] of Object.entries(node as Record<string, unknown>)) {
+      if (key === "src" && typeof item === "string" && /^data:image\//i.test(item)) {
+        (node as Record<string, unknown>)[key] = `[inline image data omitted from structured context; ${item.length} characters; preserve the image from source HTML]`;
+      } else visit(item);
+    }
+  };
+  visit(clone);
+  return clone;
+}
+
 export function isSourceAuthored(builder?: WidgetBuilderState): boolean { const movcues = builder?.projectData.movcues; return Boolean(movcues && typeof movcues === "object" && (movcues as Record<string, unknown>).authoringSurface === "source"); }
