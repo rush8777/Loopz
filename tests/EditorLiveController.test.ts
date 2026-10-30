@@ -31,6 +31,24 @@ describe("live placement editor", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps theme controls in their own inspector tab and removes viewport controls", async () => {
+    vi.stubGlobal("fetch", editorFetch(widgetDraft("toast")));
+    controller = new EditorModeController("https://api.example.com");
+    expect(await controller.start("one-time-token")).toBe(true);
+
+    const root = editorRoot();
+    expect(root.querySelector("[data-device]")).toBeNull();
+    expect(root.querySelector(".devicebar")).toBeNull();
+    expect(root.querySelector<HTMLElement>("[data-theme-section]")?.hidden).toBe(true);
+    const themeTab = root.querySelector<HTMLButtonElement>('[data-inspector-tab="theme"]')!;
+    themeTab.click();
+    expect(themeTab.classList.contains("active")).toBe(true);
+    expect(root.querySelector("main")?.classList.contains("theme-mode")).toBe(true);
+    expect(root.querySelector<HTMLElement>("[data-theme-section]")?.hidden).toBe(false);
+    root.querySelector<HTMLButtonElement>('[data-inspector-tab="properties"]')!.click();
+    expect(root.querySelector<HTMLElement>("[data-theme-section]")?.hidden).toBe(true);
+  });
+
   it("intercepts customer clicks in Select mode and passes them through in Navigate mode", async () => {
     const target = document.createElement("button"); target.id = "checkout"; document.body.appendChild(target);
     Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => target });
@@ -470,6 +488,9 @@ describe("live placement editor", () => {
     const prompt = editorRoot().querySelector<HTMLTextAreaElement>("[data-ai-prompt]")!; prompt.value = "Add a value step";
     editorRoot().querySelector<HTMLFormElement>("[data-ai-form]")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(editorRoot().querySelector<HTMLElement>("[data-ai-proposal]")?.hidden).toBe(false));
+    expect(editorRoot().querySelector("[data-ai-suggestion]")).toBeNull();
+    expect(editorRoot().querySelector("[data-ai-history]")?.textContent).toContain("Add a value step");
+    expect(editorRoot().querySelector("[data-ai-history]")?.textContent).toContain("Guide proposal ready.");
     editorRoot().querySelector<HTMLButtonElement>("[data-ai-preview]")!.click(); expect({ count: editorRoot().querySelectorAll("[data-step]").length, status: editorRoot().querySelector("[data-ai-status]")?.textContent }).toEqual({ count: 3, status: "Previewing the complete proposed Guide. Apply or Discard to finish." });
     editorRoot().querySelector<HTMLButtonElement>("[data-ai-discard]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(2);
     prompt.value = "Add it"; editorRoot().querySelector<HTMLFormElement>("[data-ai-form]")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));

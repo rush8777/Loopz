@@ -39,6 +39,7 @@ import { applySourceMarkup, isSourceAuthored, type ReplaceMarkupOperation } from
 
 type EditorMode = "design" | "target" | "navigate" | "preview";
 type TargetStatus = "found" | "off-page" | "missing" | "unconfigured";
+type AiChatMessage = { role: "user" | "assistant"; text: string };
 
 export class EditorModeController {
   private host: HTMLElement | null = null;
@@ -82,6 +83,7 @@ export class EditorModeController {
   private guidePreviewEntryPath = "";
   private previewDevice: "desktop" | "tablet" | "mobile" = "desktop";
   private aiConversationId: string | undefined;
+  private aiMessages: AiChatMessage[] = [];
   private aiProposal: { value: EditorAiProposal | SurveyAiProposal | ChecklistAiProposal; revision: number; generation: number; selectionKey: string } | null = null;
   private aiResolvedTargets = new Map<number, ExperienceTarget>();
   private aiPreviewOriginal: (RuntimeGuideDefinition & { targeting: ExperienceTargeting }) | null = null;
@@ -221,17 +223,16 @@ export class EditorModeController {
         <div class="header-actions"><button type="button" data-global-undo aria-label="Undo">↶</button><button type="button" data-global-redo aria-label="Redo">↷</button><button type="button" data-save aria-label="Save draft">Save</button><button type="button" data-move-side aria-label="Move inspector to other side">⇄</button><button type="button" data-return-dashboard aria-label="Return to dashboard">↗</button><button type="button" data-minimize aria-label="Toggle inspector" aria-expanded="true">☷</button><button type="button" data-close aria-label="Close editor">×</button></div>
       </header>
         <div class="modebar"><button type="button" data-mode="design"${designDisabled}>Design</button><button type="button" data-mode="target">Target</button><button type="button" data-mode="navigate">Navigate</button><button type="button" data-mode="preview">Preview</button></div>
-        <div class="devicebar" aria-label="Widget-only viewport preview"><span>Widget preview</span><button type="button" data-device="desktop">Desktop</button><button type="button" data-device="tablet">Tablet</button><button type="button" data-device="mobile">Mobile</button></div>
         <div class="guide-preview-controls" data-guide-preview hidden><button type="button" data-preview-start>Start Guide</button><button type="button" data-preview-back aria-label="Previous preview step">←</button><button type="button" data-preview-next aria-label="Next preview step">→</button><button type="button" data-preview-reset>Reset</button><button type="button" data-preview-test hidden>Test event</button><span data-preview-step></span><small data-trigger-status role="status" aria-live="polite"></small></div>
       </div>
       ${guideMarkup}
       <aside aria-label="Contextual inspector"><main>
-        <nav class="inspector-tabs" aria-label="Inspector mode"><button type="button" class="active" data-inspector-tab="properties">Properties</button><button type="button" data-inspector-tab="ai"${aiEligible ? "" : " disabled"}>AI</button></nav>
+        <nav class="inspector-tabs" aria-label="Inspector mode"><button type="button" class="active" data-inspector-tab="properties">Properties</button><button type="button" data-inspector-tab="theme">Theme</button><button type="button" data-inspector-tab="ai"${aiEligible ? "" : " disabled"}>AI</button></nav>
         <section class="section ai-panel" data-ai-panel hidden>
-          <div class="content-heading"><div><div class="eyebrow">Movcues AI</div><strong>Design assistant</strong></div><button type="button" class="secondary-button compact" data-ai-cancel hidden>Cancel</button></div>
+          <div class="content-heading"><div><div class="eyebrow">Movcues AI</div><strong>Design assistant</strong></div><button type="button" class="secondary-button compact" data-ai-cancel hidden>Stop</button></div>
           <p class="muted" data-ai-context>Choose an element or ask about the whole widget.</p>
-          <div class="ai-suggestions"><button type="button" data-ai-suggestion="Improve the selected copy while keeping the same meaning.">Improve copy</button><button type="button" data-ai-suggestion="Improve the selected element's visual hierarchy and spacing.">Improve hierarchy</button><button type="button" data-ai-suggestion="Make this widget more concise and mobile friendly.">Mobile polish</button></div>
-          <form data-ai-form><textarea data-ai-prompt maxlength="4000" rows="4" placeholder="Describe the change…"></textarea><button type="submit" class="secondary-button" data-ai-send>Generate proposal</button></form>
+          <div class="ai-chat-history" data-ai-history aria-label="AI chat history" aria-live="polite"></div>
+          <form class="ai-composer" data-ai-form><textarea data-ai-prompt maxlength="4000" rows="3" placeholder="Describe the change…"></textarea><button type="submit" class="secondary-button" data-ai-send>Send</button></form>
           <div class="ai-status" data-ai-status role="status" aria-live="polite"></div>
           <article class="ai-proposal" data-ai-proposal hidden><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Preview only. Nothing changes until you apply it.</p><div class="history-row"><button type="button" class="secondary-button" data-ai-target hidden>Select target</button><button type="button" class="secondary-button" data-ai-preview hidden>Preview Guide</button><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div></article>
         </section>
@@ -294,7 +295,7 @@ export class EditorModeController {
         </section>
         <section class="section" data-step-only data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
         <section class="section" data-step-only><div class="eyebrow">Configured</div><dl data-configured></dl></section>
-        <section class="section" data-theme-section>
+        <section class="section theme-panel" data-theme-section hidden>
           <div class="content-heading"><div><div class="eyebrow">Design system</div><strong>Experience theme</strong></div><button type="button" class="secondary-button compact" data-theme-reset>Reset to theme</button></div>
           <label>Base style<select data-theme-source><option value="template">Template defaults</option><option value="site">Match my website</option><option value="preset" disabled>Saved style</option><option value="minimal">Minimal</option><option value="modern">Modern</option><option value="soft">Soft</option><option value="dark">Dark</option></select></label>
           <label>Saved style<select data-saved-style><option value="">Choose saved style…</option>${(draft.references?.stylePresets??[]).map(style=>`<option value="${escapeText(style.id)}">${escapeText(style.name)}</option>`).join("")}</select></label>
@@ -318,8 +319,7 @@ export class EditorModeController {
 
   private bindPanel(): void {
     const root = this.root!;
-    root.querySelectorAll<HTMLButtonElement>("[data-inspector-tab]").forEach(button => button.addEventListener("click", () => this.setInspectorTab(button.dataset.inspectorTab as "properties" | "ai")));
-    root.querySelectorAll<HTMLButtonElement>("[data-ai-suggestion]").forEach(button => button.addEventListener("click", () => { const input = root.querySelector<HTMLTextAreaElement>("[data-ai-prompt]"); if (input) { input.value = button.dataset.aiSuggestion ?? ""; input.focus(); } }));
+    root.querySelectorAll<HTMLButtonElement>("[data-inspector-tab]").forEach(button => button.addEventListener("click", () => this.setInspectorTab(button.dataset.inspectorTab as "properties" | "theme" | "ai")));
     root.querySelector<HTMLFormElement>("[data-ai-form]")?.addEventListener("submit", event => { event.preventDefault(); void this.sendAiPrompt(); });
     root.querySelector<HTMLButtonElement>("[data-ai-cancel]")?.addEventListener("click", () => this.cancelAiRequest());
     root.querySelector<HTMLButtonElement>("[data-ai-target]")?.addEventListener("click", () => this.resolveAiGuideTarget());
@@ -327,7 +327,6 @@ export class EditorModeController {
     root.querySelector<HTMLButtonElement>("[data-ai-apply]")?.addEventListener("click", () => this.applyAiProposal());
     root.querySelector<HTMLButtonElement>("[data-ai-discard]")?.addEventListener("click", () => this.discardAiProposal());
     root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.addEventListener("click", () => this.setMode(button.dataset.mode as EditorMode)));
-    root.querySelectorAll<HTMLButtonElement>("[data-device]").forEach(button=>button.addEventListener("click",()=>{this.previewDevice=button.dataset.device as typeof this.previewDevice;this.applyPreviewDevice();this.syncThemeInspector();}));
     root.querySelectorAll<HTMLButtonElement>("[data-pick]").forEach(button => button.addEventListener("click", () => { if (this.mode !== "target") this.setMode("target"); else this.startPicker(); }));
     root.querySelector<HTMLButtonElement>("[data-pick-layer]")?.addEventListener("click", () => this.startLayerPicker());
     root.querySelectorAll<HTMLButtonElement>("[data-step]").forEach(button => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
@@ -1002,17 +1001,30 @@ export class EditorModeController {
     if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !this.surveyAiUndo.length && !this.checklistAiUndo.length && !this.widgetAiUndo.length && !editor.canUndo(); if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !this.surveyAiRedo.length && !this.checklistAiRedo.length && !this.widgetAiRedo.length && !editor.canRedo();
   }
 
-  private setInspectorTab(tab: "properties" | "ai"): void {
+  private setInspectorTab(tab: "properties" | "theme" | "ai"): void {
     if (!this.root || (tab === "ai" && this.draft?.experience.builderMode !== "onsite")) return;
-    this.root.querySelector("main")?.classList.toggle("ai-mode", tab === "ai");
+    const main = this.root.querySelector("main");
+    main?.classList.toggle("ai-mode", tab === "ai");
+    main?.classList.toggle("theme-mode", tab === "theme");
     this.root.querySelectorAll<HTMLButtonElement>("[data-inspector-tab]").forEach(button => button.classList.toggle("active", button.dataset.inspectorTab === tab));
     const panel = this.root.querySelector<HTMLElement>("[data-ai-panel]"); if (panel) panel.hidden = tab !== "ai";
+    const themePanel = this.root.querySelector<HTMLElement>("[data-theme-section]"); if (themePanel) themePanel.hidden = tab !== "theme";
     if (tab === "ai") this.syncAiPanel();
   }
 
   private syncAiPanel(): void {
     if (!this.root) return; const selection = this.compositionSelection;
     this.setText("[data-ai-context]", this.guide ? `Guide · step ${this.stepIndex + 1} of ${this.guide.steps.length}${selection ? ` · ${selection.label}` : ""}` : this.survey ? `Survey · step ${this.stepIndex + 1} of ${this.survey.steps.length}${selection ? ` · ${selection.label}` : ""}` : this.checklist ? `Checklist · ${this.checklistEditor?.getView() ?? "expanded"}${selection ? ` · ${selection.label}` : ""}` : selection ? `Editing ${selection.label} · ${selection.kind}` : "Choose an element or ask about the whole widget.");
+    const history = this.root.querySelector<HTMLElement>("[data-ai-history]");
+    if (history) {
+      const messages = this.aiMessages.map(message => {
+        const item = document.createElement("article"); item.className = `ai-chat-message ai-chat-message--${message.role}`;
+        const label = document.createElement("span"); label.className = "ai-chat-message__role"; label.textContent = message.role === "user" ? "You" : "Movcues AI";
+        const text = document.createElement("p"); text.textContent = message.text;
+        item.append(label, text); return item;
+      });
+      history.replaceChildren(...messages); history.scrollTop = history.scrollHeight;
+    }
     const proposal = this.root.querySelector<HTMLElement>("[data-ai-proposal]"); if (proposal) proposal.hidden = !this.aiProposal;
     if (!this.aiProposal) return;
     this.setText("[data-ai-summary]", this.aiProposal.value.summary);
@@ -1034,6 +1046,7 @@ export class EditorModeController {
     this.cancelAiRequest(); const generation = ++this.aiRequestGeneration; const abort = new AbortController(); this.aiAbort = abort;
     const send = this.root?.querySelector<HTMLButtonElement>("[data-ai-send]"); if (send) send.disabled = true;
     const cancel = this.root?.querySelector<HTMLButtonElement>("[data-ai-cancel]"); if (cancel) cancel.hidden = false;
+    this.aiMessages.push({ role: "user", text: prompt }); if (input) input.value = "";
     this.setText("[data-ai-status]", "Generating a validated proposal…"); this.discardAiPreview(); this.aiProposal = null; this.aiResolvedTargets.clear(); this.syncAiPanel();
     try {
       const document = onsiteDocumentFromBuilder(builder); if (!document) throw new Error("This draft has no recoverable on-site document.");
@@ -1041,7 +1054,7 @@ export class EditorModeController {
       const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context }, abort.signal);
       if (generation !== this.aiRequestGeneration) return;
       this.aiConversationId = response.conversationId; this.aiProposal = response.proposal ? { value: response.proposal as EditorAiProposal | SurveyAiProposal | ChecklistAiProposal, revision: response.revision, generation: this.editGeneration, selectionKey: this.aiSelectionKey() } : null;
-      this.setText("[data-ai-status]", response.markdown); if (response.proposal && input) input.value = ""; this.syncAiPanel();
+      this.aiMessages.push({ role: "assistant", text: response.markdown.trim() || "Proposal generated." }); this.setText("[data-ai-status]", ""); this.syncAiPanel();
     } catch (error) {
       if (generation === this.aiRequestGeneration && !abort.signal.aborted) { if (error instanceof DraftConflictError) this.saveState = "conflict"; if (error instanceof EditorAiRequestError && error.conversationId) this.aiConversationId = error.conversationId; this.setText("[data-ai-status]", error instanceof Error ? error.message : "Movcues AI could not complete this request."); this.showSaveState(); }
     } finally { if (generation === this.aiRequestGeneration) { this.aiAbort = null; if (send) send.disabled = false; if (cancel) cancel.hidden = true; } }
@@ -1110,6 +1123,10 @@ export class EditorModeController {
     const operations = this.aiProposal.value.operations, operation = operations[0] as ReplaceMarkupOperation | undefined;
     if (operations.length !== 1 || operation?.type !== "replace_markup" || operation.stepId) throw new Error("A widget source replacement must be one atomic widget-scoped operation.");
     const candidate = cloneOnsite(source); if (!candidate.builder) throw new Error("Widget has no builder source.");
+    if (operation.widthPx !== undefined) {
+      if (this.draft.experience.widgetType !== "modal") throw new Error("Only modal source replacements can change the outer width.");
+      candidate.design.size = { width: { mode: "fixed", value: operation.widthPx }, height: candidate.design.size?.height ?? { mode: "auto" } };
+    }
     applySourceMarkup(candidate.builder, candidate.content, operation, { widgetType: this.draft.experience.widgetType ?? "modal", guide: false }); return candidate;
   }
 
@@ -1395,7 +1412,7 @@ export class EditorModeController {
 
   private teardown(clearContinuation: boolean): void {
     this.lifecycle++;
-    this.cancelAiRequest(); this.aiProposal = null; this.aiConversationId = undefined; this.aiResolvedTargets.clear(); this.aiPreviewOriginal = null; this.aiPreviewCandidate = null; this.surveyAiPreviewOriginal = null; this.surveyAiPreviewCandidate = null; this.checklistAiPreviewOriginal = null; this.checklistAiPreviewCandidate = null; this.widgetAiPreviewOriginal = null; this.widgetAiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.guideAiUndo = []; this.guideAiRedo = []; this.surveyAiUndo = []; this.surveyAiRedo = []; this.checklistAiUndo = []; this.checklistAiRedo = []; this.widgetAiUndo = []; this.widgetAiRedo = [];
+    this.cancelAiRequest(); this.aiProposal = null; this.aiConversationId = undefined; this.aiMessages = []; this.aiResolvedTargets.clear(); this.aiPreviewOriginal = null; this.aiPreviewCandidate = null; this.surveyAiPreviewOriginal = null; this.surveyAiPreviewCandidate = null; this.checklistAiPreviewOriginal = null; this.checklistAiPreviewCandidate = null; this.widgetAiPreviewOriginal = null; this.widgetAiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.guideAiUndo = []; this.guideAiRedo = []; this.surveyAiUndo = []; this.surveyAiRedo = []; this.checklistAiUndo = []; this.checklistAiRedo = []; this.widgetAiUndo = []; this.widgetAiRedo = [];
     clearTimeout(this.expiryTimer);
     clearInterval(this.validationTimer);
     clearTimeout(this.saveTimer);
@@ -1459,10 +1476,10 @@ const BASE_STYLE = `
 
 const STYLE = `${BASE_STYLE}
 .editor-toolbar{position:fixed;left:50%;transform:translateX(-50%);top:12px;width:min(410px,calc(100vw - 8px));z-index:2147483647;border:1px solid #d7dce3;border-radius:10px;background:#fff;color:#111827;box-shadow:0 8px 24px rgba(15,23,42,.16);font:12px/1.3 ui-sans-serif,system-ui,sans-serif;overflow:hidden}
-.devicebar{display:flex;align-items:center;gap:3px;padding:0 6px 5px;color:#64748b;font-size:9px}.devicebar span{margin-right:auto}.devicebar button{border:1px solid #d7dce3;border-radius:5px;background:#fff;color:#475569;padding:3px 5px;font:9px inherit;cursor:pointer}.devicebar button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}
 .editor-toolbar header{padding:7px 8px;gap:4px;align-items:center}.header-copy>span{display:none}.header-copy strong{font-size:11px}.header-copy small{margin-top:1px;font-size:10px}.header-actions{flex-wrap:wrap;justify-content:flex-end;gap:1px}.header-actions button{width:25px;height:28px;font-size:14px}.header-actions [data-save]{width:38px;font-size:11px}.header-actions button:disabled{opacity:.4;cursor:default}
 .editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-drag-handle{flex:none;padding:2px 1px;color:#94a3b8;font-size:16px;line-height:1;cursor:move;touch-action:none;user-select:none}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .history-row{gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .step-bar-action{width:24px;height:24px;padding:0;font-size:16px;line-height:1}.step-navigator .step-bar-action svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.step-navigator .step-bar-delete{border-color:#fecaca;background:#fff1f2;color:#dc2626}.step-navigator .step-bar-delete:hover{border-color:#fca5a5;background:#fee2e2;color:#b91c1c}.step-navigator .step-bar-action:disabled{cursor:not-allowed;opacity:.4}.step-navigator .content-heading>.history-row{display:none}
-.inspector-tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.inspector-tabs button,.ai-suggestions button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#475569;padding:6px;font:600 11px inherit;cursor:pointer}.inspector-tabs button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.inspector-tabs button:disabled{opacity:.4;cursor:not-allowed}main.ai-mode>:not(.inspector-tabs):not(.ai-panel){display:none!important}.ai-panel textarea{width:100%;resize:vertical;padding:7px;border:1px solid #d7dce3;border-radius:7px;font:12px/1.4 inherit}.ai-panel form{display:grid;gap:6px}.ai-suggestions{display:flex;flex-wrap:wrap;gap:4px}.ai-suggestions button{padding:5px 6px;font-weight:500}.ai-status{white-space:pre-wrap;color:#475569;font-size:11px}.ai-proposal{display:grid;gap:6px;padding:8px;border:1px solid #bfdbfe;border-radius:8px;background:#f8fbff}.ai-proposal ul{margin:0;padding-left:18px;color:#475569;font-size:11px}
+.inspector-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.inspector-tabs button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#475569;padding:6px;font:600 11px inherit;cursor:pointer}.inspector-tabs button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.inspector-tabs button:disabled{opacity:.4;cursor:not-allowed}main.ai-mode>:not(.inspector-tabs):not(.ai-panel),main.theme-mode>:not(.inspector-tabs):not(.theme-panel){display:none!important}.ai-panel{min-height:min(580px,calc(100dvh - 130px));display:flex;flex-direction:column;gap:10px;background:#fcfcfd}.ai-panel .content-heading{flex:none}.ai-panel .muted{margin:0}.ai-chat-history{display:grid;align-content:start;gap:8px;flex:1;min-height:260px;overflow:auto;padding:2px}.ai-chat-message{display:grid;gap:3px;max-width:92%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#334155}.ai-chat-message--user{justify-self:end;border-color:#dbeafe;background:#eff6ff;color:#1e3a8a}.ai-chat-message__role{font-size:10px;font-weight:700;color:#64748b}.ai-chat-message--user .ai-chat-message__role{color:#2563eb}.ai-chat-message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45}.ai-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:7px;padding-top:8px;border-top:1px solid #eef0f3}.ai-panel textarea{min-height:72px;width:100%;resize:vertical;padding:8px;border:1px solid #d7dce3;border-radius:8px;font:12px/1.4 inherit}.ai-composer button{padding:8px 10px}.ai-status{min-height:16px;margin:0;white-space:pre-wrap;color:#64748b;font-size:11px}.ai-proposal{display:grid;gap:6px;padding:8px;border:1px solid #bfdbfe;border-radius:8px;background:#f8fbff}.ai-proposal ul{margin:0;padding-left:18px;color:#475569;font-size:11px}
+.ai-composer{grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:7px;border:1px solid #d9e1ec;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgb(15 23 42 / .04);transition:border-color .16s ease,box-shadow .16s ease}.ai-composer:focus-within{border-color:#93c5fd;box-shadow:0 0 0 3px rgb(59 130 246 / .12)}.ai-composer textarea{min-height:54px;padding:5px 3px;border:0;border-radius:0;background:transparent;outline:0;box-shadow:none;line-height:1.45}.ai-composer textarea:focus{outline:0}.ai-composer textarea::placeholder{color:#94a3b8}.ai-composer button{min-width:58px;min-height:34px;margin-bottom:2px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;box-shadow:0 1px 2px rgb(37 99 235 / .25);transition:background .16s ease,transform .16s ease,box-shadow .16s ease}.ai-composer button:hover:not(:disabled){background:#1d4ed8;box-shadow:0 4px 10px rgb(37 99 235 / .24);transform:translateY(-1px)}.ai-composer button:active:not(:disabled){transform:translateY(0);box-shadow:none}.ai-composer button:disabled{opacity:.5;cursor:not-allowed}
 [data-composition-inspector]>.history-row{display:none}
 @media(max-width:800px){.editor-toolbar{width:min(350px,calc(100vw - 8px))}aside{width:min(300px,calc(100vw - 8px))}}
 @media(max-width:480px){.editor-toolbar{left:4px;top:4px;transform:none}.header-copy strong{font-size:10px}.header-copy small{font-size:9px}.header-actions [data-return-dashboard],.header-actions [data-move-side]{display:none}aside{width:calc(100vw - 8px)}.step-navigator{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:calc(100vw - 8px);box-shadow:0 4px 14px rgba(15,23,42,.12)}.step-navigator>.history-row:not([data-step-bar-actions]){display:none}.step-navigator .content-heading{display:none}}

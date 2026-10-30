@@ -5039,7 +5039,7 @@ const bundledRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-CsuKXSR5.js");
+    const { EditorModeController } = await import("./EditorModeController-K-g1WsfW.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -5090,4 +5090,4 @@ export {
   storeEditorContinuation as t,
   createAnalytics as u
 };
-//# sourceMappingURL=module-CoQnHQDM.js.map
+//# sourceMappingURL=module-2XlES8XH.js.map

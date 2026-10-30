@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { applyEditorAiProposal, applyGuideAiProposal, editorAiContext, guideAiContext } from "../src/experiences/editor/AiEditing";
 import { applyOnsiteDocument, createBlock, createOnsiteDocument, emptyCell, listBlocks, onsiteDocumentFromBuilder } from "../src/experiences/onsite/OnsiteDocument";
-import type { EditorDefinition, ExperienceTarget, GuideStep, WidgetBuilderState } from "../src/experiences/types";
+import type { ExperienceTarget, ExperienceTargeting, GuideStep, RuntimeGuideDefinition, WidgetBuilderState } from "../src/experiences/types";
 
 function guideStep(id: string, pattern: "modal" | "anchored_card" = "modal"): GuideStep {
   const builder: WidgetBuilderState = { version: 1, projectData: {}, html: "", css: "" };
   const compiled = applyOnsiteDocument(builder, createOnsiteDocument(true), pattern);
   return { id, label: id, pattern, content: compiled.content, builder, advance: { type: "button" }, behavior: pattern === "modal" ? { dismissible: true } : { dismissible: true, placement: "auto", alignment: "center", offset: 8 } };
 }
-function guide(): EditorDefinition {
+function guide(): RuntimeGuideDefinition & { targeting: ExperienceTargeting } {
   return {
     steps: [guideStep("step_one"), guideStep("step_two", "anchored_card")],
     design: { width: "sm", theme: { background: "#ffffff", foreground: "#111827", primary: "#2563eb", borderRadius: "md" } },
@@ -26,6 +26,16 @@ describe("editor AI operations", () => {
     expect(listBlocks(source.root)[0]).not.toMatchObject({ html: "Try &lt;Movcues&gt; today" });
     expect(listBlocks(result.root)[0]).toMatchObject({ html: "Try &lt;Movcues&gt; today" });
     expect(listBlocks(result.root)[2]).toMatchObject({ label: "Start now", radius: 12 });
+  });
+
+  it("applies a source-proposed modal width to the outer Guide step envelope", () => {
+    const source = guide();
+    const owner = source.steps[0];
+    owner.pattern = "modal";
+    const actionBindings = (owner.builder!.projectData.movcues as { actionBindings: Record<string, { type: "dismiss" | "next_step" | "previous_step" }> }).actionBindings;
+    const result = applyGuideAiProposal(source, { summary: "Widen modal", operations: [{ type: "replace_markup", stepId: owner.id, widthPx: 640, html: owner.builder!.html, css: owner.builder!.css, actionBindings }] });
+    expect(result.guide.steps[0].size).toEqual({ width: { mode: "fixed", value: 640 }, height: { mode: "auto" } });
+    expect(source.steps[0].size).toBeUndefined();
   });
 
   it("rejects the whole proposal when any operation is invalid", () => {

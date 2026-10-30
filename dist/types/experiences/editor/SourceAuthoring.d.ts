@@ -11,6 +11,7 @@ export type SourceAction = {
 export interface ReplaceMarkupOperation {
     type: "replace_markup";
     stepId?: string;
+    widthPx?: number;
     html: string;
     css: string;
     actionBindings: Record<string, SourceAction>;

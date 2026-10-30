@@ -42,6 +42,7 @@ export declare class EditorModeController {
     private guidePreviewEntryPath;
     private previewDevice;
     private aiConversationId;
+    private aiMessages;
     private aiProposal;
     private aiResolvedTargets;
     private aiPreviewOriginal;

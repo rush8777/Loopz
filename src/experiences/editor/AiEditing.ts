@@ -130,6 +130,10 @@ export function applyGuideAiProposal(source: RuntimeGuideDefinition & { targetin
   if (replacement) {
     if (proposal.operations.length !== 1 || !replacement.stepId) throw new Error("A source replacement must be one atomic step-scoped operation.");
     const owner = step(replacement.stepId); if (!owner.builder) throw new Error("Guide step has no builder source.");
+    if (replacement.widthPx !== undefined) {
+      if (getGuideStepPattern(owner) !== "modal") throw new Error("Only modal source replacements can change the outer width.");
+      owner.size = { width: { mode: "fixed", value: replacement.widthPx }, height: owner.size?.height ?? { mode: "auto" } };
+    }
     applySourceMarkup(owner.builder, owner.content, replacement, { widgetType: getGuideStepPattern(owner), guide: true });
     return { guide, affectedStepIds: [owner.id], order: guide.steps.map(value => value.id), warnings: ["This step now uses Source mode; cell controls are disabled until a recoverable conversion is available."] };
   }

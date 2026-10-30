@@ -5,7 +5,7 @@ export type SourceAction =
   | { type: "dismiss" | "next_step" | "previous_step" }
   | { type: "open_url"; url: string }
   | { type: "track_event"; eventName: string };
-export interface ReplaceMarkupOperation { type: "replace_markup"; stepId?: string; html: string; css: string; actionBindings: Record<string, SourceAction> }
+export interface ReplaceMarkupOperation { type: "replace_markup"; stepId?: string; widthPx?: number; html: string; css: string; actionBindings: Record<string, SourceAction> }
 
 const actionIdPattern = /^[A-Za-z][A-Za-z0-9_-]{2,63}$/;
 
@@ -13,6 +13,7 @@ function parse(html: string): HTMLTemplateElement { const template = document.cr
 
 export function validateSourceMarkup(operation: ReplaceMarkupOperation, options: { widgetType: string; guide: boolean; survey?: { questions: Array<{ id: string; type: string }> }; checklist?: { items: Array<{ id: string }> } }): string[] {
   const errors: string[] = [];
+  if (operation.widthPx !== undefined && (options.widgetType !== "modal" || !Number.isInteger(operation.widthPx) || operation.widthPx < 320 || operation.widthPx > 960)) errors.push("Modal width must be a whole number from 320 to 960px.");
   if (operation.html.length > 100_000 || operation.css.length > 100_000) errors.push("Source proposal is too large.");
   if (safeScopedBuilderCss(operation.css) === null) errors.push("Source CSS is unsafe or contains an unscoped selector.");
   const template = parse(operation.html), elements = Array.from(template.content.querySelectorAll<HTMLElement>("*"));
