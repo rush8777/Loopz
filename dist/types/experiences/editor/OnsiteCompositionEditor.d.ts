@@ -18,7 +18,12 @@ export type CompositionSelection = {
     blockType: OnsiteBlock["type"];
 };
 interface Callbacks {
-    onChange(): void;
+    onUndo?(): void;
+    onRedo?(): void;
+    canUndo?(): boolean;
+    canRedo?(): boolean;
+    onTransaction?(): void;
+    onChange(typing?: boolean): void;
     onSelectionChange(selection: CompositionSelection): void;
     onValidation(errors: string[]): void;
     onImageStatus?(message: string): void;
@@ -36,6 +41,7 @@ export declare class OnsiteCompositionEditor {
     private survey?;
     private checklist?;
     private document;
+    private source;
     private surface;
     private toolbar;
     private palette;
@@ -69,6 +75,8 @@ export declare class OnsiteCompositionEditor {
         step: SurveyStep;
     } | undefined, checklist?: OnsiteChecklistContext | undefined);
     start(): void;
+    restoreBuilder(builder: WidgetBuilderState, content: ExperienceContent): void;
+    isSource(): boolean;
     getDocument(): OnsiteDocument;
     getSelection(): CompositionSelection;
     getSelectedCell(): OnsiteCell | null;
@@ -86,6 +94,7 @@ export declare class OnsiteCompositionEditor {
     };
     undo(): void;
     redo(): void;
+    restoreSelection(selection: CompositionSelection): void;
     selectStep(): void;
     selectParent(): void;
     selectChild(): void;
@@ -149,6 +158,7 @@ export declare class OnsiteCompositionEditor {
     private commit;
     private compileAndPatch;
     private scheduleCompile;
+    private compile;
     private repairDocumentStructure;
     private pushHistory;
     private restore;

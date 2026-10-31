@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import checklistFixture from "./fixtures/checklist-v4.json";
 import { OnsiteCompositionEditor } from "../src/experiences/editor/OnsiteCompositionEditor";
-import { applySourceMarkup, sourceContext } from "../src/experiences/editor/SourceAuthoring";
+import { applySourceMarkup, sourceContext, validateSourceMarkup } from "../src/experiences/editor/SourceAuthoring";
 import { duplicateSurveyStep } from "../src/experiences/editor/SurveyEditing";
 import { applyOnsiteDocument, createOnsiteSurveyDocument, type OnsiteDocument } from "../src/experiences/onsite/OnsiteDocument";
 import type { EditorChecklistDefinition, ExperienceContent, SurveyConfig, SurveyStep, SurveyQuestion, WidgetBuilderState } from "../src/experiences/types";
@@ -53,6 +53,8 @@ describe("source protected components", () => {
     const checklist = { ...f.definition, builder: value, targeting: { pageRules: [], audience: { type: "all" }, priority: 0 } } as EditorChecklistDefinition;
     const content = applyOnsiteDocument(value, f.document as OnsiteDocument, "checklist", undefined, checklist).content;
     makeSource(value, content, { widgetType: "checklist", guide: false, checklist });
+    const unknownTask = '<button data-movcues-node-id="foreign_node" data-movcues-block-id="foreign_block" data-movcues-checklist-role="item" data-movcues-checklist-item-id="foreign_task">Unexpected</button>';
+    expect(validateSourceMarkup({ type: "replace_markup", html: value.html.replace("</section>", `${unknownTask}</section>`), css: value.css, actionBindings: {} }, { widgetType: "checklist", guide: false, checklist, editable: true })).toContain("Checklist source task identities must match the canonical items exactly.");
     const root = surface(value, content, undefined, checklist), initialItems = structuredClone(checklist.items), css = value.css;
     root.querySelector<HTMLElement>('[data-movcues-checklist-item-id="item_one"]')!.click(); editor!.updateBlock({ fontSize: 18 });
     expect(editor!.remove()).toBe(false); expect(editor!.duplicate()).toBe(false); expect(editor!.getValidation()).toEqual([]);

@@ -47,6 +47,10 @@ export function validateSourceMarkup(operation: ReplaceMarkupOperation, options:
     if (elements.filter(element => element.hasAttribute("data-movcues-survey-controls")).length !== 1 || elements.filter(element => element.dataset.movcuesSurveyAction === "submit").length !== 1) errors.push("Survey controls and submission must be preserved.");
   }
   if (options.checklist) {
+    const taskElements = elements.filter(element => element.hasAttribute("data-movcues-checklist-item-id") || element.dataset.movcuesChecklistRole === "item");
+    const taskIds = taskElements.map(element => element.dataset.movcuesChecklistItemId ?? "");
+    if (taskElements.some(element => element.tagName !== "BUTTON" || element.dataset.movcuesChecklistRole !== "item")) errors.push("Checklist task components must use canonical button/item semantics.");
+    if (taskIds.length !== options.checklist.items.length || taskIds.some(id => !options.checklist!.items.some(item => item.id === id))) errors.push("Checklist source task identities must match the canonical items exactly.");
     for (const role of ["root", "title", "items", "progress", "launcher-label", "remaining-count", "completion-title", "completion-description", "completion-acknowledge"]) if (elements.filter(element => element.dataset.movcuesChecklistRole === role).length !== 1) errors.push(`Checklist role ${role} must be preserved.`);
     for (const item of options.checklist.items) if (elements.filter(element => element.dataset.movcuesChecklistItemId === item.id).length !== 1) errors.push(`Checklist item ${item.id} must be preserved.`);
   }

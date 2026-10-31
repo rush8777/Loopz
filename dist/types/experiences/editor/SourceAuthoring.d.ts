@@ -1,3 +1,4 @@
+import { type SourceElement } from "./SourceEditability";
 import type { ExperienceContent, WidgetBuilderState } from "../types";
 export type SourceAction = {
     type: "dismiss" | "next_step" | "previous_step";
@@ -23,6 +24,13 @@ export declare function validateSourceMarkup(operation: ReplaceMarkupOperation, 
         questions: Array<{
             id: string;
             type: string;
+            options?: Array<{
+                id: string;
+            }>;
+            min?: number;
+            max?: number;
+            maxLength?: number;
+            required?: boolean;
         }>;
     };
     checklist?: {
@@ -30,6 +38,8 @@ export declare function validateSourceMarkup(operation: ReplaceMarkupOperation, 
             id: string;
         }>;
     };
+    editable?: boolean;
+    previousHtml?: string;
 }): string[];
 export declare function applySourceMarkup(builder: WidgetBuilderState, content: ExperienceContent, operation: ReplaceMarkupOperation, options: Parameters<typeof validateSourceMarkup>[1]): void;
 export declare function sourceContext(builder: WidgetBuilderState, guide: boolean): {
@@ -45,3 +55,4 @@ export declare function sourceContext(builder: WidgetBuilderState, guide: boolea
  */
 export declare function aiDocumentContext<T>(value: T): T;
 export declare function isSourceAuthored(builder?: WidgetBuilderState): boolean;
+export declare function sourceElement(element: Element): SourceElement;
