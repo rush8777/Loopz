@@ -1,4 +1,4 @@
-import { C as ChecklistRenderer, b as builderImageUrlIsSafe, a as builderLinkUrlIsSafe, s as surveyBranchErrors, c as computeElementRole, d as computeElementLabel, e as sanitizeBuilderHtml, f as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, g as BUILDER_SURVEY_INPUT_TAGS, h as BUILDER_ALLOWED_ATTRIBUTES, i as builderInputTypeIsSafe, j as getGuideStepPattern, k as guideStepRequiresTarget, l as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, m as clearEditorContinuation, n as isChecklistDefinition, o as isGuideDefinition, p as guideInteractionTarget, q as matchesGuideRoute, r as findTarget, t as storeEditorContinuation } from "./module-2XlES8XH.js";
+import { C as ChecklistRenderer, b as builderImageUrlIsSafe, a as builderLinkUrlIsSafe, s as surveyBranchErrors, c as computeElementRole, d as computeElementLabel, e as sanitizeBuilderHtml, f as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, g as BUILDER_SURVEY_INPUT_TAGS, h as BUILDER_ALLOWED_ATTRIBUTES, i as builderInputTypeIsSafe, j as getGuideStepPattern, k as guideStepRequiresTarget, l as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, m as clearEditorContinuation, n as isChecklistDefinition, o as isGuideDefinition, p as guideInteractionTarget, q as matchesGuideRoute, r as findTarget, t as storeEditorContinuation } from "./module-Baxjwbmd.js";
 const esc = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 class ChecklistEditor {
   constructor(root, definition, references, options) {
@@ -2487,7 +2487,7 @@ function setDocumentCopy(step, heading, body) {
 function newGuideStep(operation) {
   var _a;
   const document2 = createOnsiteDocument(true), builder = { version: 1, projectData: {}, html: "", css: "" };
-  const step = { id: onsiteId("step"), label: ((_a = operation.label) == null ? void 0 : _a.trim().slice(0, 80)) || (operation.pattern === "modal" ? "Modal step" : "Anchored step"), pattern: operation.pattern, content: { heading: "", body: "" }, builder, advance: { type: "button" }, behavior: operation.pattern === "modal" ? { dismissible: true } : { placement: "auto", alignment: "center", offset: 8, pointer: { enabled: true, size: 10 }, dismissible: true } };
+  const step = { id: onsiteId("step"), label: ((_a = operation.label) == null ? void 0 : _a.trim().slice(0, 80)) || (operation.pattern === "modal" ? "Modal step" : "Anchored step"), pattern: operation.pattern, content: { heading: "", body: "" }, builder, advance: { type: "button" }, behavior: operation.pattern === "modal" ? { dismissible: true, layer: { mode: "always_on_top" } } : { placement: "auto", alignment: "center", offset: 8, pointer: { enabled: true, size: 10 }, dismissible: true, layer: { mode: "auto" } } };
   applyOnsiteDocument(builder, document2, operation.pattern);
   setDocumentCopy(step, operation.heading, operation.body);
   return step;
@@ -2499,8 +2499,8 @@ function normalizePattern(step, pattern) {
     delete step.target;
     (_a = step.presentation) == null ? true : delete _a.missingTarget;
     if (((_b = step.advance) == null ? void 0 : _b.type) === "element_click" || ((_c = step.advance) == null ? void 0 : _c.type) === "element_hover") step.advance = { type: "button" };
-    step.behavior = { dismissible: step.behavior.dismissible ?? true, backdrop: step.behavior.backdrop, backdropOpacity: step.behavior.backdropOpacity, closeOnBackdrop: step.behavior.closeOnBackdrop };
-  } else step.behavior = { placement: step.behavior.placement ?? "auto", alignment: step.behavior.alignment ?? "center", offset: step.behavior.offset ?? 8, pointer: step.behavior.pointer ?? { enabled: true, size: 10 }, dismissible: step.behavior.dismissible ?? true, layer: step.behavior.layer };
+    step.behavior = { dismissible: step.behavior.dismissible ?? true, backdrop: step.behavior.backdrop, backdropOpacity: step.behavior.backdropOpacity, closeOnBackdrop: step.behavior.closeOnBackdrop, layer: step.behavior.layer ?? { mode: "always_on_top" } };
+  } else step.behavior = { placement: step.behavior.placement ?? "auto", alignment: step.behavior.alignment ?? "center", offset: step.behavior.offset ?? 8, pointer: step.behavior.pointer ?? { enabled: true, size: 10 }, dismissible: step.behavior.dismissible ?? true, layer: step.behavior.layer ?? { mode: "auto" } };
   if (step.builder) {
     const document2 = onsiteDocumentFromBuilder(step.builder);
     if (document2) step.content = applyOnsiteDocument(step.builder, document2, pattern).content;
@@ -5711,7 +5711,7 @@ class EditorModeController {
     const document2 = createOnsiteDocument(true);
     const builder = { version: 1, projectData: {}, html: "", css: "" };
     const compiled = applyOnsiteDocument(builder, document2, pattern);
-    const step = { id: editorId("step"), label: pattern === "modal" ? "Modal step" : "Anchored step", pattern, content: compiled.content, builder, advance: { type: "button" }, behavior: pattern === "modal" ? { dismissible: true } : { placement: "auto", alignment: "center", offset: 8, pointer: { enabled: true, size: 10 }, dismissible: true } };
+    const step = { id: editorId("step"), label: pattern === "modal" ? "Modal step" : "Anchored step", pattern, content: compiled.content, builder, advance: { type: "button" }, behavior: pattern === "modal" ? { dismissible: true, layer: { mode: "always_on_top" } } : { placement: "auto", alignment: "center", offset: 8, pointer: { enabled: true, size: 10 }, dismissible: true, layer: { mode: "auto" } } };
     this.guide.steps.splice(this.stepIndex + 1, 0, step);
     this.stepIndex++;
     this.changed();
@@ -7336,4 +7336,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-K-g1WsfW.js.map
+//# sourceMappingURL=EditorModeController-by6uUZP4.js.map

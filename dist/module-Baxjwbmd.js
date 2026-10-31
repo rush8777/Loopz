@@ -4343,7 +4343,7 @@ class ChecklistRenderer {
     this.host = document.createElement("div");
     this.host.dataset.movcuesChecklist = checklist.id;
     const side = checklist.definition.behavior.position === "bottom-left" ? "left:16px" : "right:16px";
-    this.host.style.cssText = `position:fixed;bottom:16px;${side};z-index:${ALWAYS_ON_TOP_Z_INDEX};pointer-events:auto`;
+    this.host.style.cssText = `position:fixed;bottom:16px;${side};z-index:${ALWAYS_ON_TOP_Z_INDEX - 1};pointer-events:auto`;
     const root = this.host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
     style.textContent = `:host{all:initial}.surface{position:relative;pointer-events:auto}.surface>.movcues-widget{position:relative!important;inset:auto!important}${css}`;
@@ -5039,7 +5039,7 @@ const bundledRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-K-g1WsfW.js");
+    const { EditorModeController } = await import("./EditorModeController-by6uUZP4.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -5090,4 +5090,4 @@ export {
   storeEditorContinuation as t,
   createAnalytics as u
 };
-//# sourceMappingURL=module-2XlES8XH.js.map
+//# sourceMappingURL=module-Baxjwbmd.js.map

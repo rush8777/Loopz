@@ -19,7 +19,7 @@ export class ChecklistRenderer {
     if (!nodes || css === null) return false;
     this.host = document.createElement("div"); this.host.dataset.movcuesChecklist = checklist.id;
     const side = checklist.definition.behavior.position === "bottom-left" ? "left:16px" : "right:16px";
-    this.host.style.cssText = `position:fixed;bottom:16px;${side};z-index:${ALWAYS_ON_TOP_Z_INDEX};pointer-events:auto`;
+    this.host.style.cssText = `position:fixed;bottom:16px;${side};z-index:${ALWAYS_ON_TOP_Z_INDEX - 1};pointer-events:auto`;
     const root = this.host.attachShadow({ mode: "open" }); const style = document.createElement("style");
     style.textContent = `:host{all:initial}.surface{position:relative;pointer-events:auto}.surface>.movcues-widget{position:relative!important;inset:auto!important}${css}`; root.appendChild(style);
     const surface = document.createElement("div"); surface.className = "surface"; surface.append(...nodes); root.appendChild(surface);

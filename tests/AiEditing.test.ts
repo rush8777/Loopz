@@ -38,6 +38,14 @@ describe("editor AI operations", () => {
     expect(source.steps[0].size).toBeUndefined();
   });
 
+  it("defaults AI-created modal steps above checklists and anchored steps to automatic layering", () => {
+    const source = guide();
+    const modal = applyGuideAiProposal(source, { summary: "Add modal", operations: [{ type: "add_guide_step", afterStepId: "step_two", pattern: "modal", heading: "Modal", body: "Top" }] }).guide.steps[2];
+    const anchored = applyGuideAiProposal(source, { summary: "Add anchored", operations: [{ type: "add_guide_step", afterStepId: "step_two", pattern: "anchored_card", heading: "Anchor", body: "Automatic" }] }).guide.steps[2];
+    expect(modal.behavior.layer).toEqual({ mode: "always_on_top" });
+    expect(anchored.behavior.layer).toEqual({ mode: "auto" });
+  });
+
   it("rejects the whole proposal when any operation is invalid", () => {
     const source = createOnsiteDocument(); const before = JSON.stringify(source);
     expect(() => applyEditorAiProposal(source, { summary: "Unsafe", operations: [

@@ -590,7 +590,7 @@ export class EditorModeController {
     if (!this.guide || !this.flushContent()) return;
     if (this.guide.steps.length >= 20) { this.showValidation(["A Guide can contain up to 20 steps."]); return; }
     const document = createOnsiteDocument(true); const builder: WidgetBuilderState = { version: 1, projectData: {}, html: "", css: "" }; const compiled = applyOnsiteDocument(builder, document, pattern);
-    const step = { id: editorId("step"), label: pattern === "modal" ? "Modal step" : "Anchored step", pattern, content: compiled.content, builder, advance: { type: "button" as const }, behavior: pattern === "modal" ? { dismissible: true } : { placement: "auto" as const, alignment: "center" as const, offset: 8, pointer: { enabled: true, size: 10 }, dismissible: true } };
+    const step = { id: editorId("step"), label: pattern === "modal" ? "Modal step" : "Anchored step", pattern, content: compiled.content, builder, advance: { type: "button" as const }, behavior: pattern === "modal" ? { dismissible: true, layer: { mode: "always_on_top" as const } } : { placement: "auto" as const, alignment: "center" as const, offset: 8, pointer: { enabled: true, size: 10 }, dismissible: true, layer: { mode: "auto" as const } } };
     this.guide.steps.splice(this.stepIndex + 1, 0, step); this.stepIndex++; this.changed(); this.refreshStepBar();
   }
 

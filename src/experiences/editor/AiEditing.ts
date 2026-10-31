@@ -103,7 +103,7 @@ function setDocumentCopy(step: GuideStep, heading?: string, body?: string): void
 
 function newGuideStep(operation: Extract<GuideAiOperation, { type: "add_guide_step" }>): GuideStep {
   const document = createOnsiteDocument(true), builder: WidgetBuilderState = { version: 1, projectData: {}, html: "", css: "" };
-  const step: GuideStep = { id: onsiteId("step"), label: operation.label?.trim().slice(0, 80) || (operation.pattern === "modal" ? "Modal step" : "Anchored step"), pattern: operation.pattern, content: { heading: "", body: "" }, builder, advance: { type: "button" }, behavior: operation.pattern === "modal" ? { dismissible: true } : { placement: "auto", alignment: "center", offset: 8, pointer: { enabled: true, size: 10 }, dismissible: true } };
+  const step: GuideStep = { id: onsiteId("step"), label: operation.label?.trim().slice(0, 80) || (operation.pattern === "modal" ? "Modal step" : "Anchored step"), pattern: operation.pattern, content: { heading: "", body: "" }, builder, advance: { type: "button" }, behavior: operation.pattern === "modal" ? { dismissible: true, layer: { mode: "always_on_top" } } : { placement: "auto", alignment: "center", offset: 8, pointer: { enabled: true, size: 10 }, dismissible: true, layer: { mode: "auto" } } };
   applyOnsiteDocument(builder, document, operation.pattern); setDocumentCopy(step, operation.heading, operation.body); return step;
 }
 
@@ -112,8 +112,8 @@ function normalizePattern(step: GuideStep, pattern: "modal" | "anchored_card"): 
   if (pattern === "modal") {
     delete step.target; delete step.presentation?.missingTarget;
     if (step.advance?.type === "element_click" || step.advance?.type === "element_hover") step.advance = { type: "button" };
-    step.behavior = { dismissible: step.behavior.dismissible ?? true, backdrop: step.behavior.backdrop, backdropOpacity: step.behavior.backdropOpacity, closeOnBackdrop: step.behavior.closeOnBackdrop };
-  } else step.behavior = { placement: step.behavior.placement ?? "auto", alignment: step.behavior.alignment ?? "center", offset: step.behavior.offset ?? 8, pointer: step.behavior.pointer ?? { enabled: true, size: 10 }, dismissible: step.behavior.dismissible ?? true, layer: step.behavior.layer };
+    step.behavior = { dismissible: step.behavior.dismissible ?? true, backdrop: step.behavior.backdrop, backdropOpacity: step.behavior.backdropOpacity, closeOnBackdrop: step.behavior.closeOnBackdrop, layer: step.behavior.layer ?? { mode: "always_on_top" } };
+  } else step.behavior = { placement: step.behavior.placement ?? "auto", alignment: step.behavior.alignment ?? "center", offset: step.behavior.offset ?? 8, pointer: step.behavior.pointer ?? { enabled: true, size: 10 }, dismissible: step.behavior.dismissible ?? true, layer: step.behavior.layer ?? { mode: "auto" } };
   if (step.builder) { const document = onsiteDocumentFromBuilder(step.builder); if (document) step.content = applyOnsiteDocument(step.builder, document, pattern).content; }
 }
 

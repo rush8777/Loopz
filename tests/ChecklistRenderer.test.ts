@@ -2,6 +2,7 @@ import fixture from './fixtures/checklist-v4.json';
 import {applyOnsiteDocument,listBlocks,type OnsiteDocument} from '../src/experiences/onsite/OnsiteDocument';
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChecklistRenderer } from "../src/experiences/runtime/ChecklistRenderer";
+import { ALWAYS_ON_TOP_Z_INDEX } from "../src/experiences/runtime/layering/LayerManager";
 import type { DeliveredChecklist } from "../src/experiences/types";
 
 const checklist = (): DeliveredChecklist => ({
@@ -23,6 +24,13 @@ describe("ChecklistRenderer", () => {
     const callbacks = { onOpen: vi.fn(), onCollapse: vi.fn(), onDismiss: vi.fn(), onAcknowledge: vi.fn(), onItemClick: vi.fn() }; const renderer = new ChecklistRenderer(); expect(renderer.render(checklist(), callbacks)).toBe(true);
     const root = document.querySelector<HTMLElement>("[data-movcues-checklist]")!.shadowRoot!; expect(root.textContent).toContain("Getting started"); expect(root.querySelector('style')?.textContent).toContain("background:#fff"); expect(root.querySelector<HTMLElement>('[data-movcues-checklist-item-id="second"]')?.dataset.state).toBe("locked");
     root.querySelector<HTMLButtonElement>('[data-movcues-checklist-item-id="second"]')!.click(); expect(callbacks.onItemClick).not.toHaveBeenCalled(); root.querySelector<HTMLButtonElement>('[data-movcues-checklist-item-id="first"]')!.click(); expect(callbacks.onItemClick).toHaveBeenCalledWith("first"); renderer.destroy(); expect(document.querySelector("[data-movcues-checklist]")).toBeNull();
+  });
+
+  it("stays exactly one layer below always-on-top experiences", () => {
+    const renderer = new ChecklistRenderer();
+    expect(renderer.render(checklist(), { onOpen: vi.fn(), onCollapse: vi.fn(), onDismiss: vi.fn(), onAcknowledge: vi.fn(), onItemClick: vi.fn() })).toBe(true);
+    expect(document.querySelector<HTMLElement>("[data-movcues-checklist]")!.style.zIndex).toBe(String(ALWAYS_ON_TOP_Z_INDEX - 1));
+    renderer.destroy();
   });
 
   it("shows authored completion copy only in the completion state", () => { const value = checklist(); value.progress.complete = true; value.progress.completedItemIds = ["first", "second"]; value.progress.items = value.progress.items.map(item => ({ ...item, state: "completed" })); const renderer = new ChecklistRenderer(); renderer.render(value, { onOpen: vi.fn(), onCollapse: vi.fn(), onDismiss: vi.fn(), onAcknowledge: vi.fn(), onItemClick: vi.fn() }); const root = document.querySelector<HTMLElement>("[data-movcues-checklist]")!.shadowRoot!; expect(root.querySelector('[data-movcues-checklist-view="completion"]')?.classList.contains("is-active")).toBe(true); expect(root.textContent).toContain("All complete"); renderer.destroy(); });
