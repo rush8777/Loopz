@@ -57,11 +57,10 @@ export function applyBuilderSizeContent(card: HTMLElement, widgetType: WidgetTyp
   const size = normalizeWidgetSize(widgetType, design); const fillsHeight = size.height.mode !== "auto";
   content.style.width = "100%"; content.style.height = fillsHeight ? "100%" : "auto";
   widget.style.setProperty("box-sizing", "border-box");
-  // Saved builder CSS owns the visual width for every widget type. The card
-  // supplies only the bounded positioning envelope; forcing a child width of
-  // 100% here expands authored compact cards, toasts, and slideouts to their
-  // generic runtime defaults. Keep content inside that envelope without
-  // replacing an authored width.
+  if (widgetType === "banner") widget.style.setProperty("width", "100%", "important");
+  // Banner roots fill their full-width host by contract. Saved builder CSS
+  // owns the visual width for compact widget types; forcing those children to
+  // 100% would expand cards, toasts and slideouts to generic runtime defaults.
   widget.style.setProperty("min-width", "0", "important"); widget.style.setProperty("max-width", "100%", "important");
   widget.style.setProperty("height", fillsHeight ? "100%" : "auto", "important"); widget.style.setProperty("max-height", fillsHeight ? "100%" : "none", "important");
 }

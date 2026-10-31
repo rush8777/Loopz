@@ -288,7 +288,7 @@ export class EditorModeController {
           <div data-for="modal"><label>Layout<select data-modal-layout><option value="center">Centered</option><option value="fullscreen">Fullscreen</option></select></label></div>
           <div data-for="backdrop"><label class="check"><input data-backdrop type="checkbox"> Backdrop</label><label>Backdrop opacity<input data-backdrop-opacity type="number" min="0" max="0.9" step="0.05"></label><label class="check"><input data-close-backdrop type="checkbox"> Dismiss on backdrop click</label></div>
           <div data-for="slideout"><label>Position<select data-slideout-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="center-left">Center left</option><option value="center-right">Center right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label></div>
-          <div data-for="banner"><label>Position<select data-banner-position><option value="top">Top</option><option value="bottom">Bottom</option></select></label></div>
+          <div data-for="banner"><label>Display<select data-banner-display-mode><option value="inline">Inline with page</option><option value="overlay">Overlay viewport</option></select></label><label>Position<select data-banner-position><option value="top">Top</option><option value="bottom">Bottom</option></select></label></div>
           <div data-for="cursor"><label>X offset<div class="number"><input data-cursor-x type="number"><span>px</span></div></label><label>Y offset<div class="number"><input data-cursor-y type="number"><span>px</span></div></label></div>
           <div data-for="hotspot"><label>Beacon style<select data-hotspot-style><option value="pulse">Pulse</option><option value="dot">Dot</option><option value="question">Question mark</option></select></label><label>Beacon color<input data-hotspot-color type="color"></label></div>
         </section>
@@ -393,6 +393,7 @@ export class EditorModeController {
     this.onInput("[data-backdrop-opacity]", value => { this.currentBehavior().backdropOpacity = numberValue(value, 0.45); });
     this.onCheck("[data-close-backdrop]", value => { this.currentBehavior().closeOnBackdrop = value; });
     this.onSelect("[data-slideout-position]", value => { this.currentBehavior().slideoutPosition = value as NonNullable<ExperienceBehavior["slideoutPosition"]>; });
+    this.onSelect("[data-banner-display-mode]", value => { this.currentBehavior().bannerDisplayMode = value as NonNullable<ExperienceBehavior["bannerDisplayMode"]>; });
     this.onSelect("[data-banner-position]", value => { this.currentBehavior().bannerPosition = value as NonNullable<ExperienceBehavior["bannerPosition"]>; });
     this.onInput("[data-cursor-x]", value => { this.currentBehavior().cursorOffset = { x: numberValue(value, 16), y: this.currentBehavior().cursorOffset?.y ?? 16 }; });
     this.onInput("[data-cursor-y]", value => { this.currentBehavior().cursorOffset = { x: this.currentBehavior().cursorOffset?.x ?? 16, y: numberValue(value, 16) }; });
@@ -1234,6 +1235,7 @@ export class EditorModeController {
     this.setValue("[data-backdrop-opacity]", String(behavior.backdropOpacity ?? 0.45));
     this.setChecked("[data-close-backdrop]", behavior.closeOnBackdrop ?? false);
     this.setValue("[data-slideout-position]", behavior.slideoutPosition ?? "bottom-right");
+    this.setValue("[data-banner-display-mode]", behavior.bannerDisplayMode ?? "overlay");
     this.setValue("[data-banner-position]", behavior.bannerPosition ?? "top");
     this.setValue("[data-cursor-x]", String(behavior.cursorOffset?.x ?? 16));
     this.setValue("[data-cursor-y]", String(behavior.cursorOffset?.y ?? 16));

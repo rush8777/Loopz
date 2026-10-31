@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Banner geometry fixture</title><style>html,body{margin:0}body{min-height:1400px;font:16px system-ui}nav{position:sticky;top:0;height:50px;background:#fff}main{height:1200px;background:#f8fafc}</style></head><body>
+<nav>Application navigation</nav><main>Page content</main>
+<script type="module">
+import { ExperienceRenderer } from '/src/experiences/runtime/ExperienceRenderer.ts';
+const query = new URLSearchParams(location.search); const layout = query.get('layout');
+if (layout === 'flex') { document.body.style.display = 'flex'; document.body.style.flexDirection = 'row'; }
+if (layout === 'grid') document.body.style.display = 'grid';
+const mode = query.get('mode'); const position = query.get('position') === 'bottom' ? 'bottom' : 'top';
+const experience = { id:'browser_banner', versionId:'v1', kind:'widget', widgetType:'banner', priority:1, definition:{ content:{heading:'LaunchPad',body:'A faster way to work.',primaryAction:{label:'Got it',type:'dismiss'}}, design:{width:'md',theme:{background:'#fff',foreground:'#111',primary:'#2563eb',borderRadius:'md'}}, behavior:{dismissible:true,bannerPosition:position,...(mode?{bannerDisplayMode:mode}:{})}, builder:{version:1,projectData:{},html:'<section class="movcues-widget movcues-widget--banner"><div>LaunchPad</div><button data-movcues-action-id="primary">Got it</button></section>',css:'.movcues-widget{box-sizing:border-box;display:flex;align-items:center;width:100%;padding:14px 22px;background:#dbeafe;border:1px solid #93c5fd}'}} };
+const renderer = new ExperienceRenderer(); renderer.render(experience,{onVisible(){},onDismiss(){},onAction(){},onComplete(){}}); window.bannerRenderer = renderer; document.documentElement.dataset.bannerReady = 'true';
+</script></body></html>

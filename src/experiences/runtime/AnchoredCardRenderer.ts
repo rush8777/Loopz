@@ -68,7 +68,7 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
   }
   if (behavior.dismissible) mountRuntimeDismissControl(card, callbacks.onDismiss);
   root.appendChild(card);
-  if (mountedBuilder && widgetType) fitBuilderWidthEnvelope(card);
+  if (mountedBuilder && widgetType && widgetType !== "banner") fitBuilderWidthEnvelope(card);
   if (mountedBuilder && widgetType === "anchored_card") fitAnchoredBuilderEnvelope(card);
   return card;
 }

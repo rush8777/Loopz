@@ -6,6 +6,7 @@ export class BannerRenderer {
     const card = buildCard(root, content, design, behavior, callbacks, builder, "banner");
     card.classList.add("banner");
     card.dataset.position = behavior.bannerPosition ?? "top";
+    card.dataset.displayMode = behavior.bannerDisplayMode ?? "overlay";
     return card;
   }
 

@@ -31,7 +31,7 @@ describe("runtime builder sizing envelope", () => {
     expect(fixture.widget.style.getPropertyPriority("max-width")).toBe("important");
   });
 
-  it.each(["anchored_card", "toast", "cursor_follow", "modal", "slideout", "hotspot", "banner", "survey"] as const)("keeps the authored %s width inside its runtime envelope", widgetType => {
+  it.each(["anchored_card", "toast", "cursor_follow", "modal", "slideout", "hotspot", "survey"] as const)("keeps the authored %s width inside its runtime envelope", widgetType => {
     const fixture = card(); const value = design({ mode: "auto" });
     fixture.widget.style.width = "248px";
     applyWidgetSizeEnvelope(fixture.card, widgetType, value); applyBuilderSizeContent(fixture.card, widgetType, value);
@@ -40,5 +40,12 @@ describe("runtime builder sizing envelope", () => {
     expect(fixture.widget.style.getPropertyPriority("width")).toBe("");
     expect(fixture.widget.style.getPropertyValue("max-width")).toBe("100%");
     expect(fixture.widget.style.getPropertyPriority("max-width")).toBe("important");
+  });
+
+  it("makes the banner surface fill its authoritative outer envelope", () => {
+    const fixture = card(); const value = design({ mode: "auto" }); fixture.widget.style.width = "248px";
+    applyWidgetSizeEnvelope(fixture.card, "banner", value); applyBuilderSizeContent(fixture.card, "banner", value);
+    expect(fixture.card.style.width).toBe("100%"); expect(fixture.widget.style.getPropertyValue("width")).toBe("100%"); expect(fixture.widget.style.getPropertyPriority("width")).toBe("important");
+    expect(fixture.widget.style.getPropertyValue("max-width")).toBe("100%");
   });
 });

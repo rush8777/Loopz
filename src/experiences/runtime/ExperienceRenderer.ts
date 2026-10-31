@@ -11,6 +11,7 @@ import { SurveyRenderer, type SurveyResume } from "./SurveyRenderer";
 import { LayerManager, type AppliedLayer } from "./layering/LayerManager";
 import type { BuilderAction, BuilderRenderCallbacks } from "./BuilderContent";
 import { guideInteractionTarget } from "./GuideStepLogic";
+import { mountInlineBannerHost } from "./BannerMountManager";
 
 export interface ExperienceRendererCallbacks {
   onVisible: () => void;
@@ -46,9 +47,22 @@ export class ExperienceRenderer {
   }
 
   private root(experienceId: string, behavior: Pick<ExperienceBehavior, "layer" | "zIndex">, targetElement?: Element | null): ShadowRoot {
-    this.host = document.createElement("div"); this.host.dataset.movcuesExperience = experienceId; this.host.dataset.movcuesExperienceRoot = experienceId; this.host.style.cssText = "position:fixed;inset:0;pointer-events:none";
-    const root = this.host.attachShadow({ mode: "open" }); const style = document.createElement("style"); style.textContent = STYLES; root.appendChild(style); document.documentElement.appendChild(this.host);
+    const root = this.createRoot(experienceId); this.host!.style.cssText = "position:fixed;inset:0;pointer-events:none"; document.documentElement.appendChild(this.host!);
     this.applyLayer(behavior, targetElement);
+    return root;
+  }
+
+  private bannerRoot(experienceId: string, behavior: ExperienceBehavior): ShadowRoot {
+    if (behavior.bannerDisplayMode !== "inline") return this.root(experienceId, behavior);
+    const root = this.createRoot(experienceId);
+    mountInlineBannerHost(this.host!, behavior.bannerPosition ?? "top");
+    this.applyLayer(behavior);
+    return root;
+  }
+
+  private createRoot(experienceId: string): ShadowRoot {
+    this.host = document.createElement("div"); this.host.dataset.movcuesExperience = experienceId; this.host.dataset.movcuesExperienceRoot = experienceId;
+    const root = this.host.attachShadow({ mode: "open" }); const style = document.createElement("style"); style.textContent = STYLES; root.appendChild(style);
     return root;
   }
 
@@ -80,7 +94,7 @@ export class ExperienceRenderer {
       const root = this.root(experience.id, definition.behavior); const renderer = new SlideoutRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
     } else if (experience.widgetType === "banner") {
-      const root = this.root(experience.id, definition.behavior); const renderer = new BannerRenderer(); this.renderer = renderer;
+      const root = this.bannerRoot(experience.id, definition.behavior); const renderer = new BannerRenderer(); this.renderer = renderer;
       renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
     } else return false;
     if (experience.widgetType !== "anchored_card" && experience.widgetType !== "hotspot") requestAnimationFrame(callbacks.onVisible); return true;
@@ -207,7 +221,7 @@ const STYLES = `
   .backdrop{pointer-events:auto;position:fixed;inset:0;background:rgba(0,0,0,var(--movcues-backdrop-opacity,.45))}
   .modal{left:50%;top:50%;transform:translate(-50%,-50%)}.modal[data-layout=fullscreen],.modal[data-size-width=full]{inset:12px;width:auto!important;max-width:none!important;transform:none;display:flex;flex-direction:column;justify-content:center}.modal[data-layout=fullscreen] footer,.modal[data-size-width=full] footer{justify-content:center}
   .slideout[data-position=top-left]{top:16px;left:16px}.slideout[data-position=top-right]{top:16px;right:16px}.slideout[data-position=bottom-left]{bottom:16px;left:16px}.slideout[data-position=bottom-right]{bottom:16px;right:16px}.slideout[data-position=center-left]{left:16px;top:50%;transform:translateY(-50%)}.slideout[data-position=center-right]{right:16px;top:50%;transform:translateY(-50%)}
-  .banner{left:0;right:0;width:auto!important;max-width:none;border-radius:0!important;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner[data-position=top]{top:0}.banner[data-position=bottom]{bottom:0}.banner h2,.banner p{grid-column:1}.banner footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
+  .banner{max-width:none;border-radius:0!important}.banner[data-display-mode=overlay]{left:0;right:0;width:auto!important}.banner[data-display-mode=overlay][data-position=top]{top:0}.banner[data-display-mode=overlay][data-position=bottom]{bottom:0}.banner[data-display-mode=inline]{position:relative;inset:auto;width:100%!important;max-width:none}.banner.builder-card{display:block}.banner .builder-content{width:100%;max-width:100%}.banner:not(.builder-card) .legacy-content{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner:not(.builder-card) h2,.banner:not(.builder-card) p{grid-column:1}.banner:not(.builder-card) footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
   .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--movcues-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--movcues-hotspot);border-radius:50%;animation:movcues-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes movcues-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
   .movcues-survey-question.has-error{outline:2px solid #fecaca;outline-offset:6px;border-radius:6px}.movcues-survey-validation{color:#b91c1c}:where(.movcues-survey-option.is-selected){border-color:var(--movcues-primary);background:color-mix(in srgb,var(--movcues-primary) 12%,white)}.movcues-survey-input{font:inherit}
 `;
