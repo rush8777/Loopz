@@ -1,3 +1,4 @@
+import { isSourceAuthored } from "./SourceAuthoring";
 import type { ChecklistItem, ChecklistProgress, EditorDraft, RuntimeChecklistDefinition } from '../types';
 import type { ChecklistView } from '../checklist/ChecklistMarkup';
 import { ChecklistRenderer } from '../runtime/ChecklistRenderer';
@@ -21,6 +22,9 @@ export class ChecklistEditor {
     if(innerWidth<=480)this.closeMobileInspector();else this.root.querySelector('aside')?.classList.toggle('left-side',definition.behavior.position==='bottom-right');
   }
   sync():void {
+    const source = isSourceAuthored(this.definition.builder);
+    this.root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('[data-checklist-add],[data-checklist-task-move],[data-checklist-view-width],[data-checklist-indicator],[data-checklist-launcher-label]').forEach(control => { control.disabled = source; control.title = source ? 'Protected source task structure is preserved. Use the element inspector for visual styles.' : ''; });
+
     const c=this.options.composer(),task=c?.getSelectedTask(),block=c?.getSelectedBlock();this.task.querySelector<HTMLElement>('[data-checklist-task-fields]')!.hidden=!task;
     this.value('[data-checklist-view]',this.view);this.root.querySelector<HTMLElement>('[data-checklist-preview-note]')!.hidden=!this.preview;
     this.root.querySelectorAll<HTMLButtonElement>('[data-checklist-add]').forEach(button=>{button.disabled=!this.options.canEdit()||this.definition.items.length>=20;});
