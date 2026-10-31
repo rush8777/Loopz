@@ -135,7 +135,7 @@ export function applyGuideAiProposal(source: RuntimeGuideDefinition & { targetin
       owner.size = { width: { mode: "fixed", value: replacement.widthPx }, height: owner.size?.height ?? { mode: "auto" } };
     }
     applySourceMarkup(owner.builder, owner.content, replacement, { widgetType: getGuideStepPattern(owner), guide: true });
-    return { guide, affectedStepIds: [owner.id], order: guide.steps.map(value => value.id), warnings: ["This step now uses Source mode; cell controls are disabled until a recoverable conversion is available."] };
+    return { guide, affectedStepIds: [owner.id], order: guide.steps.map(value => value.id), warnings: ["This source design remains visually editable; Undo restores the complete prior step."] };
   }
   proposal.operations.forEach((operation, operationIndex) => {
     if (["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell"].includes(operation.type)) {

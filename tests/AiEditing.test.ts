@@ -33,7 +33,7 @@ describe("editor AI operations", () => {
     const owner = source.steps[0];
     owner.pattern = "modal";
     const actionBindings = (owner.builder!.projectData.movcues as { actionBindings: Record<string, { type: "dismiss" | "next_step" | "previous_step" }> }).actionBindings;
-    const result = applyGuideAiProposal(source, { summary: "Widen modal", operations: [{ type: "replace_markup", stepId: owner.id, widthPx: 640, html: owner.builder!.html, css: owner.builder!.css, actionBindings }] });
+    const result = applyGuideAiProposal(source, { summary: "Widen modal", operations: [{ type: "replace_markup", stepId: owner.id, widthPx: 640, html: owner.builder!.html.replace("<section ", '<section data-movcues-node-id="source_root" '), css: owner.builder!.css, actionBindings }] });
     expect(result.guide.steps[0].size).toEqual({ width: { mode: "fixed", value: 640 }, height: { mode: "auto" } });
     expect(source.steps[0].size).toBeUndefined();
   });
