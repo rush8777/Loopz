@@ -1,3 +1,5 @@
+import { SourceDocumentAdapter, type SourceSnapshot } from "./SourceDocumentAdapter";
+import { isSourceAuthored } from "./SourceAuthoring";
 import type { ChecklistItem } from "../types";
 import type { ChecklistView, OnsiteChecklistContext } from "../checklist/ChecklistMarkup";
 import { newSurveyQuestion } from "./SurveyEditing";
@@ -46,8 +48,8 @@ export type CompositionSelection =
   | { kind: "step"; label: string }
   | { kind: "cell"; label: string; cellId: string }
   | { kind: "block"; label: string; cellId: string; blockId: string; blockType: OnsiteBlock["type"] };
-interface Callbacks { onChange(): void; onSelectionChange(selection: CompositionSelection): void; onValidation(errors: string[]): void; onImageStatus?(message: string): void; onPatch?(): void }
-interface HistoryEntry { checklist?: OnsiteChecklistContext; questions?: SurveyQuestion[]; branching?: SurveyStep["branching"]; document: OnsiteDocument; selection: CompositionSelection; bytes: number }
+interface Callbacks { onUndo?(): void; onRedo?(): void; canUndo?(): boolean; canRedo?(): boolean; onTransaction?(): void; onChange(typing?: boolean): void; onSelectionChange(selection: CompositionSelection): void; onValidation(errors: string[]): void; onImageStatus?(message: string): void; onPatch?(): void }
+interface HistoryEntry { source?: SourceSnapshot; checklist?: OnsiteChecklistContext; questions?: SurveyQuestion[]; branching?: SurveyStep["branching"]; document: OnsiteDocument; selection: CompositionSelection; bytes: number }
 type CellEdge = "top" | "right" | "bottom" | "left";
 
 const BLOCK_LABEL: Record<OnsiteBlock["type"], string> = { checklist_task:"Task",checklist_text:"Checklist text",checklist_control:"Checklist control",checklist_progress:"Progress", question: "Question", survey_controls: "Survey controls", heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
@@ -57,6 +59,7 @@ const HISTORY_BYTES = 2_000_000;
 /** Structured on-site authoring. It is imported only by the lazy editor bundle. */
 export class OnsiteCompositionEditor {
   private document: OnsiteDocument;
+  private source: SourceDocumentAdapter | null = null;
   private surface: HTMLElement | null;
   private toolbar: HTMLElement;
   private palette: HTMLElement;
@@ -96,9 +99,10 @@ export class OnsiteCompositionEditor {
     private survey?: { config: SurveyConfig; step: SurveyStep },
     private checklist?: OnsiteChecklistContext,
   ) {
-    const existing = onsiteDocumentFromBuilder(builder);
+    this.source = isSourceAuthored(builder) ? new SourceDocumentAdapter(builder, content, { widgetType, guide, survey: survey ? { questions: survey.step.questions } : undefined, checklist: checklist ? { items: checklist.items } : undefined }) : null;
+    const existing = this.source?.getDocument() ?? onsiteDocumentFromBuilder(builder);
     this.document = existing ?? migrateV1Builder(builder, content, widgetType, guide) ?? (() => { throw new Error("This v1 layout cannot be converted safely. Continue editing it with the compatibility editor."); })();
-    this.migrated = !existing;
+    this.migrated = this.source?.upgraded ?? !existing;
     this.surface = root.querySelector<HTMLElement>("[data-movcues-builder-surface]");
     this.toolbar = document.createElement("div"); this.toolbar.dataset.movcuesCompositionToolbar = "";
     this.palette = document.createElement("div"); this.palette.dataset.movcuesBlockPalette = ""; this.palette.hidden = true;
@@ -130,7 +134,7 @@ export class OnsiteCompositionEditor {
     this.toolbar.innerHTML = tools.map(([command, label, icon]) => `<button type="button" data-command="${command}" title="${label}" aria-label="${label}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></button>`).join("");
     this.toolbar.querySelector<HTMLButtonElement>('[data-command="move"]')!.draggable = true;
     this.palette.innerHTML = (Object.keys(BLOCK_LABEL) as OnsiteBlock["type"][]).filter(type => type !== "question" && type !== "survey_controls" && !type.startsWith("checklist_") && !(this.checklist && type === "button")).map(type => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
-    if (this.survey) this.palette.insertAdjacentHTML("beforeend", QUESTION_TYPES.map(type => `<button type="button" data-insert-question="${type}">${({ single_choice: "Single choice", multiple_choice: "Multiple choice", short_text: "Short text", long_text: "Long text", rating: "Rating", nps: "NPS" })[type]}</button>`).join(""));
+    if (this.survey && !this.source) this.palette.insertAdjacentHTML("beforeend", QUESTION_TYPES.map(type => `<button type="button" data-insert-question="${type}">${({ single_choice: "Single choice", multiple_choice: "Multiple choice", short_text: "Short text", long_text: "Long text", rating: "Rating", nps: "NPS" })[type]}</button>`).join(""));
     this.root.append(this.toolbar, this.palette, this.imageInput);
     const edgeLabels = { top: "Add above", right: "Add to the right", bottom: "Add below", left: "Add to the left" };
     this.edgeButtons = (["top", "right", "bottom", "left"] as const).map(edge => {
@@ -139,7 +143,7 @@ export class OnsiteCompositionEditor {
       button.addEventListener("click", () => { const cell = this.getSelectedCell(); if (this.paletteAnchor === button && !this.palette.hidden) this.closePalette(); else if (cell) this.openPalette(button, { cellId: cell.id, edge }); });
       this.root.append(button); return button;
     });
-    if(this.checklist)this.palette.insertAdjacentHTML("afterbegin",'<button type="button" data-insert-task>Task</button>');
+    if(this.checklist && !this.source)this.palette.insertAdjacentHTML("afterbegin",'<button type="button" data-insert-task>Task</button>');
     this.surface.addEventListener("click", this.onSurfaceClick);
     this.surface.addEventListener("dblclick", this.onDoubleClick);
     this.surface.addEventListener("input", this.onInput);
@@ -163,21 +167,32 @@ export class OnsiteCompositionEditor {
     this.select({ kind: "step", label: "Step" }); this.pushHistory(); if (this.migrated || repaired) this.callbacks.onChange();
   }
 
+  restoreBuilder(builder: WidgetBuilderState, content: ExperienceContent): void {
+    Object.assign(this.builder, cloneOnsite(builder));
+    for (const key of Object.keys(this.content)) Reflect.deleteProperty(this.content, key);
+    Object.assign(this.content, cloneOnsite(content));
+    this.source = isSourceAuthored(this.builder) ? new SourceDocumentAdapter(this.builder, this.content, { widgetType: this.widgetType, guide: this.guide, survey: this.survey ? { questions: this.survey.step.questions } : undefined, checklist: this.checklist ? { items: this.checklist.items } : undefined }) : null;
+    this.document = this.source?.getDocument() ?? onsiteDocumentFromBuilder(this.builder)!;
+    this.compileAndPatch(); this.restoreSelection(this.selection); this.callbacks.onChange();
+  }
+
+  isSource(): boolean { return Boolean(this.source); }
+
   getDocument(): OnsiteDocument { return this.document; }
   getSelection(): CompositionSelection { return this.selection; }
-  getSelectedCell(): OnsiteCell | null { const id = this.selection.kind === "step" ? (this.checklist ? this.document.root.children!.find(cell=>cell.checklistRole===this.checklistView)!.id : this.document.root.id) : this.selection.cellId; return findCell(this.document, id); }
+  getSelectedCell(): OnsiteCell | null { const id = this.selection.kind === "step" ? (this.checklist && !this.source ? this.document.root.children!.find(cell=>cell.checklistRole===this.checklistView)!.id : this.document.root.id) : this.selection.cellId; return findCell(this.document, id); }
   getSelectedBlock(): OnsiteBlock | null { return this.selection.kind === "block" ? findBlock(this.document, this.selection.blockId) : null; }
-  canUndo(): boolean { return this.historyIndex > 0 || this.historyIndex >= 0 && this.historyState() !== this.historyState(this.history[this.historyIndex]); }
-  canRedo(): boolean { return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1 && this.historyState() === this.historyState(this.history[this.historyIndex]); }
+  canUndo(): boolean { if (this.callbacks.canUndo) return this.callbacks.canUndo(); return this.historyIndex > 0 || this.historyIndex >= 0 && this.historyState() !== this.historyState(this.history[this.historyIndex]); }
+  canRedo(): boolean { if (this.callbacks.canRedo) return this.callbacks.canRedo(); return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1 && this.historyState() === this.historyState(this.history[this.historyIndex]); }
   isComposing(): boolean { return this.composing; }
-  getValidation(): string[] { return [...validateOnsiteDocument(this.document).errors, ...(this.survey ? validateOnsiteSurveyDocument(this.document, this.surveyContext()!) : []), ...(this.checklist ? validateOnsiteChecklistDocument(this.document,this.checklist) : [])]; }
+  getValidation(): string[] { if (this.source) { this.source.setContracts(this.survey?.step.questions, this.checklist?.items); return this.source.validate(this.document); } return [...validateOnsiteDocument(this.document).errors, ...(this.survey ? validateOnsiteSurveyDocument(this.document, this.surveyContext()!) : []), ...(this.checklist ? validateOnsiteChecklistDocument(this.document,this.checklist) : [])]; }
 
   /** Commits an already-reviewed AI proposal as one undoable transaction. */
   applyAiProposal(proposal: EditorAiProposal): boolean {
     if (this.guide || this.survey || this.checklist || this.composing || !this.beforeTransaction()) return false;
     try {
       this.document = applyEditorAiProposal(this.document, proposal);
-      this.commit(this.selection); return true;
+      return this.commit(this.selection);
     } catch (error) {
       const previous = this.history[this.historyIndex]; if (previous) this.document = cloneOnsite(previous.document);
       this.callbacks.onValidation([error instanceof Error ? error.message : "AI proposal is invalid."]); return false;
@@ -190,23 +205,34 @@ export class OnsiteCompositionEditor {
     this.repairDocumentStructure();
     const state = this.historyState(); if (state === this.compiledState) return true;
     const errors = this.getValidation(); this.callbacks.onValidation(errors); if (errors.length) return false;
-    const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext(), this.checklist); Object.assign(this.content, compiled.content); this.compiledState = state; return true;
+    try { const compiled = this.compile(); Object.assign(this.content, compiled.content); this.compiledState = state; this.callbacks.onTransaction?.(); return true; } catch (error) { this.callbacks.onValidation([error instanceof Error ? error.message : "Source edit failed."]); return false; }
   }
 
   snapshot(): { builder: WidgetBuilderState; content: ExperienceContent } { this.flush(); return { builder: cloneOnsite(this.builder), content: cloneOnsite(this.content) }; }
 
-  undo(): void { if (this.composing) return; if (!this.flush()) { clearTimeout(this.typingTimer); const current = this.history[this.historyIndex]; if (current) this.restore(current); return; } this.pushHistory(); if (!this.canUndo()) return; clearTimeout(this.typingTimer); this.historyIndex--; this.restore(this.history[this.historyIndex]); }
-  redo(): void { if (!this.canRedo() || this.composing) return; this.historyIndex++; this.restore(this.history[this.historyIndex]); }
+  undo(): void { if (this.callbacks.onUndo) { this.callbacks.onUndo(); return; } if (this.composing) return; if (!this.flush()) { clearTimeout(this.typingTimer); const current = this.history[this.historyIndex]; if (current) this.restore(current); return; } this.pushHistory(); if (!this.canUndo()) return; clearTimeout(this.typingTimer); this.historyIndex--; this.restore(this.history[this.historyIndex]); }
+  redo(): void { if (this.callbacks.onRedo) { this.callbacks.onRedo(); return; } if (!this.canRedo() || this.composing) return; this.historyIndex++; this.restore(this.history[this.historyIndex]); }
+
+  restoreSelection(selection: CompositionSelection): void {
+    if (selection.kind === "block") {
+      const cell = cellForBlock(this.document, selection.blockId);
+      if (cell?.block) { this.select({ ...selection, cellId: cell.id, blockType: cell.block.type }); return; }
+    } else if (selection.kind === "step" || findCell(this.document, selection.cellId)) { this.select(selection); return; }
+    this.selectStep();
+  }
 
   selectStep(): void { this.select({ kind: "step", label: "Step" }); }
   selectParent(): void {
-    if (this.selection.kind === "block") { this.select({ kind: "cell", label: "Cell", cellId: this.selection.cellId }); return; }
+    if (this.selection.kind === "block") {
+      const cell = this.source?.componentIsCell(this.selection.cellId) ? parentCell(this.document, this.selection.cellId) : findCell(this.document, this.selection.cellId);
+      cell ? this.select({ kind: "cell", label: "Cell", cellId: cell.id }) : this.selectStep(); return;
+    }
     if (this.selection.kind === "cell") { const parent = parentCell(this.document, this.selection.cellId); parent ? this.select({ kind: "cell", label: "Parent cell", cellId: parent.id }) : this.selectStep(); }
   }
   selectChild(): void {
     if (this.selection.kind === "step") { this.select({ kind: "cell", label: "Root cell", cellId: this.document.root.id }); return; }
     if (this.selection.kind !== "cell") return; const cell = findCell(this.document, this.selection.cellId); if (!cell) return;
-    if (cell.block) this.select({ kind: "block", label: BLOCK_LABEL[cell.block.type], cellId: cell.id, blockId: cell.block.id, blockType: cell.block.type }); else if (cell.children?.[0]) this.select({ kind: "cell", label: "Child cell", cellId: cell.children[0].id });
+    if (cell.block) this.select({ kind: "block", label: BLOCK_LABEL[cell.block.type], cellId: cell.id, blockId: cell.block.id, blockType: cell.block.type }); else if (cell.children?.[0]) { const child = cell.children[0]; this.select(this.source && child.block ? { kind: "block", label: BLOCK_LABEL[child.block.type], cellId: child.id, blockId: child.block.id, blockType: child.block.type } : { kind: "cell", label: "Child cell", cellId: child.id }); }
   }
 
   insertBlock(type: OnsiteBlock["type"], insertion?: { cellId: string; edge: CellEdge }): boolean {
@@ -217,17 +243,17 @@ export class OnsiteCompositionEditor {
       const candidate = cloneOnsite(this.document);
       const id = insertAdjacentCell(candidate, insertion.cellId, insertion.edge); if (!id) return false;
       findCell(candidate, id)!.block = block;
-      const validation = validateOnsiteDocument(candidate); this.callbacks.onValidation(validation.errors); if (!validation.valid) return false;
+      const validation = this.source ? (() => { const errors = this.source.validate(candidate); return { valid: !errors.length, errors }; })() : validateOnsiteDocument(candidate); this.callbacks.onValidation(validation.errors); if (!validation.valid) return false;
       this.document = candidate;
-      this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: id, blockId: block.id, blockType: type }); return true;
+      return this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: id, blockId: block.id, blockType: type });
     }
     if (cell.children) {
       const added = emptyCell(block); cell.children.push(added);
-      this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: added.id, blockId: block.id, blockType: type }); return true;
+      return this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: added.id, blockId: block.id, blockType: type });
     }
     if (!cell.block) {
       cell.block = block;
-      this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: cell.id, blockId: block.id, blockType: type }); return true;
+      return this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: cell.id, blockId: block.id, blockType: type });
     }
     // Adding from a selected block inserts the new block after it instead of
     // silently replacing the author’s current content.
@@ -235,36 +261,36 @@ export class OnsiteCompositionEditor {
     const added = addedId ? findCell(this.document, addedId) : null;
     if (!added) return false;
     delete added.children; added.block = block;
-    this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: added.id, blockId: block.id, blockType: type }); return true;
+    return this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: added.id, blockId: block.id, blockType: type });
   }
-  split(direction: "row" | "column"): boolean { const cell = this.getSelectedCell(); if (!cell || this.composing) return false; if (!this.beforeTransaction()) return false; const id = splitCell(this.document, cell.id, direction); if (!id) return false; this.commit({ kind: "cell", label: direction === "row" ? "Right cell" : "Lower cell", cellId: id }); return true; }
+  split(direction: "row" | "column"): boolean { const cell = this.getSelectedCell(); if (!cell || this.composing) return false; if (!this.beforeTransaction()) return false; const id = this.source ? insertAdjacentCell(this.document, cell.id, direction === "row" ? "right" : "bottom") : splitCell(this.document, cell.id, direction); if (!id) return false; return this.commit({ kind: "cell", label: direction === "row" ? "Right cell" : "Lower cell", cellId: id }); }
   addEdge(edge: "top" | "right" | "bottom" | "left"): void { if (this.composing) return; if (!this.beforeTransaction()) return; const id = insertEdgeCell(this.document, edge); this.commit({ kind: "cell", label: `${edge} cell`, cellId: id }); }
   duplicate(): boolean {
     const cell = this.getSelectedCell(); if (!cell || cell === this.document.root || this.composing) return false;
     if (!this.beforeTransaction()) return false;
-    if (this.checklist) {
+    if (this.checklist && !this.source) {
       const duplicated=duplicateChecklistCell(this.document,this.checklist,cell.id);if(!duplicated){this.callbacks.onValidation(["Required Checklist components cannot be duplicated."]);return false;}
       this.document=duplicated.document;this.checklist.items=duplicated.items;this.commit({kind:"cell",label:"Duplicated cell",cellId:duplicated.cellId});return true;
     }
-    if (this.survey) {
+    if (this.survey && !this.source) {
       const duplicated = duplicateSurveyCell(this.document, this.survey.step.questions, cell.id); if (!duplicated) return false;
       this.document = duplicated.document; this.survey.step.questions = duplicated.questions;
-      this.commit({ kind: "cell", label: "Duplicated cell", cellId: duplicated.cellId }); return true;
+      return this.commit({ kind: "cell", label: "Duplicated cell", cellId: duplicated.cellId });
     }
-    const id = duplicateCell(this.document, cell.id); if (!id) return false; this.commit({ kind: "cell", label: "Duplicated cell", cellId: id }); return true;
+    const id = duplicateCell(this.document, cell.id); if (!id) return false; this.source?.duplicate(cell.id, id); return this.commit({ kind: "cell", label: "Duplicated cell", cellId: id });
   }
   remove(): boolean { const cell = this.getSelectedCell(); if (!cell || cell === this.document.root || this.composing) return false; if (!this.beforeTransaction()) return false;
     if (this.survey && listBlocks(cell).some(block => block.type === "survey_controls")) { this.callbacks.onValidation(["Keep the Survey navigation block so visitors can continue or submit."]); return false; }
-    if(this.checklist){
+    if(this.checklist && !this.source){
       const components=listBlocks(cell);if(cell.checklistRole||components.some(block=>block.type.startsWith("checklist_")&&block.type!=="checklist_task")){this.callbacks.onValidation(["Keep the required Checklist views and controls. You can style or move them within their view."]);return false;}
       const removedTasks=new Set(components.filter((block):block is Extract<OnsiteBlock,{type:"checklist_task"}>=>block.type==="checklist_task").map(block=>block.itemId));
       if(this.checklist.items.length-removedTasks.size<1){this.callbacks.onValidation(["Keep at least one task in this Checklist."]);return false;}
       this.checklist.items=this.checklist.items.filter(item=>!removedTasks.has(item.id));
     }
     const removed = new Set(listBlocks(cell).filter(block => block.type === "question").map(block => block.type === "question" ? block.questionId : ""));
-    const parent = parentCell(this.document, cell.id); if (!removeCell(this.document, cell.id)) return false;
-    if (this.survey) { this.survey.step.questions = this.survey.step.questions.filter(question => !removed.has(question.id)); if (this.survey.step.branching) this.survey.step.branching.rules = this.survey.step.branching.rules.filter(rule => !removed.has(rule.questionId)); } this.commit(parent ? { kind: "cell", label: "Parent cell", cellId: parent.id } : { kind: "step", label: "Step" }); return true; }
-  move(delta: -1 | 1): boolean { const cell = this.getSelectedCell(); if (!cell || this.composing) return false; if (!this.beforeTransaction()) return false; if (!moveCell(this.document, cell.id, delta)) return false; this.commit(this.selection); return true; }
+    const parent = parentCell(this.document, cell.id); if (!(this.source ? this.source.removeCell(this.document, cell.id) : removeCell(this.document, cell.id))) return false;
+    if (this.survey && !this.source) { this.survey.step.questions = this.survey.step.questions.filter(question => !removed.has(question.id)); if (this.survey.step.branching) this.survey.step.branching.rules = this.survey.step.branching.rules.filter(rule => !removed.has(rule.questionId)); } return this.commit(parent ? { kind: "cell", label: "Parent cell", cellId: parent.id } : { kind: "step", label: "Step" }); }
+  move(delta: -1 | 1): boolean { const cell = this.getSelectedCell(); if (!cell || this.composing) return false; if (!this.beforeTransaction()) return false; if (!moveCell(this.document, cell.id, delta)) return false; return this.commit(this.selection); }
 
   /** Move the existing subtree; never regenerate its cell/block/action IDs. */
   moveTo(targetId: string, before = false, sourceId = this.moveSource ?? this.getSelectedCell()?.id): boolean {
@@ -274,23 +300,27 @@ export class OnsiteCompositionEditor {
     from.children.splice(from.children.indexOf(source), 1); if (!from.children.length) delete from.children;
     if (!target.block && !target.children) target.children = [source];
     else { const to = parentCell(candidate, targetId); if (!to?.children) return false; to.children.splice(to.children.indexOf(target) + (before ? 0 : 1), 0, source); }
-    const validation = validateOnsiteDocument(candidate); this.callbacks.onValidation(validation.errors); if (!validation.valid) return false;
+    const validation = this.source ? (() => { const errors = this.source.validate(candidate); return { valid: !errors.length, errors }; })() : validateOnsiteDocument(candidate); this.callbacks.onValidation(validation.errors); if (!validation.valid) return false;
     if (!this.beforeTransaction()) return false; this.document = candidate; this.cancelMove();
-    this.commit(source.block ? { kind: "block", label: BLOCK_LABEL[source.block.type], cellId: source.id, blockId: source.block.id, blockType: source.block.type } : { kind: "cell", label: "Cell", cellId: source.id }); return true;
+    return this.commit(source.block ? { kind: "block", label: BLOCK_LABEL[source.block.type], cellId: source.id, blockId: source.block.id, blockType: source.block.type } : { kind: "cell", label: "Cell", cellId: source.id });
   }
 
   private checklistState(): OnsiteChecklistContext { const value=this.checklist!;return cloneOnsite({title:value.title,description:value.description,items:value.items,behavior:value.behavior,completionMessage:value.completionMessage}); }
-  updateChecklistViewWidth(width:number):void{if(!this.checklist||!this.beforeTransaction())return;const view=this.document.root.children!.find(cell=>cell.checklistRole===this.checklistView)!;view.checklistWidth=width;this.commit(this.selection);}
+  updateChecklistViewWidth(width:number):void{if(this.source||!this.checklist||!this.beforeTransaction())return;const view=this.document.root.children!.find(cell=>cell.checklistRole===this.checklistView)!;view.checklistWidth=width;this.commit(this.selection);}
   refreshChecklist():void {this.callbacks.onPatch?.();this.callbacks.onSelectionChange(this.selection);}
   setChecklistView(view: ChecklistView):void {this.checklistView=view;}
   getSelectedTask(): ChecklistItem | null {const block=this.getSelectedBlock();return block?.type==="checklist_task"?this.checklist?.items.find(item=>item.id===block.itemId)??null:null;}
   updateChecklist(update:(next:OnsiteChecklistContext)=>void):boolean {
     if(!this.checklist||!this.beforeTransaction())return false;const next=this.checklistState();update(next);
     if(!next.title.trim()||next.title.length>160||!next.completionMessage.title.trim()||!next.completionMessage.acknowledgeLabel.trim()||next.completionMessage.acknowledgeLabel.length>80||next.items.some(item=>!item.title.trim()||item.title.length>200||(item.description?.length??0)>1000||item.action.type==="none"&&item.completion.type!=="item_clicked")){this.callbacks.onValidation(["Use a title and valid task settings. Tasks without an action must complete when clicked."]);return false;}
-    Object.assign(this.checklist,next);this.commit(this.selection);return true;
+    if (this.source) {
+      try { this.source.synchronizeChecklist(next); this.document = this.source.getDocument(); }
+      catch (error) { this.callbacks.onValidation([error instanceof Error ? error.message : "Checklist update failed."]); return false; }
+    }
+    Object.assign(this.checklist,next); return this.commit(this.selection);
   }
   insertTask(insertion?:{cellId:string;edge:CellEdge}): boolean {
-    if(!this.checklist||this.checklist.items.length>=20||!this.beforeTransaction())return false;
+    if(this.source||!this.checklist||this.checklist.items.length>=20||!this.beforeTransaction())return false;
     let container:OnsiteCell|undefined;const visit=(cell:OnsiteCell)=>{if(cell.checklistRole==="items")container=cell;cell.children?.forEach(visit);};visit(this.document.root);if(!container)return false;
     const item:ChecklistItem={id:onsiteId("item"),title:"New task",description:"Describe the next step.",action:{type:"none"},completion:{type:"item_clicked"}};
     let cell:OnsiteCell;
@@ -302,10 +332,10 @@ export class OnsiteCompositionEditor {
   private surveyContext() { return this.survey ? { questions: this.survey.step.questions, submitLabel: this.survey.config.submitLabel } : undefined; }
   private historyState(entry?: Pick<HistoryEntry, "document" | "questions" | "branching" | "checklist">): string { return JSON.stringify(this.checklist ? {document:entry?.document??this.document,checklist:entry?entry.checklist:this.checklistState()} : this.survey ? (entry ? { document: entry.document, questions: entry.questions, branching: entry.branching } : { document: this.document, questions: this.survey.step.questions, branching: this.survey.step.branching }) : entry?.document ?? this.document); }
   getSelectedQuestion(): SurveyQuestion | null { const block = this.getSelectedBlock(); return block?.type === "question" ? this.survey?.step.questions.find(question => question.id === block.questionId) ?? null : null; }
-  refreshSurvey(): void { this.compileAndPatch(); this.select(this.selection); }
+  refreshSurvey(): void { if (this.source) { this.source.refresh(); this.document = this.source.getDocument(); } this.compileAndPatch(); this.select(this.selection); }
 
   insertQuestion(type: SurveyQuestion["type"], insertion?: { cellId: string; edge: CellEdge }): boolean {
-    if (!this.survey || !QUESTION_TYPES.includes(type) || this.survey.step.questions.length >= 20 || !this.beforeTransaction()) return false;
+    if (this.source || !this.survey || !QUESTION_TYPES.includes(type) || this.survey.step.questions.length >= 20 || !this.beforeTransaction()) return false;
     const selected = this.getSelectedCell(); if (!selected) return false;
     const candidate = cloneOnsite(this.document), question = newSurveyQuestion(type);
     const block: OnsiteBlock = { id: onsiteId("block"), type: "question", questionId: question.id, fontSize: 14 };
@@ -318,14 +348,14 @@ export class OnsiteCompositionEditor {
     const errors = [...validateOnsiteDocument(candidate).errors, ...validateOnsiteSurveyDocument(candidate, { questions })];
     if (errors.length) { this.callbacks.onValidation(errors); return false; }
     this.document = candidate; this.survey.step.questions = questions;
-    this.commit({ kind: "block", label: "Question", cellId: cell.id, blockId: block.id, blockType: block.type }); return true;
+    return this.commit({ kind: "block", label: "Question", cellId: cell.id, blockId: block.id, blockType: block.type });
   }
 
   updateStepHeading(label: string): boolean {
     if (!this.survey || !this.beforeTransaction()) return false;
     const heading = listBlocks(this.document.root).find(block => block.type === "heading");
     if (heading?.type !== "heading") { this.callbacks.onValidation(["Insert a Heading block to set the step heading."]); return false; }
-    heading.html = escapeHtmlAttribute(label.slice(0, 160)); this.commit(this.selection); return true;
+    heading.html = escapeHtmlAttribute(label.slice(0, 160)); return this.commit(this.selection);
   }
 
   updateBranching(branching: NonNullable<SurveyStep["branching"]>): boolean {
@@ -333,20 +363,24 @@ export class OnsiteCompositionEditor {
     const step = { ...this.survey.step, branching: cloneOnsite(branching) };
     const errors = surveyBranchErrors({ ...this.survey.config, steps: this.survey.config.steps.map(value => value.id === step.id ? step : value) });
     if (errors.length) { this.callbacks.onValidation(errors); return false; }
-    this.survey.step.branching = step.branching; this.commit(this.selection); return true;
+    this.survey.step.branching = step.branching; return this.commit(this.selection);
   }
 
   updateQuestion(question: SurveyQuestion): boolean {
     const current = this.getSelectedQuestion(); if (!this.survey || !current || current.id !== question.id || !this.beforeTransaction()) return false;
     const questions = this.survey.step.questions.map(value => value.id === question.id ? cloneOnsite(question) : value);
     const errors = surveyQuestionErrors(questions); if (errors.length) { this.callbacks.onValidation(errors); return false; }
+    if (this.source) {
+      try { this.source.synchronizeQuestion(question, current, questions); this.document = this.source.getDocument(); }
+      catch (error) { this.callbacks.onValidation([error instanceof Error ? error.message : "Question update failed."]); return false; }
+    }
     this.survey.step.questions = questions;
     if (this.survey.step.branching) this.survey.step.branching.rules = this.survey.step.branching.rules.filter(rule => {
       if (rule.questionId !== question.id) return true;
       const step = { ...this.survey!.step, branching: { rules: [rule] } };
       return !surveyBranchErrors({ ...this.survey!.config, steps: this.survey!.config.steps.map(value => value.id === step.id ? step : value) }).length;
     });
-    this.commit(this.selection); return true;
+    return this.commit(this.selection);
   }
 
   updateCell(update: Partial<Pick<OnsiteCell, "direction" | "align" | "justify" | "gap" | "padding" | "style" | "responsiveStack">> & { sizing?: OnsiteSizing }): void {
@@ -377,9 +411,9 @@ export class OnsiteCompositionEditor {
       if (this.destroyed || request !== this.imageRequest) return false;
       const current = findBlock(this.document, id); if (current?.type !== "image" || current.src !== previousSrc) return false;
       const candidate = cloneOnsite(this.document); const image = findBlock(candidate, id); if (image?.type !== "image") return false; image.src = src;
-      const validation = validateOnsiteDocument(candidate); this.callbacks.onValidation(validation.errors); if (!validation.valid) return false;
+      const validation = this.source ? (() => { const errors = this.source.validate(candidate); return { valid: !errors.length, errors }; })() : validateOnsiteDocument(candidate); this.callbacks.onValidation(validation.errors); if (!validation.valid) return false;
       if (!this.flush()) return false;
-      this.document = candidate; this.commit(this.selection); return true;
+      this.document = candidate; return this.commit(this.selection);
     } catch (error) {
       if (!this.destroyed && request === this.imageRequest) this.callbacks.onValidation([error instanceof Error ? error.message : "Image could not be added. Try another file."]);
       return false;
@@ -393,7 +427,7 @@ export class OnsiteCompositionEditor {
   editSelected(): void { if (this.selection.kind !== "block") return; const block = this.getSelectedBlock(); if (!block || !["heading", "text", "button"].includes(block.type)) return; const element = this.surface?.querySelector<HTMLElement>(`[data-movcues-block-id="${block.id}"]`); if (element) { element.contentEditable = "true"; element.focus(); } }
   setAlignment(align: "left" | "center" | "right"): void { this.updateBlock({ align } as Partial<OnsiteBlock>); }
   formatInline(tag: "strong" | "em" | "u"): boolean { return this.wrapSelection(tag); }
-  toggleList(tag: "ul" | "ol"): boolean { const block = this.getSelectedBlock(); if (block?.type !== "text" || this.composing) return false; if (!this.beforeTransaction()) return false; const current = block.html.trim(); block.html = current.startsWith(`<${tag}>`) ? current.replace(new RegExp(`^<${tag}><li>|</li></${tag}>$`, "g"), "") : `<${tag}><li>${current}</li></${tag}>`; this.commit(this.selection); return true; }
+  toggleList(tag: "ul" | "ol"): boolean { const block = this.getSelectedBlock(); if (block?.type !== "text" || this.composing) return false; if (!this.beforeTransaction()) return false; const current = block.html.trim(); block.html = current.startsWith(`<${tag}>`) ? current.replace(new RegExp(`^<${tag}><li>|</li></${tag}>$`, "g"), "") : `<${tag}><li>${current}</li></${tag}>`; return this.commit(this.selection); }
   applyLink(url: string): boolean { if (!builderLinkUrlIsSafe(url)) return false; return this.wrapSelection("a", url); }
 
   private wrapSelection(tag: "strong" | "em" | "u" | "a", href?: string): boolean {
@@ -403,7 +437,7 @@ export class OnsiteCompositionEditor {
     if (this.savedRange && element.contains(this.savedRange.commonAncestorContainer)) { setEditorRange(this.root, this.savedRange); }
     const range = editorRange(this.root); const selectedInside = range && element.contains(range.commonAncestorContainer) && !range.collapsed;
     if (tag === "a" && (selectedInside ? range?.cloneContents().querySelector("a") || range?.startContainer.parentElement?.closest("a") || range?.endContainer.parentElement?.closest("a") : element.querySelector("a"))) return false;
-    if (selectedInside && range) { const wrapper = document.createElement(tag); if (tag === "a" && href) { wrapper.setAttribute("href", href); if (/^https?:\/\//i.test(href)) { wrapper.setAttribute("target", "_blank"); wrapper.setAttribute("rel", "noopener noreferrer"); } } try { range.surroundContents(wrapper); } catch { wrapper.append(range.extractContents()); range.insertNode(wrapper); } block.html = sanitizeRichText(element.innerHTML); }
+    if (selectedInside && range) { const wrapper = document.createElement(tag); if (tag === "a" && href) { wrapper.setAttribute("href", href); if (/^https?:\/\//i.test(href)) { wrapper.setAttribute("target", "_blank"); wrapper.setAttribute("rel", "noopener noreferrer"); } } try { range.surroundContents(wrapper); } catch { wrapper.append(range.extractContents()); range.insertNode(wrapper); } block.html = this.source ? element.innerHTML : sanitizeRichText(element.innerHTML); }
     else { const open = tag === "a" ? `<a href="${escapeHtmlAttribute(href ?? "")}"${/^https?:\/\//i.test(href ?? "") ? ' target="_blank" rel="noopener noreferrer"' : ""}>` : `<${tag}>`; block.html = `${open}${block.html}</${tag}>`; }
     if (!selectedInside) element.innerHTML = block.html;
     element.contentEditable = "true"; element.focus({ preventScroll: true });
@@ -420,28 +454,29 @@ export class OnsiteCompositionEditor {
   }
 
   private beforeTransaction(): boolean { clearTimeout(this.typingTimer); this.repairDocumentStructure(); if (!this.flush()) return false; this.pushHistory(); return true; }
-  private commit(selection: CompositionSelection): void {
+  private commit(selection: CompositionSelection): boolean {
     this.repairDocumentStructure();
-    if(this.checklist){const byId=new Map(this.checklist.items.map(item=>[item.id,item]));this.checklist.items=listBlocks(this.document.root).filter((block):block is Extract<OnsiteBlock,{type:"checklist_task"}>=>block.type==="checklist_task").map(block=>byId.get(block.itemId)!).filter(Boolean);}
+    if(this.checklist && !this.source){const byId=new Map(this.checklist.items.map(item=>[item.id,item]));this.checklist.items=listBlocks(this.document.root).filter((block):block is Extract<OnsiteBlock,{type:"checklist_task"}>=>block.type==="checklist_task").map(block=>byId.get(block.itemId)!).filter(Boolean);}
     const errors = this.getValidation(); const validation = { valid: !errors.length, errors };
-    if (!validation.valid) { const previous = this.history[this.historyIndex]; if (previous) { this.document = cloneOnsite(previous.document); if(this.checklist&&previous.checklist)Object.assign(this.checklist,cloneOnsite(previous.checklist)); if (this.survey && previous.questions) { this.survey.step.questions = cloneOnsite(previous.questions); this.survey.step.branching = previous.branching ? cloneOnsite(previous.branching) : undefined; } this.compileAndPatch(); this.select(previous.selection); } this.callbacks.onValidation(validation.errors); return; }
-    if (this.historyState() === this.compiledState) { this.select(selection); return; }
-    this.selection = selection; this.compileAndPatch(); this.pushHistory(); this.callbacks.onChange(); this.select(selection);
+    if (!validation.valid) { const previous = this.history[this.historyIndex]; if (previous) { this.document = cloneOnsite(previous.document); if(this.checklist&&previous.checklist)Object.assign(this.checklist,cloneOnsite(previous.checklist)); if (this.survey && previous.questions) { this.survey.step.questions = cloneOnsite(previous.questions); this.survey.step.branching = previous.branching ? cloneOnsite(previous.branching) : undefined; } this.compileAndPatch(); this.select(previous.selection); } this.callbacks.onValidation(validation.errors); return false; }
+    if (this.historyState() === this.compiledState) { this.select(selection); return true; }
+    this.selection = selection; this.compileAndPatch(); this.pushHistory(); this.callbacks.onChange(); this.select(selection); return true;
   }
   private compileAndPatch(): void {
-    const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext(), this.checklist); Object.assign(this.content, compiled.content);
+    const compiled = this.compile(); Object.assign(this.content, compiled.content);
     this.compiledState = this.historyState();
     const template = document.createElement("template"); template.innerHTML = compiled.html; this.surface?.replaceChildren(...Array.from(template.content.childNodes));
+    if (this.surface) this.source?.prepareSurface(this.surface);
     this.imagePlaceholders.clear();
     this.surface?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-movcues-question-input]").forEach(input => { input.readOnly = true; input.tabIndex = -1; });
     this.savedRange = null;
     this.surface?.querySelectorAll<HTMLElement>("[data-movcues-node-id]").forEach(cell => {
-      cell.tabIndex = 0; cell.setAttribute("aria-label", "Layout cell");
-      if (!cell.children.length) { const add = document.createElement("button"); add.type = "button"; add.dataset.movcuesEmptyCell = ""; add.textContent = "+ Add content"; cell.append(add); }
+      cell.tabIndex = 0; if (!cell.hasAttribute("data-movcues-block-id")) cell.setAttribute("aria-label", "Layout cell");
+      if (!cell.children.length && !cell.hasAttribute("data-movcues-block-id")) { const add = document.createElement("button"); add.type = "button"; add.dataset.movcuesEmptyCell = ""; add.textContent = "+ Add content"; cell.append(add); }
     });
     this.surface?.querySelectorAll<HTMLImageElement>('img[data-movcues-block-id][src=""]').forEach(image => {
       const placeholder = document.createElement("button"); placeholder.type = "button"; placeholder.className = image.className;
-      placeholder.dataset.movcuesBlockId = image.dataset.movcuesBlockId; placeholder.dataset.movcuesImagePlaceholder = "";
+      placeholder.dataset.movcuesBlockId = image.dataset.movcuesBlockId; if (image.dataset.movcuesNodeId) placeholder.dataset.movcuesNodeId = image.dataset.movcuesNodeId; placeholder.dataset.movcuesImagePlaceholder = "";
       placeholder.setAttribute("aria-label", "Choose image");
       placeholder.innerHTML = '<svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 3-3 6 6"/></svg><span>Drop an image or click to browse</span>';
       image.replaceWith(placeholder); this.imagePlaceholders.set(placeholder, image);
@@ -451,7 +486,10 @@ export class OnsiteCompositionEditor {
   }
   private scheduleCompile(): void { clearTimeout(this.compileTimer); this.compileTimer = window.setTimeout(() => { if (!this.destroyed && !this.composing) this.flush(); }, 160); }
 
+  private compile() { return this.source ? this.source.apply(this.document) : applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext(), this.checklist); }
+
   private repairDocumentStructure(): boolean {
+    if (this.source) return false;
     let repaired = false; const blockIds = new Set<string>();
     const repair = (cell: OnsiteCell): void => {
       if (cell.children && cell.block) {
@@ -474,14 +512,15 @@ export class OnsiteCompositionEditor {
   }
 
   private pushHistory(): void {
-    const document = cloneOnsite(this.document), questions = this.survey ? cloneOnsite(this.survey.step.questions) : undefined, branching = this.survey?.step.branching ? cloneOnsite(this.survey.step.branching) : undefined; const bytes = this.historyState().length; const entry = { document, questions, branching, checklist:this.checklist?this.checklistState():undefined, selection: cloneOnsite(this.selection), bytes };
+    const document = cloneOnsite(this.document), questions = this.survey ? cloneOnsite(this.survey.step.questions) : undefined, branching = this.survey?.step.branching ? cloneOnsite(this.survey.step.branching) : undefined; const bytes = this.historyState().length; const entry = { source: this.source?.snapshot(), document, questions, branching, checklist:this.checklist?this.checklistState():undefined, selection: cloneOnsite(this.selection), bytes };
     if (this.historyIndex >= 0 && this.historyState(this.history[this.historyIndex]) === this.historyState()) return;
+    if (this.callbacks.onUndo) { this.history = [entry]; this.historyIndex = 0; this.historyBytes = bytes; return; }
     if (this.historyIndex < this.history.length - 1) { this.historyBytes -= this.history.slice(this.historyIndex + 1).reduce((sum, item) => sum + item.bytes, 0); this.history.splice(this.historyIndex + 1); }
     this.history.push(entry); this.historyBytes += bytes;
     while (this.history.length > HISTORY_LIMIT || this.historyBytes > HISTORY_BYTES) { const removed = this.history.shift(); this.historyBytes -= removed?.bytes ?? 0; }
     this.historyIndex = this.history.length - 1;
   }
-  private restore(entry: HistoryEntry): void { this.document = cloneOnsite(entry.document); if(this.checklist&&entry.checklist)Object.assign(this.checklist,cloneOnsite(entry.checklist)); if (this.survey && entry.questions) { this.survey.step.questions = cloneOnsite(entry.questions); this.survey.step.branching = entry.branching ? cloneOnsite(entry.branching) : undefined; } this.compileAndPatch(); this.selection = cloneOnsite(entry.selection); this.callbacks.onChange(); this.select(this.selection); }
+  private restore(entry: HistoryEntry): void { this.document = cloneOnsite(entry.document); if (this.source && entry.source) this.source.restore(entry.source, this.document); if(this.checklist&&entry.checklist)Object.assign(this.checklist,cloneOnsite(entry.checklist)); if (this.survey && entry.questions) { this.survey.step.questions = cloneOnsite(entry.questions); this.survey.step.branching = entry.branching ? cloneOnsite(entry.branching) : undefined; } this.compileAndPatch(); this.selection = cloneOnsite(entry.selection); this.callbacks.onChange(); this.select(this.selection); }
 
   private onSurfaceClick = (event: Event): void => {
     const element = event.target instanceof Element ? event.target : null; if (!element) return;
@@ -528,7 +567,7 @@ export class OnsiteCompositionEditor {
     void this.setImageFile(event.dataTransfer.files[0], block.id);
   };
   private onDoubleClick = (event: Event): void => { const element = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movcues-block-id]") : null; const block = element ? findBlock(this.document, element.dataset.movcuesBlockId!) : null; if (element && (block?.type === "heading" || block?.type === "text" || block?.type === "button")) { element.contentEditable = "true"; element.focus(); } };
-  private onInput = (event: Event): void => { const element = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movcues-block-id]") : null; const block = element ? findBlock(this.document, element.dataset.movcuesBlockId!) : null; if (!block || !element) return; if (block.type === "heading" || block.type === "text") block.html = sanitizeRichText(element.innerHTML); else if (block.type === "button") block.label = (element.textContent ?? "").slice(0, 80); else return; this.scheduleCompile(); this.positionTools(); this.callbacks.onChange(); clearTimeout(this.typingTimer); this.typingTimer = window.setTimeout(() => this.pushHistory(), 300); };
+  private onInput = (event: Event): void => { const element = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-movcues-block-id]") : null; const block = element ? findBlock(this.document, element.dataset.movcuesBlockId!) : null; if (!block || !element) return; if (block.type === "heading" || block.type === "text") block.html = this.source ? element.innerHTML : sanitizeRichText(element.innerHTML); else if (block.type === "button") { this.source?.captureButtonHtml(block.id, element.innerHTML); block.label = (element.textContent ?? "").slice(0, this.source ? 10_000 : 80); } else return; this.scheduleCompile(); this.positionTools(); this.callbacks.onChange(true); clearTimeout(this.typingTimer); this.typingTimer = window.setTimeout(() => this.pushHistory(), 300); };
   private onBlur = (event: Event): void => { const element = event.target instanceof HTMLElement ? event.target : null; if (element?.isContentEditable) { this.rememberSelection(); if ((event as FocusEvent).relatedTarget) element.contentEditable = "false"; this.flush(); this.pushHistory(); } };
   private onCompositionStart = (): void => { this.composing = true; };
   private onCompositionEnd = (): void => { this.composing = false; this.scheduleCompile(); };
@@ -542,6 +581,10 @@ export class OnsiteCompositionEditor {
     }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.stopImmediatePropagation(); event.shiftKey ? this.redo() : this.undo(); return; }
     if ((event.ctrlKey || event.metaKey) && ["b", "i", "u"].includes(event.key.toLowerCase())) { event.preventDefault(); this.rememberSelection(); this.formatInline(event.key.toLowerCase() === "b" ? "strong" : event.key.toLowerCase() === "i" ? "em" : "u"); return; }
+    if (this.source && event.key === "Enter" && target?.isContentEditable && ["heading", "text"].includes(this.getSelectedBlock()?.type ?? "")) {
+      const range = editorRange(this.root);
+      if (range && target.contains(range.commonAncestorContainer)) { event.preventDefault(); const br = document.createElement("br"); range.deleteContents(); range.insertNode(br); range.setStartAfter(br); range.collapse(true); setEditorRange(this.root, range); target.dispatchEvent(new Event("input", { bubbles: true })); return; }
+    }
     if (target?.isContentEditable) return;
     if (this.moveSource && event.key === "Tab" && target?.hasAttribute("data-movcues-node-id")) {
       const destinations = this.moveDestinations(); const index = destinations.indexOf(target);
@@ -592,7 +635,7 @@ export class OnsiteCompositionEditor {
     const cell = this.getSelectedCell(); const atRoot = !cell || cell === this.document.root;
     for (const command of ["delete", "duplicate", "move"] as const) {
       const button = this.toolbar.querySelector<HTMLButtonElement>(`[data-command="${command}"]`); if (!button) continue;
-      button.disabled = atRoot; button.title = atRoot ? "Select an element to use this action" : command === "delete" ? "Delete selected element (Undo is available)" : "Duplicate";
+      const protectedSource = cell && this.source?.isProtected(cell.id); button.disabled = atRoot || Boolean(protectedSource); button.title = protectedSource ? "Protected functional structure is preserved; its visual styles remain editable" : atRoot ? "Select an element to use this action" : command === "delete" ? "Delete selected element (Undo is available)" : "Duplicate";
     }
   }
 
@@ -644,7 +687,7 @@ export class OnsiteCompositionEditor {
 
   private renderResizeHandles(): void {
     this.handles.forEach(handle => handle.remove()); this.handles = [];
-    const cell = this.getSelectedCell(); const parent = cell ? parentCell(this.document, cell.id) : null; if (!cell || !parent?.children) return;
+    const cell = this.getSelectedCell(); const parent = cell ? parentCell(this.document, cell.id) : null; if (!cell || !parent?.children || this.source && !this.source.canResize(parent.id)) return;
     const index = parent.children.indexOf(cell);
     for (const firstIndex of [index - 1, index]) {
       const first = parent.children[firstIndex]; const second = parent.children[firstIndex + 1]; if (!first || !second) continue;

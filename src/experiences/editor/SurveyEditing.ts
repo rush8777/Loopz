@@ -1,3 +1,6 @@
+import postcss from "postcss";
+import { remapSourceSelector } from "./SourceStyles";
+import { isSourceAuthored } from "./SourceAuthoring";
 import type { SurveyQuestion, SurveyStep } from '../types';
 import { applyOnsiteDocument, cloneOnsite, createOnsiteSurveyDocument, duplicateDocument, listBlocks, onsiteDocumentFromBuilder, onsiteId } from '../onsite/OnsiteDocument';
 
@@ -27,6 +30,20 @@ export function duplicateSurveyStep(source: SurveyStep, submitLabel: string): Su
   if (!document || !copy.builder) throw new Error('This Survey step is not an on-site document.');
   const duplicated = duplicateDocument(document);
   listBlocks(duplicated.root).forEach(block => { if (block.type === 'question') block.questionId = questions.get(block.questionId)!; });
+  if (isSourceAuthored(copy.builder)) {
+    const template = globalThis.document.createElement('template'); template.innerHTML = copy.builder.html;
+    template.content.querySelectorAll<HTMLElement>('[data-movcues-question-id]').forEach(node => {
+      const id = questions.get(node.dataset.movcuesQuestionId!)!; node.dataset.movcuesQuestionId = id;
+      node.querySelectorAll<HTMLElement>('[data-movcues-option-id]').forEach(option => { option.dataset.movcuesOptionId = options.get(`${id}:${option.dataset.movcuesOptionId}`) ?? option.dataset.movcuesOptionId; });
+    });
+    copy.builder.html = template.innerHTML;
+    const css = postcss.parse(copy.builder.css);
+    const optionIds = new Map<string, string>(); for (const [key, id] of options) optionIds.set(key.slice(key.indexOf(":") + 1), id);
+    css.walkRules(rule => { rule.selector = remapSourceSelector(remapSourceSelector(rule.selector, "data-movcues-question-id", questions), "data-movcues-option-id", optionIds); });
+    copy.builder.css = css.toString();
+    const metadata = copy.builder.projectData.movcues as Record<string, unknown>; metadata.onsiteDocument = duplicated;
+    return copy;
+  }
   copy.content = applyOnsiteDocument(copy.builder, duplicated, 'survey', { questions: copy.questions, submitLabel }).content;
   return copy;
 }

@@ -19,6 +19,7 @@ export declare class SurveyEditor {
     private dock;
     private style;
     constructor(root: ShadowRoot, survey: SurveyConfig, options: Options);
+    setDefinition(survey: SurveyConfig): void;
     sync(): void;
     private destinations;
     private ruleMarkup;

@@ -1,3 +1,4 @@
+import { isSourceAuthored } from "./SourceAuthoring";
 import type { SurveyBranchRule, SurveyConfig, SurveyQuestion } from '../types';
 import { applyOnsiteDocument, cloneOnsite, onsiteDocumentFromBuilder, onsiteId } from '../onsite/OnsiteDocument';
 import { QUESTION_TYPES } from '../survey/SurveyMarkup';
@@ -36,9 +37,16 @@ export class SurveyEditor {
     root.addEventListener('change', this.onChange); root.addEventListener('click', this.onClick);
   }
 
+  setDefinition(survey: SurveyConfig): void { this.survey = survey; }
+
   sync(): void {
     const step = this.survey.steps[this.options.index()], composer = this.options.composer();
     if (!step) return;
+    const source = isSourceAuthored(step.builder);
+    this.questionHost.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-survey-question-type],[data-survey-rating-min],[data-survey-rating-max]').forEach(control => {
+      control.disabled = source;
+      control.title = source ? 'Source question type and rating range preserve their canonical answer structure. Labels, input settings, typography and color remain editable.' : '';
+    });
     this.dock.hidden = !this.options.canEdit();
     this.value('[data-survey-step-heading]', step.content.heading);
     this.check('[data-survey-allow-back]', this.survey.allowBack); this.check('[data-survey-show-progress]', this.survey.showProgress); this.value('[data-survey-submit-label]', this.survey.submitLabel);
@@ -136,7 +144,11 @@ export class SurveyEditor {
   private defaultRule(question: SurveyQuestion): SurveyBranchRule {
     return { questionId: question.id, operator: question.type === 'multiple_choice' ? 'includes' : 'equals', value: 'options' in question ? question.options[0].id : question.type === 'rating' ? question.min : question.type === 'nps' ? 0 : '', nextStepId: this.survey.steps[this.options.index() + 1]?.id ?? 'submit' };
   }
-  private recompile(): void { this.survey.steps.forEach(step => { const doc = onsiteDocumentFromBuilder(step.builder); if (doc && step.builder) Object.assign(step.content, applyOnsiteDocument(step.builder, doc, 'survey', { questions: step.questions, submitLabel: this.survey.submitLabel }).content); }); }
+  private recompile(): void { this.survey.steps.forEach(step => { const doc = onsiteDocumentFromBuilder(step.builder); if (isSourceAuthored(step.builder) && step.builder) {
+      const template = document.createElement('template'); template.innerHTML = step.builder.html;
+      const submit = template.content.querySelector('[data-movcues-survey-action="submit"]'); if (submit) submit.textContent = this.survey.submitLabel;
+      step.builder.html = template.innerHTML;
+    } else if (doc && step.builder) Object.assign(step.content, applyOnsiteDocument(step.builder, doc, 'survey', { questions: step.questions, submitLabel: this.survey.submitLabel }).content); }); }
   private value(selector: string, value: string): void { const input = this.root.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(selector); if (input && this.root.activeElement !== input) input.value = value; }
   private check(selector: string, value: boolean): void { const input = this.root.querySelector<HTMLInputElement>(selector); if (input) input.checked = value; }
   destroy(): void { this.root.removeEventListener('change', this.onChange); this.root.removeEventListener('click', this.onClick); this.questionHost.remove(); this.stepHost.remove(); this.dock.remove(); this.style.remove(); }

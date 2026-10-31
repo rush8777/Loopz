@@ -116,7 +116,7 @@ export function applySurveyAiProposal(source: RuntimeWidgetDefinition & { target
   if (replacement) {
     if (proposal.operations.length !== 1 || !replacement.stepId) throw new Error("A Survey source replacement must be one atomic step-scoped operation.");
     const owner = step(replacement.stepId); if (!owner.builder) throw new Error("Survey step has no builder source.");
-    applySourceMarkup(owner.builder, owner.content, replacement, { widgetType: "survey", guide: false, survey: { questions: owner.questions.map(question => ({ id: question.id, type: question.type })) } });
+    applySourceMarkup(owner.builder, owner.content, replacement, { widgetType: "survey", guide: false, survey: { questions: owner.questions } });
     const branchErrors = surveyBranchErrors(survey); if (branchErrors.length) throw new Error(branchErrors.join(" "));
     return { definition, affectedStepIds: [owner.id], order: survey.steps.map(value => value.id), warnings: ["This Survey step now uses Source mode; its protected questions and controls remain canonical."] };
   }

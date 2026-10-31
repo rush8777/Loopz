@@ -1,3 +1,4 @@
+import { EditorHistory } from "./EditorHistory";
 import { ChecklistEditor } from "./ChecklistEditor";
 import type { EditorChecklistDefinition } from "../types";
 import { isChecklistDefinition } from "../types";
@@ -73,6 +74,11 @@ export class EditorModeController {
   private mode: EditorMode = "design";
   private dirty = false;
   private editGeneration = 0;
+  private history = new EditorHistory<{ definition: EditorDefinition | EditorChecklistDefinition; selection: CompositionSelection | null; stepIndex: number }>(value => JSON.stringify(value.definition));
+  private historyTyping = false;
+  private restoringHistory = false;
+  private preferredSelection: CompositionSelection | null = null;
+  private aiPreviewLocation: { index: number; selection: CompositionSelection | null } | null = null;
   private saveState: "clean" | "dirty" | "saving" | "failed" | "conflict" | "expired" = "clean";
   private recoveryDraft: string | null = null;
   private lifecycle = 0;
@@ -89,20 +95,12 @@ export class EditorModeController {
   private aiPreviewOriginal: (RuntimeGuideDefinition & { targeting: ExperienceTargeting }) | null = null;
   private aiPreviewCandidate: (RuntimeGuideDefinition & { targeting: ExperienceTargeting }) | null = null;
   private aiPreviewReturnMode: EditorMode | null = null;
-  private guideAiUndo: Array<RuntimeGuideDefinition & { targeting: ExperienceTargeting }> = [];
-  private guideAiRedo: Array<RuntimeGuideDefinition & { targeting: ExperienceTargeting }> = [];
   private surveyAiPreviewOriginal: (RuntimeWidgetDefinition & { targeting: ExperienceTargeting }) | null = null;
   private surveyAiPreviewCandidate: (RuntimeWidgetDefinition & { targeting: ExperienceTargeting }) | null = null;
-  private surveyAiUndo: Array<RuntimeWidgetDefinition & { targeting: ExperienceTargeting }> = [];
-  private surveyAiRedo: Array<RuntimeWidgetDefinition & { targeting: ExperienceTargeting }> = [];
   private checklistAiPreviewOriginal: EditorChecklistDefinition | null = null;
   private checklistAiPreviewCandidate: EditorChecklistDefinition | null = null;
-  private checklistAiUndo: EditorChecklistDefinition[] = [];
-  private checklistAiRedo: EditorChecklistDefinition[] = [];
   private widgetAiPreviewOriginal: (RuntimeWidgetDefinition & { targeting: ExperienceTargeting }) | null = null;
   private widgetAiPreviewCandidate: (RuntimeWidgetDefinition & { targeting: ExperienceTargeting }) | null = null;
-  private widgetAiUndo: Array<RuntimeWidgetDefinition & { targeting: ExperienceTargeting }> = [];
-  private widgetAiRedo: Array<RuntimeWidgetDefinition & { targeting: ExperienceTargeting }> = [];
   private aiAbort: AbortController | null = null;
   private aiRequestGeneration = 0;
   private persistBeforePageLeave = () => this.updateContinuation();
@@ -160,6 +158,7 @@ export class EditorModeController {
     this.draft = draft;
     this.checklist = isChecklistDefinition(draft.version.definition) ? draft.version.definition : null;
     this.definition = this.checklist ? checklistEditorAdapter(this.checklist) : draft.version.definition as EditorDefinition;
+    this.history.reset({ definition: cloneOnsite(this.checklist ?? this.definition), selection: null, stepIndex: this.stepIndex });
     this.guide = isGuideDefinition(this.definition) ? this.definition : null;
     this.survey = !this.guide && draft.experience.widgetType === "survey" ? (this.definition as RuntimeWidgetDefinition).survey ?? null : null;
     const selectableSteps = this.guide?.steps ?? this.survey?.steps;
@@ -596,7 +595,7 @@ export class EditorModeController {
 
   private duplicateGuideStep(): void {
     if (!this.guide || !this.flushContent()) return; const source = this.guide.steps[this.stepIndex]; const copy = cloneOnsite(source); copy.id = editorId("step"); copy.label = `${source.label || source.content.heading || "Step"} copy`;
-    const document = onsiteDocumentFromBuilder(copy.builder); if (document && copy.builder) { const next = duplicateDocument(document); const compiled = applyOnsiteDocument(copy.builder, next, getGuideStepPattern(copy)); copy.content = compiled.content; }
+    const document = onsiteDocumentFromBuilder(copy.builder); if (document && copy.builder && !isSourceAuthored(copy.builder)) { const next = duplicateDocument(document); const compiled = applyOnsiteDocument(copy.builder, next, getGuideStepPattern(copy)); copy.content = compiled.content; }
     this.guide.steps.splice(this.stepIndex + 1, 0, copy); this.stepIndex++; this.changed(); this.refreshStepBar();
   }
 
@@ -728,7 +727,8 @@ export class EditorModeController {
 
   private changed(render = true, preserveAiHistory = false): void {
     if (this.saveState === "expired") return;
-    if (!preserveAiHistory) { this.guideAiUndo = []; this.guideAiRedo = []; this.surveyAiUndo = []; this.surveyAiRedo = []; this.checklistAiUndo = []; this.checklistAiRedo = []; }
+    if (!render && !this.compositionEditor?.isComposing()) this.compositionEditor?.flush();
+    this.recordHistory();
     this.dirty = true; this.editGeneration++;
     this.updateContinuation();
     if (render) this.syncPanel(); else { this.syncContentInspector(); this.syncCompositionInspector(); }
@@ -746,7 +746,7 @@ export class EditorModeController {
     const errors = this.contentEditor?.getValidation() ?? [];
     if (this.compositionEditor && !this.compositionEditor.flush()) { const compositionErrors = this.compositionEditor.getValidation(); this.showValidation(compositionErrors); return false; }
     const allErrors = [...errors, ...(this.compositionEditor?.getValidation() ?? []), ...(this.guide?.steps.flatMap(guideStepConfigurationErrors) ?? []), ...(this.survey ? surveyBranchErrors(this.survey) : [])];
-    this.showValidation(allErrors); return !allErrors.length;
+    this.showValidation(allErrors); if (!allErrors.length) this.recordHistory(); return !allErrors.length;
   }
 
   private showValidation(errors: string[]): void {
@@ -910,23 +910,19 @@ export class EditorModeController {
     // Only the authoring instance moves; visitor rendering and positioning stay intact.
     if (document.body && !document.body.contains(host)) document.body.appendChild(host);
     this.contentEditor?.destroy(); this.compositionEditor?.destroy();
-    if (isSourceAuthored(builder)) {
-      this.contentEditor = null; this.compositionEditor = null; this.componentSelection = null;
-      this.compositionSelection = { kind: "step", label: "Source-authored widget" };
-      this.root?.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('main button:not([data-inspector-tab]):not([data-ai-panel] *),main input:not([data-ai-panel] *),main select:not([data-ai-panel] *)').forEach(control => { if (!control.disabled) { control.disabled = true; control.dataset.movcuesSourceDisabled = ""; } });
-      this.setText("[data-mode-hint]", "Source mode · full HTML/CSS is preserved exactly; use Movcues AI to redesign it."); this.syncAiPanel(); return;
-    }
-    this.root?.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('[data-movcues-source-disabled]').forEach(control => { control.disabled = false; delete control.dataset.movcuesSourceDisabled; });
     try {
         this.compositionEditor = new OnsiteCompositionEditor(host.shadowRoot, builder, content, this.checklist ? "checklist" : this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : this.draft.experience.widgetType ?? "modal", Boolean(this.guide), {
           onPatch: () => { this.checklistEditor?.applyDesign(this.draft!.experience.id); },
-          onChange: () => { this.syncOnsiteAnchoredPointer(host.shadowRoot!, builder); this.changed(false); },
+          onChange: typing => { this.historyTyping = Boolean(typing); try { this.syncOnsiteAnchoredPointer(host.shadowRoot!, builder); this.changed(false); } finally { this.historyTyping = false; } },
           onValidation: errors => this.showValidation(errors),
           onImageStatus: message => this.setText("[data-image-status]", message),
-          onSelectionChange: selection => { if(this.checklist && selection.kind !== "step"){this.root?.querySelector("aside")?.classList.remove("minimized");this.root?.querySelector("[data-minimize]")?.setAttribute("aria-expanded","true");} this.compositionSelection = selection; this.syncCompositionInspector(); this.syncAiPanel(); },
+          onSelectionChange: selection => { this.history.endGroup(); if(this.checklist && selection.kind !== "step"){this.root?.querySelector("aside")?.classList.remove("minimized");this.root?.querySelector("[data-minimize]")?.setAttribute("aria-expanded","true");} this.compositionSelection = selection; this.recordHistory(); this.syncCompositionInspector(); this.syncAiPanel(); },
+          onUndo: () => this.globalUndo(), onRedo: () => this.globalRedo(),
+          canUndo: () => this.history.canUndo(), canRedo: () => this.history.canRedo(), onTransaction: () => this.recordHistory(),
         }, this.survey ? { config: this.survey, step: this.survey.steps[this.stepIndex] } : undefined, this.checklist ?? undefined);
-        this.compositionEditor.start(); this.syncOnsiteAnchoredPointer(host.shadowRoot, builder); return;
+        this.compositionEditor.start(); if (this.preferredSelection) { this.compositionEditor.restoreSelection(this.preferredSelection); this.preferredSelection = null; } this.syncOnsiteAnchoredPointer(host.shadowRoot, builder); return;
     } catch (error) { this.showValidation([error instanceof Error ? error.message : "This layout could not be converted safely."]); this.compositionEditor = null; }
+    if (isSourceAuthored(builder)) { this.contentEditor = null; this.compositionSelection = { kind: "step", label: "Source design" }; this.syncCompositionInspector(); this.syncAiPanel(); return; }
     this.contentEditor = new OnsiteContentEditor(host.shadowRoot, builder, content, {
       onChange: () => this.changed(false),
       onValidation: errors => this.showValidation(errors),
@@ -979,8 +975,8 @@ export class EditorModeController {
     this.surveyEditor?.sync();this.checklistEditor?.sync();
     if (!this.root) return; const editor = this.compositionEditor; const selection = this.compositionSelection; const inspector = this.root.querySelector<HTMLElement>("[data-composition-inspector]"); if (!inspector) return;
     const globalUndo = this.root.querySelector<HTMLButtonElement>("[data-global-undo]"); const globalRedo = this.root.querySelector<HTMLButtonElement>("[data-global-redo]");
-    if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !this.surveyAiUndo.length && !this.checklistAiUndo.length && !this.widgetAiUndo.length && !editor?.canUndo() && !this.contentEditor?.canUndo();
-    if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !this.surveyAiRedo.length && !this.checklistAiRedo.length && !this.widgetAiRedo.length && !editor?.canRedo() && !this.contentEditor?.canRedo();
+    if (globalUndo) globalUndo.disabled = !this.history.canUndo() && !this.contentEditor?.canUndo();
+    if (globalRedo) globalRedo.disabled = !this.history.canRedo() && !this.contentEditor?.canRedo();
     inspector.hidden = this.mode !== "design" || !editor || !selection; this.root.querySelector<HTMLElement>("[data-content-inspector]")!.hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
     if (!editor || !selection) return; if (selection.kind === "step") this.syncGuideBehavior(); this.setText("[data-composition-label]", selection.label);
     this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { if (selection.kind !== "step") group.hidden = true; });
@@ -998,7 +994,7 @@ export class EditorModeController {
     }
     this.hideChecklistWidgetControls();
     const undo = this.root.querySelector<HTMLButtonElement>("[data-v2-undo]"); if (undo) undo.disabled = !editor.canUndo(); const redo = this.root.querySelector<HTMLButtonElement>("[data-v2-redo]"); if (redo) redo.disabled = !editor.canRedo();
-    if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !this.surveyAiUndo.length && !this.checklistAiUndo.length && !this.widgetAiUndo.length && !editor.canUndo(); if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !this.surveyAiRedo.length && !this.checklistAiRedo.length && !this.widgetAiRedo.length && !editor.canRedo();
+    if (globalUndo) globalUndo.disabled = !editor.canUndo(); if (globalRedo) globalRedo.disabled = !editor.canRedo();
   }
 
   private setInspectorTab(tab: "properties" | "theme" | "ai"): void {
@@ -1051,9 +1047,10 @@ export class EditorModeController {
     try {
       const document = onsiteDocumentFromBuilder(builder); if (!document) throw new Error("This draft has no recoverable on-site document.");
       const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting }, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.ensureThemeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : this.survey ? surveyAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, definition: this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }, currentStepId: this.survey.steps[this.stepIndex].id, selection: this.compositionSelection, scope: this.compositionSelection.kind === "step" ? "survey" : "step" }) : this.checklist ? checklistAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, checklist: this.checklist, references: this.draft.references ?? { guides: [], segments: [] }, selection: this.compositionSelection, currentView: this.checklistEditor?.getView() ?? "expanded", theme: resolvedTheme(this.ensureThemeState()) }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document, builder });
+      const requestEditGeneration = this.editGeneration, requestSelectionKey = this.aiSelectionKey();
       const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context }, abort.signal);
       if (generation !== this.aiRequestGeneration) return;
-      this.aiConversationId = response.conversationId; this.aiProposal = response.proposal ? { value: response.proposal as EditorAiProposal | SurveyAiProposal | ChecklistAiProposal, revision: response.revision, generation: this.editGeneration, selectionKey: this.aiSelectionKey() } : null;
+      this.aiConversationId = response.conversationId; this.aiProposal = response.proposal ? { value: response.proposal as EditorAiProposal | SurveyAiProposal | ChecklistAiProposal, revision: response.revision, generation: requestEditGeneration, selectionKey: requestSelectionKey } : null;
       this.aiMessages.push({ role: "assistant", text: response.markdown.trim() || "Proposal generated." }); this.setText("[data-ai-status]", ""); this.syncAiPanel();
     } catch (error) {
       if (generation === this.aiRequestGeneration && !abort.signal.aborted) { if (error instanceof DraftConflictError) this.saveState = "conflict"; if (error instanceof EditorAiRequestError && error.conversationId) this.aiConversationId = error.conversationId; this.setText("[data-ai-status]", error instanceof Error ? error.message : "Movcues AI could not complete this request."); this.showSaveState(); }
@@ -1064,20 +1061,20 @@ export class EditorModeController {
 
   private applyAiProposal(): void {
     if (!this.aiProposal || !this.draft || this.aiProposalIsStale()) { this.syncAiPanel(); return; }
-    if (this.checklist) { try { const before = cloneOnsite(this.checklistAiPreviewOriginal ?? this.checklist), candidate = this.checklistAiPreviewCandidate ?? applyChecklistAiProposal(before, this.aiProposal.value as ChecklistAiProposal, this.draft.references ?? { guides: [], segments: [] }).definition; this.checklistAiUndo.push(before); if (this.checklistAiUndo.length > 20) this.checklistAiUndo.shift(); this.checklistAiRedo = []; this.setChecklistDefinition(cloneOnsite(candidate)); this.checklistAiPreviewOriginal = null; this.checklistAiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.aiProposal = null; this.changed(true, true); this.setText("[data-ai-status]", "Applied. Undo restores the complete Checklist in one step."); this.syncAiPanel(); } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Checklist proposal is invalid."); } return; }
+    if (this.checklist) { try { const before = cloneOnsite(this.checklistAiPreviewOriginal ?? this.checklist), candidate = this.checklistAiPreviewCandidate ?? applyChecklistAiProposal(before, this.aiProposal.value as ChecklistAiProposal, this.draft.references ?? { guides: [], segments: [] }).definition;  this.setChecklistDefinition(cloneOnsite(candidate)); this.checklistAiPreviewOriginal = null; this.checklistAiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.aiProposal = null; this.finishAiApply(); this.setText("[data-ai-status]", "Applied. Undo restores the complete Checklist in one step."); this.syncAiPanel(); } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Checklist proposal is invalid."); } return; }
     if (this.survey) {
-      try { const before = cloneOnsite(this.surveyAiPreviewOriginal ?? this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }); const candidate = this.surveyAiPreviewCandidate ?? applySurveyAiProposal(before, this.aiProposal.value as SurveyAiProposal).definition; this.surveyAiUndo.push(before); if (this.surveyAiUndo.length > 20) this.surveyAiUndo.shift(); this.surveyAiRedo = []; this.setSurveyDefinition(cloneOnsite(candidate)); this.surveyAiPreviewOriginal = null; this.surveyAiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.aiProposal = null; this.changed(true, true); this.refreshStepBar(); this.setText("[data-ai-status]", "Applied. Undo restores the complete Survey in one step."); this.syncAiPanel(); } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Survey proposal is invalid."); } return;
+      try { const before = cloneOnsite(this.surveyAiPreviewOriginal ?? this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }); const candidate = this.surveyAiPreviewCandidate ?? applySurveyAiProposal(before, this.aiProposal.value as SurveyAiProposal).definition;  this.setSurveyDefinition(cloneOnsite(candidate)); this.surveyAiPreviewOriginal = null; this.surveyAiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.aiProposal = null; this.finishAiApply(); this.refreshStepBar(); this.setText("[data-ai-status]", "Applied. Undo restores the complete Survey in one step."); this.syncAiPanel(); } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Survey proposal is invalid."); } return;
     }
     if (!this.guide) {
-      if (this.aiProposal.value.operations.some(operation => operation.type === "replace_markup")) { try { const before = cloneOnsite(this.widgetAiPreviewOriginal ?? this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }), candidate = this.widgetAiPreviewCandidate ?? this.applyWidgetSourceProposal(before); this.widgetAiUndo.push(before); if (this.widgetAiUndo.length > 20) this.widgetAiUndo.shift(); this.widgetAiRedo = []; this.definition = cloneOnsite(candidate); this.widgetAiPreviewOriginal = null; this.widgetAiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.aiProposal = null; this.changed(true, true); this.setText("[data-ai-status]", "Applied atomically. This widget is now in Source mode; Undo restores the prior structured design."); this.syncAiPanel(); } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The source proposal is invalid."); } return; }
+      if (this.aiProposal.value.operations.some(operation => operation.type === "replace_markup")) { try { const before = cloneOnsite(this.widgetAiPreviewOriginal ?? this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }), candidate = this.widgetAiPreviewCandidate ?? this.applyWidgetSourceProposal(before);  this.definition = cloneOnsite(candidate); this.widgetAiPreviewOriginal = null; this.widgetAiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.aiProposal = null; this.finishAiApply(); this.setText("[data-ai-status]", "Applied. You can continue editing this design directly. Undo restores the entire proposal."); this.syncAiPanel(); } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The source proposal is invalid."); } return; }
       if (this.compositionEditor?.applyAiProposal(this.aiProposal.value as EditorAiProposal)) { this.aiProposal = null; this.setText("[data-ai-status]", "Applied. Use Undo to revert the entire proposal."); this.syncAiPanel(); } return;
     }
     try {
       const before = cloneOnsite(this.aiPreviewOriginal ?? this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting });
       const candidate = this.aiPreviewCandidate ?? applyGuideAiProposal(before, this.aiProposal.value as EditorAiProposal, this.aiResolvedTargets).guide;
-      this.guideAiUndo.push(before); if (this.guideAiUndo.length > 20) this.guideAiUndo.shift(); this.guideAiRedo = [];
+
       this.setGuideDefinition(cloneOnsite(candidate)); this.aiPreviewOriginal = null; this.aiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.aiProposal = null; this.aiResolvedTargets.clear();
-      this.changed(true, true); this.refreshStepBar(); this.setText("[data-ai-status]", "Applied. Undo restores the complete Guide in one step."); this.syncAiPanel();
+      this.finishAiApply(); this.refreshStepBar(); this.setText("[data-ai-status]", "Applied. Undo restores the complete Guide in one step."); this.syncAiPanel();
     } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Guide proposal is invalid."); }
   }
 
@@ -1097,7 +1094,7 @@ export class EditorModeController {
   private previewAiGuideProposal(): void {
     if (!this.aiProposal || !this.guide || !this.draft || this.aiProposal.revision !== this.draft.version.revision || this.aiProposal.generation !== this.editGeneration) return;
     try {
-      this.discardAiPreview(); const original = cloneOnsite(this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting }); this.aiPreviewReturnMode = this.mode;
+      this.discardAiPreview(); this.aiPreviewLocation = { index: this.stepIndex, selection: this.compositionSelection }; const original = cloneOnsite(this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting }); this.aiPreviewReturnMode = this.mode;
       const result = applyGuideAiProposal(original, this.aiProposal.value as EditorAiProposal, this.aiResolvedTargets); this.aiPreviewOriginal = original; this.aiPreviewCandidate = cloneOnsite(result.guide);
       this.setGuideDefinition(cloneOnsite(result.guide)); this.stepIndex = 0; this.refreshStepBar(); this.startGuidePreview(); this.setText("[data-ai-status]", "Previewing the complete proposed Guide. Apply or Discard to finish.");
     } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Guide proposal is invalid."); }
@@ -1114,7 +1111,7 @@ export class EditorModeController {
 
   private setGuideDefinition(value: RuntimeGuideDefinition & { targeting: ExperienceTargeting }): void { this.guide = value; this.definition = value; }
 
-  private setSurveyDefinition(value: RuntimeWidgetDefinition & { targeting: ExperienceTargeting }): void { this.definition = value; this.survey = value.survey ?? null; }
+  private setSurveyDefinition(value: RuntimeWidgetDefinition & { targeting: ExperienceTargeting }): void { this.definition = value; this.survey = value.survey ?? null; if (this.survey) this.surveyEditor?.setDefinition(this.survey); }
 
   private setChecklistDefinition(value: EditorChecklistDefinition): void { this.checklist = value; this.definition = checklistEditorAdapter(value); this.checklistEditor?.setDefinition(value); }
 
@@ -1132,35 +1129,75 @@ export class EditorModeController {
 
   private previewAiWidgetSourceProposal(): void {
     if (!this.aiProposal || !this.draft || !this.definition || this.aiProposalIsStale()) return;
-    try { this.discardAiPreview(); const original = cloneOnsite(this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }), candidate = this.applyWidgetSourceProposal(original); this.aiPreviewReturnMode = this.mode; this.widgetAiPreviewOriginal = original; this.widgetAiPreviewCandidate = cloneOnsite(candidate); this.definition = cloneOnsite(candidate); this.setMode("preview"); this.setText("[data-ai-status]", "Previewing the complete source-authored design. Apply or Discard to finish."); }
+    try { this.discardAiPreview(); this.aiPreviewLocation = { index: this.stepIndex, selection: this.compositionSelection }; const original = cloneOnsite(this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }), candidate = this.applyWidgetSourceProposal(original); this.aiPreviewReturnMode = this.mode; this.widgetAiPreviewOriginal = original; this.widgetAiPreviewCandidate = cloneOnsite(candidate); this.definition = cloneOnsite(candidate); this.setMode("preview"); this.setText("[data-ai-status]", "Previewing the complete source-authored design. Apply or Discard to finish."); }
     catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The source proposal is invalid."); }
   }
 
-  private previewAiChecklistProposal(): void { if (!this.aiProposal || !this.checklist || !this.draft || this.aiProposalIsStale()) return; try { this.discardAiPreview(); const original = cloneOnsite(this.checklist), result = applyChecklistAiProposal(original, this.aiProposal.value as ChecklistAiProposal, this.draft.references ?? { guides: [], segments: [] }); this.aiPreviewReturnMode = this.mode; this.checklistAiPreviewOriginal = original; this.checklistAiPreviewCandidate = cloneOnsite(result.definition); this.setChecklistDefinition(cloneOnsite(result.definition)); this.setMode("preview"); this.setText("[data-ai-status]", `Previewing the complete proposed Checklist.${result.warnings.length ? ` ${result.warnings.join(" ")}` : ""} Apply or Discard to finish.`); } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Checklist proposal is invalid."); } }
+  private previewAiChecklistProposal(): void { if (!this.aiProposal || !this.checklist || !this.draft || this.aiProposalIsStale()) return; try { this.discardAiPreview(); this.aiPreviewLocation = { index: this.stepIndex, selection: this.compositionSelection }; const original = cloneOnsite(this.checklist), result = applyChecklistAiProposal(original, this.aiProposal.value as ChecklistAiProposal, this.draft.references ?? { guides: [], segments: [] }); this.aiPreviewReturnMode = this.mode; this.checklistAiPreviewOriginal = original; this.checklistAiPreviewCandidate = cloneOnsite(result.definition); this.setChecklistDefinition(cloneOnsite(result.definition)); this.setMode("preview"); this.setText("[data-ai-status]", `Previewing the complete proposed Checklist.${result.warnings.length ? ` ${result.warnings.join(" ")}` : ""} Apply or Discard to finish.`); } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Checklist proposal is invalid."); } }
 
   private aiSelectionKey(): string { return JSON.stringify({ selection: this.compositionSelection, checklistView: this.checklistEditor?.getView() }); }
   private aiProposalIsStale(): boolean { return !this.aiProposal || this.aiProposal.revision !== this.draft?.version.revision || this.aiProposal.generation !== this.editGeneration || !this.aiPreviewOriginal && !this.surveyAiPreviewOriginal && !this.checklistAiPreviewOriginal && !this.widgetAiPreviewOriginal && this.aiProposal.selectionKey !== this.aiSelectionKey(); }
 
   private previewAiSurveyProposal(): void {
     if (!this.aiProposal || !this.survey || !this.draft || this.aiProposal.revision !== this.draft.version.revision || this.aiProposal.generation !== this.editGeneration) return;
-    try { this.discardAiPreview(); const original = cloneOnsite(this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }), result = applySurveyAiProposal(original, this.aiProposal.value as SurveyAiProposal); this.aiPreviewReturnMode = this.mode; this.surveyAiPreviewOriginal = original; this.surveyAiPreviewCandidate = cloneOnsite(result.definition); this.setSurveyDefinition(cloneOnsite(result.definition)); this.stepIndex = 0; this.refreshStepBar(); this.setMode("preview"); this.setText("[data-ai-status]", `Previewing the complete proposed Survey.${result.warnings.length ? ` ${result.warnings.join(" ")}` : ""} Apply or Discard to finish.`); }
+    try { this.discardAiPreview(); this.aiPreviewLocation = { index: this.stepIndex, selection: this.compositionSelection }; const original = cloneOnsite(this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }), result = applySurveyAiProposal(original, this.aiProposal.value as SurveyAiProposal); this.aiPreviewReturnMode = this.mode; this.surveyAiPreviewOriginal = original; this.surveyAiPreviewCandidate = cloneOnsite(result.definition); this.setSurveyDefinition(cloneOnsite(result.definition)); this.stepIndex = 0; this.refreshStepBar(); this.setMode("preview"); this.setText("[data-ai-status]", `Previewing the complete proposed Survey.${result.warnings.length ? ` ${result.warnings.join(" ")}` : ""} Apply or Discard to finish.`); }
     catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Survey proposal is invalid."); }
   }
 
+  private recordHistory(): void {
+    if (this.restoringHistory || !this.definition || this.compositionEditor?.isComposing() || this.widgetAiPreviewOriginal || this.aiPreviewOriginal || this.surveyAiPreviewOriginal || this.checklistAiPreviewOriginal) return;
+    this.history.record({ definition: cloneOnsite(this.checklist ?? this.definition), selection: this.compositionSelection, stepIndex: this.stepIndex }, this.historyTyping);
+  }
+
+  private finishAiApply(): void {
+    const location = this.aiPreviewLocation;
+    this.preferredSelection = location?.selection ?? this.compositionSelection;
+    if (location) this.stepIndex = location.index;
+    this.aiPreviewLocation = null;
+    this.contentEditor?.destroy(); this.contentEditor = null;
+    this.compositionEditor?.destroy(); this.compositionEditor = null;
+    this.mode = "design"; this.guidePreviewComplete = false;
+    this.changed(true, true);
+  }
+
   private globalUndo(): void {
-    if (!this.guide && !this.survey && !this.checklist && this.widgetAiUndo.length && this.flushContent()) { const previous = this.widgetAiUndo.pop()!; this.widgetAiRedo.push(cloneOnsite(this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting })); this.definition = previous; this.changed(true, true); return; }
-    if (this.guide && this.guideAiUndo.length && this.flushContent()) { const previous = this.guideAiUndo.pop()!; this.guideAiRedo.push(cloneOnsite(this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting })); this.setGuideDefinition(previous); this.stepIndex = clampStep(this.stepIndex, previous.steps.length); this.changed(true, true); this.refreshStepBar(); return; }
-    if (this.survey && this.surveyAiUndo.length && this.flushContent()) { const previous = this.surveyAiUndo.pop()!; this.surveyAiRedo.push(cloneOnsite(this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting })); this.setSurveyDefinition(previous); this.stepIndex = clampStep(this.stepIndex, this.survey!.steps.length); this.changed(true, true); this.refreshStepBar(); return; }
-    if (this.checklist && this.checklistAiUndo.length && this.flushContent()) { const previous = this.checklistAiUndo.pop()!; this.checklistAiRedo.push(cloneOnsite(this.checklist)); this.setChecklistDefinition(previous); this.changed(true, true); return; }
-    this.compositionEditor?.undo(); this.contentEditor?.undo(); this.syncContentInspector();
+    if (!this.flushContent()) return;
+    this.recordHistory(); const value = this.history.undo();
+    if (value) this.restoreHistory(value); else this.contentEditor?.undo();
   }
 
   private globalRedo(): void {
-    if (!this.guide && !this.survey && !this.checklist && this.widgetAiRedo.length && this.flushContent()) { const next = this.widgetAiRedo.pop()!; this.widgetAiUndo.push(cloneOnsite(this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting })); this.definition = next; this.changed(true, true); return; }
-    if (this.guide && this.guideAiRedo.length && this.flushContent()) { const next = this.guideAiRedo.pop()!; this.guideAiUndo.push(cloneOnsite(this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting })); this.setGuideDefinition(next); this.stepIndex = clampStep(this.stepIndex, next.steps.length); this.changed(true, true); this.refreshStepBar(); return; }
-    if (this.survey && this.surveyAiRedo.length && this.flushContent()) { const next = this.surveyAiRedo.pop()!; this.surveyAiUndo.push(cloneOnsite(this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting })); this.setSurveyDefinition(next); this.stepIndex = clampStep(this.stepIndex, this.survey!.steps.length); this.changed(true, true); this.refreshStepBar(); return; }
-    if (this.checklist && this.checklistAiRedo.length && this.flushContent()) { const next = this.checklistAiRedo.pop()!; this.checklistAiUndo.push(cloneOnsite(this.checklist)); this.setChecklistDefinition(next); this.changed(true, true); return; }
-    this.compositionEditor?.redo(); this.contentEditor?.redo(); this.syncContentInspector();
+    if (!this.flushContent()) return;
+    const value = this.history.redo();
+    if (value) this.restoreHistory(value); else this.contentEditor?.redo();
+  }
+
+  private restoreHistory(entry: { definition: EditorDefinition | EditorChecklistDefinition; selection: CompositionSelection | null; stepIndex: number }): void {
+    const value = entry.definition;
+    this.restoringHistory = true;
+    try {
+      if (this.compositionEditor && !this.checklist && entry.stepIndex === this.stepIndex) {
+        const current = cloneOnsite(this.definition!), target = cloneOnsite(value) as EditorDefinition;
+        const owner = (definition: EditorDefinition) => "steps" in definition ? definition.steps[this.stepIndex] : definition.survey ? definition.survey.steps[this.stepIndex] : definition;
+        const a = owner(current), b = owner(target);
+        if (a?.builder && b?.builder) {
+          const builder = b.builder, content = b.content;
+          a.builder = b.builder; a.content = b.content;
+          if (JSON.stringify(current) === JSON.stringify(target)) {
+            this.compositionEditor.restoreBuilder(builder, content); this.compositionEditor.restoreSelection(entry.selection ?? { kind: "step", label: "Step" }); this.changed(false, true); return;
+          }
+        }
+      }
+      this.preferredSelection = entry.selection; this.stepIndex = entry.stepIndex;
+      this.compositionEditor?.destroy(); this.compositionEditor = null;
+      this.contentEditor?.destroy(); this.contentEditor = null;
+      if (this.checklist) this.setChecklistDefinition(value as EditorChecklistDefinition);
+      else if (this.guide) this.setGuideDefinition(value as RuntimeGuideDefinition & { targeting: ExperienceTargeting });
+      else if (this.survey) this.setSurveyDefinition(value as RuntimeWidgetDefinition & { targeting: ExperienceTargeting });
+      else this.definition = value as EditorDefinition;
+      this.stepIndex = clampStep(this.stepIndex, this.guide?.steps.length ?? this.survey?.steps.length ?? 1);
+      this.changed(true, true); this.refreshStepBar();
+    } finally { this.restoringHistory = false; }
   }
 
   private syncPanel(): void {
@@ -1412,7 +1449,7 @@ export class EditorModeController {
 
   private teardown(clearContinuation: boolean): void {
     this.lifecycle++;
-    this.cancelAiRequest(); this.aiProposal = null; this.aiConversationId = undefined; this.aiMessages = []; this.aiResolvedTargets.clear(); this.aiPreviewOriginal = null; this.aiPreviewCandidate = null; this.surveyAiPreviewOriginal = null; this.surveyAiPreviewCandidate = null; this.checklistAiPreviewOriginal = null; this.checklistAiPreviewCandidate = null; this.widgetAiPreviewOriginal = null; this.widgetAiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.guideAiUndo = []; this.guideAiRedo = []; this.surveyAiUndo = []; this.surveyAiRedo = []; this.checklistAiUndo = []; this.checklistAiRedo = []; this.widgetAiUndo = []; this.widgetAiRedo = [];
+    this.cancelAiRequest(); this.aiProposal = null; this.aiConversationId = undefined; this.aiMessages = []; this.aiResolvedTargets.clear(); this.aiPreviewOriginal = null; this.aiPreviewCandidate = null; this.surveyAiPreviewOriginal = null; this.surveyAiPreviewCandidate = null; this.checklistAiPreviewOriginal = null; this.checklistAiPreviewCandidate = null; this.widgetAiPreviewOriginal = null; this.widgetAiPreviewCandidate = null; this.aiPreviewReturnMode = null;
     clearTimeout(this.expiryTimer);
     clearInterval(this.validationTimer);
     clearTimeout(this.saveTimer);

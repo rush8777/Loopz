@@ -1,4 +1,6 @@
 import { BUILDER_ALLOWED_ATTRIBUTES, BUILDER_ALLOWED_TAGS, BUILDER_SURVEY_INPUT_TAGS, builderImageUrlIsSafe, builderInputTypeIsSafe, builderLinkUrlIsSafe, safeScopedBuilderCss } from "../runtime/BuilderContentContract";
+import { SOURCE_EDITABILITY, sourceEditabilityErrors, type SourceElement } from "./SourceEditability";
+import { sourceEditingCssErrors } from "./SourceStyles";
 import type { ExperienceContent, WidgetBuilderState } from "../types";
 
 export type SourceAction =
@@ -11,7 +13,7 @@ const actionIdPattern = /^[A-Za-z][A-Za-z0-9_-]{2,63}$/;
 
 function parse(html: string): HTMLTemplateElement { const template = document.createElement("template"); template.innerHTML = html; return template; }
 
-export function validateSourceMarkup(operation: ReplaceMarkupOperation, options: { widgetType: string; guide: boolean; survey?: { questions: Array<{ id: string; type: string }> }; checklist?: { items: Array<{ id: string }> } }): string[] {
+export function validateSourceMarkup(operation: ReplaceMarkupOperation, options: { widgetType: string; guide: boolean; survey?: { questions: Array<{ id: string; type: string; options?: Array<{ id: string }>; min?: number; max?: number; maxLength?: number; required?: boolean }> }; checklist?: { items: Array<{ id: string }> }; editable?: boolean; previousHtml?: string }): string[] {
   const errors: string[] = [];
   if (operation.widthPx !== undefined && (options.widgetType !== "modal" || !Number.isInteger(operation.widthPx) || operation.widthPx < 320 || operation.widthPx > 960)) errors.push("Modal width must be a whole number from 320 to 960px.");
   if (operation.html.length > 100_000 || operation.css.length > 100_000) errors.push("Source proposal is too large.");
@@ -30,7 +32,7 @@ export function validateSourceMarkup(operation: ReplaceMarkupOperation, options:
   if (roots[0]?.dataset.movcuesWidgetType !== options.widgetType) errors.push("The widget root type cannot be changed.");
   if (roots[0] && !roots[0].dataset.movcuesDocumentVersion) errors.push("The widget root document version must be preserved.");
   const ids = elements.map(element => element.id).filter(Boolean); if (new Set(ids).size !== ids.length) errors.push("Source HTML contains duplicate IDs.");
-  const buttons = elements.filter((element): element is HTMLButtonElement => element instanceof HTMLButtonElement && !element.dataset.movcuesSurveyAction && !element.dataset.movcuesChecklistRole && !element.dataset.movcuesChecklistItemRole);
+  const buttons = elements.filter((element): element is HTMLButtonElement => element instanceof HTMLButtonElement && !element.dataset.movcuesSurveyAction && !element.dataset.movcuesOptionId && !element.dataset.movcuesChecklistRole && !element.dataset.movcuesChecklistItemRole);
   const actionIds = buttons.map(button => button.dataset.movcuesActionId ?? "");
   if (actionIds.some(value => !actionIdPattern.test(value)) || new Set(actionIds).size !== actionIds.length) errors.push("Every ordinary button needs one unique valid action ID.");
   const bindings = Object.keys(operation.actionBindings);
@@ -45,17 +47,22 @@ export function validateSourceMarkup(operation: ReplaceMarkupOperation, options:
     if (elements.filter(element => element.hasAttribute("data-movcues-survey-controls")).length !== 1 || elements.filter(element => element.dataset.movcuesSurveyAction === "submit").length !== 1) errors.push("Survey controls and submission must be preserved.");
   }
   if (options.checklist) {
+    const taskElements = elements.filter(element => element.hasAttribute("data-movcues-checklist-item-id") || element.dataset.movcuesChecklistRole === "item");
+    const taskIds = taskElements.map(element => element.dataset.movcuesChecklistItemId ?? "");
+    if (taskElements.some(element => element.tagName !== "BUTTON" || element.dataset.movcuesChecklistRole !== "item")) errors.push("Checklist task components must use canonical button/item semantics.");
+    if (taskIds.length !== options.checklist.items.length || taskIds.some(id => !options.checklist!.items.some(item => item.id === id))) errors.push("Checklist source task identities must match the canonical items exactly.");
     for (const role of ["root", "title", "items", "progress", "launcher-label", "remaining-count", "completion-title", "completion-description", "completion-acknowledge"]) if (elements.filter(element => element.dataset.movcuesChecklistRole === role).length !== 1) errors.push(`Checklist role ${role} must be preserved.`);
     for (const item of options.checklist.items) if (elements.filter(element => element.dataset.movcuesChecklistItemId === item.id).length !== 1) errors.push(`Checklist item ${item.id} must be preserved.`);
   }
+  if (options.editable && roots[0]) errors.push(...sourceEditabilityErrors(sourceElement(roots[0]), options.previousHtml && parse(options.previousHtml).content.firstElementChild ? sourceElement(parse(options.previousHtml).content.firstElementChild!) : undefined, options.survey?.questions), ...sourceEditingCssErrors(operation.css));
   return [...new Set(errors)];
 }
 
 export function applySourceMarkup(builder: WidgetBuilderState, content: ExperienceContent, operation: ReplaceMarkupOperation, options: Parameters<typeof validateSourceMarkup>[1]): void {
-  const errors = validateSourceMarkup(operation, options); if (errors.length) throw new Error(errors.join(" "));
+  const errors = validateSourceMarkup(operation, { ...options, editable: true, previousHtml: options.previousHtml ?? builder.html }); if (errors.length) throw new Error(errors.join(" "));
   const previous = builder.projectData.movcues && typeof builder.projectData.movcues === "object" ? builder.projectData.movcues as Record<string, unknown> : {};
   builder.html = operation.html; builder.css = operation.css;
-  builder.projectData = { ...builder.projectData, movcues: { ...previous, authoringSurface: "source", sourceVersion: 1, actionBindings: structuredClone(operation.actionBindings) } };
+  builder.projectData = { ...builder.projectData, movcues: { ...previous, authoringSurface: "source", sourceVersion: 1, sourceEditabilityVersion: SOURCE_EDITABILITY.version, actionBindings: structuredClone(operation.actionBindings) } };
   const template = parse(operation.html), heading = template.content.querySelector<HTMLElement>('[data-movcues-content="heading"]'), body = template.content.querySelector<HTMLElement>('[data-movcues-content="body"]');
   if (heading) content.heading = (heading.textContent ?? "").trim().slice(0, 500); if (body) content.body = (body.textContent ?? "").trim().slice(0, 10_000);
 }
@@ -85,3 +92,7 @@ export function aiDocumentContext<T>(value: T): T {
 }
 
 export function isSourceAuthored(builder?: WidgetBuilderState): boolean { const movcues = builder?.projectData.movcues; return Boolean(movcues && typeof movcues === "object" && (movcues as Record<string, unknown>).authoringSurface === "source"); }
+
+export function sourceElement(element: Element): SourceElement {
+  return { tag: element.tagName.toLowerCase(), attrs: Object.fromEntries(Array.from(element.attributes, attr => [attr.name, attr.value])), text: Array.from(element.childNodes).filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent ?? "").join(""), children: Array.from(element.children, sourceElement) };
+}

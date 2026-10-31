@@ -1,9 +1,4337 @@
-import { C as ChecklistRenderer, b as builderImageUrlIsSafe, a as builderLinkUrlIsSafe, s as surveyBranchErrors, c as computeElementRole, d as computeElementLabel, e as sanitizeBuilderHtml, f as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, g as BUILDER_SURVEY_INPUT_TAGS, h as BUILDER_ALLOWED_ATTRIBUTES, i as builderInputTypeIsSafe, j as getGuideStepPattern, k as guideStepRequiresTarget, l as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, m as clearEditorContinuation, n as isChecklistDefinition, o as isGuideDefinition, p as guideInteractionTarget, q as matchesGuideRoute, r as findTarget, t as storeEditorContinuation } from "./module-Baxjwbmd.js";
+import { s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, C as ChecklistRenderer, f as surveyBranchErrors, g as computeElementRole, h as computeElementLabel, i as sanitizeBuilderHtml, j as getGuideStepPattern, k as guideStepRequiresTarget, l as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, m as clearEditorContinuation, n as isChecklistDefinition, o as isGuideDefinition, p as guideInteractionTarget, q as matchesGuideRoute, r as findTarget, t as storeEditorContinuation } from "./module-Dlj9p7uW.js";
+class EditorHistory {
+  constructor(keyOf = JSON.stringify) {
+    this.keyOf = keyOf;
+    this.entries = [];
+    this.index = -1;
+    this.coalescing = false;
+  }
+  endGroup() {
+    this.coalescing = false;
+  }
+  reset(value) {
+    this.coalescing = false;
+    this.entries = [];
+    this.index = -1;
+    this.record(value);
+  }
+  record(value, coalesce = false) {
+    var _a;
+    const key = this.keyOf(value);
+    if (((_a = this.entries[this.index]) == null ? void 0 : _a.key) === key) {
+      this.entries[this.index].value = structuredClone(value);
+      if (!coalesce) this.coalescing = false;
+      return;
+    }
+    if (coalesce && this.coalescing && this.index > 0 && this.index === this.entries.length - 1) {
+      this.entries[this.index] = { value: structuredClone(value), key };
+      return;
+    }
+    this.coalescing = coalesce;
+    this.entries.splice(this.index + 1);
+    this.entries.push({ value: structuredClone(value), key });
+    while (this.entries.length > 50 || this.entries.length > 1 && this.entries.reduce((bytes, entry) => bytes + entry.key.length * 2, 0) > 8e6) this.entries.shift();
+    this.index = this.entries.length - 1;
+  }
+  canUndo() {
+    return this.index > 0;
+  }
+  canRedo() {
+    return this.index >= 0 && this.index < this.entries.length - 1;
+  }
+  undo() {
+    this.coalescing = false;
+    return this.canUndo() ? structuredClone(this.entries[--this.index].value) : void 0;
+  }
+  redo() {
+    this.coalescing = false;
+    return this.canRedo() ? structuredClone(this.entries[++this.index].value) : void 0;
+  }
+}
+const SOURCE_EDITABILITY = {
+  version: 1,
+  maxDepth: 8,
+  maxNodes: 120,
+  containers: ["div", "section", "header"],
+  components: ["h1", "h2", "h3", "h4", "p", "span", "label", "a", "ul", "ol", "button", "img", "hr"],
+  inline: ["span", "strong", "em", "u", "a", "br", "ul", "ol", "li"]
+};
+const idPattern = /^[A-Za-z][A-Za-z0-9_-]{2,63}$/;
+const layouts = new Set(SOURCE_EDITABILITY.containers);
+const components = new Set(SOURCE_EDITABILITY.components);
+const inline = new Set(SOURCE_EDITABILITY.inline);
+function sourceComponentKind(element) {
+  const a = element.attrs, role = a["data-movcues-checklist-role"];
+  if (a["data-movcues-block-id"] && element.children.some((child) => child.attrs["data-movcues-checklist-role"] || child.attrs["data-movcues-survey-controls"])) return "protected";
+  if (a["data-movcues-question-id"] || "data-movcues-survey-controls" in a || a["data-movcues-checklist-item-id"] || role && !["root", "items"].includes(role)) return "protected";
+  if (a["data-movcues-block-id"] || !layouts.has(element.tag)) return "component";
+  return "layout";
+}
+function sourceEditabilityErrors(root2, previous, questions) {
+  var _a;
+  const errors = [], ids = /* @__PURE__ */ new Set();
+  let count = 0;
+  const visit = (element, depth, parent) => {
+    if (++count > SOURCE_EDITABILITY.maxNodes || depth > SOURCE_EDITABILITY.maxDepth) {
+      errors.push("Editable source exceeds 120 components or 8 layout levels.");
+      return;
+    }
+    const kind = sourceComponentKind(element), a = element.attrs;
+    for (const key of ["data-movcues-node-id", "data-movcues-block-id"]) {
+      if (!(key in a)) continue;
+      if (!idPattern.test(a[key]) || ids.has(a[key])) errors.push(`Invalid or duplicate visual ID: ${a[key] || "(empty)"}.`);
+      ids.add(a[key]);
+    }
+    const required = kind === "layout" ? "data-movcues-node-id" : "data-movcues-block-id";
+    if (!a[required]) errors.push(`${element.tag} needs ${required} for live editing.`);
+    if (kind !== "layout" && !a["data-movcues-node-id"] && !((parent == null ? void 0 : parent.attrs["data-movcues-node-id"]) && parent.children.length === 1 && sourceComponentKind(parent) === "layout")) errors.push(`Component ${a[required] ?? element.tag} needs a node ID or a dedicated layout wrapper.`);
+    if (kind === "layout") {
+      if (!layouts.has(element.tag) || element.text.trim()) errors.push(`Layout ${a[required] ?? element.tag} has ambiguous mixed text; wrap text in a component.`);
+      element.children.forEach((child) => visit(child, depth + 1, element));
+    } else if (kind === "component") {
+      if (!components.has(element.tag) && !layouts.has(element.tag)) errors.push(`Unsupported editable component: ${element.tag}.`);
+      const checkInline = (child) => {
+        if (!inline.has(child.tag) || child.attrs["data-movcues-node-id"] || child.attrs["data-movcues-block-id"] || child.attrs["data-movcues-action-id"]) errors.push(`Component ${a[required]} contains a nested component; use a layout container.`);
+        child.children.forEach(checkInline);
+      };
+      element.children.forEach(checkInline);
+    }
+  };
+  if (!root2.attrs["data-movcues-node-id"] || sourceComponentKind(root2) !== "layout") errors.push("The widget root needs a layout node ID, without a block ID.");
+  visit(root2, 0);
+  if ((previous == null ? void 0 : previous.attrs["data-movcues-node-id"]) && root2.attrs["data-movcues-node-id"] !== previous.attrs["data-movcues-node-id"]) errors.push("The surviving widget root must preserve its node ID.");
+  const all = (element) => {
+    const result2 = [], pending = [element];
+    while (pending.length) {
+      const next = pending.pop();
+      result2.push(next);
+      pending.push(...next.children.slice().reverse());
+    }
+    return result2;
+  };
+  const visual = all(root2).flatMap((element) => [element.attrs["data-movcues-node-id"], element.attrs["data-movcues-block-id"]].filter(Boolean));
+  const functionalIds = all(root2).flatMap((element) => [element.attrs["data-movcues-action-id"], element.attrs["data-movcues-question-id"], element.attrs["data-movcues-checklist-item-id"]].filter(Boolean));
+  if (visual.some((id) => !idPattern.test(id) || functionalIds.includes(id))) errors.push("Visual IDs must be valid and distinct from functional action/question/task IDs.");
+  for (const element of all(root2)) {
+    const a = element.attrs, widgetType = root2.attrs["data-movcues-widget-type"];
+    if (Object.keys(a).some((key) => key.startsWith("data-movcues-checklist")) && widgetType !== "checklist") errors.push("Checklist markers are only valid in a Checklist.");
+    if (Object.keys(a).some((key) => key.startsWith("data-movcues-question") || key.startsWith("data-movcues-survey") || key === "data-movcues-option-id") && widgetType !== "survey") errors.push("Survey markers are only valid in a Survey.");
+    if (a["data-movcues-checklist-role"] && !["root", "title", "description", "items", "item", "progress", "launcher-label", "remaining-count", "completion-title", "completion-description", "completion-acknowledge", "collapse", "dismiss"].includes(a["data-movcues-checklist-role"])) errors.push("Unknown protected Checklist role.");
+  }
+  if (new Set(visual).size !== visual.length) errors.push("Source contains duplicate visual IDs, including protected components.");
+  if (questions) {
+    const elements = all(root2), groups = elements.filter((element) => element.attrs["data-movcues-question-id"]);
+    if (groups.length !== questions.length) errors.push("Survey questions must match the canonical question identities exactly.");
+    for (const question of questions) {
+      const group = groups.find((element) => element.attrs["data-movcues-question-id"] === question.id);
+      if (!group) continue;
+      const descendants = all(group);
+      if (question.type === "short_text" || question.type === "long_text") {
+        const inputs = descendants.filter((element) => "data-movcues-question-input" in element.attrs);
+        if (inputs.length !== 1 || inputs[0].tag !== (question.type === "short_text" ? "input" : "textarea") || inputs[0].attrs.maxlength !== String(question.maxLength ?? 1e4) || Boolean(inputs[0].attrs["aria-required"] === "true") !== Boolean(question.required)) errors.push(`Question ${question.id} must preserve its canonical text input, limit and required state.`);
+      } else {
+        const expected = question.type === "nps" ? Array.from({ length: 11 }, (_, index) => String(index)) : question.type === "rating" && question.min !== void 0 && question.max !== void 0 ? Array.from({ length: question.max - question.min + 1 }, (_, index) => String(index + question.min)) : (_a = question.options) == null ? void 0 : _a.map((option) => option.id);
+        const options = descendants.filter((element) => element.attrs["data-movcues-option-id"]);
+        if (expected && (options.length !== expected.length || expected.some((id) => options.filter((option) => option.tag === "button" && option.attrs["data-movcues-option-id"] === id).length !== 1))) errors.push(`Question ${question.id} must preserve its canonical answer options.`);
+      }
+    }
+    for (const option of elements.filter((element) => element.attrs["data-movcues-option-id"])) if (!groups.some((group) => all(group).includes(option))) errors.push("Survey options must remain inside a canonical question.");
+  }
+  if (previous) {
+    const next = all(root2), before = all(previous);
+    const functionalKeys = ["data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-checklist-item-id", "data-movcues-checklist-role", "data-movcues-checklist-item-role", "data-movcues-checklist-view", "type", "maxlength"];
+    const signature = (element) => ({ tag: element.tag, attrs: Object.fromEntries(functionalKeys.filter((key) => key in element.attrs).map((key) => [key, element.attrs[key]])), children: element.children.map(signature) });
+    for (const element of before) {
+      const a = element.attrs;
+      const marker = ["data-movcues-question-id", "data-movcues-checklist-item-id", "data-movcues-survey-controls"].find((key) => key in a);
+      if (marker) {
+        const matches2 = next.filter((value) => value.attrs[marker] === a[marker]);
+        if (matches2.length !== 1 || JSON.stringify(signature(matches2[0])) !== JSON.stringify(signature(element))) errors.push(`Protected ${marker} ${a[marker]} changed its functional structure.`);
+      }
+      const identity = a.id ? "id" : a["data-movcues-content"] ? "data-movcues-content" : marker;
+      if (!identity) continue;
+      const matches = next.filter((value) => value.attrs[identity] === a[identity]);
+      if (matches.length !== 1) continue;
+      for (const key of ["data-movcues-node-id", "data-movcues-block-id"]) if (a[key] && matches[0].attrs[key] !== a[key]) errors.push(`Surviving ${identity} ${a[identity]} must preserve ${key}=${a[key]}.`);
+    }
+  }
+  return [...new Set(errors)];
+}
+function getDefaultExportFromCjs(x2) {
+  return x2 && x2.__esModule && Object.prototype.hasOwnProperty.call(x2, "default") ? x2["default"] : x2;
+}
+function getAugmentedNamespace(n) {
+  if (n.__esModule) return n;
+  var f = n.default;
+  if (typeof f == "function") {
+    var a = function a2() {
+      if (this instanceof a2) {
+        return Reflect.construct(f, arguments, this.constructor);
+      }
+      return f.apply(this, arguments);
+    };
+    a.prototype = f.prototype;
+  } else a = {};
+  Object.defineProperty(a, "__esModule", { value: true });
+  Object.keys(n).forEach(function(k) {
+    var d = Object.getOwnPropertyDescriptor(n, k);
+    Object.defineProperty(a, k, d.get ? d : {
+      enumerable: true,
+      get: function() {
+        return n[k];
+      }
+    });
+  });
+  return a;
+}
+var picocolors_browser = { exports: {} };
+var x = String;
+var create = function() {
+  return { isColorSupported: false, reset: x, bold: x, dim: x, italic: x, underline: x, inverse: x, hidden: x, strikethrough: x, black: x, red: x, green: x, yellow: x, blue: x, magenta: x, cyan: x, white: x, gray: x, bgBlack: x, bgRed: x, bgGreen: x, bgYellow: x, bgBlue: x, bgMagenta: x, bgCyan: x, bgWhite: x, blackBright: x, redBright: x, greenBright: x, yellowBright: x, blueBright: x, magentaBright: x, cyanBright: x, whiteBright: x, bgBlackBright: x, bgRedBright: x, bgGreenBright: x, bgYellowBright: x, bgBlueBright: x, bgMagentaBright: x, bgCyanBright: x, bgWhiteBright: x };
+};
+picocolors_browser.exports = create();
+picocolors_browser.exports.createColors = create;
+var picocolors_browserExports = picocolors_browser.exports;
+const __viteBrowserExternal = {};
+const __viteBrowserExternal$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  default: __viteBrowserExternal
+}, Symbol.toStringTag, { value: "Module" }));
+const require$$2 = /* @__PURE__ */ getAugmentedNamespace(__viteBrowserExternal$1);
+let pico = picocolors_browserExports;
+let terminalHighlight$1 = require$$2;
+let CssSyntaxError$3 = class CssSyntaxError extends Error {
+  constructor(message, line, column, source, file, plugin2) {
+    super(message);
+    this.name = "CssSyntaxError";
+    this.reason = message;
+    if (file) {
+      this.file = file;
+    }
+    if (source) {
+      this.source = source;
+    }
+    if (plugin2) {
+      this.plugin = plugin2;
+    }
+    if (typeof line !== "undefined" && typeof column !== "undefined") {
+      if (typeof line === "number") {
+        this.line = line;
+        this.column = column;
+      } else {
+        this.line = line.line;
+        this.column = line.column;
+        this.endLine = column.line;
+        this.endColumn = column.column;
+      }
+    }
+    this.setMessage();
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, CssSyntaxError);
+    }
+  }
+  setMessage() {
+    this.message = this.plugin ? this.plugin + ": " : "";
+    this.message += this.file ? this.file : "<css input>";
+    if (typeof this.line !== "undefined") {
+      this.message += ":" + this.line + ":" + this.column;
+    }
+    this.message += ": " + this.reason;
+  }
+  showSourceCode(color) {
+    if (!this.source) return "";
+    let css = this.source;
+    if (color == null) color = pico.isColorSupported;
+    let aside = (text2) => text2;
+    let mark = (text2) => text2;
+    let highlight = (text2) => text2;
+    if (color) {
+      let { bold, gray, red } = pico.createColors(true);
+      mark = (text2) => bold(red(text2));
+      aside = (text2) => gray(text2);
+      if (terminalHighlight$1) {
+        highlight = (text2) => terminalHighlight$1(text2);
+      }
+    }
+    let lines = css.split(/\r?\n/);
+    let start = Math.max(this.line - 3, 0);
+    let end = Math.min(this.line + 2, lines.length);
+    let maxWidth = String(end).length;
+    return lines.slice(start, end).map((line, index) => {
+      let number = start + 1 + index;
+      let gutter = " " + (" " + number).slice(-maxWidth) + " | ";
+      if (number === this.line) {
+        if (line.length > 160) {
+          let padding = 20;
+          let subLineStart = Math.max(0, this.column - padding);
+          let subLineEnd = Math.max(
+            this.column + padding,
+            this.endColumn + padding
+          );
+          let subLine = line.slice(subLineStart, subLineEnd);
+          let spacing2 = aside(gutter.replace(/\d/g, " ")) + line.slice(0, Math.min(this.column - 1, padding - 1)).replace(/[^\t]/g, " ");
+          return mark(">") + aside(gutter) + highlight(subLine) + "\n " + spacing2 + mark("^");
+        }
+        let spacing = aside(gutter.replace(/\d/g, " ")) + line.slice(0, this.column - 1).replace(/[^\t]/g, " ");
+        return mark(">") + aside(gutter) + highlight(line) + "\n " + spacing + mark("^");
+      }
+      return " " + aside(gutter) + highlight(line);
+    }).join("\n");
+  }
+  toString() {
+    let code = this.showSourceCode();
+    if (code) {
+      code = "\n\n" + code + "\n";
+    }
+    return this.name + ": " + this.message + code;
+  }
+};
+var cssSyntaxError = CssSyntaxError$3;
+CssSyntaxError$3.default = CssSyntaxError$3;
+const STYLE_TAG = /(<)(\/?style\b)/gi;
+const COMMENT_OPEN = /(<)(!--)/g;
+const AT_NAME_END = /[\t\n\f\r "#'()/;[\\\]{}]/;
+function escapeHTMLInCSS(str) {
+  if (typeof str !== "string") return str;
+  if (!str.includes("<")) return str;
+  return str.replace(STYLE_TAG, "\\3c $2").replace(COMMENT_OPEN, "\\3c $2");
+}
+const DEFAULT_RAW = {
+  after: "\n",
+  beforeClose: "\n",
+  beforeComment: "\n",
+  beforeDecl: "\n",
+  beforeOpen: " ",
+  beforeRule: "\n",
+  colon: ": ",
+  commentLeft: " ",
+  commentRight: " ",
+  emptyBody: "",
+  indent: "    ",
+  semicolon: false
+};
+function capitalize$1(str) {
+  return str[0].toUpperCase() + str.slice(1);
+}
+function atruleStart(str, node2) {
+  let name = "@" + node2.name;
+  let params = node2.params ? str.rawValue(node2, "params") : "";
+  let afterName = node2.raws.afterName;
+  if (typeof afterName === "undefined") {
+    afterName = params ? " " : "";
+  } else if (afterName === "" && params && !AT_NAME_END.test(params[0])) {
+    afterName = " ";
+  }
+  return name + afterName + params;
+}
+function pushBody(str, stack, node2) {
+  let nodes = node2.nodes;
+  let last = nodes.length - 1;
+  while (last > 0) {
+    if (nodes[last].type !== "comment") break;
+    last -= 1;
+  }
+  let semicolon = str.raw(node2, "semicolon");
+  let isDocument = node2.type === "document";
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    let child = nodes[i];
+    let childSemicolon = last !== i || semicolon;
+    if (!childSemicolon && i < nodes.length - 1 && (child.type === "atrule" && !child.nodes || child.type === "decl" && child.prop.startsWith("--"))) {
+      childSemicolon = true;
+    }
+    stack.push({
+      document: isDocument,
+      node: child,
+      semicolon: childSemicolon
+    });
+  }
+}
+function pushBlock(str, stack, node2, start) {
+  let between = str.raw(node2, "between", "beforeOpen");
+  str.builder(escapeHTMLInCSS(start + between) + "{", node2, "start");
+  let hasNodes = node2.nodes && node2.nodes.length;
+  let close = () => {
+    let after = hasNodes ? str.raw(node2, "after") : str.raw(node2, "after", "emptyBody");
+    if (after) str.builder(escapeHTMLInCSS(after));
+    str.builder("}", node2, "end");
+    if (node2.type === "rule" && node2.raws.ownSemicolon) {
+      str.builder(escapeHTMLInCSS(node2.raws.ownSemicolon), node2, "end");
+    }
+  };
+  if (hasNodes) {
+    stack.push(close);
+    pushBody(str, stack, node2);
+  } else {
+    close();
+  }
+}
+let Stringifier$2 = class Stringifier {
+  constructor(builder) {
+    this.builder = builder;
+  }
+  atrule(node2, semicolon) {
+    let start = atruleStart(this, node2);
+    if (node2.nodes) {
+      this.block(node2, start);
+    } else {
+      let end = (node2.raws.between || "") + (semicolon ? ";" : "");
+      this.builder(escapeHTMLInCSS(start + end), node2);
+    }
+  }
+  beforeAfter(node2, detect) {
+    let value;
+    if (node2.type === "decl") {
+      value = this.raw(node2, null, "beforeDecl");
+    } else if (node2.type === "comment") {
+      value = this.raw(node2, null, "beforeComment");
+    } else if (detect === "before") {
+      value = this.raw(node2, null, "beforeRule");
+    } else {
+      value = this.raw(node2, null, "beforeClose");
+    }
+    let buf = node2.parent;
+    let depth = 0;
+    while (buf && buf.type !== "root") {
+      depth += 1;
+      buf = buf.parent;
+    }
+    if (value.includes("\n")) {
+      let indent = this.raw(node2, null, "indent");
+      if (indent.length) {
+        for (let step = 0; step < depth; step++) value += indent;
+      }
+    }
+    return value;
+  }
+  block(node2, start) {
+    let between = this.raw(node2, "between", "beforeOpen");
+    this.builder(escapeHTMLInCSS(start + between) + "{", node2, "start");
+    let after;
+    if (node2.nodes && node2.nodes.length) {
+      this.body(node2);
+      after = this.raw(node2, "after");
+    } else {
+      after = this.raw(node2, "after", "emptyBody");
+    }
+    if (after) this.builder(escapeHTMLInCSS(after));
+    this.builder("}", node2, "end");
+  }
+  body(node2) {
+    let proto = Stringifier.prototype;
+    let expandable = ["atrule", "block", "body", "rule", "stringify"].every(
+      (method) => this[method] === proto[method]
+    );
+    let stack = [];
+    pushBody(this, stack, node2);
+    while (stack.length > 0) {
+      let entry = stack.pop();
+      if (typeof entry === "function") {
+        entry();
+        continue;
+      }
+      let child = entry.node;
+      let before = this.raw(child, "before");
+      if (before) {
+        this.builder(entry.document ? before : escapeHTMLInCSS(before));
+      }
+      if (expandable && child.type === "rule") {
+        pushBlock(this, stack, child, this.rawValue(child, "selector"));
+      } else if (expandable && child.type === "atrule" && child.nodes) {
+        pushBlock(this, stack, child, atruleStart(this, child));
+      } else {
+        this.stringify(child, entry.semicolon);
+      }
+    }
+  }
+  comment(node2) {
+    let left = this.raw(node2, "left", "commentLeft");
+    let right = this.raw(node2, "right", "commentRight");
+    this.builder(escapeHTMLInCSS("/*" + left + node2.text + right + "*/"), node2);
+  }
+  decl(node2, semicolon) {
+    let raws = node2.raws;
+    let between = this.raw(node2, "between", "colon");
+    let string = node2.prop + between + this.rawValue(node2, "value");
+    if (node2.important) {
+      string += raws.important || " !important";
+    }
+    if (semicolon) string += ";";
+    this.builder(escapeHTMLInCSS(string), node2);
+  }
+  document(node2) {
+    this.body(node2);
+  }
+  raw(node2, own, detect) {
+    let value;
+    if (!detect) detect = own;
+    if (own) {
+      value = node2.raws[own];
+      if (typeof value !== "undefined") return value;
+    }
+    let parent = node2.parent;
+    if (detect === "before") {
+      if (!parent || parent.type === "root" && parent.first === node2) {
+        return "";
+      }
+      if (parent && parent.type === "document") {
+        return "";
+      }
+    }
+    if (!parent) return DEFAULT_RAW[detect];
+    let root2 = node2.root();
+    let cache = root2.rawCache || (root2.rawCache = {});
+    if (typeof cache[detect] !== "undefined") {
+      return cache[detect];
+    }
+    if (detect === "before" || detect === "after") {
+      return this.beforeAfter(node2, detect);
+    } else {
+      let method = "raw" + capitalize$1(detect);
+      if (this[method]) {
+        value = this[method](root2, node2);
+      } else {
+        root2.walk((i) => {
+          value = i.raws[own];
+          if (typeof value !== "undefined") return false;
+        });
+      }
+    }
+    if (typeof value === "undefined") value = DEFAULT_RAW[detect];
+    cache[detect] = value;
+    return value;
+  }
+  rawBeforeClose(root2) {
+    let value;
+    root2.walk((i) => {
+      if (i.nodes && i.nodes.length > 0) {
+        if (typeof i.raws.after !== "undefined") {
+          value = i.raws.after;
+          if (value.includes("\n")) {
+            value = value.replace(/[^\n]+$/, "");
+          }
+          return false;
+        }
+      }
+    });
+    if (value) value = value.replace(/\S/g, "");
+    return value;
+  }
+  rawBeforeComment(root2, node2) {
+    let value;
+    root2.walkComments((i) => {
+      if (typeof i.raws.before !== "undefined") {
+        value = i.raws.before;
+        if (value.includes("\n")) {
+          value = value.replace(/[^\n]+$/, "");
+        }
+        return false;
+      }
+    });
+    if (typeof value === "undefined") {
+      value = this.raw(node2, null, "beforeDecl");
+    } else if (value) {
+      value = value.replace(/\S/g, "");
+    }
+    return value;
+  }
+  rawBeforeDecl(root2, node2) {
+    let value;
+    root2.walkDecls((i) => {
+      if (typeof i.raws.before !== "undefined") {
+        value = i.raws.before;
+        if (value.includes("\n")) {
+          value = value.replace(/[^\n]+$/, "");
+        }
+        return false;
+      }
+    });
+    if (typeof value === "undefined") {
+      value = this.raw(node2, null, "beforeRule");
+    } else if (value) {
+      value = value.replace(/\S/g, "");
+    }
+    return value;
+  }
+  rawBeforeOpen(root2) {
+    let value;
+    root2.walk((i) => {
+      if (i.type !== "decl") {
+        value = i.raws.between;
+        if (typeof value !== "undefined") return false;
+      }
+    });
+    return value;
+  }
+  rawBeforeRule(root2) {
+    let value;
+    root2.walk((i) => {
+      if (i.nodes && (i.parent !== root2 || root2.first !== i)) {
+        if (typeof i.raws.before !== "undefined") {
+          value = i.raws.before;
+          if (value.includes("\n")) {
+            value = value.replace(/[^\n]+$/, "");
+          }
+          return false;
+        }
+      }
+    });
+    if (value) value = value.replace(/\S/g, "");
+    return value;
+  }
+  rawColon(root2) {
+    let value;
+    root2.walkDecls((i) => {
+      if (typeof i.raws.between !== "undefined") {
+        value = i.raws.between.replace(/[^\s:]/g, "");
+        return false;
+      }
+    });
+    return value;
+  }
+  rawEmptyBody(root2) {
+    let value;
+    root2.walk((i) => {
+      if (i.nodes && i.nodes.length === 0) {
+        value = i.raws.after;
+        if (typeof value !== "undefined") return false;
+      }
+    });
+    return value;
+  }
+  rawIndent(root2) {
+    if (root2.raws.indent) return root2.raws.indent;
+    let value;
+    root2.walk((i) => {
+      let p = i.parent;
+      if (p && p !== root2 && p.parent && p.parent === root2) {
+        if (typeof i.raws.before !== "undefined") {
+          let parts = i.raws.before.split("\n");
+          value = parts[parts.length - 1];
+          value = value.replace(/\S/g, "");
+          return false;
+        }
+      }
+    });
+    return value;
+  }
+  rawSemicolon(root2) {
+    let value;
+    root2.walk((i) => {
+      if (i.nodes && i.nodes.length && i.last.type === "decl") {
+        value = i.raws.semicolon;
+        if (typeof value !== "undefined") return false;
+      }
+    });
+    return value;
+  }
+  rawValue(node2, prop) {
+    let value = node2[prop];
+    let raw = node2.raws[prop];
+    if (raw && raw.value === value) {
+      return raw.raw;
+    }
+    return value;
+  }
+  root(node2) {
+    if (node2.source && node2.source.input.hasBOM) {
+      this.builder("\uFEFF", node2, "start");
+    }
+    this.body(node2);
+    if (node2.raws.after) {
+      let after = node2.raws.after;
+      let isDocument = node2.parent && node2.parent.type === "document";
+      this.builder(isDocument ? after : escapeHTMLInCSS(after));
+    }
+  }
+  rule(node2) {
+    this.block(node2, this.rawValue(node2, "selector"));
+    if (node2.raws.ownSemicolon) {
+      this.builder(escapeHTMLInCSS(node2.raws.ownSemicolon), node2, "end");
+    }
+  }
+  stringify(node2, semicolon) {
+    if (!this[node2.type]) {
+      throw new Error(
+        "Unknown AST node type " + node2.type + ". Maybe you need to change PostCSS stringifier."
+      );
+    }
+    this[node2.type](node2, semicolon);
+  }
+};
+var stringifier = Stringifier$2;
+Stringifier$2.default = Stringifier$2;
+let Stringifier$1 = stringifier;
+function stringify$4(node2, builder) {
+  let str = new Stringifier$1(builder);
+  str.stringify(node2);
+}
+var stringify_1 = stringify$4;
+stringify$4.default = stringify$4;
+var symbols = {};
+symbols.isClean = Symbol("isClean");
+symbols.my = Symbol("my");
+let CssSyntaxError$2 = cssSyntaxError;
+let Stringifier2 = stringifier;
+let stringify$3 = stringify_1;
+let { isClean: isClean$2, my: my$3 } = symbols;
+function cloneNode(obj, parent) {
+  let cloned = new obj.constructor();
+  let stack = [[obj, cloned, parent]];
+  while (stack.length > 0) {
+    let [source, target, targetParent] = stack.pop();
+    for (let i in source) {
+      if (!Object.prototype.hasOwnProperty.call(source, i)) {
+        continue;
+      }
+      if (i === "proxyCache") continue;
+      let value = source[i];
+      let type = typeof value;
+      if (i === "parent" && type === "object") {
+        if (targetParent) target[i] = targetParent;
+      } else if (i === "source") {
+        target[i] = value;
+      } else if (Array.isArray(value)) {
+        let children = [];
+        target[i] = children;
+        for (let j of value) {
+          let childClone = new j.constructor();
+          children.push(childClone);
+          stack.push([j, childClone, target]);
+        }
+      } else {
+        if (type === "object" && value !== null) {
+          let valueClone = new value.constructor();
+          stack.push([value, valueClone, void 0]);
+          value = valueClone;
+        }
+        target[i] = value;
+      }
+    }
+  }
+  return cloned;
+}
+function sourceOffset(inputCSS, position) {
+  if (position && typeof position.offset !== "undefined") {
+    return position.offset;
+  }
+  let column = 1;
+  let line = 1;
+  let offset = 0;
+  for (let i = 0; i < inputCSS.length; i++) {
+    if (line === position.line && column === position.column) {
+      offset = i;
+      break;
+    }
+    if (inputCSS[i] === "\n") {
+      column = 1;
+      line += 1;
+    } else {
+      column += 1;
+    }
+  }
+  return offset;
+}
+let Node$5 = class Node2 {
+  get proxyOf() {
+    return this;
+  }
+  constructor(defaults = {}) {
+    this.raws = {};
+    this[isClean$2] = false;
+    this[my$3] = true;
+    for (let name of Object.keys(defaults)) {
+      if (name === "__proto__") continue;
+      if (name === "nodes") {
+        this.nodes = [];
+        for (let node2 of defaults[name]) {
+          if (typeof node2.clone === "function" && node2.parent) {
+            this.append(node2.clone());
+          } else {
+            this.append(node2);
+          }
+        }
+      } else {
+        this[name] = defaults[name];
+      }
+    }
+  }
+  addToError(error) {
+    error.postcssNode = this;
+    if (error.stack && this.source && /\n\s{4}at /.test(error.stack)) {
+      let s = this.source;
+      error.stack = error.stack.replace(
+        /\n\s{4}at /,
+        `$&${s.input.from}:${s.start.line}:${s.start.column}$&`
+      );
+    }
+    return error;
+  }
+  after(add) {
+    this.parent.insertAfter(this, add);
+    return this;
+  }
+  assign(overrides = {}) {
+    for (let name in overrides) {
+      this[name] = overrides[name];
+    }
+    return this;
+  }
+  before(add) {
+    this.parent.insertBefore(this, add);
+    return this;
+  }
+  cleanRaws(keepBetween) {
+    delete this.raws.before;
+    delete this.raws.after;
+    if (!keepBetween) delete this.raws.between;
+  }
+  clone(overrides = {}) {
+    let cloned = cloneNode(this);
+    for (let name in overrides) {
+      cloned[name] = overrides[name];
+    }
+    return cloned;
+  }
+  cloneAfter(overrides = {}) {
+    let cloned = this.clone(overrides);
+    this.parent.insertAfter(this, cloned);
+    return cloned;
+  }
+  cloneBefore(overrides = {}) {
+    let cloned = this.clone(overrides);
+    this.parent.insertBefore(this, cloned);
+    return cloned;
+  }
+  error(message, opts = {}) {
+    if (this.source) {
+      let { end, start } = this.rangeBy(opts);
+      return this.source.input.error(
+        message,
+        { column: start.column, line: start.line },
+        { column: end.column, line: end.line },
+        opts
+      );
+    }
+    return new CssSyntaxError$2(message);
+  }
+  getProxyProcessor() {
+    return {
+      get(node2, prop) {
+        if (prop === "proxyOf") {
+          return node2;
+        } else if (prop === "root") {
+          return () => node2.root().toProxy();
+        } else {
+          return node2[prop];
+        }
+      },
+      set(node2, prop, value) {
+        if (node2[prop] === value) return true;
+        node2[prop] = value;
+        if (prop === "prop" || prop === "value" || prop === "name" || prop === "params" || prop === "important" || /* c8 ignore next */
+        prop === "text") {
+          node2.markDirty();
+        }
+        return true;
+      }
+    };
+  }
+  /* c8 ignore next 3 */
+  markClean() {
+    this[isClean$2] = true;
+  }
+  markDirty() {
+    if (this[isClean$2]) {
+      this[isClean$2] = false;
+      let next = this;
+      while (next = next.parent) {
+        next[isClean$2] = false;
+      }
+    }
+  }
+  next() {
+    if (!this.parent) return void 0;
+    let index = this.parent.index(this);
+    return this.parent.nodes[index + 1];
+  }
+  positionBy(opts = {}) {
+    let inputString = "document" in this.source.input ? this.source.input.document : this.source.input.css;
+    let pos = {
+      column: this.source.start.column,
+      line: this.source.start.line,
+      offset: sourceOffset(inputString, this.source.start)
+    };
+    if (opts.index) {
+      pos = this.positionInside(opts.index);
+    } else if (opts.word) {
+      let stringRepresentation = inputString.slice(
+        sourceOffset(inputString, this.source.start),
+        sourceOffset(inputString, this.source.end)
+      );
+      let index = stringRepresentation.indexOf(opts.word);
+      if (index !== -1) pos = this.positionInside(index);
+    }
+    return pos;
+  }
+  positionInside(index) {
+    let column = this.source.start.column;
+    let line = this.source.start.line;
+    let inputString = "document" in this.source.input ? this.source.input.document : this.source.input.css;
+    let offset = sourceOffset(inputString, this.source.start);
+    let end = offset + index;
+    for (let i = offset; i < end; i++) {
+      if (inputString[i] === "\n") {
+        column = 1;
+        line += 1;
+      } else {
+        column += 1;
+      }
+    }
+    return { column, line, offset: end };
+  }
+  prev() {
+    if (!this.parent) return void 0;
+    let index = this.parent.index(this);
+    return this.parent.nodes[index - 1];
+  }
+  rangeBy(opts = {}) {
+    let inputString = "document" in this.source.input ? this.source.input.document : this.source.input.css;
+    let start = {
+      column: this.source.start.column,
+      line: this.source.start.line,
+      offset: sourceOffset(inputString, this.source.start)
+    };
+    let end = this.source.end ? {
+      column: this.source.end.column + 1,
+      line: this.source.end.line,
+      offset: typeof this.source.end.offset === "number" ? (
+        // `source.end.offset` is exclusive, so we don't need to add 1
+        this.source.end.offset
+      ) : (
+        // Since line/column in this.source.end is inclusive,
+        // the `sourceOffset(... , this.source.end)` returns an inclusive offset.
+        // So, we add 1 to convert it to exclusive.
+        sourceOffset(inputString, this.source.end) + 1
+      )
+    } : {
+      column: start.column + 1,
+      line: start.line,
+      offset: start.offset + 1
+    };
+    if (opts.word) {
+      let stringRepresentation = inputString.slice(
+        sourceOffset(inputString, this.source.start),
+        sourceOffset(inputString, this.source.end)
+      );
+      let index = stringRepresentation.indexOf(opts.word);
+      if (index !== -1) {
+        start = this.positionInside(index);
+        end = this.positionInside(index + opts.word.length);
+      }
+    } else {
+      if (opts.start) {
+        start = {
+          column: opts.start.column,
+          line: opts.start.line,
+          offset: sourceOffset(inputString, opts.start)
+        };
+      } else if (typeof opts.index === "number") {
+        start = this.positionInside(opts.index);
+      }
+      if (opts.end) {
+        end = {
+          column: opts.end.column,
+          line: opts.end.line,
+          offset: sourceOffset(inputString, opts.end)
+        };
+      } else if (typeof opts.endIndex === "number") {
+        end = this.positionInside(opts.endIndex);
+      } else if (typeof opts.index === "number") {
+        end = this.positionInside(opts.index + 1);
+      }
+    }
+    if (end.line < start.line || end.line === start.line && end.column <= start.column) {
+      end = {
+        column: start.column + 1,
+        line: start.line,
+        offset: start.offset + 1
+      };
+    }
+    return { end, start };
+  }
+  raw(prop, defaultType) {
+    let str = new Stringifier2();
+    return str.raw(this, prop, defaultType);
+  }
+  remove() {
+    if (this.parent) {
+      this.parent.removeChild(this);
+    }
+    this.parent = void 0;
+    return this;
+  }
+  replaceWith(...nodes) {
+    if (this.parent) {
+      let bookmark = this;
+      let foundSelf = false;
+      for (let node2 of nodes) {
+        if (node2 === this) {
+          foundSelf = true;
+        } else if (foundSelf) {
+          this.parent.insertAfter(bookmark, node2);
+          bookmark = node2;
+        } else {
+          this.parent.insertBefore(bookmark, node2);
+        }
+      }
+      if (!foundSelf) {
+        this.remove();
+      }
+    }
+    return this;
+  }
+  root() {
+    let result2 = this;
+    while (result2.parent && result2.parent.type !== "document") {
+      result2 = result2.parent;
+    }
+    return result2;
+  }
+  toJSON(_, inputs) {
+    let emitInputs = inputs == null;
+    inputs = inputs || /* @__PURE__ */ new Map();
+    let holderOfRoot = [];
+    let queue = [[this, holderOfRoot, 0]];
+    for (let step = 0; step < queue.length; step++) {
+      let [node2, holder, key] = queue[step];
+      let fixed2 = {};
+      holder[key] = fixed2;
+      for (let name in node2) {
+        if (!Object.prototype.hasOwnProperty.call(node2, name)) {
+          continue;
+        }
+        if (name === "parent" || name === "proxyCache") continue;
+        let value = node2[name];
+        if (Array.isArray(value)) {
+          let fixedArray = [];
+          fixed2[name] = fixedArray;
+          for (let i = 0; i < value.length; i++) {
+            let item = value[i];
+            if (typeof item === "object" && item.toJSON) {
+              if (item.toJSON === Node2.prototype.toJSON) {
+                queue.push([item, fixedArray, i]);
+              } else {
+                fixedArray[i] = item.toJSON(null, inputs);
+              }
+            } else {
+              fixedArray[i] = item;
+            }
+          }
+        } else if (typeof value === "object" && value.toJSON) {
+          if (value.toJSON === Node2.prototype.toJSON) {
+            queue.push([value, fixed2, name]);
+          } else {
+            fixed2[name] = value.toJSON(null, inputs);
+          }
+        } else if (name === "source") {
+          if (value == null) continue;
+          let inputId = inputs.get(value.input);
+          if (inputId == null) {
+            inputId = inputs.size;
+            inputs.set(value.input, inputId);
+          }
+          fixed2[name] = {
+            end: value.end,
+            inputId,
+            start: value.start
+          };
+        } else {
+          fixed2[name] = value;
+        }
+      }
+    }
+    let fixed = holderOfRoot[0];
+    if (emitInputs) {
+      fixed.inputs = [...inputs.keys()].map((input2) => input2.toJSON());
+    }
+    return fixed;
+  }
+  toProxy() {
+    if (!this.proxyCache) {
+      this.proxyCache = new Proxy(this, this.getProxyProcessor());
+    }
+    return this.proxyCache;
+  }
+  toString(stringifier2 = stringify$3) {
+    if (stringifier2.stringify) stringifier2 = stringifier2.stringify;
+    let result2 = "";
+    stringifier2(this, (i) => {
+      result2 += i;
+    });
+    return result2;
+  }
+  warn(result2, text2, opts = {}) {
+    let data = { node: this };
+    for (let i in opts) data[i] = opts[i];
+    return result2.warn(text2, data);
+  }
+};
+var node = Node$5;
+Node$5.default = Node$5;
+let Node$4 = node;
+let Comment$4 = class Comment extends Node$4 {
+  constructor(defaults) {
+    super(defaults);
+    this.type = "comment";
+  }
+};
+var comment = Comment$4;
+Comment$4.default = Comment$4;
+let Node$3 = node;
+let Declaration$4 = class Declaration extends Node$3 {
+  get variable() {
+    return this.prop.startsWith("--") || this.prop[0] === "$";
+  }
+  constructor(defaults) {
+    if (defaults && typeof defaults.value !== "undefined" && typeof defaults.value !== "string") {
+      defaults = { ...defaults, value: String(defaults.value) };
+    }
+    super(defaults);
+    this.type = "decl";
+  }
+};
+var declaration = Declaration$4;
+Declaration$4.default = Declaration$4;
+let Comment$3 = comment;
+let Declaration$3 = declaration;
+let Node$2 = node;
+let { isClean: isClean$1, my: my$2 } = symbols;
+let AtRule$4, parse$6, Root$6, Rule$4;
+function cleanSource(nodes) {
+  let stack = nodes.slice();
+  while (stack.length > 0) {
+    let node2 = stack.pop();
+    delete node2.source;
+    if (node2.nodes) {
+      node2.nodes = node2.nodes.slice();
+      for (let i of node2.nodes) stack.push(i);
+    }
+  }
+  return nodes.slice();
+}
+function markTreeDirty(node2) {
+  let stack = [node2];
+  while (stack.length > 0) {
+    let next = stack.pop();
+    next[isClean$1] = false;
+    if (next.proxyOf.nodes) {
+      for (let i of next.proxyOf.nodes) stack.push(i);
+    }
+  }
+}
+let Container$8 = class Container extends Node$2 {
+  get first() {
+    if (!this.proxyOf.nodes) return void 0;
+    return this.proxyOf.nodes[0];
+  }
+  get last() {
+    if (!this.proxyOf.nodes) return void 0;
+    return this.proxyOf.nodes[this.proxyOf.nodes.length - 1];
+  }
+  append(...children) {
+    for (let child of children) {
+      let nodes = this.normalize(child, this.last);
+      for (let node2 of nodes) this.proxyOf.nodes.push(node2);
+    }
+    this.markDirty();
+    return this;
+  }
+  cleanRaws(keepBetween) {
+    let stack = [this];
+    while (stack.length > 0) {
+      let node2 = stack.pop();
+      if (node2 !== this && node2.cleanRaws !== Container.prototype.cleanRaws) {
+        node2.cleanRaws(keepBetween);
+        continue;
+      }
+      Node$2.prototype.cleanRaws.call(node2, keepBetween);
+      if (node2.nodes) {
+        for (let child of node2.nodes) stack.push(child);
+      }
+    }
+  }
+  each(callback) {
+    if (!this.proxyOf.nodes) return void 0;
+    let iterator = this.getIterator();
+    let index, result2;
+    while (this.indexes[iterator] < this.proxyOf.nodes.length) {
+      index = this.indexes[iterator];
+      result2 = callback(this.proxyOf.nodes[index], index);
+      if (result2 === false) break;
+      this.indexes[iterator] += 1;
+    }
+    delete this.indexes[iterator];
+    return result2;
+  }
+  every(condition) {
+    return this.nodes.every(condition);
+  }
+  getIterator() {
+    if (!this.lastEach) this.lastEach = 0;
+    if (!this.indexes) this.indexes = {};
+    this.lastEach += 1;
+    let iterator = this.lastEach;
+    this.indexes[iterator] = 0;
+    return iterator;
+  }
+  getProxyProcessor() {
+    return {
+      get(node2, prop) {
+        if (prop === "proxyOf") {
+          return node2;
+        } else if (!node2[prop]) {
+          return node2[prop];
+        } else if (prop === "each" || typeof prop === "string" && prop.startsWith("walk")) {
+          return (...args) => {
+            return node2[prop](
+              ...args.map((i) => {
+                if (typeof i === "function") {
+                  return (child, index) => i(child.toProxy(), index);
+                } else {
+                  return i;
+                }
+              })
+            );
+          };
+        } else if (prop === "every" || prop === "some") {
+          return (cb) => {
+            return node2[prop](
+              (child, ...other) => cb(child.toProxy(), ...other)
+            );
+          };
+        } else if (prop === "root") {
+          return () => node2.root().toProxy();
+        } else if (prop === "nodes") {
+          return node2.nodes.map((i) => i.toProxy());
+        } else if (prop === "first" || prop === "last") {
+          return node2[prop].toProxy();
+        } else {
+          return node2[prop];
+        }
+      },
+      set(node2, prop, value) {
+        if (node2[prop] === value) return true;
+        node2[prop] = value;
+        if (prop === "name" || prop === "params" || prop === "selector") {
+          node2.markDirty();
+        }
+        return true;
+      }
+    };
+  }
+  index(child) {
+    if (typeof child === "number") return child;
+    if (child.proxyOf) child = child.proxyOf;
+    return this.proxyOf.nodes.indexOf(child);
+  }
+  insertAfter(exist, add) {
+    let existIndex = this.index(exist);
+    let nodes = this.normalize(add, this.proxyOf.nodes[existIndex]).reverse();
+    existIndex = this.index(exist);
+    for (let node2 of nodes) this.proxyOf.nodes.splice(existIndex + 1, 0, node2);
+    let index;
+    for (let id in this.indexes) {
+      index = this.indexes[id];
+      if (existIndex < index) {
+        this.indexes[id] = index + nodes.length;
+      }
+    }
+    this.markDirty();
+    return this;
+  }
+  insertBefore(exist, add) {
+    let existIndex = this.index(exist);
+    let type = existIndex === 0 ? "prepend" : false;
+    let nodes = this.normalize(
+      add,
+      this.proxyOf.nodes[existIndex],
+      type
+    ).reverse();
+    existIndex = this.index(exist);
+    for (let node2 of nodes) this.proxyOf.nodes.splice(existIndex, 0, node2);
+    let index;
+    for (let id in this.indexes) {
+      index = this.indexes[id];
+      if (existIndex <= index) {
+        this.indexes[id] = index + nodes.length;
+      }
+    }
+    this.markDirty();
+    return this;
+  }
+  normalize(nodes, sample) {
+    if (typeof nodes === "string") {
+      nodes = cleanSource(parse$6(nodes).nodes);
+    } else if (typeof nodes === "undefined") {
+      nodes = [];
+    } else if (Array.isArray(nodes)) {
+      nodes = nodes.slice(0);
+      for (let i of nodes) {
+        if (i.parent) i.parent.removeChild(i, "ignore");
+      }
+    } else if (nodes.type === "root" && this.type !== "document") {
+      nodes = nodes.nodes.slice(0);
+      for (let i of nodes) {
+        if (i.parent) i.parent.removeChild(i, "ignore");
+      }
+    } else if (nodes.type) {
+      nodes = [nodes];
+    } else if (nodes.prop) {
+      if (typeof nodes.value === "undefined") {
+        throw new Error("Value field is missed in node creation");
+      } else if (typeof nodes.value !== "string") {
+        nodes.value = String(nodes.value);
+      }
+      nodes = [new Declaration$3(nodes)];
+    } else if (nodes.selector || nodes.selectors) {
+      nodes = [new Rule$4(nodes)];
+    } else if (nodes.name) {
+      nodes = [new AtRule$4(nodes)];
+    } else if (nodes.text) {
+      nodes = [new Comment$3(nodes)];
+    } else {
+      throw new Error("Unknown node type in node creation");
+    }
+    let processed = nodes.map((i) => {
+      if (!i[my$2]) Container.rebuild(i);
+      i = i.proxyOf;
+      if (i.parent) i.parent.removeChild(i);
+      if (i[isClean$1]) markTreeDirty(i);
+      if (!i.raws) i.raws = {};
+      if (typeof i.raws.before === "undefined") {
+        if (sample && typeof sample.raws.before !== "undefined") {
+          i.raws.before = sample.raws.before.replace(/\S/g, "");
+        }
+      }
+      i.parent = this.proxyOf;
+      return i;
+    });
+    return processed;
+  }
+  prepend(...children) {
+    children = children.reverse();
+    for (let child of children) {
+      let nodes = this.normalize(child, this.first, "prepend").reverse();
+      for (let node2 of nodes) this.proxyOf.nodes.unshift(node2);
+      for (let id in this.indexes) {
+        this.indexes[id] = this.indexes[id] + nodes.length;
+      }
+    }
+    this.markDirty();
+    return this;
+  }
+  push(child) {
+    child.parent = this;
+    this.proxyOf.nodes.push(child);
+    return this;
+  }
+  removeAll() {
+    for (let node2 of this.proxyOf.nodes) node2.parent = void 0;
+    this.proxyOf.nodes = [];
+    this.markDirty();
+    return this;
+  }
+  removeChild(child) {
+    child = this.index(child);
+    this.proxyOf.nodes[child].parent = void 0;
+    this.proxyOf.nodes.splice(child, 1);
+    let index;
+    for (let id in this.indexes) {
+      index = this.indexes[id];
+      if (index >= child) {
+        this.indexes[id] = index - 1;
+      }
+    }
+    this.markDirty();
+    return this;
+  }
+  replaceValues(pattern, opts, callback) {
+    if (!callback) {
+      callback = opts;
+      opts = {};
+    }
+    this.walkDecls((decl) => {
+      if (opts.props && !opts.props.includes(decl.prop)) return;
+      if (opts.fast && !decl.value.includes(opts.fast)) return;
+      decl.value = decl.value.replace(pattern, callback);
+    });
+    this.markDirty();
+    return this;
+  }
+  some(condition) {
+    return this.nodes.some(condition);
+  }
+  walk(callback) {
+    if (!this.proxyOf.nodes) return void 0;
+    let stack = [{ iterator: this.getIterator(), node: this.proxyOf }];
+    while (stack.length > 0) {
+      let { iterator, node: node2 } = stack[stack.length - 1];
+      let index = node2.indexes[iterator];
+      if (index >= node2.proxyOf.nodes.length) {
+        delete node2.indexes[iterator];
+        stack.pop();
+        let parent = stack[stack.length - 1];
+        if (parent) parent.node.indexes[parent.iterator] += 1;
+        continue;
+      }
+      let child = node2.proxyOf.nodes[index];
+      let result2;
+      try {
+        result2 = callback(child, index);
+      } catch (e) {
+        throw child.addToError(e);
+      }
+      if (result2 === false) {
+        for (let opened of stack) {
+          delete opened.node.indexes[opened.iterator];
+        }
+        return false;
+      }
+      if (child.walk && child.proxyOf.nodes) {
+        stack.push({ iterator: child.getIterator(), node: child });
+      } else {
+        node2.indexes[iterator] += 1;
+      }
+    }
+    return void 0;
+  }
+  walkAtRules(name, callback) {
+    if (!callback) {
+      callback = name;
+      return this.walk((child, i) => {
+        if (child.type === "atrule") {
+          return callback(child, i);
+        }
+      });
+    }
+    if (name instanceof RegExp) {
+      return this.walk((child, i) => {
+        if (child.type === "atrule" && name.test(child.name)) {
+          return callback(child, i);
+        }
+      });
+    }
+    return this.walk((child, i) => {
+      if (child.type === "atrule" && child.name === name) {
+        return callback(child, i);
+      }
+    });
+  }
+  walkComments(callback) {
+    return this.walk((child, i) => {
+      if (child.type === "comment") {
+        return callback(child, i);
+      }
+    });
+  }
+  walkDecls(prop, callback) {
+    if (!callback) {
+      callback = prop;
+      return this.walk((child, i) => {
+        if (child.type === "decl") {
+          return callback(child, i);
+        }
+      });
+    }
+    if (prop instanceof RegExp) {
+      return this.walk((child, i) => {
+        if (child.type === "decl" && prop.test(child.prop)) {
+          return callback(child, i);
+        }
+      });
+    }
+    return this.walk((child, i) => {
+      if (child.type === "decl" && child.prop === prop) {
+        return callback(child, i);
+      }
+    });
+  }
+  walkRules(selector, callback) {
+    if (!callback) {
+      callback = selector;
+      return this.walk((child, i) => {
+        if (child.type === "rule") {
+          return callback(child, i);
+        }
+      });
+    }
+    if (selector instanceof RegExp) {
+      return this.walk((child, i) => {
+        if (child.type === "rule" && selector.test(child.selector)) {
+          return callback(child, i);
+        }
+      });
+    }
+    return this.walk((child, i) => {
+      if (child.type === "rule" && child.selector === selector) {
+        return callback(child, i);
+      }
+    });
+  }
+};
+Container$8.registerParse = (dependant) => {
+  parse$6 = dependant;
+};
+Container$8.registerRule = (dependant) => {
+  Rule$4 = dependant;
+};
+Container$8.registerAtRule = (dependant) => {
+  AtRule$4 = dependant;
+};
+Container$8.registerRoot = (dependant) => {
+  Root$6 = dependant;
+};
+var container = Container$8;
+Container$8.default = Container$8;
+Container$8.rebuild = (node2) => {
+  let stack = [node2];
+  while (stack.length > 0) {
+    let next = stack.pop();
+    if (next.type === "atrule") {
+      Object.setPrototypeOf(next, AtRule$4.prototype);
+    } else if (next.type === "rule") {
+      Object.setPrototypeOf(next, Rule$4.prototype);
+    } else if (next.type === "decl") {
+      Object.setPrototypeOf(next, Declaration$3.prototype);
+    } else if (next.type === "comment") {
+      Object.setPrototypeOf(next, Comment$3.prototype);
+    } else if (next.type === "root") {
+      Object.setPrototypeOf(next, Root$6.prototype);
+    }
+    next[my$2] = true;
+    if (next.nodes) {
+      for (let child of next.nodes) stack.push(child);
+    }
+  }
+};
+let Container$7 = container;
+let AtRule$3 = class AtRule extends Container$7 {
+  constructor(defaults) {
+    super(defaults);
+    this.type = "atrule";
+  }
+  append(...children) {
+    if (!this.proxyOf.nodes) this.nodes = [];
+    return super.append(...children);
+  }
+  prepend(...children) {
+    if (!this.proxyOf.nodes) this.nodes = [];
+    return super.prepend(...children);
+  }
+};
+var atRule = AtRule$3;
+AtRule$3.default = AtRule$3;
+Container$7.registerAtRule(AtRule$3);
+let Container$6 = container;
+let LazyResult$4, Processor$3;
+let Document$3 = class Document extends Container$6 {
+  constructor(defaults) {
+    super({ type: "document", ...defaults });
+    if (!this.nodes) {
+      this.nodes = [];
+    }
+  }
+  toResult(opts = {}) {
+    let lazy = new LazyResult$4(new Processor$3(), this, opts);
+    return lazy.stringify();
+  }
+};
+Document$3.registerLazyResult = (dependant) => {
+  LazyResult$4 = dependant;
+};
+Document$3.registerProcessor = (dependant) => {
+  Processor$3 = dependant;
+};
+var document$1 = Document$3;
+Document$3.default = Document$3;
+let urlAlphabet = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
+let nanoid$1 = (size = 21) => {
+  let id = "";
+  let i = size | 0;
+  while (i-- > 0) {
+    id += urlAlphabet[Math.random() * 64 | 0];
+  }
+  return id;
+};
+var nonSecure = { nanoid: nanoid$1 };
+let { existsSync, readFileSync } = require$$2;
+let { dirname: dirname$1, isAbsolute: isAbsolute$1, join, relative: relative$1, sep: sep$1 } = require$$2;
+let { SourceMapConsumer: SourceMapConsumer$2, SourceMapGenerator: SourceMapGenerator$2 } = require$$2;
+function fromBase64(str) {
+  if (Buffer) {
+    return Buffer.from(str, "base64").toString();
+  } else {
+    return window.atob(str);
+  }
+}
+let PreviousMap$2 = class PreviousMap {
+  constructor(css, opts) {
+    if (opts.map === false) return;
+    if (opts.unsafeMap) this.unsafeMap = true;
+    this.loadAnnotation(css);
+    this.inline = this.startWith(this.annotation, "data:");
+    let prev = opts.map ? opts.map.prev : void 0;
+    let text2 = this.loadMap(opts.from, prev);
+    if (!this.mapFile && opts.from) {
+      this.mapFile = opts.from;
+    }
+    if (this.mapFile) this.root = dirname$1(this.mapFile);
+    if (text2) this.text = text2;
+  }
+  consumer() {
+    if (!this.consumerCache) {
+      this.consumerCache = new SourceMapConsumer$2(this.json || this.text);
+    }
+    return this.consumerCache;
+  }
+  decodeInline(text2) {
+    let baseCharsetUri = /^data:application\/json;charset=utf-?8;base64,/;
+    let baseUri = /^data:application\/json;base64,/;
+    let charsetUri = /^data:application\/json;charset=utf-?8,/;
+    let uri = /^data:application\/json,/;
+    let uriMatch = text2.match(charsetUri) || text2.match(uri);
+    if (uriMatch) {
+      return decodeURIComponent(text2.substr(uriMatch[0].length));
+    }
+    let baseUriMatch = text2.match(baseCharsetUri) || text2.match(baseUri);
+    if (baseUriMatch) {
+      return fromBase64(text2.substr(baseUriMatch[0].length));
+    }
+    let encoding = text2.slice("data:application/json;".length);
+    encoding = encoding.slice(0, encoding.indexOf(","));
+    throw new Error("Unsupported source map encoding " + encoding);
+  }
+  getAnnotationURL(sourceMapString) {
+    return sourceMapString.replace(/^\/\*\s*# sourceMappingURL=/, "").trim();
+  }
+  isMap(map) {
+    if (typeof map !== "object") return false;
+    return typeof map.mappings === "string" || typeof map._mappings === "string" || Array.isArray(map.sections);
+  }
+  loadAnnotation(css) {
+    let comments = css.match(/\/\*\s*# sourceMappingURL=/g);
+    if (!comments) return;
+    let start = css.lastIndexOf(comments.pop());
+    let end = css.indexOf("*/", start);
+    if (start > -1 && end > -1) {
+      this.annotation = this.getAnnotationURL(css.substring(start, end));
+    }
+  }
+  loadFile(path, cssFile, trusted) {
+    if (!trusted && !this.unsafeMap) {
+      if (!/\.map$/i.test(path)) return void 0;
+      if (!cssFile) return void 0;
+      let rel = relative$1(dirname$1(cssFile), path);
+      if (rel === ".." || rel.startsWith(".." + sep$1) || isAbsolute$1(rel)) {
+        return void 0;
+      }
+    }
+    this.root = dirname$1(path);
+    if (existsSync(path)) {
+      this.mapFile = path;
+      return readFileSync(path, "utf-8").toString().trim();
+    }
+  }
+  loadMap(file, prev) {
+    if (prev === false) return false;
+    if (prev) {
+      if (typeof prev === "string") {
+        return prev;
+      } else if (typeof prev === "function") {
+        let prevPath = prev(file);
+        if (prevPath) {
+          let map = this.loadFile(prevPath, file, true);
+          if (!map) {
+            throw new Error(
+              "Unable to load previous source map: " + prevPath.toString()
+            );
+          }
+          return map;
+        }
+      } else if (prev instanceof SourceMapConsumer$2) {
+        return SourceMapGenerator$2.fromSourceMap(prev).toString();
+      } else if (prev instanceof SourceMapGenerator$2) {
+        return prev.toString();
+      } else if (this.isMap(prev)) {
+        return JSON.stringify(prev);
+      } else {
+        throw new Error(
+          "Unsupported previous source map format: " + prev.toString()
+        );
+      }
+    } else if (this.inline) {
+      return this.decodeInline(this.annotation);
+    } else if (this.annotation) {
+      let map = this.annotation;
+      if (file) map = join(dirname$1(file), map);
+      let unknown = this.loadFile(map, file, false);
+      if (unknown) {
+        try {
+          this.json = JSON.parse(unknown.replace(/^\)]}'[^\n]*\n/, ""));
+        } catch {
+          return void 0;
+        }
+      }
+      return unknown;
+    }
+  }
+  startWith(string, start) {
+    if (!string) return false;
+    return string.substr(0, start.length) === start;
+  }
+  withContent() {
+    return !!(this.consumer().sourcesContent && this.consumer().sourcesContent.length > 0);
+  }
+};
+var previousMap = PreviousMap$2;
+PreviousMap$2.default = PreviousMap$2;
+let { nanoid } = nonSecure;
+let { isAbsolute, resolve: resolve$1 } = require$$2;
+let { SourceMapConsumer: SourceMapConsumer$1, SourceMapGenerator: SourceMapGenerator$1 } = require$$2;
+let { fileURLToPath, pathToFileURL: pathToFileURL$1 } = require$$2;
+let CssSyntaxError$1 = cssSyntaxError;
+let PreviousMap$1 = previousMap;
+let terminalHighlight = require$$2;
+let lineToIndexCache = Symbol("lineToIndexCache");
+let sourceMapAvailable$1 = Boolean(SourceMapConsumer$1 && SourceMapGenerator$1);
+let pathAvailable$1 = Boolean(resolve$1 && isAbsolute);
+function getLineToIndex(input2) {
+  if (input2[lineToIndexCache]) return input2[lineToIndexCache];
+  let lines = input2.css.split("\n");
+  let lineToIndex = new Array(lines.length);
+  let prevIndex = 0;
+  for (let i = 0, l = lines.length; i < l; i++) {
+    lineToIndex[i] = prevIndex;
+    prevIndex += lines[i].length + 1;
+  }
+  input2[lineToIndexCache] = lineToIndex;
+  return lineToIndex;
+}
+let Input$4 = class Input {
+  get from() {
+    return this.file || this.id;
+  }
+  constructor(css, opts = {}) {
+    if (css === null || typeof css === "undefined" || typeof css === "object" && !css.toString) {
+      throw new Error(`PostCSS received ${css} instead of CSS string`);
+    }
+    this.css = css.toString();
+    if (this.css[0] === "\uFEFF" || this.css[0] === "￾") {
+      this.hasBOM = true;
+      this.css = this.css.slice(1);
+    } else {
+      this.hasBOM = false;
+    }
+    this.document = this.css;
+    if (opts.document) this.document = opts.document.toString();
+    if (opts.from) {
+      if (!pathAvailable$1 || /^\w+:\/\//.test(opts.from) || isAbsolute(opts.from)) {
+        this.file = opts.from;
+      } else {
+        this.file = resolve$1(opts.from);
+      }
+    }
+    if (pathAvailable$1 && sourceMapAvailable$1) {
+      let map = new PreviousMap$1(this.css, opts);
+      if (map.text) {
+        this.map = map;
+        let file = map.consumer().file;
+        if (!this.file && file) this.file = this.mapResolve(file);
+      }
+    }
+    if (!this.file) {
+      this.id = "<input css " + nanoid(6) + ">";
+    }
+    if (this.map) this.map.file = this.from;
+  }
+  error(message, line, column, opts = {}) {
+    let endColumn, endLine, endOffset, offset, result2;
+    if (line && typeof line === "object") {
+      let start = line;
+      let end = column;
+      if (typeof start.offset === "number") {
+        offset = start.offset;
+        let pos = this.fromOffset(offset);
+        line = pos.line;
+        column = pos.col;
+      } else {
+        line = start.line;
+        column = start.column;
+        offset = this.fromLineAndColumn(line, column);
+      }
+      if (typeof end.offset === "number") {
+        endOffset = end.offset;
+        let pos = this.fromOffset(endOffset);
+        endLine = pos.line;
+        endColumn = pos.col;
+      } else {
+        endLine = end.line;
+        endColumn = end.column;
+        endOffset = this.fromLineAndColumn(end.line, end.column);
+      }
+    } else if (!column) {
+      offset = line;
+      let pos = this.fromOffset(offset);
+      line = pos.line;
+      column = pos.col;
+    } else {
+      offset = this.fromLineAndColumn(line, column);
+    }
+    let origin = this.origin(line, column, endLine, endColumn);
+    if (origin) {
+      result2 = new CssSyntaxError$1(
+        message,
+        origin.endLine === void 0 ? origin.line : { column: origin.column, line: origin.line },
+        origin.endLine === void 0 ? origin.column : { column: origin.endColumn, line: origin.endLine },
+        origin.source,
+        origin.file,
+        opts.plugin
+      );
+    } else {
+      result2 = new CssSyntaxError$1(
+        message,
+        endLine === void 0 ? line : { column, line },
+        endLine === void 0 ? column : { column: endColumn, line: endLine },
+        this.css,
+        this.file,
+        opts.plugin
+      );
+    }
+    result2.input = {
+      column,
+      endColumn,
+      endLine,
+      endOffset,
+      line,
+      offset,
+      source: this.css
+    };
+    if (this.file) {
+      if (pathToFileURL$1) {
+        result2.input.url = pathToFileURL$1(this.file).toString();
+      }
+      result2.input.file = this.file;
+    }
+    return result2;
+  }
+  fromLineAndColumn(line, column) {
+    let lineToIndex = getLineToIndex(this);
+    let index = lineToIndex[line - 1];
+    return index + column - 1;
+  }
+  fromOffset(offset) {
+    let lineToIndex = getLineToIndex(this);
+    let lastLine = lineToIndex[lineToIndex.length - 1];
+    let min = 0;
+    if (offset >= lastLine) {
+      min = lineToIndex.length - 1;
+    } else {
+      let max = lineToIndex.length - 2;
+      let mid;
+      while (min < max) {
+        mid = min + (max - min >> 1);
+        if (offset < lineToIndex[mid]) {
+          max = mid - 1;
+        } else if (offset >= lineToIndex[mid + 1]) {
+          min = mid + 1;
+        } else {
+          min = mid;
+          break;
+        }
+      }
+    }
+    return {
+      col: offset - lineToIndex[min] + 1,
+      line: min + 1
+    };
+  }
+  mapResolve(file) {
+    if (/^\w+:\/\//.test(file)) {
+      return file;
+    }
+    return resolve$1(this.map.consumer().sourceRoot || this.map.root || ".", file);
+  }
+  origin(line, column, endLine, endColumn) {
+    if (!this.map) return false;
+    let consumer = this.map.consumer();
+    let from = consumer.originalPositionFor({ column: column - 1, line });
+    if (!from.source) return false;
+    let to;
+    if (typeof endLine === "number") {
+      let toPosition = consumer.originalPositionFor({
+        column: endColumn - 1,
+        line: endLine
+      });
+      if (toPosition.source) to = toPosition;
+    }
+    let fromUrl;
+    if (isAbsolute(from.source)) {
+      fromUrl = pathToFileURL$1(from.source);
+    } else {
+      fromUrl = new URL(
+        from.source,
+        this.map.consumer().sourceRoot || pathToFileURL$1(this.map.mapFile)
+      );
+    }
+    let result2 = {
+      column: from.column + 1,
+      endColumn: to && to.column + 1,
+      endLine: to && to.line,
+      line: from.line,
+      url: fromUrl.toString()
+    };
+    if (fromUrl.protocol === "file:") {
+      if (fileURLToPath) {
+        result2.file = fileURLToPath(fromUrl);
+      } else {
+        throw new Error(`file: protocol is not available in this PostCSS build`);
+      }
+    }
+    let source = consumer.sourceContentFor(from.source);
+    if (source) result2.source = source;
+    return result2;
+  }
+  toJSON() {
+    let json = {};
+    for (let name of ["hasBOM", "css", "file", "id"]) {
+      if (this[name] != null) {
+        json[name] = this[name];
+      }
+    }
+    if (this.map) {
+      json.map = { ...this.map };
+      if (json.map.consumerCache) {
+        json.map.consumerCache = void 0;
+      }
+    }
+    return json;
+  }
+};
+var input = Input$4;
+Input$4.default = Input$4;
+if (terminalHighlight && terminalHighlight.registerInput) {
+  terminalHighlight.registerInput(Input$4);
+}
+let Container$5 = container;
+let LazyResult$3, Processor$2;
+let Root$5 = class Root extends Container$5 {
+  constructor(defaults) {
+    super(defaults);
+    this.type = "root";
+    if (!this.nodes) this.nodes = [];
+  }
+  normalize(child, sample, type) {
+    let keepBefore = /* @__PURE__ */ new Set();
+    for (let node2 of Array.isArray(child) ? child : [child]) {
+      if (node2 && typeof node2 === "object" && !node2.parent && node2.raws && typeof node2.raws.before !== "undefined") {
+        keepBefore.add(node2.raws);
+      }
+    }
+    let nodes = super.normalize(child);
+    if (sample) {
+      if (type === "prepend") {
+        if (this.nodes.length > 1) {
+          sample.raws.before = this.nodes[1].raws.before;
+        } else {
+          delete sample.raws.before;
+        }
+      } else if (this.first !== sample) {
+        for (let node2 of nodes) {
+          if (!keepBefore.has(node2.raws)) {
+            node2.raws.before = sample.raws.before;
+          }
+        }
+      }
+    }
+    return nodes;
+  }
+  removeChild(child, ignore) {
+    let index = this.index(child);
+    if (!ignore && index === 0 && this.nodes.length > 1) {
+      this.nodes[1].raws.before = this.nodes[index].raws.before;
+    }
+    return super.removeChild(child);
+  }
+  toResult(opts = {}) {
+    let lazy = new LazyResult$3(new Processor$2(), this, opts);
+    return lazy.stringify();
+  }
+};
+Root$5.registerLazyResult = (dependant) => {
+  LazyResult$3 = dependant;
+};
+Root$5.registerProcessor = (dependant) => {
+  Processor$2 = dependant;
+};
+var root = Root$5;
+Root$5.default = Root$5;
+Container$5.registerRoot(Root$5);
+let list$2 = {
+  comma(string) {
+    return list$2.split(string, [","], true);
+  },
+  space(string) {
+    let spaces = [" ", "\n", "	"];
+    return list$2.split(string, spaces);
+  },
+  split(string, separators, last) {
+    if (!string) return [];
+    let array = [];
+    let current = "";
+    let split = false;
+    let func = 0;
+    let inQuote = false;
+    let prevQuote = "";
+    let escape2 = false;
+    for (let letter of string) {
+      if (escape2) {
+        escape2 = false;
+      } else if (letter === "\\") {
+        escape2 = true;
+      } else if (inQuote) {
+        if (letter === prevQuote) {
+          inQuote = false;
+        }
+      } else if (letter === '"' || letter === "'") {
+        inQuote = true;
+        prevQuote = letter;
+      } else if (letter === "(") {
+        func += 1;
+      } else if (letter === ")") {
+        if (func > 0) func -= 1;
+      } else if (func === 0) {
+        if (separators.includes(letter)) split = true;
+      }
+      if (split) {
+        if (current !== "") array.push(current.trim());
+        current = "";
+        split = false;
+      } else {
+        current += letter;
+      }
+    }
+    if (last || current !== "") array.push(current.trim());
+    return array;
+  }
+};
+var list_1 = list$2;
+list$2.default = list$2;
+let Container$4 = container;
+let list$1 = list_1;
+let Rule$3 = class Rule extends Container$4 {
+  get selectors() {
+    return list$1.comma(this.selector);
+  }
+  set selectors(values) {
+    let match = this.selector ? this.selector.match(/,\s*/) : null;
+    let sep2 = match ? match[0] : "," + this.raw("between", "beforeOpen");
+    this.selector = values.join(sep2);
+  }
+  constructor(defaults) {
+    super(defaults);
+    this.type = "rule";
+    if (!this.nodes) this.nodes = [];
+  }
+};
+var rule = Rule$3;
+Rule$3.default = Rule$3;
+Container$4.registerRule(Rule$3);
+let AtRule$2 = atRule;
+let Comment$2 = comment;
+let Declaration$2 = declaration;
+let Input$3 = input;
+let PreviousMap2 = previousMap;
+let Root$4 = root;
+let Rule$2 = rule;
+function hydrateInputs(json, inputs) {
+  if (!json.inputs) return inputs;
+  return json.inputs.map((input2) => {
+    let inputHydrated = { ...input2, __proto__: Input$3.prototype };
+    if (inputHydrated.map) {
+      inputHydrated.map = {
+        ...inputHydrated.map,
+        __proto__: PreviousMap2.prototype
+      };
+    }
+    return inputHydrated;
+  });
+}
+function constructNode(json, inputs, children) {
+  let defaults = { ...json };
+  delete defaults.inputs;
+  delete defaults.nodes;
+  if (defaults.source) {
+    let { inputId, ...source } = defaults.source;
+    defaults.source = source;
+    if (inputId != null) {
+      defaults.source.input = inputs[inputId];
+    }
+  }
+  let node2;
+  if (defaults.type === "root") {
+    node2 = new Root$4(defaults);
+  } else if (defaults.type === "decl") {
+    node2 = new Declaration$2(defaults);
+  } else if (defaults.type === "rule") {
+    node2 = new Rule$2(defaults);
+  } else if (defaults.type === "comment") {
+    node2 = new Comment$2(defaults);
+  } else if (defaults.type === "atrule") {
+    node2 = new AtRule$2(defaults);
+  } else {
+    throw new Error("Unknown node type: " + json.type);
+  }
+  if (children) {
+    node2.nodes = children;
+    for (let child of children) child.parent = node2;
+  }
+  return node2;
+}
+function fromJSON$1(json, inputs) {
+  if (Array.isArray(json)) return json.map((n) => fromJSON$1(n));
+  let result2;
+  let stack = [
+    { childIndex: 0, children: [], inputs: hydrateInputs(json, inputs), json }
+  ];
+  while (stack.length > 0) {
+    let frame = stack[stack.length - 1];
+    let jsonNodes = frame.json.nodes;
+    if (jsonNodes && frame.childIndex < jsonNodes.length) {
+      let childJson = jsonNodes[frame.childIndex];
+      frame.childIndex += 1;
+      stack.push({
+        childIndex: 0,
+        children: [],
+        inputs: hydrateInputs(childJson, frame.inputs),
+        json: childJson
+      });
+      continue;
+    }
+    stack.pop();
+    let node2 = constructNode(
+      frame.json,
+      frame.inputs,
+      jsonNodes ? frame.children : void 0
+    );
+    if (stack.length > 0) {
+      stack[stack.length - 1].children.push(node2);
+    } else {
+      result2 = node2;
+    }
+  }
+  return result2;
+}
+var fromJSON_1 = fromJSON$1;
+fromJSON$1.default = fromJSON$1;
+let { dirname, relative, resolve, sep } = require$$2;
+let { SourceMapConsumer, SourceMapGenerator } = require$$2;
+let { pathToFileURL } = require$$2;
+let Input$2 = input;
+let sourceMapAvailable = Boolean(SourceMapConsumer && SourceMapGenerator);
+let pathAvailable = Boolean(dirname && resolve && relative && sep);
+let MapGenerator$2 = class MapGenerator {
+  constructor(stringify2, root2, opts, cssString2) {
+    this.stringify = stringify2;
+    this.mapOpts = opts.map || {};
+    this.root = root2;
+    this.opts = opts;
+    this.css = cssString2;
+    this.originalCSS = cssString2;
+    this.usesFileUrls = !this.mapOpts.from && this.mapOpts.absolute;
+    this.memoizedFileURLs = /* @__PURE__ */ new Map();
+    this.memoizedPaths = /* @__PURE__ */ new Map();
+    this.memoizedURLs = /* @__PURE__ */ new Map();
+  }
+  addAnnotation() {
+    let content;
+    if (this.isInline()) {
+      content = "data:application/json;base64," + this.toBase64(this.map.toString());
+    } else if (typeof this.mapOpts.annotation === "string") {
+      content = this.mapOpts.annotation;
+    } else if (typeof this.mapOpts.annotation === "function") {
+      content = this.mapOpts.annotation(this.opts.to, this.root);
+    } else {
+      content = this.outputFile() + ".map";
+    }
+    let eol = "\n";
+    if (this.css.includes("\r\n")) eol = "\r\n";
+    this.css += eol + "/*# sourceMappingURL=" + content + " */";
+  }
+  applyPrevMaps() {
+    for (let prev of this.previous()) {
+      let from = this.toUrl(this.path(prev.file));
+      let root2 = prev.root || dirname(prev.file);
+      let map;
+      if (this.mapOpts.sourcesContent === false) {
+        map = new SourceMapConsumer(prev.text);
+        if (map.sourcesContent) {
+          map.sourcesContent = null;
+        }
+      } else {
+        map = prev.consumer();
+      }
+      this.map.applySourceMap(map, from, this.toUrl(this.path(root2)));
+    }
+  }
+  clearAnnotation() {
+    if (this.mapOpts.annotation === false) return;
+    if (this.root) {
+      let node2;
+      for (let i = this.root.nodes.length - 1; i >= 0; i--) {
+        node2 = this.root.nodes[i];
+        if (node2.type !== "comment") continue;
+        if (node2.text.startsWith("# sourceMappingURL=")) {
+          this.root.removeChild(i);
+        }
+      }
+    } else if (this.css) {
+      let startIndex;
+      while ((startIndex = this.css.lastIndexOf("/*#")) !== -1) {
+        let endIndex = this.css.indexOf("*/", startIndex + 3);
+        if (endIndex === -1) break;
+        while (startIndex > 0 && this.css[startIndex - 1] === "\n") {
+          startIndex--;
+        }
+        this.css = this.css.slice(0, startIndex) + this.css.slice(endIndex + 2);
+      }
+    }
+  }
+  generate() {
+    this.clearAnnotation();
+    if (pathAvailable && sourceMapAvailable && this.isMap()) {
+      return this.generateMap();
+    } else {
+      let result2 = "";
+      this.stringify(this.root, (i) => {
+        result2 += i;
+      });
+      return [result2];
+    }
+  }
+  generateMap() {
+    if (this.root) {
+      this.generateString();
+    } else if (this.previous().length === 1) {
+      let prev = this.previous()[0].consumer();
+      prev.file = this.outputFile();
+      this.map = SourceMapGenerator.fromSourceMap(prev, {
+        ignoreInvalidMapping: true
+      });
+    } else {
+      this.map = new SourceMapGenerator({
+        file: this.outputFile(),
+        ignoreInvalidMapping: true
+      });
+      this.map.addMapping({
+        generated: { column: 0, line: 1 },
+        original: { column: 0, line: 1 },
+        source: this.opts.from ? this.toUrl(this.path(this.opts.from)) : "<no source>"
+      });
+    }
+    if (this.isSourcesContent()) this.setSourcesContent();
+    if (this.root && this.previous().length > 0) this.applyPrevMaps();
+    if (this.isAnnotation()) this.addAnnotation();
+    if (this.isInline()) {
+      return [this.css];
+    } else {
+      return [this.css, this.map];
+    }
+  }
+  generateString() {
+    this.css = "";
+    this.map = new SourceMapGenerator({
+      file: this.outputFile(),
+      ignoreInvalidMapping: true
+    });
+    let line = 1;
+    let column = 1;
+    let noSource = "<no source>";
+    let mapping = {
+      generated: { column: 0, line: 0 },
+      original: { column: 0, line: 0 },
+      source: ""
+    };
+    let last, lines;
+    this.stringify(this.root, (str, node2, type) => {
+      this.css += str;
+      if (node2 && type !== "end") {
+        mapping.generated.line = line;
+        mapping.generated.column = column - 1;
+        if (node2.source && node2.source.start) {
+          mapping.source = this.sourcePath(node2);
+          mapping.original.line = node2.source.start.line;
+          mapping.original.column = node2.source.start.column - 1;
+          this.map.addMapping(mapping);
+        } else {
+          mapping.source = noSource;
+          mapping.original.line = 1;
+          mapping.original.column = 0;
+          this.map.addMapping(mapping);
+        }
+      }
+      lines = str.match(/\n/g);
+      if (lines) {
+        line += lines.length;
+        last = str.lastIndexOf("\n");
+        column = str.length - last;
+      } else {
+        column += str.length;
+      }
+      if (node2 && type !== "start") {
+        let p = node2.parent || { raws: {} };
+        let childless = node2.type === "decl" || node2.type === "atrule" && !node2.nodes;
+        if (!childless || node2 !== p.last || p.raws.semicolon) {
+          if (node2.source && node2.source.end) {
+            mapping.source = this.sourcePath(node2);
+            mapping.original.line = node2.source.end.line;
+            mapping.original.column = node2.source.end.column - 1;
+            mapping.generated.line = line;
+            mapping.generated.column = column - 2;
+            this.map.addMapping(mapping);
+          } else {
+            mapping.source = noSource;
+            mapping.original.line = 1;
+            mapping.original.column = 0;
+            mapping.generated.line = line;
+            mapping.generated.column = column - 1;
+            this.map.addMapping(mapping);
+          }
+        }
+      }
+    });
+  }
+  isAnnotation() {
+    if (this.isInline()) {
+      return true;
+    }
+    if (typeof this.mapOpts.annotation !== "undefined") {
+      return this.mapOpts.annotation;
+    }
+    if (this.previous().length) {
+      return this.previous().some((i) => i.annotation);
+    }
+    return true;
+  }
+  isInline() {
+    if (typeof this.mapOpts.inline !== "undefined") {
+      return this.mapOpts.inline;
+    }
+    let annotation = this.mapOpts.annotation;
+    if (typeof annotation !== "undefined" && annotation !== true) {
+      return false;
+    }
+    if (this.previous().length) {
+      return this.previous().some((i) => i.inline);
+    }
+    return true;
+  }
+  isMap() {
+    if (typeof this.opts.map !== "undefined") {
+      return !!this.opts.map;
+    }
+    return this.previous().length > 0;
+  }
+  isSourcesContent() {
+    if (typeof this.mapOpts.sourcesContent !== "undefined") {
+      return this.mapOpts.sourcesContent;
+    }
+    if (this.previous().length) {
+      return this.previous().some((i) => i.withContent());
+    }
+    return true;
+  }
+  outputFile() {
+    if (this.opts.to) {
+      return this.path(this.opts.to);
+    } else if (this.opts.from) {
+      return this.path(this.opts.from);
+    } else {
+      return "to.css";
+    }
+  }
+  path(file) {
+    if (this.mapOpts.absolute) return file;
+    if (file.charCodeAt(0) === 60) return file;
+    if (/^\w+:\/\//.test(file)) return file;
+    let cached = this.memoizedPaths.get(file);
+    if (cached) return cached;
+    let from = this.opts.to ? dirname(this.opts.to) : ".";
+    if (typeof this.mapOpts.annotation === "string") {
+      from = dirname(resolve(from, this.mapOpts.annotation));
+    }
+    let path = relative(from, file);
+    this.memoizedPaths.set(file, path);
+    return path;
+  }
+  previous() {
+    if (!this.previousMaps) {
+      this.previousMaps = [];
+      if (this.root) {
+        this.root.walk((node2) => {
+          if (node2.source && node2.source.input.map) {
+            let map = node2.source.input.map;
+            if (!this.previousMaps.includes(map)) {
+              this.previousMaps.push(map);
+            }
+          }
+        });
+      } else {
+        let input2 = new Input$2(this.originalCSS, this.opts);
+        if (input2.map) this.previousMaps.push(input2.map);
+      }
+    }
+    return this.previousMaps;
+  }
+  setSourcesContent() {
+    let already = {};
+    if (this.root) {
+      this.root.walk((node2) => {
+        if (node2.source) {
+          let from = node2.source.input.from;
+          if (from && !already[from]) {
+            already[from] = true;
+            let fromUrl = this.usesFileUrls ? this.toFileUrl(from) : this.toUrl(this.path(from));
+            this.map.setSourceContent(fromUrl, node2.source.input.css);
+          }
+        }
+      });
+    } else if (this.css) {
+      let from = this.opts.from ? this.toUrl(this.path(this.opts.from)) : "<no source>";
+      this.map.setSourceContent(from, this.css);
+    }
+  }
+  sourcePath(node2) {
+    if (this.mapOpts.from) {
+      return this.toUrl(this.mapOpts.from);
+    } else if (this.usesFileUrls) {
+      return this.toFileUrl(node2.source.input.from);
+    } else {
+      return this.toUrl(this.path(node2.source.input.from));
+    }
+  }
+  toBase64(str) {
+    if (Buffer) {
+      return Buffer.from(str).toString("base64");
+    } else {
+      return window.btoa(unescape(encodeURIComponent(str)));
+    }
+  }
+  toFileUrl(path) {
+    let cached = this.memoizedFileURLs.get(path);
+    if (cached) return cached;
+    if (pathToFileURL) {
+      let fileURL = pathToFileURL(path).toString();
+      this.memoizedFileURLs.set(path, fileURL);
+      return fileURL;
+    } else {
+      throw new Error(
+        "`map.absolute` option is not available in this PostCSS build"
+      );
+    }
+  }
+  toUrl(path) {
+    let cached = this.memoizedURLs.get(path);
+    if (cached) return cached;
+    if (sep === "\\") {
+      path = path.replace(/\\/g, "/");
+    }
+    let url = encodeURI(path).replace(/[#?]/g, encodeURIComponent);
+    this.memoizedURLs.set(path, url);
+    return url;
+  }
+};
+var mapGenerator = MapGenerator$2;
+const SINGLE_QUOTE = "'".charCodeAt(0);
+const DOUBLE_QUOTE = '"'.charCodeAt(0);
+const BACKSLASH = "\\".charCodeAt(0);
+const SLASH = "/".charCodeAt(0);
+const NEWLINE = "\n".charCodeAt(0);
+const SPACE = " ".charCodeAt(0);
+const FEED = "\f".charCodeAt(0);
+const TAB = "	".charCodeAt(0);
+const CR = "\r".charCodeAt(0);
+const OPEN_SQUARE = "[".charCodeAt(0);
+const CLOSE_SQUARE = "]".charCodeAt(0);
+const OPEN_PARENTHESES = "(".charCodeAt(0);
+const CLOSE_PARENTHESES = ")".charCodeAt(0);
+const OPEN_CURLY = "{".charCodeAt(0);
+const CLOSE_CURLY = "}".charCodeAt(0);
+const SEMICOLON = ";".charCodeAt(0);
+const ASTERISK = "*".charCodeAt(0);
+const COLON = ":".charCodeAt(0);
+const AT = "@".charCodeAt(0);
+const RE_AT_END = /[\t\n\f\r "#'()/;[\\\]{}]/g;
+const RE_WORD_END = /[\t\n\f\r !"#'():;@[\\\]{}]|\/(?=\*)/g;
+const RE_BAD_BRACKET = /.[\r\n"'(/\\]/;
+const RE_HEX_ESCAPE = /[\da-f]/i;
+var tokenize = function tokenizer(input2, options = {}) {
+  let css = input2.css.valueOf();
+  let ignore = options.ignoreErrors;
+  let code, content, escape2, next, quote;
+  let currentToken, escaped, escapePos, n, prev;
+  let length = css.length;
+  let pos = 0;
+  let buffer = [];
+  let returned = [];
+  let lastBadParen = -1;
+  function position() {
+    return pos;
+  }
+  function unclosed(what) {
+    throw input2.error("Unclosed " + what, pos);
+  }
+  function endOfFile() {
+    return returned.length === 0 && pos >= length;
+  }
+  function nextToken(opts) {
+    if (returned.length) return returned.pop();
+    if (pos >= length) return;
+    let ignoreUnclosed = opts ? opts.ignoreUnclosed : false;
+    code = css.charCodeAt(pos);
+    switch (code) {
+      case NEWLINE:
+      case SPACE:
+      case TAB:
+      case CR:
+      case FEED: {
+        next = pos;
+        do {
+          next += 1;
+          code = css.charCodeAt(next);
+        } while (code === SPACE || code === NEWLINE || code === TAB || code === CR || code === FEED);
+        currentToken = ["space", css.slice(pos, next)];
+        pos = next - 1;
+        break;
+      }
+      case OPEN_SQUARE:
+      case CLOSE_SQUARE:
+      case OPEN_CURLY:
+      case CLOSE_CURLY:
+      case COLON:
+      case SEMICOLON:
+      case CLOSE_PARENTHESES: {
+        let controlChar = String.fromCharCode(code);
+        currentToken = [controlChar, controlChar, pos];
+        break;
+      }
+      case OPEN_PARENTHESES: {
+        prev = buffer.length ? buffer.pop()[1] : "";
+        n = css.charCodeAt(pos + 1);
+        if (prev === "url" && n !== SINGLE_QUOTE && n !== DOUBLE_QUOTE && n !== SPACE && n !== NEWLINE && n !== TAB && n !== FEED && n !== CR) {
+          next = pos;
+          do {
+            escaped = false;
+            next = css.indexOf(")", next + 1);
+            if (next === -1) {
+              if (ignore || ignoreUnclosed) {
+                next = pos;
+                break;
+              } else {
+                unclosed("bracket");
+              }
+            }
+            escapePos = next;
+            while (css.charCodeAt(escapePos - 1) === BACKSLASH) {
+              escapePos -= 1;
+              escaped = !escaped;
+            }
+          } while (escaped);
+          currentToken = ["brackets", css.slice(pos, next + 1), pos, next];
+          pos = next;
+        } else if (pos <= lastBadParen) {
+          currentToken = ["(", "(", pos];
+        } else {
+          next = css.indexOf(")", pos + 1);
+          content = css.slice(pos, next + 1);
+          if (next === -1 || RE_BAD_BRACKET.test(content)) {
+            lastBadParen = next === -1 ? length : next;
+            currentToken = ["(", "(", pos];
+          } else {
+            currentToken = ["brackets", content, pos, next];
+            pos = next;
+          }
+        }
+        break;
+      }
+      case SINGLE_QUOTE:
+      case DOUBLE_QUOTE: {
+        quote = code === SINGLE_QUOTE ? "'" : '"';
+        next = pos;
+        do {
+          escaped = false;
+          next = css.indexOf(quote, next + 1);
+          if (next === -1) {
+            if (ignore || ignoreUnclosed) {
+              next = pos + 1;
+              break;
+            } else {
+              unclosed("string");
+            }
+          }
+          escapePos = next;
+          while (css.charCodeAt(escapePos - 1) === BACKSLASH) {
+            escapePos -= 1;
+            escaped = !escaped;
+          }
+        } while (escaped);
+        currentToken = ["string", css.slice(pos, next + 1), pos, next];
+        pos = next;
+        break;
+      }
+      case AT: {
+        RE_AT_END.lastIndex = pos + 1;
+        RE_AT_END.test(css);
+        if (RE_AT_END.lastIndex === 0) {
+          next = css.length - 1;
+        } else {
+          next = RE_AT_END.lastIndex - 2;
+        }
+        currentToken = ["at-word", css.slice(pos, next + 1), pos, next];
+        pos = next;
+        break;
+      }
+      case BACKSLASH: {
+        next = pos;
+        escape2 = true;
+        while (css.charCodeAt(next + 1) === BACKSLASH) {
+          next += 1;
+          escape2 = !escape2;
+        }
+        code = css.charCodeAt(next + 1);
+        if (escape2 && code !== SLASH && code !== SPACE && code !== NEWLINE && code !== TAB && code !== CR && code !== FEED) {
+          next += 1;
+          if (RE_HEX_ESCAPE.test(css.charAt(next))) {
+            while (RE_HEX_ESCAPE.test(css.charAt(next + 1))) {
+              next += 1;
+            }
+            if (css.charCodeAt(next + 1) === SPACE) {
+              next += 1;
+            }
+          }
+        }
+        currentToken = ["word", css.slice(pos, next + 1), pos, next];
+        pos = next;
+        break;
+      }
+      default: {
+        if (code === SLASH && css.charCodeAt(pos + 1) === ASTERISK) {
+          next = css.indexOf("*/", pos + 2) + 1;
+          if (next === 0) {
+            if (ignore || ignoreUnclosed) {
+              next = css.length;
+            } else {
+              unclosed("comment");
+            }
+          }
+          currentToken = ["comment", css.slice(pos, next + 1), pos, next];
+          pos = next;
+        } else {
+          RE_WORD_END.lastIndex = pos + 1;
+          RE_WORD_END.test(css);
+          if (RE_WORD_END.lastIndex === 0) {
+            next = css.length - 1;
+          } else {
+            next = RE_WORD_END.lastIndex - 2;
+          }
+          currentToken = ["word", css.slice(pos, next + 1), pos, next];
+          buffer.push(currentToken);
+          pos = next;
+        }
+        break;
+      }
+    }
+    pos++;
+    return currentToken;
+  }
+  function back(token) {
+    returned.push(token);
+  }
+  return {
+    back,
+    endOfFile,
+    nextToken,
+    position
+  };
+};
+let AtRule$1 = atRule;
+let Comment$1 = comment;
+let Declaration$1 = declaration;
+let Root$3 = root;
+let Rule$1 = rule;
+let tokenizer2 = tokenize;
+const SAFE_COMMENT_NEIGHBOR = {
+  empty: true,
+  space: true
+};
+function findLastWithPosition(tokens) {
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    let token = tokens[i];
+    let pos = token[3] || token[2];
+    if (pos) return pos;
+  }
+}
+function tokensToString(tokens, from, to) {
+  let result2 = "";
+  for (let i = from; i < to; i++) result2 += tokens[i][1];
+  return result2;
+}
+let Parser$1 = class Parser {
+  constructor(input2) {
+    this.input = input2;
+    this.root = new Root$3();
+    this.current = this.root;
+    this.spaces = "";
+    this.semicolon = false;
+    this.createTokenizer();
+    this.root.source = { input: input2, start: { column: 1, line: 1, offset: 0 } };
+  }
+  atrule(token) {
+    let node2 = new AtRule$1();
+    node2.name = token[1].slice(1);
+    if (node2.name === "") {
+      this.unnamedAtrule(node2, token);
+    }
+    this.init(node2, token[2]);
+    let type;
+    let prev;
+    let shift;
+    let last = false;
+    let open = false;
+    let params = [];
+    let brackets = [];
+    while (!this.tokenizer.endOfFile()) {
+      token = this.tokenizer.nextToken();
+      type = token[0];
+      if (type === "(" || type === "[") {
+        brackets.push(type === "(" ? ")" : "]");
+      } else if (type === "{" && brackets.length > 0) {
+        brackets.push("}");
+      } else if (type === brackets[brackets.length - 1]) {
+        brackets.pop();
+      }
+      if (brackets.length === 0) {
+        if (type === ";") {
+          node2.source.end = this.getPosition(token[2]);
+          node2.source.end.offset++;
+          this.semicolon = true;
+          break;
+        } else if (type === "{") {
+          open = true;
+          break;
+        } else if (type === "}") {
+          if (params.length > 0) {
+            shift = params.length - 1;
+            prev = params[shift];
+            while (prev && prev[0] === "space") {
+              prev = params[--shift];
+            }
+            if (prev) {
+              node2.source.end = this.getPosition(prev[3] || prev[2]);
+              node2.source.end.offset++;
+            }
+          }
+          this.end(token);
+          break;
+        } else {
+          params.push(token);
+        }
+      } else {
+        params.push(token);
+      }
+      if (this.tokenizer.endOfFile()) {
+        last = true;
+        break;
+      }
+    }
+    node2.raws.between = this.spacesAndCommentsFromEnd(params);
+    if (params.length) {
+      node2.raws.afterName = this.spacesAndCommentsFromStart(params);
+      this.raw(node2, "params", params);
+      if (last) {
+        token = params[params.length - 1];
+        node2.source.end = this.getPosition(token[3] || token[2]);
+        node2.source.end.offset++;
+        this.spaces = node2.raws.between;
+        node2.raws.between = "";
+      }
+    } else {
+      node2.raws.afterName = "";
+      node2.params = "";
+    }
+    if (open) {
+      node2.nodes = [];
+      this.current = node2;
+    }
+  }
+  checkMissedSemicolon(tokens) {
+    let colon = this.colon(tokens);
+    if (colon === false) return;
+    let founded = 0;
+    let token;
+    for (let j = colon - 1; j >= 0; j--) {
+      token = tokens[j];
+      if (token[0] !== "space") {
+        founded += 1;
+        if (founded === 2) break;
+      }
+    }
+    throw this.input.error(
+      "Missed semicolon",
+      token[0] === "word" ? token[3] + 1 : token[2]
+    );
+  }
+  colon(tokens) {
+    let brackets = 0;
+    let prev, token, type;
+    for (let [i, element] of tokens.entries()) {
+      token = element;
+      type = token[0];
+      if (type === "(") {
+        brackets += 1;
+      }
+      if (type === ")") {
+        brackets -= 1;
+      }
+      if (brackets === 0 && type === ":") {
+        if (!prev) {
+          this.doubleColon(token);
+        } else if (prev[0] === "word" && prev[1] === "progid") {
+          continue;
+        } else {
+          return i;
+        }
+      }
+      prev = token;
+    }
+    return false;
+  }
+  comment(token) {
+    let node2 = new Comment$1();
+    this.init(node2, token[2]);
+    node2.source.end = this.getPosition(token[3] || token[2]);
+    node2.source.end.offset++;
+    let text2 = token[1].slice(2, -2);
+    if (!text2.trim()) {
+      node2.text = "";
+      node2.raws.left = text2;
+      node2.raws.right = "";
+    } else {
+      let match = text2.match(/^(\s*)([^]*\S)(\s*)$/);
+      node2.text = match[2];
+      node2.raws.left = match[1];
+      node2.raws.right = match[3];
+    }
+  }
+  createTokenizer() {
+    this.tokenizer = tokenizer2(this.input);
+  }
+  decl(tokens, customProperty) {
+    let node2 = new Declaration$1();
+    this.init(node2, tokens[0][2]);
+    let last = tokens[tokens.length - 1];
+    if (last[0] === ";") {
+      this.semicolon = true;
+      tokens.pop();
+    }
+    node2.source.end = this.getPosition(
+      last[3] || last[2] || findLastWithPosition(tokens)
+    );
+    node2.source.end.offset++;
+    let start = 0;
+    while (tokens[start][0] !== "word") {
+      if (start === tokens.length - 1) this.unknownWord([tokens[start]]);
+      start++;
+    }
+    node2.raws.before += tokensToString(tokens, 0, start);
+    node2.source.start = this.getPosition(tokens[start][2]);
+    let propStart = start;
+    while (start < tokens.length) {
+      let type = tokens[start][0];
+      if (type === ":" || type === "space" || type === "comment") {
+        break;
+      }
+      start++;
+    }
+    node2.prop = tokensToString(tokens, propStart, start);
+    let betweenStart = start;
+    let token;
+    while (start < tokens.length) {
+      token = tokens[start];
+      start++;
+      if (token[0] === ":") break;
+      if (token[0] === "word" && /\w/.test(token[1])) {
+        this.unknownWord([token]);
+      }
+    }
+    node2.raws.between = tokensToString(tokens, betweenStart, start);
+    if (node2.prop[0] === "_" || node2.prop[0] === "*") {
+      node2.raws.before += node2.prop[0];
+      node2.prop = node2.prop.slice(1);
+    }
+    let firstSpacesStart = start;
+    while (start < tokens.length) {
+      let next = tokens[start][0];
+      if (next !== "space" && next !== "comment") break;
+      start++;
+    }
+    let firstSpaces = tokens.slice(firstSpacesStart, start);
+    tokens = tokens.slice(start);
+    this.precheckMissedSemicolon(tokens);
+    for (let i = tokens.length - 1; i >= 0; i--) {
+      token = tokens[i];
+      if (token[1].toLowerCase() === "!important") {
+        node2.important = true;
+        let string = this.stringFrom(tokens, i);
+        string = this.spacesFromEnd(tokens) + string;
+        if (string !== " !important") node2.raws.important = string;
+        break;
+      } else if (token[1].toLowerCase() === "important") {
+        let cache = tokens.slice(0);
+        let str = "";
+        for (let j = i; j > 0; j--) {
+          let type = cache[j][0];
+          if (str.trim().startsWith("!") && type !== "space") {
+            break;
+          }
+          str = cache.pop()[1] + str;
+        }
+        if (str.trim().startsWith("!")) {
+          node2.important = true;
+          node2.raws.important = str;
+          tokens = cache;
+        }
+      }
+      if (token[0] !== "space" && token[0] !== "comment") {
+        break;
+      }
+    }
+    let hasWord = tokens.some((i) => i[0] !== "space" && i[0] !== "comment");
+    if (hasWord) {
+      node2.raws.between += firstSpaces.map((i) => i[1]).join("");
+      firstSpaces = [];
+    }
+    this.raw(node2, "value", firstSpaces.concat(tokens), customProperty);
+    if (node2.value.includes(":") && !customProperty) {
+      this.checkMissedSemicolon(tokens);
+    }
+  }
+  doubleColon(token) {
+    throw this.input.error(
+      "Double colon",
+      { offset: token[2] },
+      { offset: token[2] + token[1].length }
+    );
+  }
+  emptyRule(token) {
+    let node2 = new Rule$1();
+    this.init(node2, token[2]);
+    node2.selector = "";
+    node2.raws.between = "";
+    this.current = node2;
+  }
+  end(token) {
+    if (this.current.nodes && this.current.nodes.length) {
+      this.current.raws.semicolon = this.semicolon;
+    }
+    this.semicolon = false;
+    this.current.raws.after = (this.current.raws.after || "") + this.spaces;
+    this.spaces = "";
+    if (this.current.parent) {
+      this.current.source.end = this.getPosition(token[2]);
+      this.current.source.end.offset++;
+      this.current = this.current.parent;
+    } else {
+      this.unexpectedClose(token);
+    }
+  }
+  endFile() {
+    if (this.current.parent) this.unclosedBlock();
+    if (this.current.nodes && this.current.nodes.length) {
+      this.current.raws.semicolon = this.semicolon;
+    }
+    this.current.raws.after = (this.current.raws.after || "") + this.spaces;
+    this.root.source.end = this.getPosition(this.tokenizer.position());
+  }
+  freeSemicolon(token) {
+    this.spaces += token[1];
+    if (this.current.nodes) {
+      let prev = this.current.nodes[this.current.nodes.length - 1];
+      if (prev && prev.type === "rule" && !prev.raws.ownSemicolon) {
+        prev.raws.ownSemicolon = this.spaces;
+        this.spaces = "";
+        prev.source.end = this.getPosition(token[2]);
+        prev.source.end.offset += prev.raws.ownSemicolon.length;
+      }
+    }
+  }
+  // Helpers
+  getPosition(offset) {
+    let pos = this.input.fromOffset(offset);
+    return {
+      column: pos.col,
+      line: pos.line,
+      offset
+    };
+  }
+  init(node2, offset) {
+    this.current.push(node2);
+    node2.source = {
+      input: this.input,
+      start: this.getPosition(offset)
+    };
+    node2.raws.before = this.spaces;
+    this.spaces = "";
+    if (node2.type !== "comment") this.semicolon = false;
+  }
+  other(start) {
+    let end = false;
+    let type = null;
+    let colon = false;
+    let bracket = null;
+    let brackets = [];
+    let customProperty = start[1].startsWith("--");
+    let tokens = [];
+    let token = start;
+    while (token) {
+      type = token[0];
+      tokens.push(token);
+      if (type === "(" || type === "[") {
+        if (!bracket) bracket = token;
+        brackets.push(type === "(" ? ")" : "]");
+      } else if (customProperty && colon && type === "{") {
+        if (!bracket) bracket = token;
+        brackets.push("}");
+      } else if (brackets.length === 0) {
+        if (type === ";") {
+          if (colon) {
+            this.decl(tokens, customProperty);
+            return;
+          } else {
+            break;
+          }
+        } else if (type === "{") {
+          this.rule(tokens);
+          return;
+        } else if (type === "}") {
+          this.tokenizer.back(tokens.pop());
+          end = true;
+          break;
+        } else if (type === ":") {
+          colon = true;
+        }
+      } else if (type === brackets[brackets.length - 1]) {
+        brackets.pop();
+        if (brackets.length === 0) bracket = null;
+      }
+      token = this.tokenizer.nextToken();
+    }
+    if (this.tokenizer.endOfFile()) end = true;
+    if (brackets.length > 0) this.unclosedBracket(bracket);
+    if (end && colon) {
+      if (!customProperty) {
+        while (tokens.length) {
+          token = tokens[tokens.length - 1][0];
+          if (token !== "space" && token !== "comment") break;
+          this.tokenizer.back(tokens.pop());
+        }
+      }
+      this.decl(tokens, customProperty);
+    } else {
+      this.unknownWord(tokens);
+    }
+  }
+  parse() {
+    let token;
+    while (!this.tokenizer.endOfFile()) {
+      token = this.tokenizer.nextToken();
+      switch (token[0]) {
+        case "space":
+          this.spaces += token[1];
+          break;
+        case ";":
+          this.freeSemicolon(token);
+          break;
+        case "}":
+          this.end(token);
+          break;
+        case "comment":
+          this.comment(token);
+          break;
+        case "at-word":
+          this.atrule(token);
+          break;
+        case "{":
+          this.emptyRule(token);
+          break;
+        default:
+          this.other(token);
+          break;
+      }
+    }
+    this.endFile();
+  }
+  precheckMissedSemicolon() {
+  }
+  raw(node2, prop, tokens, customProperty) {
+    let token, type;
+    let length = tokens.length;
+    let value = "";
+    let clean = true;
+    let next, prev;
+    for (let i = 0; i < length; i += 1) {
+      token = tokens[i];
+      type = token[0];
+      if (type === "space" && i === length - 1 && !customProperty) {
+        clean = false;
+      } else if (type === "comment") {
+        prev = tokens[i - 1] ? tokens[i - 1][0] : "empty";
+        next = tokens[i + 1] ? tokens[i + 1][0] : "empty";
+        if (!SAFE_COMMENT_NEIGHBOR[prev] && !SAFE_COMMENT_NEIGHBOR[next]) {
+          if (value.slice(-1) === ",") {
+            clean = false;
+          } else {
+            value += token[1];
+          }
+        } else {
+          clean = false;
+        }
+      } else {
+        value += token[1];
+      }
+    }
+    if (!clean) {
+      let raw = tokens.reduce((all, i) => all + i[1], "");
+      node2.raws[prop] = { raw, value };
+    }
+    node2[prop] = value;
+  }
+  rule(tokens) {
+    tokens.pop();
+    let node2 = new Rule$1();
+    this.init(node2, tokens[0][2]);
+    node2.raws.between = this.spacesAndCommentsFromEnd(tokens);
+    this.raw(node2, "selector", tokens);
+    this.current = node2;
+  }
+  spacesAndCommentsFromEnd(tokens) {
+    let lastTokenType;
+    let spaces = "";
+    while (tokens.length) {
+      lastTokenType = tokens[tokens.length - 1][0];
+      if (lastTokenType !== "space" && lastTokenType !== "comment") break;
+      spaces = tokens.pop()[1] + spaces;
+    }
+    return spaces;
+  }
+  // Errors
+  spacesAndCommentsFromStart(tokens) {
+    let next;
+    let spaces = "";
+    while (tokens.length) {
+      next = tokens[0][0];
+      if (next !== "space" && next !== "comment") break;
+      spaces += tokens.shift()[1];
+    }
+    return spaces;
+  }
+  spacesFromEnd(tokens) {
+    let lastTokenType;
+    let spaces = "";
+    while (tokens.length) {
+      lastTokenType = tokens[tokens.length - 1][0];
+      if (lastTokenType !== "space") break;
+      spaces = tokens.pop()[1] + spaces;
+    }
+    return spaces;
+  }
+  stringFrom(tokens, from) {
+    let result2 = "";
+    for (let i = from; i < tokens.length; i++) {
+      result2 += tokens[i][1];
+    }
+    tokens.splice(from, tokens.length - from);
+    return result2;
+  }
+  unclosedBlock() {
+    let pos = this.current.source.start;
+    throw this.input.error("Unclosed block", pos.line, pos.column);
+  }
+  unclosedBracket(bracket) {
+    throw this.input.error(
+      "Unclosed bracket",
+      { offset: bracket[2] },
+      { offset: bracket[2] + 1 }
+    );
+  }
+  unexpectedClose(token) {
+    throw this.input.error(
+      "Unexpected }",
+      { offset: token[2] },
+      { offset: token[2] + 1 }
+    );
+  }
+  unknownWord(tokens) {
+    throw this.input.error(
+      "Unknown word " + tokens[0][1],
+      { offset: tokens[0][2] },
+      { offset: tokens[0][2] + tokens[0][1].length }
+    );
+  }
+  unnamedAtrule(node2, token) {
+    throw this.input.error(
+      "At-rule without name",
+      { offset: token[2] },
+      { offset: token[2] + token[1].length }
+    );
+  }
+};
+var parser = Parser$1;
+let Container$3 = container;
+let Input$1 = input;
+let Parser2 = parser;
+function parse$5(css, opts) {
+  let input2 = new Input$1(css, opts);
+  let parser2 = new Parser2(input2);
+  try {
+    parser2.parse();
+  } catch (e) {
+    if (process.env.NODE_ENV !== "production") {
+      if (e.name === "CssSyntaxError" && opts && opts.from) {
+        if (/\.scss$/i.test(opts.from)) {
+          e.message += "\nYou tried to parse SCSS with the standard CSS parser; try again with the postcss-scss parser";
+        } else if (/\.sass/i.test(opts.from)) {
+          e.message += "\nYou tried to parse Sass with the standard CSS parser; try again with the postcss-sass parser";
+        } else if (/\.less$/i.test(opts.from)) {
+          e.message += "\nYou tried to parse Less with the standard CSS parser; try again with the postcss-less parser";
+        }
+      }
+    }
+    throw e;
+  }
+  return parser2.root;
+}
+var parse_1 = parse$5;
+parse$5.default = parse$5;
+Container$3.registerParse(parse$5);
+let Container$2 = container;
+let { my: my$1 } = symbols;
+let Warning$2 = class Warning {
+  constructor(text2, opts = {}) {
+    this.type = "warning";
+    this.text = text2;
+    if (opts.node && opts.node.source) {
+      if (!opts.node[my$1]) {
+        Container$2.rebuild(opts.node);
+      }
+      let range = opts.node.rangeBy(opts);
+      this.line = range.start.line;
+      this.column = range.start.column;
+      this.endLine = range.end.line;
+      this.endColumn = range.end.column;
+    }
+    for (let opt in opts) this[opt] = opts[opt];
+  }
+  toString() {
+    if (this.node) {
+      return this.node.error(this.text, {
+        index: this.index,
+        plugin: this.plugin,
+        word: this.word
+      }).message;
+    }
+    if (this.plugin) {
+      return this.plugin + ": " + this.text;
+    }
+    return this.text;
+  }
+};
+var warning = Warning$2;
+Warning$2.default = Warning$2;
+let Warning$1 = warning;
+let Result$3 = class Result {
+  get content() {
+    return this.css;
+  }
+  constructor(processor2, root2, opts) {
+    this.processor = processor2;
+    this.messages = [];
+    this.root = root2;
+    this.opts = opts;
+    this.css = "";
+    this.map = void 0;
+  }
+  toString() {
+    return this.css;
+  }
+  warn(text2, opts = {}) {
+    if (!opts.plugin) {
+      if (this.lastPlugin && this.lastPlugin.postcssPlugin) {
+        opts.plugin = this.lastPlugin.postcssPlugin;
+      }
+    }
+    let warning2 = new Warning$1(text2, opts);
+    this.messages.push(warning2);
+    return warning2;
+  }
+  warnings() {
+    return this.messages.filter((i) => i.type === "warning");
+  }
+};
+var result = Result$3;
+Result$3.default = Result$3;
+let printed = {};
+var warnOnce$2 = function warnOnce(message) {
+  if (printed[message]) return;
+  printed[message] = true;
+  if (typeof console !== "undefined" && console.warn) {
+    console.warn(message);
+  }
+};
+let Container$1 = container;
+let Document$2 = document$1;
+let MapGenerator$1 = mapGenerator;
+let parse$4 = parse_1;
+let Result$2 = result;
+let Root$2 = root;
+let stringify$2 = stringify_1;
+let { isClean, my } = symbols;
+let warnOnce$1 = warnOnce$2;
+const TYPE_TO_CLASS_NAME = {
+  atrule: "AtRule",
+  comment: "Comment",
+  decl: "Declaration",
+  document: "Document",
+  root: "Root",
+  rule: "Rule"
+};
+const PLUGIN_PROPS = {
+  AtRule: true,
+  AtRuleExit: true,
+  Comment: true,
+  CommentExit: true,
+  Declaration: true,
+  DeclarationExit: true,
+  Document: true,
+  DocumentExit: true,
+  Once: true,
+  OnceExit: true,
+  postcssPlugin: true,
+  prepare: true,
+  Root: true,
+  RootExit: true,
+  Rule: true,
+  RuleExit: true
+};
+const NOT_VISITORS = {
+  Once: true,
+  postcssPlugin: true,
+  prepare: true
+};
+const CHILDREN = 0;
+function isPromise(obj) {
+  return typeof obj === "object" && typeof obj.then === "function";
+}
+function getEvents(node2) {
+  let key = false;
+  let type = TYPE_TO_CLASS_NAME[node2.type];
+  if (node2.type === "decl") {
+    key = node2.prop.toLowerCase();
+  } else if (node2.type === "atrule") {
+    key = node2.name.toLowerCase();
+  }
+  if (key && node2.append) {
+    return [
+      type,
+      type + "-" + key,
+      CHILDREN,
+      type + "Exit",
+      type + "Exit-" + key
+    ];
+  } else if (key) {
+    return [type, type + "-" + key, type + "Exit", type + "Exit-" + key];
+  } else if (node2.append) {
+    return [type, CHILDREN, type + "Exit"];
+  } else {
+    return [type, type + "Exit"];
+  }
+}
+function toStack(node2) {
+  let events;
+  if (node2.type === "document") {
+    events = ["Document", CHILDREN, "DocumentExit"];
+  } else if (node2.type === "root") {
+    events = ["Root", CHILDREN, "RootExit"];
+  } else {
+    events = getEvents(node2);
+  }
+  return {
+    eventIndex: 0,
+    events,
+    iterator: 0,
+    node: node2,
+    visitorIndex: 0,
+    visitors: []
+  };
+}
+function cleanMarks(node2) {
+  let stack = [node2];
+  while (stack.length > 0) {
+    let next = stack.pop();
+    next[isClean] = false;
+    if (next.nodes) {
+      for (let i of next.nodes) stack.push(i);
+    }
+  }
+  return node2;
+}
+let postcss$2 = {};
+let LazyResult$2 = class LazyResult {
+  get content() {
+    return this.stringify().content;
+  }
+  get css() {
+    return this.stringify().css;
+  }
+  get map() {
+    return this.stringify().map;
+  }
+  get messages() {
+    return this.sync().messages;
+  }
+  get opts() {
+    return this.result.opts;
+  }
+  get processor() {
+    return this.result.processor;
+  }
+  get root() {
+    return this.sync().root;
+  }
+  get [Symbol.toStringTag]() {
+    return "LazyResult";
+  }
+  constructor(processor2, css, opts) {
+    this.stringified = false;
+    this.processed = false;
+    let root2;
+    if (typeof css === "object" && css !== null && (css.type === "root" || css.type === "document")) {
+      root2 = cleanMarks(css);
+    } else if (css instanceof LazyResult || css instanceof Result$2) {
+      root2 = cleanMarks(css.root);
+      if (css.map) {
+        if (typeof opts.map === "undefined") opts.map = {};
+        if (!opts.map.inline) opts.map.inline = false;
+        opts.map.prev = css.map;
+      }
+    } else {
+      let parser2 = parse$4;
+      if (opts.syntax) parser2 = opts.syntax.parse;
+      if (opts.parser) parser2 = opts.parser;
+      if (parser2.parse) parser2 = parser2.parse;
+      try {
+        root2 = parser2(css, opts);
+      } catch (error) {
+        this.processed = true;
+        this.error = error;
+      }
+      if (root2 && !root2[my]) {
+        Container$1.rebuild(root2);
+      }
+    }
+    this.result = new Result$2(processor2, root2, opts);
+    this.helpers = { ...postcss$2, postcss: postcss$2, result: this.result };
+    this.plugins = this.processor.plugins.map((plugin2) => {
+      if (typeof plugin2 === "object" && plugin2.prepare) {
+        return { ...plugin2, ...plugin2.prepare(this.result) };
+      } else {
+        return plugin2;
+      }
+    });
+  }
+  async() {
+    if (this.error) return Promise.reject(this.error);
+    if (this.processed) return Promise.resolve(this.result);
+    if (!this.processing) {
+      this.processing = this.runAsync();
+    }
+    return this.processing;
+  }
+  catch(onRejected) {
+    return this.async().catch(onRejected);
+  }
+  finally(onFinally) {
+    return this.async().then(onFinally, onFinally);
+  }
+  getAsyncError() {
+    throw new Error("Use process(css).then(cb) to work with async plugins");
+  }
+  handleError(error, node2) {
+    let plugin2 = this.result.lastPlugin;
+    try {
+      if (node2) node2.addToError(error);
+      this.error = error;
+      if (error.name === "CssSyntaxError" && !error.plugin) {
+        error.plugin = plugin2.postcssPlugin;
+        error.setMessage();
+      } else if (plugin2.postcssVersion) {
+        if (process.env.NODE_ENV !== "production") {
+          let pluginName = plugin2.postcssPlugin;
+          let pluginVer = plugin2.postcssVersion;
+          let runtimeVer = this.result.processor.version;
+          let a = pluginVer.split(".");
+          let b = runtimeVer.split(".");
+          if (a[0] !== b[0] || parseInt(a[1]) > parseInt(b[1])) {
+            console.error(
+              "Unknown error from PostCSS plugin. Your current PostCSS version is " + runtimeVer + ", but " + pluginName + " uses " + pluginVer + ". Perhaps this is the source of the error below."
+            );
+          }
+        }
+      }
+    } catch (err) {
+      if (console && console.error) console.error(err);
+    }
+    return error;
+  }
+  prepareVisitors() {
+    this.listeners = {};
+    let add = (plugin2, type, cb) => {
+      if (!this.listeners[type]) this.listeners[type] = [];
+      this.listeners[type].push([plugin2, cb]);
+    };
+    for (let plugin2 of this.plugins) {
+      if (typeof plugin2 === "object") {
+        for (let event in plugin2) {
+          if (!PLUGIN_PROPS[event] && /^[A-Z]/.test(event)) {
+            throw new Error(
+              `Unknown event ${event} in ${plugin2.postcssPlugin}. Try to update PostCSS (${this.processor.version} now).`
+            );
+          }
+          if (!NOT_VISITORS[event]) {
+            if (typeof plugin2[event] === "object") {
+              for (let filter in plugin2[event]) {
+                if (filter === "*") {
+                  add(plugin2, event, plugin2[event][filter]);
+                } else {
+                  add(
+                    plugin2,
+                    event + "-" + filter.toLowerCase(),
+                    plugin2[event][filter]
+                  );
+                }
+              }
+            } else if (typeof plugin2[event] === "function") {
+              add(plugin2, event, plugin2[event]);
+            }
+          }
+        }
+      }
+    }
+    this.hasListener = Object.keys(this.listeners).length > 0;
+  }
+  async runAsync() {
+    this.plugin = 0;
+    for (let i = 0; i < this.plugins.length; i++) {
+      let plugin2 = this.plugins[i];
+      let promise = this.runOnRoot(plugin2);
+      if (isPromise(promise)) {
+        try {
+          await promise;
+        } catch (error) {
+          throw this.handleError(error);
+        }
+      }
+    }
+    this.prepareVisitors();
+    if (this.hasListener) {
+      let root2 = this.result.root;
+      while (!root2[isClean]) {
+        root2[isClean] = true;
+        let stack = [toStack(root2)];
+        while (stack.length > 0) {
+          let promise = this.visitTick(stack);
+          if (isPromise(promise)) {
+            try {
+              await promise;
+            } catch (e) {
+              let node2 = stack[stack.length - 1].node;
+              throw this.handleError(e, node2);
+            }
+          }
+        }
+      }
+      if (this.listeners.OnceExit) {
+        for (let [plugin2, visitor] of this.listeners.OnceExit) {
+          this.result.lastPlugin = plugin2;
+          try {
+            if (root2.type === "document") {
+              let roots = root2.nodes.map(
+                (subRoot) => visitor(subRoot, this.helpers)
+              );
+              await Promise.all(roots);
+            } else {
+              await visitor(root2, this.helpers);
+            }
+          } catch (e) {
+            throw this.handleError(e);
+          }
+        }
+      }
+    }
+    this.processed = true;
+    return this.stringify();
+  }
+  runOnRoot(plugin2) {
+    this.result.lastPlugin = plugin2;
+    try {
+      if (typeof plugin2 === "object" && plugin2.Once) {
+        if (this.result.root.type === "document") {
+          let roots = this.result.root.nodes.map(
+            (root2) => plugin2.Once(root2, this.helpers)
+          );
+          if (isPromise(roots[0])) {
+            return Promise.all(roots);
+          }
+          return roots;
+        }
+        return plugin2.Once(this.result.root, this.helpers);
+      } else if (typeof plugin2 === "function") {
+        return plugin2(this.result.root, this.result);
+      }
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+  stringify() {
+    if (this.error) throw this.error;
+    if (this.stringified) return this.result;
+    this.stringified = true;
+    this.sync();
+    let opts = this.result.opts;
+    let str = stringify$2;
+    if (opts.syntax) str = opts.syntax.stringify;
+    if (opts.stringifier) str = opts.stringifier;
+    if (str.stringify) str = str.stringify;
+    let rootSource = this.result.root.source;
+    if (opts.map === void 0 && !(rootSource && rootSource.input && rootSource.input.map)) {
+      let result2 = "";
+      str(this.result.root, (i) => {
+        result2 += i;
+      });
+      this.result.css = result2;
+      return this.result;
+    }
+    let map = new MapGenerator$1(str, this.result.root, this.result.opts);
+    let data = map.generate();
+    this.result.css = data[0];
+    this.result.map = data[1];
+    return this.result;
+  }
+  sync() {
+    if (this.error) throw this.error;
+    if (this.processed) return this.result;
+    this.processed = true;
+    if (this.processing) {
+      throw this.getAsyncError();
+    }
+    for (let plugin2 of this.plugins) {
+      let promise = this.runOnRoot(plugin2);
+      if (isPromise(promise)) {
+        throw this.getAsyncError();
+      }
+    }
+    this.prepareVisitors();
+    if (this.hasListener) {
+      let root2 = this.result.root;
+      while (!root2[isClean]) {
+        root2[isClean] = true;
+        this.walkSync(root2);
+      }
+      if (this.listeners.OnceExit) {
+        if (root2.type === "document") {
+          for (let subRoot of root2.nodes) {
+            this.visitSync(this.listeners.OnceExit, subRoot);
+          }
+        } else {
+          this.visitSync(this.listeners.OnceExit, root2);
+        }
+      }
+    }
+    return this.result;
+  }
+  then(onFulfilled, onRejected) {
+    if (process.env.NODE_ENV !== "production") {
+      if (!("from" in this.opts)) {
+        warnOnce$1(
+          "Without `from` option PostCSS could generate wrong source map and will not find Browserslist config. Set it to CSS file path or to `undefined` to prevent this warning."
+        );
+      }
+    }
+    return this.async().then(onFulfilled, onRejected);
+  }
+  toString() {
+    return this.css;
+  }
+  visitSync(visitors, node2) {
+    for (let [plugin2, visitor] of visitors) {
+      this.result.lastPlugin = plugin2;
+      let promise;
+      try {
+        promise = visitor(node2, this.helpers);
+      } catch (e) {
+        throw this.handleError(e, node2.proxyOf);
+      }
+      if (node2.type !== "root" && node2.type !== "document" && !node2.parent) {
+        return true;
+      }
+      if (isPromise(promise)) {
+        throw this.getAsyncError();
+      }
+    }
+  }
+  visitTick(stack) {
+    let visit = stack[stack.length - 1];
+    let { node: node2, visitors } = visit;
+    if (node2.type !== "root" && node2.type !== "document" && !node2.parent) {
+      stack.pop();
+      return;
+    }
+    if (visitors.length > 0 && visit.visitorIndex < visitors.length) {
+      let [plugin2, visitor] = visitors[visit.visitorIndex];
+      visit.visitorIndex += 1;
+      if (visit.visitorIndex === visitors.length) {
+        visit.visitors = [];
+        visit.visitorIndex = 0;
+      }
+      this.result.lastPlugin = plugin2;
+      try {
+        return visitor(node2.toProxy(), this.helpers);
+      } catch (e) {
+        throw this.handleError(e, node2);
+      }
+    }
+    if (visit.iterator !== 0) {
+      let iterator = visit.iterator;
+      if (visit.descending) {
+        visit.descending = false;
+        node2.indexes[iterator] += 1;
+      }
+      let child;
+      while (child = node2.nodes[node2.indexes[iterator]]) {
+        if (!child[isClean]) {
+          child[isClean] = true;
+          visit.descending = true;
+          stack.push(toStack(child));
+          return;
+        }
+        node2.indexes[iterator] += 1;
+      }
+      visit.iterator = 0;
+      delete node2.indexes[iterator];
+    }
+    let events = visit.events;
+    while (visit.eventIndex < events.length) {
+      let event = events[visit.eventIndex];
+      visit.eventIndex += 1;
+      if (event === CHILDREN) {
+        if (node2.nodes && node2.nodes.length) {
+          node2[isClean] = true;
+          visit.iterator = node2.getIterator();
+        }
+        return;
+      } else if (this.listeners[event]) {
+        visit.visitors = this.listeners[event];
+        return;
+      }
+    }
+    stack.pop();
+  }
+  walkSync(node2) {
+    node2[isClean] = true;
+    let stack = [{ eventIndex: 0, events: getEvents(node2), iterator: 0, node: node2 }];
+    while (stack.length > 0) {
+      let visit = stack[stack.length - 1];
+      let visitNode = visit.node;
+      if (visit.iterator !== 0) {
+        let iterator = visit.iterator;
+        if (visit.descending) {
+          visit.descending = false;
+          visitNode.indexes[iterator] += 1;
+        }
+        let child;
+        let descended = false;
+        while (child = visitNode.nodes[visitNode.indexes[iterator]]) {
+          if (!child[isClean]) {
+            child[isClean] = true;
+            visit.descending = true;
+            stack.push({
+              eventIndex: 0,
+              events: getEvents(child),
+              iterator: 0,
+              node: child
+            });
+            descended = true;
+            break;
+          }
+          visitNode.indexes[iterator] += 1;
+        }
+        if (descended) continue;
+        visit.iterator = 0;
+        delete visitNode.indexes[iterator];
+      }
+      if (visit.eventIndex < visit.events.length) {
+        let event = visit.events[visit.eventIndex];
+        visit.eventIndex += 1;
+        if (event === CHILDREN) {
+          if (visitNode.nodes && visitNode.nodes.length) {
+            visit.iterator = visitNode.getIterator();
+          }
+        } else {
+          let visitors = this.listeners[event];
+          if (visitors) {
+            if (this.visitSync(visitors, visitNode.toProxy())) stack.pop();
+          }
+        }
+        continue;
+      }
+      stack.pop();
+    }
+  }
+  warnings() {
+    return this.sync().warnings();
+  }
+};
+LazyResult$2.registerPostcss = (dependant) => {
+  postcss$2 = dependant;
+};
+var lazyResult = LazyResult$2;
+LazyResult$2.default = LazyResult$2;
+Root$2.registerLazyResult(LazyResult$2);
+Document$2.registerLazyResult(LazyResult$2);
+let MapGenerator2 = mapGenerator;
+let parse$3 = parse_1;
+let Result$1 = result;
+let stringify$1 = stringify_1;
+let warnOnce2 = warnOnce$2;
+let NoWorkResult$1 = class NoWorkResult {
+  get content() {
+    return this.result.css;
+  }
+  get css() {
+    return this.result.css;
+  }
+  get map() {
+    return this.result.map;
+  }
+  get messages() {
+    return [];
+  }
+  get opts() {
+    return this.result.opts;
+  }
+  get processor() {
+    return this.result.processor;
+  }
+  get root() {
+    if (this._root) {
+      return this._root;
+    }
+    let root2;
+    let parser2 = parse$3;
+    try {
+      root2 = parser2(this._css, this._opts);
+    } catch (error) {
+      this.error = error;
+    }
+    if (this.error) {
+      throw this.error;
+    } else {
+      this._root = root2;
+      return root2;
+    }
+  }
+  get [Symbol.toStringTag]() {
+    return "NoWorkResult";
+  }
+  constructor(processor2, css, opts) {
+    css = css.toString();
+    this.stringified = false;
+    this._processor = processor2;
+    this._css = css;
+    this._opts = opts;
+    this._map = void 0;
+    let str = stringify$1;
+    this.result = new Result$1(this._processor, void 0, this._opts);
+    this.result.css = css;
+    let self = this;
+    Object.defineProperty(this.result, "root", {
+      get() {
+        return self.root;
+      }
+    });
+    let map = new MapGenerator2(str, void 0, this._opts, css);
+    if (map.isMap()) {
+      let [generatedCSS, generatedMap] = map.generate();
+      if (generatedCSS) {
+        this.result.css = generatedCSS;
+      }
+      if (generatedMap) {
+        this.result.map = generatedMap;
+      }
+    } else {
+      map.clearAnnotation();
+      this.result.css = map.css;
+    }
+  }
+  async() {
+    if (this.error) return Promise.reject(this.error);
+    return Promise.resolve(this.result);
+  }
+  catch(onRejected) {
+    return this.async().catch(onRejected);
+  }
+  finally(onFinally) {
+    return this.async().then(onFinally, onFinally);
+  }
+  sync() {
+    if (this.error) throw this.error;
+    return this.result;
+  }
+  then(onFulfilled, onRejected) {
+    if (process.env.NODE_ENV !== "production") {
+      if (!("from" in this._opts)) {
+        warnOnce2(
+          "Without `from` option PostCSS could generate wrong source map and will not find Browserslist config. Set it to CSS file path or to `undefined` to prevent this warning."
+        );
+      }
+    }
+    return this.async().then(onFulfilled, onRejected);
+  }
+  toString() {
+    return this._css;
+  }
+  warnings() {
+    return [];
+  }
+};
+var noWorkResult = NoWorkResult$1;
+NoWorkResult$1.default = NoWorkResult$1;
+let Document$1 = document$1;
+let LazyResult$1 = lazyResult;
+let NoWorkResult2 = noWorkResult;
+let Root$1 = root;
+let Processor$1 = class Processor {
+  constructor(plugins = []) {
+    this.version = "8.5.25";
+    this.plugins = this.normalize(plugins);
+  }
+  normalize(plugins) {
+    let normalized = [];
+    for (let i of plugins) {
+      if (i.postcss === true) {
+        i = i();
+      } else if (i.postcss) {
+        i = i.postcss;
+      }
+      if (typeof i === "object" && Array.isArray(i.plugins)) {
+        normalized = normalized.concat(i.plugins);
+      } else if (typeof i === "object" && i.postcssPlugin) {
+        normalized.push(i);
+      } else if (typeof i === "function") {
+        normalized.push(i);
+      } else if (typeof i === "object" && (i.parse || i.stringify)) {
+        if (process.env.NODE_ENV !== "production") {
+          throw new Error(
+            "PostCSS syntaxes cannot be used as plugins. Instead, please use one of the syntax/parser/stringifier options as outlined in your PostCSS runner documentation."
+          );
+        }
+      } else {
+        throw new Error(i + " is not a PostCSS plugin");
+      }
+    }
+    return normalized;
+  }
+  process(css, opts = {}) {
+    if (!this.plugins.length && !opts.parser && !opts.stringifier && !opts.syntax) {
+      return new NoWorkResult2(this, css, opts);
+    } else {
+      return new LazyResult$1(this, css, opts);
+    }
+  }
+  use(plugin2) {
+    this.plugins = this.plugins.concat(this.normalize([plugin2]));
+    return this;
+  }
+};
+var processor = Processor$1;
+Processor$1.default = Processor$1;
+Root$1.registerProcessor(Processor$1);
+Document$1.registerProcessor(Processor$1);
+let AtRule2 = atRule;
+let Comment2 = comment;
+let Container2 = container;
+let CssSyntaxError2 = cssSyntaxError;
+let Declaration2 = declaration;
+let Document2 = document$1;
+let fromJSON = fromJSON_1;
+let Input2 = input;
+let LazyResult2 = lazyResult;
+let list = list_1;
+let Node$1 = node;
+let parse$2 = parse_1;
+let Processor2 = processor;
+let Result2 = result;
+let Root2 = root;
+let Rule2 = rule;
+let stringify = stringify_1;
+let Warning2 = warning;
+function postcss(...plugins) {
+  if (plugins.length === 1 && Array.isArray(plugins[0])) {
+    plugins = plugins[0];
+  }
+  return new Processor2(plugins);
+}
+postcss.plugin = function plugin(name, initializer) {
+  let warningPrinted = false;
+  function creator(...args) {
+    if (console && console.warn && !warningPrinted) {
+      warningPrinted = true;
+      console.warn(
+        name + ": postcss.plugin was deprecated. Migration guide:\nhttps://evilmartians.com/chronicles/postcss-8-plugin-migration"
+      );
+      if (process.env.LANG && process.env.LANG.startsWith("cn")) {
+        console.warn(
+          name + ": 里面 postcss.plugin 被弃用. 迁移指南:\nhttps://www.w3ctech.com/topic/2226"
+        );
+      }
+    }
+    let transformer = initializer(...args);
+    transformer.postcssPlugin = name;
+    transformer.postcssVersion = new Processor2().version;
+    return transformer;
+  }
+  let cache;
+  Object.defineProperty(creator, "postcss", {
+    get() {
+      if (!cache) cache = creator();
+      return cache;
+    }
+  });
+  creator.process = function(css, processOpts, pluginOpts) {
+    return postcss([creator(pluginOpts)]).process(css, processOpts);
+  };
+  return creator;
+};
+postcss.stringify = stringify;
+postcss.parse = parse$2;
+postcss.fromJSON = fromJSON;
+postcss.list = list;
+postcss.comment = (defaults) => new Comment2(defaults);
+postcss.atRule = (defaults) => new AtRule2(defaults);
+postcss.decl = (defaults) => new Declaration2(defaults);
+postcss.rule = (defaults) => new Rule2(defaults);
+postcss.root = (defaults) => new Root2(defaults);
+postcss.document = (defaults) => new Document2(defaults);
+postcss.CssSyntaxError = CssSyntaxError2;
+postcss.Declaration = Declaration2;
+postcss.Container = Container2;
+postcss.Processor = Processor2;
+postcss.Document = Document2;
+postcss.Comment = Comment2;
+postcss.Warning = Warning2;
+postcss.AtRule = AtRule2;
+postcss.Result = Result2;
+postcss.Input = Input2;
+postcss.Rule = Rule2;
+postcss.Root = Root2;
+postcss.Node = Node$1;
+LazyResult2.registerPostcss(postcss);
+var postcss_1 = postcss;
+postcss.default = postcss;
+const postcss$1 = /* @__PURE__ */ getDefaultExportFromCjs(postcss_1);
+postcss$1.stringify;
+postcss$1.fromJSON;
+postcss$1.plugin;
+postcss$1.parse;
+postcss$1.list;
+postcss$1.document;
+postcss$1.comment;
+postcss$1.atRule;
+postcss$1.rule;
+postcss$1.decl;
+postcss$1.root;
+postcss$1.CssSyntaxError;
+postcss$1.Declaration;
+postcss$1.Container;
+postcss$1.Processor;
+postcss$1.Document;
+postcss$1.Comment;
+postcss$1.Warning;
+postcss$1.AtRule;
+postcss$1.Result;
+postcss$1.Input;
+postcss$1.Rule;
+postcss$1.Root;
+postcss$1.Node;
+function sourceEditingCssErrors(css) {
+  let root2;
+  try {
+    root2 = postcss$1.parse(css);
+  } catch {
+    return ["Source CSS is not valid CSS."];
+  }
+  const errors = [];
+  root2.walkAtRules((rule2) => {
+    if (rule2.name.toLowerCase() !== "media") errors.push(`CSS @${rule2.name} is not supported.`);
+  });
+  root2.walkRules((rule2) => {
+    var _a;
+    if (((_a = rule2.parent) == null ? void 0 : _a.type) === "rule") errors.push("Nested CSS rules are not supported by live editing.");
+    for (const selector of rule2.selectors) {
+      if (!/^\.movcues-widget(?:\b|[.#:[>+~\s])/.test(selector.trim())) errors.push(`Unscoped selector: ${selector}`);
+      if (selector.includes("::") || /#[A-Za-z_-]/.test(selector) || selector.length > 512) errors.push(`Editable selectors must use classes/attributes, without IDs or pseudo-elements: ${selector}`);
+    }
+  });
+  root2.walkDecls((decl) => {
+    const property = decl.prop.toLowerCase(), value = decl.value.trim().toLowerCase();
+    if (/^(?:animation|transition)(?:-|$)/.test(property) || ["behavior", "-moz-binding"].includes(property) || /expression\s*\(|javascript\s*:|url\s*\(/i.test(value)) errors.push(`Unsafe or unsupported CSS declaration: ${property}`);
+    if (property === "position" && /^(absolute|fixed)$/.test(value) || property === "order" && value !== "0" || property === "flex-direction" && value.includes("reverse") || property === "grid-auto-flow" && value.includes("dense") || property === "content" && !["normal", "none"].includes(value)) errors.push(`Visual ordering/layout is not supported for live editing: ${property}: ${value}`);
+  });
+  return [...new Set(errors)];
+}
+class SourceStyles {
+  constructor(css, widget) {
+    this.widget = widget;
+    this.root = postcss$1.parse(css);
+  }
+  toString() {
+    return this.root.toString();
+  }
+  append(node2) {
+    this.root.append(node2);
+  }
+  responsiveStack(element, enabled) {
+    var _a;
+    if (!enabled) {
+      element.removeAttribute("data-movcues-responsive-stack");
+      return;
+    }
+    element.dataset.movcuesResponsiveStack = "true";
+    const identity = element.dataset.movcuesNodeId ? `data-movcues-node-id="${element.dataset.movcuesNodeId}"` : `data-movcues-block-id="${element.dataset.movcuesBlockId}"`;
+    const marker = `[${identity}][data-movcues-responsive-stack="true"]`;
+    const selector = element === this.widget ? `.movcues-widget${marker}` : `.movcues-widget ${marker}`;
+    let media = this.root.nodes.find((node2) => node2.type === "atrule" && node2.name === "media" && node2.params === "(max-width:480px)");
+    if (!media) {
+      media = postcss$1.atRule({ name: "media", params: "(max-width:480px)" });
+      this.root.append(media);
+    }
+    if ((_a = media.nodes) == null ? void 0 : _a.some((node2) => node2.type === "rule" && node2.selector === selector)) return;
+    const rule2 = postcss$1.rule({ selector });
+    rule2.append(postcss$1.decl({ prop: "display", value: "flex", important: true }), postcss$1.decl({ prop: "flex-direction", value: "column", important: true }));
+    media.append(rule2);
+  }
+  removeIdentities(ids) {
+    if (!ids.length) return;
+    this.root.walkRules((rule2) => {
+      const selectors = rule2.selectors.filter((selector) => !ids.some((id) => ["node", "block"].some((key) => {
+        const marker = `[data-movcues-${key}-id="${id}"]`, count = selector.split(marker).length - 1;
+        return count > 0 && (selector === `.movcues-widget ${marker.repeat(count)}` || selector === `.movcues-widget${marker.repeat(count)}`);
+      })));
+      if (!selectors.length) rule2.remove();
+      else if (selectors.length !== rule2.selectors.length) rule2.selectors = selectors;
+    });
+  }
+  active(rule2) {
+    let parent = rule2.parent;
+    while (parent && parent.type !== "root") {
+      if (parent.type === "atrule" && parent.name === "media" && typeof matchMedia === "function" && !matchMedia(parent.params).matches) return false;
+      if (parent.type === "atrule" && parent.name === "media" && typeof matchMedia !== "function") return false;
+      parent = parent.parent;
+    }
+    return true;
+  }
+  matches(rule2, element) {
+    try {
+      return rule2.selectors.some((selector) => element.matches(selector));
+    } catch {
+      throw new Error(`Cannot safely inspect CSS selector: ${rule2.selector}`);
+    }
+  }
+  value(element, property) {
+    let value;
+    this.root.walkRules((rule2) => {
+      if (!this.active(rule2) || !this.matches(rule2, element)) return;
+      const declaration2 = document.createElement("span").style;
+      rule2.walkDecls((decl) => declaration2.setProperty(decl.prop, decl.value, decl.important ? "important" : ""));
+      value = declaration2.getPropertyValue(property) || value;
+    });
+    if (!value && element.parentElement && ["color", "font-size", "font-weight", "line-height", "text-align"].includes(property)) return this.value(element.parentElement, property);
+    return value;
+  }
+  set(element, property, value) {
+    var _a;
+    const rules = [];
+    this.root.walkRules((rule2) => {
+      if (this.matches(rule2, element)) rules.push(rule2);
+    });
+    const declares = (rule2) => rule2.nodes.some((node2) => node2.type === "decl" && (node2.prop === property || isShorthandFor(node2.prop, property)));
+    const active = rules.filter((rule2) => this.active(rule2));
+    const responsive = active.filter((rule2) => {
+      var _a2;
+      return ((_a2 = rule2.parent) == null ? void 0 : _a2.type) === "atrule" && declares(rule2);
+    });
+    const scope = ((_a = responsive[responsive.length - 1]) == null ? void 0 : _a.parent) ?? this.root;
+    const scoped = active.filter((rule2) => rule2.parent === scope);
+    const key = element.dataset.movcuesBlockId ? "data-movcues-block-id" : "data-movcues-node-id", id = element.getAttribute(key);
+    const marker = `[${key}="${id}"]`;
+    const all = [this.widget, ...Array.from(this.widget.querySelectorAll("*"))];
+    const isolated = scoped.filter((rule2) => all.filter((candidate) => this.matches(rule2, candidate)).length === 1);
+    const declaring = active.filter(declares);
+    let target = declaring.length === 1 && isolated.includes(declaring[0]) ? declaring[0] : declaring.length === 0 ? isolated[isolated.length - 1] : void 0;
+    if (!target) {
+      const isDedicated = (rule2) => {
+        const count = rule2.selector.split(marker).length - 1;
+        return count > 0 && rule2.selector === (element === this.widget ? ".movcues-widget" : ".movcues-widget ") + marker.repeat(count);
+      };
+      target = scoped.find(isDedicated);
+      const specificityBound = Math.max(1, ...active.filter((rule2) => rule2 !== target).map((rule2) => (rule2.selector.match(/[.[:]/g) ?? []).length + 1));
+      const selector = (element === this.widget ? ".movcues-widget" : ".movcues-widget ") + marker.repeat(specificityBound);
+      if (target) target.selector = selector;
+      else {
+        target = postcss$1.rule({ selector });
+        scope.append(target);
+      }
+    }
+    let declaration2;
+    target.walkDecls(property, (decl) => {
+      declaration2 = decl;
+    });
+    const important = active.some((rule2) => rule2.nodes.some((node2) => node2.type === "decl" && node2.important && (node2.prop === property || isShorthandFor(node2.prop, property))));
+    if (declaration2) {
+      declaration2.value = value;
+      declaration2.important || (declaration2.important = important);
+    } else target.append(postcss$1.decl({ prop: property, value, important }));
+  }
+}
+function isShorthandFor(shorthand, property) {
+  return shorthand === "font" && (property.startsWith("font-") || property === "line-height") || ["padding", "margin", "border", "background", "flex"].some((group) => shorthand === group && property.startsWith(`${group}-`));
+}
+function remapSourceSelector(selector, attribute, ids) {
+  for (const [before, after] of ids) for (const quote of ['"', "'", ""]) selector = selector.split(`[${attribute}=${quote}${before}${quote}]`).join(`[${attribute}=${quote}${after}${quote}]`);
+  return selector;
+}
+const actionIdPattern = /^[A-Za-z][A-Za-z0-9_-]{2,63}$/;
+function parse$1(html) {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  return template;
+}
+function validateSourceMarkup(operation, options) {
+  var _a, _b;
+  const errors = [];
+  if (operation.widthPx !== void 0 && (options.widgetType !== "modal" || !Number.isInteger(operation.widthPx) || operation.widthPx < 320 || operation.widthPx > 960)) errors.push("Modal width must be a whole number from 320 to 960px.");
+  if (operation.html.length > 1e5 || operation.css.length > 1e5) errors.push("Source proposal is too large.");
+  if (safeScopedBuilderCss(operation.css) === null) errors.push("Source CSS is unsafe or contains an unscoped selector.");
+  const template = parse$1(operation.html), elements = Array.from(template.content.querySelectorAll("*"));
+  for (const element of elements) {
+    if (!BUILDER_ALLOWED_TAGS.has(element.tagName) && !(options.survey && BUILDER_SURVEY_INPUT_TAGS.has(element.tagName))) errors.push(`Unsupported element: ${element.tagName.toLowerCase()}`);
+    for (const attribute of Array.from(element.attributes)) if (!BUILDER_ALLOWED_ATTRIBUTES.has(attribute.name) || /^on/i.test(attribute.name)) errors.push(`Unsupported attribute: ${attribute.name}`);
+    if (element instanceof HTMLImageElement && !builderImageUrlIsSafe(element.getAttribute("src") ?? "")) errors.push("Unsafe image URL.");
+    if (element instanceof HTMLAnchorElement && !builderLinkUrlIsSafe(element.getAttribute("href") ?? "")) errors.push("Unsafe link URL.");
+    if (element instanceof HTMLInputElement && !builderInputTypeIsSafe(element.type)) errors.push("Unsafe input type.");
+  }
+  const roots = elements.filter((element) => element.classList.contains("movcues-widget"));
+  if (roots.length !== 1) errors.push("Source HTML must contain exactly one .movcues-widget root.");
+  const topLevelElements = Array.from(template.content.children);
+  if (topLevelElements.length !== 1 || topLevelElements[0] !== roots[0] || Array.from(template.content.childNodes).some((node2) => {
+    var _a2;
+    return node2.nodeType === Node.TEXT_NODE && ((_a2 = node2.textContent) == null ? void 0 : _a2.trim());
+  })) errors.push("The .movcues-widget root must be the sole top-level element.");
+  if (((_a = roots[0]) == null ? void 0 : _a.dataset.movcuesWidgetType) !== options.widgetType) errors.push("The widget root type cannot be changed.");
+  if (roots[0] && !roots[0].dataset.movcuesDocumentVersion) errors.push("The widget root document version must be preserved.");
+  const ids = elements.map((element) => element.id).filter(Boolean);
+  if (new Set(ids).size !== ids.length) errors.push("Source HTML contains duplicate IDs.");
+  const buttons = elements.filter((element) => element instanceof HTMLButtonElement && !element.dataset.movcuesSurveyAction && !element.dataset.movcuesOptionId && !element.dataset.movcuesChecklistRole && !element.dataset.movcuesChecklistItemRole);
+  const actionIds = buttons.map((button) => button.dataset.movcuesActionId ?? "");
+  if (actionIds.some((value) => !actionIdPattern.test(value)) || new Set(actionIds).size !== actionIds.length) errors.push("Every ordinary button needs one unique valid action ID.");
+  const bindings = Object.keys(operation.actionBindings);
+  if (bindings.length !== actionIds.length || actionIds.some((value) => !(value in operation.actionBindings))) errors.push("Button actions and action bindings must match exactly.");
+  for (const action of Object.values(operation.actionBindings)) {
+    if (!options.guide && (action.type === "next_step" || action.type === "previous_step")) errors.push(`${action.type} is only supported by Guides.`);
+    if (action.type === "open_url" && !/^https?:\/\//i.test(action.url)) errors.push("Open URL actions must use HTTP(S).");
+    if (action.type === "track_event" && (!action.eventName.trim() || /[\u0000-\u001f\u007f]/.test(action.eventName))) errors.push("Track-event action is invalid.");
+  }
+  if (options.survey) {
+    for (const question of options.survey.questions) {
+      const matches = elements.filter((element) => element.dataset.movcuesQuestionId === question.id);
+      if (matches.length !== 1 || matches[0].dataset.movcuesQuestionType !== question.type) errors.push(`Survey question ${question.id} was changed or removed.`);
+    }
+    if (elements.filter((element) => element.hasAttribute("data-movcues-survey-controls")).length !== 1 || elements.filter((element) => element.dataset.movcuesSurveyAction === "submit").length !== 1) errors.push("Survey controls and submission must be preserved.");
+  }
+  if (options.checklist) {
+    const taskElements = elements.filter((element) => element.hasAttribute("data-movcues-checklist-item-id") || element.dataset.movcuesChecklistRole === "item");
+    const taskIds = taskElements.map((element) => element.dataset.movcuesChecklistItemId ?? "");
+    if (taskElements.some((element) => element.tagName !== "BUTTON" || element.dataset.movcuesChecklistRole !== "item")) errors.push("Checklist task components must use canonical button/item semantics.");
+    if (taskIds.length !== options.checklist.items.length || taskIds.some((id) => !options.checklist.items.some((item) => item.id === id))) errors.push("Checklist source task identities must match the canonical items exactly.");
+    for (const role of ["root", "title", "items", "progress", "launcher-label", "remaining-count", "completion-title", "completion-description", "completion-acknowledge"]) if (elements.filter((element) => element.dataset.movcuesChecklistRole === role).length !== 1) errors.push(`Checklist role ${role} must be preserved.`);
+    for (const item of options.checklist.items) if (elements.filter((element) => element.dataset.movcuesChecklistItemId === item.id).length !== 1) errors.push(`Checklist item ${item.id} must be preserved.`);
+  }
+  if (options.editable && roots[0]) errors.push(...sourceEditabilityErrors(sourceElement(roots[0]), options.previousHtml && parse$1(options.previousHtml).content.firstElementChild ? sourceElement(parse$1(options.previousHtml).content.firstElementChild) : void 0, (_b = options.survey) == null ? void 0 : _b.questions), ...sourceEditingCssErrors(operation.css));
+  return [...new Set(errors)];
+}
+function applySourceMarkup(builder, content, operation, options) {
+  const errors = validateSourceMarkup(operation, { ...options, editable: true, previousHtml: options.previousHtml ?? builder.html });
+  if (errors.length) throw new Error(errors.join(" "));
+  const previous = builder.projectData.movcues && typeof builder.projectData.movcues === "object" ? builder.projectData.movcues : {};
+  builder.html = operation.html;
+  builder.css = operation.css;
+  builder.projectData = { ...builder.projectData, movcues: { ...previous, authoringSurface: "source", sourceVersion: 1, sourceEditabilityVersion: SOURCE_EDITABILITY.version, actionBindings: structuredClone(operation.actionBindings) } };
+  const template = parse$1(operation.html), heading = template.content.querySelector('[data-movcues-content="heading"]'), body = template.content.querySelector('[data-movcues-content="body"]');
+  if (heading) content.heading = (heading.textContent ?? "").trim().slice(0, 500);
+  if (body) content.body = (body.textContent ?? "").trim().slice(0, 1e4);
+}
+function sourceContext(builder, guide) {
+  const movcues = builder.projectData.movcues && typeof builder.projectData.movcues === "object" ? builder.projectData.movcues : {};
+  return { html: builder.html, css: builder.css, authoringSurface: movcues.authoringSurface === "source" ? "source" : "onsite", actionBindings: structuredClone(movcues.actionBindings ?? {}), supportedActions: guide ? ["dismiss", "next_step", "previous_step", "open_url", "track_event"] : ["dismiss", "open_url", "track_event"] };
+}
+function aiDocumentContext(value) {
+  const clone = structuredClone(value);
+  const visit = (node2) => {
+    if (Array.isArray(node2)) {
+      node2.forEach(visit);
+      return;
+    }
+    if (!node2 || typeof node2 !== "object") return;
+    for (const [key, item] of Object.entries(node2)) {
+      if (key === "src" && typeof item === "string" && /^data:image\//i.test(item)) {
+        node2[key] = `[inline image data omitted from structured context; ${item.length} characters; preserve the image from source HTML]`;
+      } else visit(item);
+    }
+  };
+  visit(clone);
+  return clone;
+}
+function isSourceAuthored(builder) {
+  const movcues = builder == null ? void 0 : builder.projectData.movcues;
+  return Boolean(movcues && typeof movcues === "object" && movcues.authoringSurface === "source");
+}
+function sourceElement(element) {
+  return { tag: element.tagName.toLowerCase(), attrs: Object.fromEntries(Array.from(element.attributes, (attr) => [attr.name, attr.value])), text: Array.from(element.childNodes).filter((node2) => node2.nodeType === Node.TEXT_NODE).map((node2) => node2.textContent ?? "").join(""), children: Array.from(element.children, sourceElement) };
+}
 const esc = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 class ChecklistEditor {
-  constructor(root, definition, references, options) {
+  constructor(root2, definition, references, options) {
     var _a, _b, _c, _d;
-    this.root = root;
+    this.root = root2;
     this.definition = definition;
     this.references = references;
     this.options = options;
@@ -18,11 +4346,11 @@ class ChecklistEditor {
     this.sample = /* @__PURE__ */ new Map();
     this.onChange = (event) => {
       var _a2, _b2, _c2, _d2;
-      const input = event.target;
-      if (!input.matches("[data-checklist-view]") && !this.options.canEdit()) return;
-      if (input.matches("[data-checklist-view]")) {
+      const input2 = event.target;
+      if (!input2.matches("[data-checklist-view]") && !this.options.canEdit()) return;
+      if (input2.matches("[data-checklist-view]")) {
         if (this.options.flush()) {
-          this.view = input.value;
+          this.view = input2.value;
           this.closeMobileInspector();
           this.options.render();
         }
@@ -31,56 +4359,56 @@ class ChecklistEditor {
       const c = this.options.composer();
       if (!c) return;
       const item = c.getSelectedTask();
-      if (input.matches("[data-checklist-sample]") && item) {
-        this.sample.set(item.id, input.value);
+      if (input2.matches("[data-checklist-sample]") && item) {
+        this.sample.set(item.id, input2.value);
         (_a2 = this.options.composer()) == null ? void 0 : _a2.refreshChecklist();
         return;
       }
-      if (input.matches("[data-checklist-view-width]")) {
-        c.updateChecklistViewWidth(Number(input.value));
+      if (input2.matches("[data-checklist-view-width]")) {
+        c.updateChecklistViewWidth(Number(input2.value));
         return;
       }
-      if (input.matches("[data-checklist-font]")) {
-        c.updateBlock({ fontSize: Number(input.value) });
+      if (input2.matches("[data-checklist-font]")) {
+        c.updateBlock({ fontSize: Number(input2.value) });
         return;
       }
-      if (input.matches("[data-checklist-color]")) {
-        c.updateBlock({ color: input.value });
+      if (input2.matches("[data-checklist-color]")) {
+        c.updateBlock({ color: input2.value });
         return;
       }
-      if (input.matches("[data-checklist-indicator]")) {
-        c.updateBlock({ indicator: input.value });
+      if (input2.matches("[data-checklist-indicator]")) {
+        c.updateBlock({ indicator: input2.value });
         return;
       }
-      if (input.matches("[data-checklist-launcher-label]")) {
-        c.updateBlock({ text: input.value });
+      if (input2.matches("[data-checklist-launcher-label]")) {
+        c.updateBlock({ text: input2.value });
         return;
       }
-      if (this.step.contains(input)) {
+      if (this.step.contains(input2)) {
         c.updateChecklist((next2) => {
-          if (input.matches("[data-checklist-title]")) next2.title = input.value;
-          if (input.matches("[data-checklist-description]")) next2.description = input.value;
-          if (input.matches("[data-checklist-completion-title]")) next2.completionMessage.title = input.value;
-          if (input.matches("[data-checklist-completion-description]")) next2.completionMessage.description = input.value;
-          if (input.matches("[data-checklist-ack]")) next2.completionMessage.acknowledgeLabel = input.value;
-          if (input.matches("[data-checklist-position]")) next2.behavior.position = input.value;
-          if (input.matches("[data-checklist-order]")) next2.behavior.order = input.value;
-          if (input.matches("[data-checklist-initial]")) next2.behavior.initialState = input.value;
-          if (input.matches("[data-checklist-dismissible]")) next2.behavior.dismissible = input.checked;
-          if (input.matches("[data-checklist-remaining]")) next2.behavior.showRemainingCount = input.checked;
+          if (input2.matches("[data-checklist-title]")) next2.title = input2.value;
+          if (input2.matches("[data-checklist-description]")) next2.description = input2.value;
+          if (input2.matches("[data-checklist-completion-title]")) next2.completionMessage.title = input2.value;
+          if (input2.matches("[data-checklist-completion-description]")) next2.completionMessage.description = input2.value;
+          if (input2.matches("[data-checklist-ack]")) next2.completionMessage.acknowledgeLabel = input2.value;
+          if (input2.matches("[data-checklist-position]")) next2.behavior.position = input2.value;
+          if (input2.matches("[data-checklist-order]")) next2.behavior.order = input2.value;
+          if (input2.matches("[data-checklist-initial]")) next2.behavior.initialState = input2.value;
+          if (input2.matches("[data-checklist-dismissible]")) next2.behavior.dismissible = input2.checked;
+          if (input2.matches("[data-checklist-remaining]")) next2.behavior.showRemainingCount = input2.checked;
         });
         return;
       }
-      if (!item || !this.task.contains(input)) return;
+      if (!item || !this.task.contains(input2)) return;
       const next = structuredClone(item);
-      if (input.matches("[data-checklist-task-title]")) next.title = input.value;
-      if (input.matches("[data-checklist-task-description]")) next.description = input.value;
-      if (input.matches("[data-checklist-action]")) next.action = input.value === "none" ? { type: "none" } : input.value === "launch_guide" ? { type: "launch_guide", experienceId: ((_b2 = this.references.guides[0]) == null ? void 0 : _b2.id) ?? "" } : { type: input.value, url: input.value === "navigate" ? "/" : location.origin };
-      if (input.matches("[data-checklist-action-guide]")) next.action = { type: "launch_guide", experienceId: input.value };
-      if (input.matches("[data-checklist-url]") && "url" in next.action) next.action.url = input.value;
-      if (input.matches("[data-checklist-condition]")) next.completion = input.value === "item_clicked" ? { type: "item_clicked" } : input.value === "segment" ? { type: "segment", segmentId: ((_c2 = this.references.segments[0]) == null ? void 0 : _c2.id) ?? "" } : { type: "guide_completed", experienceId: ((_d2 = this.references.guides[0]) == null ? void 0 : _d2.id) ?? "" };
-      if (input.matches("[data-checklist-segment]")) next.completion = { type: "segment", segmentId: input.value };
-      if (input.matches("[data-checklist-completion-guide]")) next.completion = { type: "guide_completed", experienceId: input.value };
+      if (input2.matches("[data-checklist-task-title]")) next.title = input2.value;
+      if (input2.matches("[data-checklist-task-description]")) next.description = input2.value;
+      if (input2.matches("[data-checklist-action]")) next.action = input2.value === "none" ? { type: "none" } : input2.value === "launch_guide" ? { type: "launch_guide", experienceId: ((_b2 = this.references.guides[0]) == null ? void 0 : _b2.id) ?? "" } : { type: input2.value, url: input2.value === "navigate" ? "/" : location.origin };
+      if (input2.matches("[data-checklist-action-guide]")) next.action = { type: "launch_guide", experienceId: input2.value };
+      if (input2.matches("[data-checklist-url]") && "url" in next.action) next.action.url = input2.value;
+      if (input2.matches("[data-checklist-condition]")) next.completion = input2.value === "item_clicked" ? { type: "item_clicked" } : input2.value === "segment" ? { type: "segment", segmentId: ((_c2 = this.references.segments[0]) == null ? void 0 : _c2.id) ?? "" } : { type: "guide_completed", experienceId: ((_d2 = this.references.guides[0]) == null ? void 0 : _d2.id) ?? "" };
+      if (input2.matches("[data-checklist-segment]")) next.completion = { type: "segment", segmentId: input2.value };
+      if (input2.matches("[data-checklist-completion-guide]")) next.completion = { type: "guide_completed", experienceId: input2.value };
       if (next.action.type === "launch_guide" && !next.action.experienceId || next.completion.type === "segment" && !next.completion.segmentId || next.completion.type === "guide_completed" && !next.completion.experienceId) {
         this.options.error(["Select a Guide or Segment from this site."]);
         return;
@@ -123,13 +4451,18 @@ class ChecklistEditor {
     this.task.querySelector("[data-checklist-segment]").innerHTML = '<option value="">Select Segment</option>' + references.segments.map((segment) => `<option value="${esc(segment.id)}">${esc(segment.name)}</option>`).join("");
     this.style.textContent = "[data-checklist-inspector],[data-block^=checklist_task]{display:grid;gap:8px}[data-checklist-inspector] small,[data-checklist-action-note]{font-size:11px;color:#64748b}[data-checklist-inspector] textarea,[data-block^=checklist_task] textarea{width:100%;min-width:0;box-sizing:border-box;border:1px solid #d7dce3;border-radius:6px;font:12px ui-sans-serif,system-ui;padding:7px}[data-checklist-tools]{display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-width:0;max-width:100%;padding:0 6px 6px}[data-checklist-tools] select{width:auto;max-width:100%;font-size:11px}[data-checklist-tools] span{font-size:10px;color:#64748b}[data-checklist-task-fields]{display:grid;gap:8px}";
     this.root.append(this.style);
-    root.addEventListener("change", this.onChange);
-    root.addEventListener("click", this.onClick);
+    root2.addEventListener("change", this.onChange);
+    root2.addEventListener("click", this.onClick);
     if (innerWidth <= 480) this.closeMobileInspector();
     else (_d = this.root.querySelector("aside")) == null ? void 0 : _d.classList.toggle("left-side", definition.behavior.position === "bottom-right");
   }
   sync() {
     var _a, _b, _c;
+    const source = isSourceAuthored(this.definition.builder);
+    this.root.querySelectorAll("[data-checklist-add],[data-checklist-task-move],[data-checklist-view-width],[data-checklist-indicator],[data-checklist-launcher-label]").forEach((control) => {
+      control.disabled = source;
+      control.title = source ? "Protected source task structure is preserved. Use the element inspector for visual styles." : "";
+    });
     const c = this.options.composer(), task = c == null ? void 0 : c.getSelectedTask(), block = c == null ? void 0 : c.getSelectedBlock();
     this.task.querySelector("[data-checklist-task-fields]").hidden = !task;
     this.value("[data-checklist-view]", this.view);
@@ -201,20 +4534,20 @@ class ChecklistEditor {
   }
   applyDesign(id) {
     var _a;
-    const host = this.host(id), root = host == null ? void 0 : host.shadowRoot;
-    if (!host || !root) return;
+    const host = this.host(id), root2 = host == null ? void 0 : host.shadowRoot;
+    if (!host || !root2) return;
     host.style.left = this.definition.behavior.position === "bottom-left" ? "16px" : "auto";
     host.style.right = this.definition.behavior.position === "bottom-right" ? "16px" : "auto";
-    root.querySelectorAll("[data-movcues-checklist-view]").forEach((view) => view.classList.toggle("is-active", view.dataset.movcuesChecklistView === this.view));
+    root2.querySelectorAll("[data-movcues-checklist-view]").forEach((view) => view.classList.toggle("is-active", view.dataset.movcuesChecklistView === this.view));
     let available = true;
-    root.querySelectorAll("[data-movcues-checklist-item-id]").forEach((node) => {
-      const explicit = this.sample.get(node.dataset.movcuesChecklistItemId);
-      node.dataset.state = explicit ?? (this.definition.behavior.order === "sequential" && !available ? "locked" : "available");
-      if (node.dataset.state !== "completed") available = false;
+    root2.querySelectorAll("[data-movcues-checklist-item-id]").forEach((node2) => {
+      const explicit = this.sample.get(node2.dataset.movcuesChecklistItemId);
+      node2.dataset.state = explicit ?? (this.definition.behavior.order === "sequential" && !available ? "locked" : "available");
+      if (node2.dataset.state !== "completed") available = false;
     });
-    root.querySelector("[data-movcues-checklist-role=progress]").textContent = `${this.definition.items.filter((item) => this.sample.get(item.id) === "completed").length} of ${this.definition.items.length} complete`;
-    root.querySelectorAll("[data-movcues-checklist-role=dismiss]").forEach((node) => node.hidden = !this.definition.behavior.dismissible);
-    const count = root.querySelector("[data-movcues-checklist-role=remaining-count]");
+    root2.querySelector("[data-movcues-checklist-role=progress]").textContent = `${this.definition.items.filter((item) => this.sample.get(item.id) === "completed").length} of ${this.definition.items.length} complete`;
+    root2.querySelectorAll("[data-movcues-checklist-role=dismiss]").forEach((node2) => node2.hidden = !this.definition.behavior.dismissible);
+    const count = root2.querySelector("[data-movcues-checklist-role=remaining-count]");
     if (count) count.textContent = this.definition.behavior.showRemainingCount ? String(this.definition.items.length) : "";
     (_a = this.options.composer()) == null ? void 0 : _a.setChecklistView(this.view);
   }
@@ -238,12 +4571,12 @@ class ChecklistEditor {
     this.definition = value;
   }
   value(selector, value) {
-    const input = this.root.querySelector(selector);
-    if (input && this.root.activeElement !== input) input.value = value;
+    const input2 = this.root.querySelector(selector);
+    if (input2 && this.root.activeElement !== input2) input2.value = value;
   }
   check(selector, value) {
-    const input = this.root.querySelector(selector);
-    if (input) input.checked = value;
+    const input2 = this.root.querySelector(selector);
+    if (input2) input2.checked = value;
   }
   hide(selector, value) {
     const element = this.task.querySelector(selector);
@@ -584,8 +4917,8 @@ function validateOnsiteDocument(value) {
     else if (ids.has(id)) errors.push(`${path} reuses ID ${id}.`);
     else ids.add(id);
   };
-  const number = (input, min, max, path) => {
-    if (typeof input !== "number" || !Number.isFinite(input) || input < min || input > max) errors.push(`${path} must be between ${min} and ${max}.`);
+  const number = (input2, min, max, path) => {
+    if (typeof input2 !== "number" || !Number.isFinite(input2) || input2 < min || input2 > max) errors.push(`${path} must be between ${min} and ${max}.`);
   };
   addId(value.id, "Document");
   const visit = (cell, depth, path) => {
@@ -748,6 +5081,14 @@ function parentCell(document2, id) {
   });
   return found;
 }
+function cellForBlock(document2, id) {
+  let found = null;
+  walkCells(document2.root, (cell) => {
+    var _a;
+    if (((_a = cell.block) == null ? void 0 : _a.id) === id) found = cell;
+  });
+  return found;
+}
 function listBlocks(cell) {
   const blocks = [];
   walkCells(cell, (item) => {
@@ -877,57 +5218,57 @@ function migrateV1Builder(builder, content, widgetType, guide = false) {
   if (typeof document === "undefined") return null;
   const template = document.createElement("template");
   template.innerHTML = builder.html;
-  const root = template.content.querySelector(".movcues-widget");
-  if (!root) return null;
-  const known = root.querySelectorAll("[data-movcues-content],[data-movcues-action-id],img");
-  if (!known.length || root.querySelector("[data-movcues-question-id],[data-movcues-checklist-role]")) return null;
-  const compatibility = root.cloneNode(true);
+  const root2 = template.content.querySelector(".movcues-widget");
+  if (!root2) return null;
+  const known = root2.querySelectorAll("[data-movcues-content],[data-movcues-action-id],img");
+  if (!known.length || root2.querySelector("[data-movcues-question-id],[data-movcues-checklist-role]")) return null;
+  const compatibility = root2.cloneNode(true);
   compatibility.querySelectorAll("[data-movcues-content],[data-movcues-action-id],img").forEach((element) => element.remove());
   compatibility.querySelectorAll("*").forEach((element) => {
     var _a2;
     if (!((_a2 = element.textContent) == null ? void 0 : _a2.trim()) && !element.children.length) element.remove();
   });
   if (((_a = compatibility.textContent) == null ? void 0 : _a.trim()) || compatibility.children.length) return null;
-  const cells = [];
+  const cells2 = [];
   const alignment = (element) => element.classList.contains("movcues-align-center") ? "center" : element.classList.contains("movcues-align-right") ? "right" : element.classList.contains("movcues-align-left") ? "left" : void 0;
-  const heading = root.querySelector('[data-movcues-content="heading"]');
+  const heading = root2.querySelector('[data-movcues-content="heading"]');
   if (heading) {
     const block = createBlock("heading", guide);
     block.html = sanitizeRichText(heading.innerHTML);
     block.align = alignment(heading);
-    cells.push(emptyCell(block));
+    cells2.push(emptyCell(block));
   }
-  const body = root.querySelector('[data-movcues-content="body"]');
+  const body = root2.querySelector('[data-movcues-content="body"]');
   if (body) {
     const block = createBlock("text", guide);
     block.html = sanitizeRichText(body.innerHTML);
     block.align = alignment(body);
-    cells.push(emptyCell(block));
+    cells2.push(emptyCell(block));
   }
-  root.querySelectorAll("img").forEach((image) => {
+  root2.querySelectorAll("img").forEach((image) => {
     const block = createBlock("image", guide);
     block.src = image.getAttribute("src") ?? "";
     block.alt = image.getAttribute("alt") ?? "";
-    cells.push(emptyCell(block));
+    cells2.push(emptyCell(block));
   });
   for (const [marker, fallback] of [["secondary", content.secondaryAction], ["primary", content.primaryAction]]) {
-    const button = root.querySelector(`[data-movcues-action-id="${marker}"]`);
+    const button = root2.querySelector(`[data-movcues-action-id="${marker}"]`);
     if (!button || !fallback) continue;
     const block = createBlock("button", guide);
     block.label = fallback.label;
     block.variant = marker === "primary" ? "primary" : "secondary";
     block.action = { id: onsiteId("action"), ...fallback.type === "open_url" && fallback.url ? { type: "open_url", url: fallback.url } : fallback.type === "track_event" && fallback.eventName ? { type: "track_event", eventName: fallback.eventName } : { type: fallback.type === "next_step" ? "next_step" : "dismiss" } };
-    cells.push(emptyCell(block));
+    cells2.push(emptyCell(block));
   }
-  if (!cells.length) return null;
-  const migrated = { schemaVersion: 2, id: onsiteId("document"), root: { ...emptyCell(), direction: "column", gap: 12, padding: { top: 20, right: 20, bottom: 20, left: 20 }, children: cells } };
+  if (!cells2.length) return null;
+  const migrated = { schemaVersion: 2, id: onsiteId("document"), root: { ...emptyCell(), direction: "column", gap: 12, padding: { top: 20, right: 20, bottom: 20, left: 20 }, children: cells2 } };
   applyOnsiteDocument(builder, migrated, widgetType);
   return migrated;
 }
-function sanitizeRichText(input) {
-  if (typeof document === "undefined") return sanitizeRichTextWithoutDom(input);
+function sanitizeRichText(input2) {
+  if (typeof document === "undefined") return sanitizeRichTextWithoutDom(input2);
   const template = document.createElement("template");
-  template.innerHTML = input;
+  template.innerHTML = input2;
   for (const element of Array.from(template.content.querySelectorAll("*"))) {
     if (!SAFE_INLINE_TAGS.has(element.tagName)) {
       element.replaceWith(...Array.from(element.childNodes));
@@ -944,17 +5285,17 @@ function sanitizeRichText(input) {
   }
   return template.innerHTML;
 }
-function sanitizeRichTextWithoutDom(input) {
-  return input.replace(/<(?!\/?(?:br|strong|em|u|a|ul|ol|li)(?:\s|>|\/))/gi, "&lt;").replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi, "").replace(/javascript\s*:/gi, "");
+function sanitizeRichTextWithoutDom(input2) {
+  return input2.replace(/<(?!\/?(?:br|strong|em|u|a|ul|ol|li)(?:\s|>|\/))/gi, "&lt;").replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi, "").replace(/javascript\s*:/gi, "");
 }
-function richTextToPlain(input) {
-  if (typeof document === "undefined") return input.replace(/<br\s*\/?>/gi, "\n").replace(/<\/li>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim();
+function richTextToPlain(input2) {
+  if (typeof document === "undefined") return input2.replace(/<br\s*\/?>/gi, "\n").replace(/<\/li>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim();
   const template = document.createElement("template");
-  template.innerHTML = input;
-  const read = (node) => {
-    if (node.nodeType === 3) return node.textContent ?? "";
+  template.innerHTML = input2;
+  const read = (node2) => {
+    if (node2.nodeType === 3) return node2.textContent ?? "";
     let value = "";
-    for (const child of Array.from(node.childNodes)) {
+    for (const child of Array.from(node2.childNodes)) {
       if (child instanceof HTMLElement && child.tagName === "BR") value += "\n";
       else {
         value += read(child);
@@ -1010,10 +5351,10 @@ function duplicateSurveyStep(source, submitLabel) {
       options.set(`${question.id}:${old2}`, option.id);
     });
   });
-  (_a = copy.branching) == null ? void 0 : _a.rules.forEach((rule) => {
-    rule.questionId = questions.get(rule.questionId);
-    const key = `${rule.questionId}:${rule.value}`;
-    if (typeof rule.value === "string" && options.has(key)) rule.value = options.get(key);
+  (_a = copy.branching) == null ? void 0 : _a.rules.forEach((rule2) => {
+    rule2.questionId = questions.get(rule2.questionId);
+    const key = `${rule2.questionId}:${rule2.value}`;
+    if (typeof rule2.value === "string" && options.has(key)) rule2.value = options.get(key);
   });
   const document2 = onsiteDocumentFromBuilder(copy.builder);
   if (!document2 || !copy.builder) throw new Error("This Survey step is not an on-site document.");
@@ -1021,14 +5362,36 @@ function duplicateSurveyStep(source, submitLabel) {
   listBlocks(duplicated.root).forEach((block) => {
     if (block.type === "question") block.questionId = questions.get(block.questionId);
   });
+  if (isSourceAuthored(copy.builder)) {
+    const template = globalThis.document.createElement("template");
+    template.innerHTML = copy.builder.html;
+    template.content.querySelectorAll("[data-movcues-question-id]").forEach((node2) => {
+      const id = questions.get(node2.dataset.movcuesQuestionId);
+      node2.dataset.movcuesQuestionId = id;
+      node2.querySelectorAll("[data-movcues-option-id]").forEach((option) => {
+        option.dataset.movcuesOptionId = options.get(`${id}:${option.dataset.movcuesOptionId}`) ?? option.dataset.movcuesOptionId;
+      });
+    });
+    copy.builder.html = template.innerHTML;
+    const css = postcss$1.parse(copy.builder.css);
+    const optionIds = /* @__PURE__ */ new Map();
+    for (const [key, id] of options) optionIds.set(key.slice(key.indexOf(":") + 1), id);
+    css.walkRules((rule2) => {
+      rule2.selector = remapSourceSelector(remapSourceSelector(rule2.selector, "data-movcues-question-id", questions), "data-movcues-option-id", optionIds);
+    });
+    copy.builder.css = css.toString();
+    const metadata = copy.builder.projectData.movcues;
+    metadata.onsiteDocument = duplicated;
+    return copy;
+  }
   copy.content = applyOnsiteDocument(copy.builder, duplicated, "survey", { questions: copy.questions, submitLabel }).content;
   return copy;
 }
 const LABELS = { single_choice: "Single choice", multiple_choice: "Multiple choice", short_text: "Short text", long_text: "Long text", rating: "Rating", nps: "NPS" };
 class SurveyEditor {
-  constructor(root, survey, options) {
+  constructor(root2, survey, options) {
     var _a, _b, _c;
-    this.root = root;
+    this.root = root2;
     this.survey = survey;
     this.options = options;
     this.questionHost = document.createElement("div");
@@ -1036,33 +5399,33 @@ class SurveyEditor {
     this.dock = document.createElement("div");
     this.style = document.createElement("style");
     this.onChange = (event) => {
-      const input = event.target;
-      if (!input.dataset || !this.options.canEdit()) return;
+      const input2 = event.target;
+      if (!input2.dataset || !this.options.canEdit()) return;
       const composer = this.options.composer(), step = this.survey.steps[this.options.index()], question = composer == null ? void 0 : composer.getSelectedQuestion();
-      if (input.matches("[data-survey-default-next],[data-rule-question],[data-rule-operator],[data-rule-value],[data-rule-next]")) {
+      if (input2.matches("[data-survey-default-next],[data-rule-question],[data-rule-operator],[data-rule-value],[data-rule-next]")) {
         const branching = cloneOnsite(step.branching ?? { rules: [] });
-        if (input.matches("[data-survey-default-next]")) branching.defaultNextStepId = input.value || void 0;
+        if (input2.matches("[data-survey-default-next]")) branching.defaultNextStepId = input2.value || void 0;
         else {
-          const index = Number(input.closest("[data-survey-rule]").dataset.surveyRule), rule = branching.rules[index];
-          if (input.matches("[data-rule-question]")) Object.assign(rule, this.defaultRule(step.questions.find((question2) => question2.id === input.value)));
-          if (input.matches("[data-rule-operator]")) {
-            rule.operator = input.value;
-            if (rule.operator === "answered") delete rule.value;
-            else if (rule.value === void 0) rule.value = this.defaultRule(step.questions.find((question2) => question2.id === rule.questionId)).value;
+          const index = Number(input2.closest("[data-survey-rule]").dataset.surveyRule), rule2 = branching.rules[index];
+          if (input2.matches("[data-rule-question]")) Object.assign(rule2, this.defaultRule(step.questions.find((question2) => question2.id === input2.value)));
+          if (input2.matches("[data-rule-operator]")) {
+            rule2.operator = input2.value;
+            if (rule2.operator === "answered") delete rule2.value;
+            else if (rule2.value === void 0) rule2.value = this.defaultRule(step.questions.find((question2) => question2.id === rule2.questionId)).value;
           }
-          if (input.matches("[data-rule-next]")) rule.nextStepId = input.value;
-          if (input.matches("[data-rule-value]")) {
-            const question2 = step.questions.find((question3) => question3.id === rule.questionId);
-            rule.value = question2.type === "rating" || question2.type === "nps" ? Number(input.value) : input.value;
+          if (input2.matches("[data-rule-next]")) rule2.nextStepId = input2.value;
+          if (input2.matches("[data-rule-value]")) {
+            const question2 = step.questions.find((question3) => question3.id === rule2.questionId);
+            rule2.value = question2.type === "rating" || question2.type === "nps" ? Number(input2.value) : input2.value;
           }
         }
         composer == null ? void 0 : composer.updateBranching(branching);
         this.sync();
         return;
       }
-      if (input.matches("[data-survey-allow-back],[data-survey-show-progress],[data-survey-submit-label]")) {
+      if (input2.matches("[data-survey-allow-back],[data-survey-show-progress],[data-survey-submit-label]")) {
         if (!this.options.flush()) return;
-        if (input.matches("[data-survey-submit-label]") && !input.value.trim()) {
+        if (input2.matches("[data-survey-submit-label]") && !input2.value.trim()) {
           this.options.error(["Submit label cannot be empty."]);
           return;
         }
@@ -1074,38 +5437,38 @@ class SurveyEditor {
         this.options.changed();
         return;
       }
-      if (input.matches("[data-survey-step-heading]")) {
-        composer == null ? void 0 : composer.updateStepHeading(input.value);
+      if (input2.matches("[data-survey-step-heading]")) {
+        composer == null ? void 0 : composer.updateStepHeading(input2.value);
         this.sync();
         return;
       }
-      if (!question || !composer || !this.questionHost.contains(input)) return;
-      if (input.matches("[data-survey-font-size]")) {
-        composer.updateBlock({ fontSize: Number(input.value) });
+      if (!question || !composer || !this.questionHost.contains(input2)) return;
+      if (input2.matches("[data-survey-font-size]")) {
+        composer.updateBlock({ fontSize: Number(input2.value) });
         return;
       }
-      if (input.matches("[data-survey-question-color]")) {
-        composer.updateBlock({ color: input.value });
+      if (input2.matches("[data-survey-question-color]")) {
+        composer.updateBlock({ color: input2.value });
         return;
       }
       const next = cloneOnsite(question);
-      const value = input.matches("[data-survey-question-type]") ? { ...newSurveyQuestion(input.value), id: question.id, label: question.label, required: question.required } : next;
-      if (input.matches("[data-survey-question-label]")) value.label = input.value;
-      if (input.matches("[data-survey-question-required]")) value.required = input.checked;
-      if ("options" in value && input.matches("[data-survey-options]")) {
+      const value = input2.matches("[data-survey-question-type]") ? { ...newSurveyQuestion(input2.value), id: question.id, label: question.label, required: question.required } : next;
+      if (input2.matches("[data-survey-question-label]")) value.label = input2.value;
+      if (input2.matches("[data-survey-question-required]")) value.required = input2.checked;
+      if ("options" in value && input2.matches("[data-survey-options]")) {
         const existing = value.options;
-        value.options = input.value.split("\n").map((label, index) => {
+        value.options = input2.value.split("\n").map((label, index) => {
           var _a2;
           return { id: ((_a2 = existing[index]) == null ? void 0 : _a2.id) ?? onsiteId("option"), label };
         });
       }
       if (value.type === "short_text" || value.type === "long_text") {
-        if (input.matches("[data-survey-placeholder]")) value.placeholder = input.value;
-        if (input.matches("[data-survey-max-length]")) value.maxLength = Number(input.value);
+        if (input2.matches("[data-survey-placeholder]")) value.placeholder = input2.value;
+        if (input2.matches("[data-survey-max-length]")) value.maxLength = Number(input2.value);
       }
       if (value.type === "rating") {
-        if (input.matches("[data-survey-rating-min]")) value.min = Number(input.value);
-        if (input.matches("[data-survey-rating-max]")) value.max = Number(input.value);
+        if (input2.matches("[data-survey-rating-min]")) value.min = Number(input2.value);
+        if (input2.matches("[data-survey-rating-max]")) value.max = Number(input2.value);
       }
       composer.updateQuestion(value);
       this.sync();
@@ -1151,7 +5514,7 @@ class SurveyEditor {
         index = Math.min(index, steps.length - 1);
         steps.forEach((step2) => {
           if (step2.branching) {
-            step2.branching.rules = step2.branching.rules.filter((rule) => rule.nextStepId !== removed);
+            step2.branching.rules = step2.branching.rules.filter((rule2) => rule2.nextStepId !== removed);
             if (step2.branching.defaultNextStepId === removed) delete step2.branching.defaultNextStepId;
           }
         });
@@ -1173,17 +5536,25 @@ class SurveyEditor {
     this.dock.dataset.surveyDock = "";
     this.dock.innerHTML = '<button type="button" class="secondary-button compact" data-survey-add-step aria-label="Add Survey step">＋</button><details><summary aria-label="Survey step actions">⋯</summary><div><button type="button" data-survey-duplicate-step>Duplicate step</button><button type="button" data-survey-move="-1">Move step earlier</button><button type="button" data-survey-move="1">Move step later</button><button type="button" data-survey-delete-step>Delete step</button></div></details>';
     this.style.textContent = "[data-survey-step-inspector],[data-block=question]{display:grid;gap:8px}[data-survey-options]{box-sizing:border-box;width:100%;border:1px solid #d7dce3;border-radius:6px;padding:7px;font:12px/1.5 ui-sans-serif,system-ui}[data-survey-branch-section]>summary{cursor:pointer;font-weight:600;margin:4px 0 8px}[data-survey-rule]{display:grid;grid-template-columns:minmax(0,1fr);gap:5px;padding:8px 0;border-top:1px solid #e5e7eb}[data-survey-step-inspector] small{display:block;color:#64748b;font-size:11px;margin-top:6px}.step-navigator>[data-survey-dock]{display:flex;flex:none;gap:4px;align-items:center}[data-survey-dock][hidden]{display:none!important}[data-survey-dock] details>summary{list-style:none;cursor:pointer;border:1px solid #d7dce3;border-radius:6px;padding:3px 7px}[data-survey-dock] details>div{position:absolute;bottom:calc(100% + 6px);right:4px;display:grid;gap:4px;min-width:150px;padding:6px;background:#fff;border:1px solid #d7dce3;border-radius:8px;box-shadow:0 4px 18px #0f172a20}[data-survey-dock] details button{border:0;background:#fff;padding:7px;text-align:left;font:12px ui-sans-serif,system-ui;cursor:pointer}";
-    (_a = root.querySelector("[data-inspector=block]")) == null ? void 0 : _a.append(this.questionHost);
-    (_b = root.querySelector("[data-inspector=step]")) == null ? void 0 : _b.append(this.stepHost);
-    (_c = root.querySelector("[data-guide]")) == null ? void 0 : _c.append(this.dock);
-    root.append(this.style);
-    root.addEventListener("change", this.onChange);
-    root.addEventListener("click", this.onClick);
+    (_a = root2.querySelector("[data-inspector=block]")) == null ? void 0 : _a.append(this.questionHost);
+    (_b = root2.querySelector("[data-inspector=step]")) == null ? void 0 : _b.append(this.stepHost);
+    (_c = root2.querySelector("[data-guide]")) == null ? void 0 : _c.append(this.dock);
+    root2.append(this.style);
+    root2.addEventListener("change", this.onChange);
+    root2.addEventListener("click", this.onClick);
+  }
+  setDefinition(survey) {
+    this.survey = survey;
   }
   sync() {
     var _a, _b, _c;
     const step = this.survey.steps[this.options.index()], composer = this.options.composer();
     if (!step) return;
+    const source = isSourceAuthored(step.builder);
+    this.questionHost.querySelectorAll("[data-survey-question-type],[data-survey-rating-min],[data-survey-rating-max]").forEach((control) => {
+      control.disabled = source;
+      control.title = source ? "Source question type and rating range preserve their canonical answer structure. Labels, input settings, typography and color remain editable." : "";
+    });
     this.dock.hidden = !this.options.canEdit();
     this.value("[data-survey-step-heading]", step.content.heading);
     this.check("[data-survey-allow-back]", this.survey.allowBack);
@@ -1225,18 +5596,18 @@ class SurveyEditor {
     const signature = JSON.stringify([step.id, step.questions, step.branching, this.survey.steps.map((step2) => [step2.id, step2.content.heading])]);
     if (rules.dataset.signature !== signature) {
       rules.dataset.signature = signature;
-      rules.innerHTML = (((_b = step.branching) == null ? void 0 : _b.rules) ?? []).map((rule, index) => this.ruleMarkup(rule, index)).join("");
+      rules.innerHTML = (((_b = step.branching) == null ? void 0 : _b.rules) ?? []).map((rule2, index) => this.ruleMarkup(rule2, index)).join("");
     }
     this.root.querySelector("[data-survey-add-rule]").disabled = !step.questions.length || (((_c = step.branching) == null ? void 0 : _c.rules.length) ?? 0) >= 10;
   }
   destinations() {
     return this.survey.steps.slice(this.options.index() + 1).map((step, offset) => `<option value="${escape(step.id)}">${this.options.index() + offset + 2}. ${escape(step.content.heading || "Survey step")}</option>`).join("") + '<option value="submit">Submit Survey</option>';
   }
-  ruleMarkup(rule, index) {
-    const questions = this.survey.steps[this.options.index()].questions, question = questions.find((question2) => question2.id === rule.questionId);
+  ruleMarkup(rule2, index) {
+    const questions = this.survey.steps[this.options.index()].questions, question = questions.find((question2) => question2.id === rule2.questionId);
     const operators = (question == null ? void 0 : question.type) === "multiple_choice" ? [["includes", "includes"], ["answered", "has an answer"]] : (question == null ? void 0 : question.type) === "rating" || (question == null ? void 0 : question.type) === "nps" ? [["equals", "equals"], ["not_equals", "does not equal"], ["gte", "is at least"], ["lte", "is at most"], ["answered", "has an answer"]] : [["equals", "equals"], ["not_equals", "does not equal"], ["answered", "has an answer"]];
-    const value = rule.operator === "answered" ? "" : question && "options" in question ? `<label>Answer<select data-rule-value>${question.options.map((option) => `<option value="${escape(option.id)}"${rule.value === option.id ? " selected" : ""}>${escape(option.label)}</option>`).join("")}</select></label>` : `<label>Answer<input data-rule-value value="${escape(String(rule.value ?? ""))}"${(question == null ? void 0 : question.type) === "rating" || (question == null ? void 0 : question.type) === "nps" ? ' type="number"' : ""}></label>`;
-    return `<div data-survey-rule="${index}"><label>Question<select data-rule-question>${questions.map((question2) => `<option value="${escape(question2.id)}"${question2.id === rule.questionId ? " selected" : ""}>${escape(question2.label)}</option>`).join("")}</select></label><label>Condition<select data-rule-operator>${operators.map(([key, label]) => `<option value="${key}"${key === rule.operator ? " selected" : ""}>${label}</option>`).join("")}</select></label>${value}<label>Go to<select data-rule-next>${this.destinations().replace(`value="${escape(rule.nextStepId)}"`, `value="${escape(rule.nextStepId)}" selected`)}</select></label><button class="secondary-button compact" type="button" data-survey-remove-rule="${index}">Remove rule</button></div>`;
+    const value = rule2.operator === "answered" ? "" : question && "options" in question ? `<label>Answer<select data-rule-value>${question.options.map((option) => `<option value="${escape(option.id)}"${rule2.value === option.id ? " selected" : ""}>${escape(option.label)}</option>`).join("")}</select></label>` : `<label>Answer<input data-rule-value value="${escape(String(rule2.value ?? ""))}"${(question == null ? void 0 : question.type) === "rating" || (question == null ? void 0 : question.type) === "nps" ? ' type="number"' : ""}></label>`;
+    return `<div data-survey-rule="${index}"><label>Question<select data-rule-question>${questions.map((question2) => `<option value="${escape(question2.id)}"${question2.id === rule2.questionId ? " selected" : ""}>${escape(question2.label)}</option>`).join("")}</select></label><label>Condition<select data-rule-operator>${operators.map(([key, label]) => `<option value="${key}"${key === rule2.operator ? " selected" : ""}>${label}</option>`).join("")}</select></label>${value}<label>Go to<select data-rule-next>${this.destinations().replace(`value="${escape(rule2.nextStepId)}"`, `value="${escape(rule2.nextStepId)}" selected`)}</select></label><button class="secondary-button compact" type="button" data-survey-remove-rule="${index}">Remove rule</button></div>`;
   }
   defaultRule(question) {
     var _a;
@@ -1245,16 +5616,22 @@ class SurveyEditor {
   recompile() {
     this.survey.steps.forEach((step) => {
       const doc = onsiteDocumentFromBuilder(step.builder);
-      if (doc && step.builder) Object.assign(step.content, applyOnsiteDocument(step.builder, doc, "survey", { questions: step.questions, submitLabel: this.survey.submitLabel }).content);
+      if (isSourceAuthored(step.builder) && step.builder) {
+        const template = document.createElement("template");
+        template.innerHTML = step.builder.html;
+        const submit = template.content.querySelector('[data-movcues-survey-action="submit"]');
+        if (submit) submit.textContent = this.survey.submitLabel;
+        step.builder.html = template.innerHTML;
+      } else if (doc && step.builder) Object.assign(step.content, applyOnsiteDocument(step.builder, doc, "survey", { questions: step.questions, submitLabel: this.survey.submitLabel }).content);
     });
   }
   value(selector, value) {
-    const input = this.root.querySelector(selector);
-    if (input && this.root.activeElement !== input) input.value = value;
+    const input2 = this.root.querySelector(selector);
+    if (input2 && this.root.activeElement !== input2) input2.value = value;
   }
   check(selector, value) {
-    const input = this.root.querySelector(selector);
-    if (input) input.checked = value;
+    const input2 = this.root.querySelector(selector);
+    if (input2) input2.checked = value;
   }
   destroy() {
     this.root.removeEventListener("change", this.onChange);
@@ -1304,8 +5681,8 @@ class EditorBridge {
     const body = await response.json();
     return body.version;
   }
-  async chat(input, signal) {
-    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/ai/chat`, { method: "POST", headers: this.headers(), credentials: "omit", body: JSON.stringify(input), signal });
+  async chat(input2, signal) {
+    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/ai/chat`, { method: "POST", headers: this.headers(), credentials: "omit", body: JSON.stringify(input2), signal });
     const body = await response.json().catch(() => null);
     if (response.status === 409 && (body == null ? void 0 : body.error) === "draft_conflict") throw new DraftConflictError(body.currentRevision);
     if ([401, 403, 404, 410].includes(response.status) && (body == null ? void 0 : body.error) !== "conversation_not_found") throw new EditorSessionExpiredError();
@@ -1452,17 +5829,17 @@ function identitySelectors(element) {
 function structuralSelectors(element) {
   const selectors = [];
   const parts = [];
-  let node = element;
-  while (node && node !== document.documentElement) {
-    const parent = node.parentElement;
-    let part = node.tagName.toLowerCase();
+  let node2 = element;
+  while (node2 && node2 !== document.documentElement) {
+    const parent = node2.parentElement;
+    let part = node2.tagName.toLowerCase();
     if (parent) {
-      const siblings = Array.from(parent.children).filter((sibling) => sibling.tagName === node.tagName);
-      if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(node) + 1})`;
+      const siblings = Array.from(parent.children).filter((sibling) => sibling.tagName === node2.tagName);
+      if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(node2) + 1})`;
     }
     parts.unshift(part);
     selectors.push(parts.join(" > "));
-    node = parent;
+    node2 = parent;
   }
   return selectors;
 }
@@ -1540,8 +5917,8 @@ class ElementPicker {
     document.addEventListener("keyup", this.keyUp, true);
     window.addEventListener("blur", this.resetPassthrough);
     document.addEventListener("visibilitychange", this.resetPassthrough);
-    return new Promise((resolve) => {
-      this.resolve = resolve;
+    return new Promise((resolve2) => {
+      this.resolve = resolve2;
     });
   }
   cancel() {
@@ -1549,10 +5926,10 @@ class ElementPicker {
     else this.cleanup();
   }
   finish(value) {
-    const resolve = this.resolve;
+    const resolve2 = this.resolve;
     this.resolve = null;
     this.cleanup();
-    resolve == null ? void 0 : resolve(value);
+    resolve2 == null ? void 0 : resolve2(value);
   }
   cleanup() {
     var _a;
@@ -1569,21 +5946,21 @@ class ElementPicker {
 }
 function isMovcuesSurface(element) {
   if (element.closest("[data-movcues-editor],[data-movcues-experience],[data-movcues-picker-overlay]")) return true;
-  const root = element.getRootNode();
-  return root instanceof ShadowRoot && isMovcuesSurface(root.host);
+  const root2 = element.getRootNode();
+  return root2 instanceof ShadowRoot && isMovcuesSurface(root2.host);
 }
-function editorSelection(root) {
+function editorSelection(root2) {
   var _a;
-  return ((_a = root.getSelection) == null ? void 0 : _a.call(root)) ?? window.getSelection();
+  return ((_a = root2.getSelection) == null ? void 0 : _a.call(root2)) ?? window.getSelection();
 }
-function editorRange(root) {
-  const selection = editorSelection(root);
+function editorRange(root2) {
+  const selection = editorSelection(root2);
   if (!selection) return null;
   const composed = selection;
   if (composed.getComposedRanges) {
     try {
-      const value = composed.getComposedRanges({ shadowRoots: [root] })[0];
-      if (value && root.contains(value.startContainer) && root.contains(value.endContainer)) {
+      const value = composed.getComposedRanges({ shadowRoots: [root2] })[0];
+      if (value && root2.contains(value.startContainer) && root2.contains(value.endContainer)) {
         const range = document.createRange();
         range.setStart(value.startContainer, value.startOffset);
         range.setEnd(value.endContainer, value.endOffset);
@@ -1594,8 +5971,8 @@ function editorRange(root) {
   }
   return selection.rangeCount ? selection.getRangeAt(0) : null;
 }
-function setEditorRange(root, range) {
-  const selection = editorSelection(root);
+function setEditorRange(root2, range) {
+  const selection = editorSelection(root2);
   if (!selection) return;
   if (selection.setBaseAndExtent) selection.setBaseAndExtent(range.startContainer, range.startOffset, range.endContainer, range.endOffset);
   else {
@@ -1607,29 +5984,29 @@ const SELECTABLE = "[data-movcues-content],[data-movcues-action-id],img";
 const MAX_HISTORY_BYTES = 2e6;
 function componentPlainText(element) {
   const readChildren = (parent) => {
-    let result = "";
-    for (const node of Array.from(parent.childNodes)) {
-      if (node.nodeType === Node.TEXT_NODE) {
-        result += node.textContent ?? "";
+    let result2 = "";
+    for (const node2 of Array.from(parent.childNodes)) {
+      if (node2.nodeType === Node.TEXT_NODE) {
+        result2 += node2.textContent ?? "";
         continue;
       }
-      if (node instanceof Element && node.tagName === "BR") {
-        result += "\n";
+      if (node2 instanceof Element && node2.tagName === "BR") {
+        result2 += "\n";
         continue;
       }
-      const block = node instanceof Element && /^(LI|P|DIV|UL|OL)$/.test(node.tagName);
-      if (block && result && !result.endsWith("\n")) result += "\n";
-      result += readChildren(node);
-      if (block && !result.endsWith("\n")) result += "\n";
+      const block = node2 instanceof Element && /^(LI|P|DIV|UL|OL)$/.test(node2.tagName);
+      if (block && result2 && !result2.endsWith("\n")) result2 += "\n";
+      result2 += readChildren(node2);
+      if (block && !result2.endsWith("\n")) result2 += "\n";
     }
-    return result;
+    return result2;
   };
   return readChildren(element).trim();
 }
 const ALIGNMENT_CLASSES = ["movcues-align-left", "movcues-align-center", "movcues-align-right"];
 class OnsiteContentEditor {
-  constructor(root, builder, content, callbacks) {
-    this.root = root;
+  constructor(root2, builder, content, callbacks) {
+    this.root = root2;
     this.builder = builder;
     this.content = content;
     this.callbacks = callbacks;
@@ -1699,7 +6076,7 @@ class OnsiteContentEditor {
     };
     this.onOutsidePointer = (event) => {
       const path = event.composedPath();
-      if (path.includes(this.root.host) || path.some((node) => node instanceof HTMLElement && node.hasAttribute("data-movcues-editor"))) return;
+      if (path.includes(this.root.host) || path.some((node2) => node2 instanceof HTMLElement && node2.hasAttribute("data-movcues-editor"))) return;
       this.finishEditing(true);
     };
     this.onInput = (event) => {
@@ -1724,13 +6101,13 @@ class OnsiteContentEditor {
       }
     };
     this.onBeforeInput = (event) => {
-      const input = event;
-      if (/^(insertFromDrop|insertFromPaste|insertHTML)$/.test(input.inputType)) event.preventDefault();
+      const input2 = event;
+      if (/^(insertFromDrop|insertFromPaste|insertHTML)$/.test(input2.inputType)) event.preventDefault();
       const formatting = { formatBold: "strong", formatItalic: "em", formatUnderline: "u" };
-      if (input.inputType in formatting) {
+      if (input2.inputType in formatting) {
         event.preventDefault();
         this.rememberSelection();
-        this.formatInline(formatting[input.inputType]);
+        this.formatInline(formatting[input2.inputType]);
       }
     };
     this.onDrop = (event) => {
@@ -1786,9 +6163,9 @@ class OnsiteContentEditor {
       paste.preventDefault();
       this.beforeOperation();
       range.deleteContents();
-      const node = document.createTextNode(text2);
-      range.insertNode(node);
-      range.setStartAfter(node);
+      const node2 = document.createTextNode(text2);
+      range.insertNode(node2);
+      range.setStartAfter(node2);
       range.collapse(true);
       setEditorRange(this.root, range);
       this.savedRange = range.cloneRange();
@@ -1803,7 +6180,7 @@ class OnsiteContentEditor {
       cancelAnimationFrame(this.frame);
       this.frame = requestAnimationFrame(() => this.renderOutline());
     };
-    this.surface = root.querySelector("[data-movcues-builder-surface]");
+    this.surface = root2.querySelector("[data-movcues-builder-surface]");
     this.style = document.createElement("style");
     this.style.dataset.movcuesAuthoringStyle = "";
     this.style.textContent = `[data-movcues-authoring-outline]{position:fixed;z-index:2147483646;pointer-events:none;border:1.5px solid #2563eb;border-radius:5px;box-shadow:0 0 0 2px rgba(37,99,235,.12);transition:none}[data-movcues-authoring-outline][data-hover]{border-style:dashed;opacity:.72}`;
@@ -1950,9 +6327,9 @@ class OnsiteContentEditor {
     const existing = component.querySelector("ul,ol");
     if (existing) {
       if (existing.tagName.toLowerCase() !== kind) {
-        const list = document.createElement(kind);
-        list.append(...Array.from(existing.childNodes));
-        existing.replaceWith(list);
+        const list2 = document.createElement(kind);
+        list2.append(...Array.from(existing.childNodes));
+        existing.replaceWith(list2);
       } else {
         const fragment = document.createDocumentFragment();
         Array.from(existing.children).forEach((item, i) => {
@@ -1962,22 +6339,22 @@ class OnsiteContentEditor {
         existing.replaceWith(fragment);
       }
     } else {
-      const list = document.createElement(kind);
+      const list2 = document.createElement(kind);
       let item = document.createElement("li");
-      list.append(item);
-      for (const node of Array.from(component.childNodes)) {
-        if (node instanceof Element && node.tagName === "BR") {
+      list2.append(item);
+      for (const node2 of Array.from(component.childNodes)) {
+        if (node2 instanceof Element && node2.tagName === "BR") {
           item = document.createElement("li");
-          list.append(item);
-        } else if (node instanceof Element && /^(P|DIV)$/.test(node.tagName)) {
+          list2.append(item);
+        } else if (node2 instanceof Element && /^(P|DIV)$/.test(node2.tagName)) {
           if (item.childNodes.length) {
             item = document.createElement("li");
-            list.append(item);
+            list2.append(item);
           }
-          item.append(...Array.from(node.childNodes));
-        } else item.append(node);
+          item.append(...Array.from(node2.childNodes));
+        } else item.append(node2);
       }
-      component.replaceChildren(list);
+      component.replaceChildren(list2);
     }
     this.savedRange = null;
     this.commit();
@@ -2153,14 +6530,14 @@ class OnsiteContentEditor {
     wrapper.className = "movcues-widget";
     wrapper.innerHTML = this.selected.innerHTML;
     const nodes = sanitizeBuilderHtml(wrapper.outerHTML);
-    const safe = nodes == null ? void 0 : nodes.find((node) => node instanceof HTMLElement);
+    const safe = nodes == null ? void 0 : nodes.find((node2) => node2 instanceof HTMLElement);
     if (!safe) return;
     if (this.selectionKind(this.selected) === "button") {
-      safe.querySelectorAll("ul,ol,li,div,p,button,a,img").forEach((node) => node.replaceWith(document.createTextNode(node.textContent ?? "")));
+      safe.querySelectorAll("ul,ol,li,div,p,button,a,img").forEach((node2) => node2.replaceWith(document.createTextNode(node2.textContent ?? "")));
     }
-    safe.querySelectorAll("[data-movcues-content],[data-movcues-action-id]").forEach((node) => {
-      node.removeAttribute("data-movcues-content");
-      node.removeAttribute("data-movcues-action-id");
+    safe.querySelectorAll("[data-movcues-content],[data-movcues-action-id]").forEach((node2) => {
+      node2.removeAttribute("data-movcues-content");
+      node2.removeAttribute("data-movcues-action-id");
     });
     if (safe.innerHTML !== this.selected.innerHTML) {
       const caret = this.selectionOffsets();
@@ -2189,8 +6566,8 @@ class OnsiteContentEditor {
     if (!this.selected) return;
     const walker = document.createTreeWalker(this.selected, NodeFilter.SHOW_TEXT);
     const nodes = [];
-    let node;
-    while (node = walker.nextNode()) nodes.push(node);
+    let node2;
+    while (node2 = walker.nextNode()) nodes.push(node2);
     if (!nodes.length) {
       this.selected.append(document.createTextNode(""));
       nodes.push(this.selected.firstChild);
@@ -2269,20 +6646,448 @@ class OnsiteContentEditor {
     Object.assign(this.outline.style, { left: `${rect.left - 2}px`, top: `${rect.top - 2}px`, width: `${rect.width + 4}px`, height: `${rect.height + 4}px` });
   }
 }
+const cells = (cell) => [cell, ...(cell.children ?? []).flatMap(cells)];
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const parse = (html) => {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const root2 = template.content.firstElementChild;
+  if (!(root2 instanceof HTMLElement)) throw new Error("Source has no widget root.");
+  return root2;
+};
+class SourceDocumentAdapter {
+  constructor(builder, content, options) {
+    this.builder = builder;
+    this.content = content;
+    this.options = options;
+    this.duplicates = /* @__PURE__ */ new Map();
+    this.pendingHtml = /* @__PURE__ */ new Map();
+    this.root = parse(builder.html);
+    const metadata = builder.projectData.movcues;
+    this.upgraded = metadata.sourceEditabilityVersion !== 1;
+    if (this.upgraded) {
+      const previous = this.root.cloneNode(true);
+      this.addLegacyIdentities(this.root);
+      const before = [previous, ...Array.from(previous.querySelectorAll("*"))], after = [this.root, ...Array.from(this.root.querySelectorAll("*"))];
+      postcss$1.parse(builder.css).walkRules((rule2) => {
+        for (const selector of rule2.selectors) if (before.some((element, index) => element.matches(selector) !== after[index].matches(selector))) throw new Error("Editing identities would change this legacy design's CSS selectors. Its original source is preserved.");
+      });
+    }
+    const errors = validateSourceMarkup(this.operation(this.root.outerHTML), { ...options, editable: true });
+    if (errors.length) throw new Error(`This source design cannot be edited safely: ${errors.join(" ")} Its original source is preserved.`);
+    if (this.upgraded) applySourceMarkup(builder, content, this.operation(this.root.outerHTML), options);
+    this.view = this.project();
+  }
+  setContracts(questions, items) {
+    if (questions) this.options.survey = { questions };
+    if (items) this.options.checklist = { items };
+  }
+  getDocument() {
+    return cloneOnsite(this.view);
+  }
+  snapshot() {
+    return { builder: cloneOnsite(this.builder), content: cloneOnsite(this.content) };
+  }
+  restore(snapshot, view) {
+    Object.assign(this.builder, cloneOnsite(snapshot.builder));
+    Object.assign(this.content, cloneOnsite(snapshot.content));
+    this.root = parse(this.builder.html);
+    this.view = cloneOnsite(view);
+    this.duplicates.clear();
+    this.pendingHtml.clear();
+  }
+  captureButtonHtml(blockId, html) {
+    this.pendingHtml.set(blockId, html);
+  }
+  refresh() {
+    this.root = parse(this.builder.html);
+    this.view = this.project();
+  }
+  synchronizeQuestion(next, current, questions) {
+    const options = (question) => "options" in question ? question.options.map((option) => option.id) : question.type === "rating" ? [question.min, question.max] : [];
+    if (next.id !== current.id || next.type !== current.type || !same(options(next), options(current))) throw new Error("Source question type and answer identities are protected. Its label, input settings and visual styles remain editable.");
+    const root2 = this.root.cloneNode(true), group = root2.querySelector(`[data-movcues-question-id="${next.id}"]`);
+    if (!group) throw new Error("The canonical question is missing from this source design.");
+    const label = Array.from(group.children).find((element) => element.tagName === "P");
+    if (!label) throw new Error("The canonical question label is missing.");
+    label.textContent = `${next.label}${next.required ? " *" : ""}`;
+    if (next.type === "short_text" || next.type === "long_text") {
+      const input2 = group.querySelector("[data-movcues-question-input]");
+      input2.setAttribute("aria-label", next.label);
+      input2.setAttribute("placeholder", next.placeholder ?? "");
+      input2.setAttribute("maxlength", String(next.maxLength ?? 1e4));
+      if (next.required) input2.setAttribute("aria-required", "true");
+      else input2.removeAttribute("aria-required");
+    } else if ("options" in next) for (const option of next.options) {
+      const node2 = group.querySelector(`[data-movcues-option-id="${option.id}"]`);
+      if (node2) node2.textContent = option.label;
+    }
+    const contract = { ...this.options, survey: { questions }, previousHtml: "" };
+    applySourceMarkup(this.builder, this.content, this.operation(root2.outerHTML), contract);
+    this.options.survey = { questions };
+    this.refresh();
+  }
+  synchronizeChecklist(next) {
+    var _a;
+    if (!same(next.items.map((item) => item.id), (_a = this.options.checklist) == null ? void 0 : _a.items.map((item) => item.id))) throw new Error("Protected source task identities must remain unchanged.");
+    const root2 = this.root.cloneNode(true), copy = checklistCopy(next);
+    const text2 = (selector, value) => {
+      var _a2;
+      const element = root2.querySelector(selector);
+      if (!element || element.textContent === value) return;
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      let node2;
+      while (node2 = walker.nextNode()) if ((_a2 = node2.textContent) == null ? void 0 : _a2.trim()) nodes.push(node2);
+      if (nodes.length > 1) throw new Error("This protected label contains composed text. Use AI to change it while retaining its design.");
+      if (nodes[0]) nodes[0].textContent = value;
+      else element.append(document.createTextNode(value));
+    };
+    for (const [role, value] of Object.entries(copy)) if (role !== "remaining-count") text2(`[data-movcues-checklist-role="${role}"]`, value);
+    text2('[data-movcues-checklist-role="completion-acknowledge"]', next.completionMessage.acknowledgeLabel);
+    for (const item of next.items) for (const role of ["title", "description"]) text2(`[data-movcues-checklist-item-id="${item.id}"] [data-movcues-checklist-item-role="${role}"]`, item[role] ?? "");
+    applySourceMarkup(this.builder, this.content, this.operation(root2.outerHTML), this.options);
+    this.refresh();
+  }
+  duplicate(from, to) {
+    this.duplicates.set(to, from);
+  }
+  removeCell(view, id) {
+    const parent = parentCell(view, id);
+    if (!(parent == null ? void 0 : parent.children)) return false;
+    parent.children = parent.children.filter((cell) => cell.id !== id);
+    return true;
+  }
+  isProtected(cellId) {
+    const element = this.element(cellId);
+    return !!element && (sourceComponentKind(sourceElement(element)) === "protected" || !!element.querySelector("[data-movcues-question-id],[data-movcues-survey-controls],[data-movcues-checklist-role],[data-movcues-checklist-view],[data-movcues-checklist-item-id]"));
+  }
+  componentIsCell(id) {
+    var _a;
+    return Boolean((_a = this.element(id)) == null ? void 0 : _a.dataset.movcuesBlockId);
+  }
+  canResize(parentId) {
+    const el = this.element(parentId);
+    return !!el && this.styles().value(el, "display") === "flex";
+  }
+  validate(view) {
+    try {
+      this.candidate(view);
+      return [];
+    } catch (error) {
+      return [error instanceof Error ? error.message : "Invalid source edit."];
+    }
+  }
+  apply(view) {
+    if (!same(view, this.view)) {
+      const operation = this.candidate(view);
+      applySourceMarkup(this.builder, this.content, operation, { ...this.options, previousHtml: this.builder.html });
+      this.root = parse(this.builder.html);
+      this.view = cloneOnsite(view);
+      this.duplicates.clear();
+      this.pendingHtml.clear();
+    }
+    return { html: this.builder.html, css: this.builder.css, content: this.content };
+  }
+  operation(html = this.builder.html, css = this.builder.css) {
+    return { type: "replace_markup", html, css, actionBindings: sourceContext(this.builder, this.options.guide).actionBindings };
+  }
+  prepareSurface(surface) {
+    for (const cell of cells(this.view.root)) {
+      const el = this.element(cell.id, surface.querySelector(".movcues-widget"));
+      if (el && !el.dataset.movcuesNodeId) el.dataset.movcuesNodeId = cell.id;
+    }
+  }
+  element(id, root2 = this.root) {
+    var _a;
+    const elements = [root2, ...Array.from(root2.querySelectorAll("*"))];
+    const node2 = elements.find((el) => el.dataset.movcuesNodeId === id);
+    if (node2) return node2;
+    const block = this.view && ((_a = findCell(this.view, id)) == null ? void 0 : _a.block);
+    return block ? elements.find((el) => el.dataset.movcuesBlockId === block.id) : void 0;
+  }
+  styles() {
+    return new SourceStyles(this.builder.css, this.root);
+  }
+  addLegacyIdentities(element) {
+    var _a, _b;
+    const facts = sourceElement(element);
+    const kind = sourceComponentKind(facts);
+    (_a = element.dataset).movcuesNodeId || (_a.movcuesNodeId = onsiteId("cell"));
+    if (kind !== "layout" || facts.text.trim() && !element.classList.contains("movcues-widget")) {
+      (_b = element.dataset).movcuesBlockId || (_b.movcuesBlockId = onsiteId("block"));
+      return;
+    }
+    Array.from(element.children).forEach((child) => this.addLegacyIdentities(child));
+  }
+  project() {
+    const styles = this.styles();
+    const projectCell = (element) => {
+      var _a;
+      const value = (property) => styles.value(element, property);
+      const number = (property, fallback) => Number.parseFloat(value(property) ?? "") || fallback;
+      const cell = { ...emptyCell(), id: element.dataset.movcuesNodeId ?? `view_${element.dataset.movcuesBlockId}`, direction: value("flex-direction") === "row" || (((_a = value("grid-template-columns")) == null ? void 0 : _a.split(/\s+/).length) ?? 0) > 1 ? "row" : "column" };
+      const basis = value("flex-basis"), width = value("width"), fixed = (basis == null ? void 0 : basis.endsWith("px")) ? basis : (width == null ? void 0 : width.endsWith("px")) ? width : void 0;
+      const grow = Number.parseFloat(value("flex-grow") ?? "0");
+      cell.sizing = fixed ? { mode: "fixed", value: Math.max(24, Math.min(1200, Number.parseFloat(fixed))) } : grow > 0 ? { mode: "flexible", weight: grow } : { mode: "hug" };
+      cell.responsiveStack = element.dataset.movcuesResponsiveStack === "true";
+      cell.gap = Math.min(96, Math.max(0, number("gap", 0)));
+      cell.padding = { top: number("padding-top", number("padding", 0)), right: number("padding-right", number("padding", 0)), bottom: number("padding-bottom", number("padding", 0)), left: number("padding-left", number("padding", 0)) };
+      cell.style = { background: value("background") ?? value("background-color"), borderWidth: number("border-width", 0), borderRadius: number("border-radius", 0) };
+      const facts = sourceElement(element), kind = sourceComponentKind(facts);
+      if (kind === "layout") {
+        const children = Array.from(element.children);
+        if (children.length === 1 && children[0].dataset.movcuesBlockId && !children[0].dataset.movcuesNodeId) cell.block = projectCell(children[0]).block;
+        else cell.children = children.map(projectCell);
+        return cell;
+      }
+      const id = element.dataset.movcuesBlockId, fontSize = number("font-size", 15), color = value("color");
+      if (kind === "protected") {
+        const role = element.dataset.movcuesChecklistRole;
+        cell.block = element.dataset.movcuesQuestionId ? { id, type: "question", questionId: element.dataset.movcuesQuestionId, fontSize, color } : element.hasAttribute("data-movcues-survey-controls") ? { id, type: "survey_controls" } : element.dataset.movcuesChecklistItemId ? { id, type: "checklist_task", itemId: element.dataset.movcuesChecklistItemId, fontSize, color, indicator: "check" } : role && ["title", "description", "launcher-label", "remaining-count", "completion-title", "completion-description"].includes(role) ? { id, type: "checklist_text", role, fontSize, color } : role && ["collapse", "dismiss", "completion-acknowledge"].includes(role) ? { id, type: "checklist_control", role, fontSize, color } : { id, type: "checklist_progress", fontSize, color };
+      } else if (element.tagName === "IMG") cell.block = { ...createBlock("image"), id, type: "image", src: element.getAttribute("src") ?? "", alt: element.getAttribute("alt") ?? "", fit: value("object-fit") === "contain" ? "contain" : "cover", width: 100, radius: number("border-radius", 0) };
+      else if (element.tagName === "BUTTON") {
+        const actionId = element.dataset.movcuesActionId, action = this.operation().actionBindings[actionId];
+        cell.block = { ...createBlock("button", this.options.guide), id, type: "button", label: element.textContent ?? "", action: { id: actionId, ...action }, variant: "primary", width: "hug", radius: number("border-radius", 8), paddingX: number("padding-left", 16), paddingY: number("padding-top", 9) };
+      } else if (element.tagName === "HR") cell.block = { id, type: "divider", orientation: "horizontal", thickness: number("height", 1), color: value("background") ?? "#dbe2ea" };
+      else if (element.classList.contains("movcues-spacer")) cell.block = { id, type: "spacer", size: number("height", 24) };
+      else if (element.classList.contains("movcues-icon") || element.getAttribute("role") === "img") cell.block = { id, type: "icon", icon: element.getAttribute("aria-label") ?? "info", size: fontSize, color };
+      else {
+        const base = { id, html: element.innerHTML, fontSize, weight: number("font-weight", 400), color, lineHeight: number("line-height", 1.5) };
+        cell.block = /^H[1-4]$/.test(element.tagName) ? { ...base, type: "heading", level: Number(element.tagName[1]) } : { ...base, type: "text" };
+      }
+      return cell;
+    };
+    return { schemaVersion: 2, id: "source_inspector_view", root: projectCell(this.root) };
+  }
+  candidate(view) {
+    var _a, _b, _c, _d, _e, _f;
+    const root2 = this.root.cloneNode(true), styles = new SourceStyles(this.builder.css, root2);
+    const old = new Map(cells(this.view.root).map((cell) => [cell.id, cell]));
+    const original = new Map(cells(this.view.root).map((cell) => [cell.id, this.element(cell.id, root2)]));
+    const nextIds = new Set(cells(view.root).map((cell) => cell.id));
+    const parent = (doc, id) => cells(doc.root).find((cell) => {
+      var _a2;
+      return (_a2 = cell.children) == null ? void 0 : _a2.some((child) => child.id === id);
+    });
+    for (const cell of old.values()) if (this.isProtected(cell.id)) {
+      const next = findCell(view, cell.id);
+      if (!next || !same(next.block, cell.block) && cell.block && !same({ ...next.block, fontSize: void 0, color: void 0, align: void 0 }, { ...cell.block, fontSize: void 0, color: void 0, align: void 0 }) || ((_a = parent(view, cell.id)) == null ? void 0 : _a.id) !== ((_b = parent(this.view, cell.id)) == null ? void 0 : _b.id)) throw new Error("Protected Survey/Checklist components must keep their structure and parent. Style their container instead.");
+      const before = (_d = (_c = parent(this.view, cell.id)) == null ? void 0 : _c.children) == null ? void 0 : _d.filter((value) => this.isProtected(value.id)).map((value) => value.id);
+      const after = (_f = (_e = parent(view, cell.id)) == null ? void 0 : _e.children) == null ? void 0 : _f.filter((value) => this.isProtected(value.id)).map((value) => value.id);
+      if (!same(before, after)) throw new Error("Protected component order cannot be changed visually.");
+    }
+    const operation = this.operation();
+    operation.actionBindings = {};
+    const build = (cell) => {
+      var _a2;
+      let element = original.get(cell.id);
+      const previous = old.get(cell.id);
+      if (!element) {
+        const duplicatedFrom = this.duplicates.get(cell.id);
+        if (duplicatedFrom) {
+          const from = findCell(this.view, duplicatedFrom);
+          if (this.isProtected(from.id)) throw new Error("Protected components cannot be duplicated.");
+          this.cloneDuplicate(from, cell, original, old, styles, root2);
+          element = original.get(cell.id);
+        }
+      }
+      if (!element) {
+        element = document.createElement("div");
+        element.dataset.movcuesNodeId = cell.id;
+      }
+      if (cell.block) {
+        const previousBlock = (previous == null ? void 0 : previous.block) ?? ((_a2 = old.get(cell.id)) == null ? void 0 : _a2.block);
+        let component = element.dataset.movcuesBlockId === cell.block.id ? element : element.querySelector(`[data-movcues-block-id="${cell.block.id}"]`);
+        if (!component) {
+          component = this.newBlock(cell.block, styles);
+          if (element === root2) throw new Error("The widget root must remain a layout.");
+          element.replaceChildren(component);
+        }
+        this.updateBlock(component, cell.block, previousBlock, styles);
+        if (cell.block.type === "button") {
+          const { id, ...action } = cell.block.action;
+          operation.actionBindings[id] = action;
+        }
+      } else {
+        const children = (cell.children ?? []).map(build);
+        if (element.children.length !== children.length || children.some((child, index) => child !== element.children[index])) element.replaceChildren(...children);
+      }
+      this.updateCell(element, cell, previous ?? old.get(cell.id), styles);
+      return element;
+    };
+    const built = build(view.root);
+    if (built !== root2) throw new Error("The source root identity must remain stable.");
+    for (const [id, element] of original) if (!nextIds.has(id) && element !== root2) element.remove();
+    styles.removeIdentities(Array.from(old.values()).filter((cell) => !nextIds.has(cell.id)).flatMap((cell) => [cell.id, ...cell.block ? [cell.block.id] : []]));
+    operation.html = root2.outerHTML;
+    operation.css = styles.toString();
+    const errors = validateSourceMarkup(operation, { ...this.options, editable: true, previousHtml: this.builder.html });
+    if (errors.length) throw new Error(errors.join(" "));
+    return operation;
+  }
+  cloneDuplicate(from, to, elements, old, styles, root2) {
+    const element = elements.get(from.id).cloneNode(true);
+    const mapping = /* @__PURE__ */ new Map();
+    const map = (a, b) => {
+      var _a;
+      mapping.set(a.id, b.id);
+      if (a.block && b.block) {
+        mapping.set(a.block.id, b.block.id);
+        if (a.block.type === "button" && b.block.type === "button") mapping.set(a.block.action.id, b.block.action.id);
+      }
+      (_a = a.children) == null ? void 0 : _a.forEach((child, index) => map(child, b.children[index]));
+    };
+    map(from, to);
+    for (const el of [element, ...Array.from(element.querySelectorAll("*"))]) {
+      el.removeAttribute("id");
+      for (const key of ["data-movcues-node-id", "data-movcues-block-id", "data-movcues-action-id"]) {
+        const value = el.getAttribute(key);
+        if (value && mapping.has(value)) el.setAttribute(key, mapping.get(value));
+      }
+    }
+    const register = (cell) => {
+      var _a;
+      const el = this.element(cell.id, element) ?? [element, ...Array.from(element.querySelectorAll("*"))].find((el2) => {
+        var _a2;
+        return el2.dataset.movcuesBlockId === ((_a2 = cell.block) == null ? void 0 : _a2.id);
+      });
+      elements.set(cell.id, el);
+      old.set(cell.id, cloneOnsite(cell));
+      (_a = cell.children) == null ? void 0 : _a.forEach(register);
+    };
+    register(to);
+    const sheet = postcss$1.parse(styles.toString()), additions = postcss$1.root();
+    sheet.each((node2) => {
+      const copy = node2.clone();
+      let found = false;
+      const remap = (rule2) => {
+        let changed = false;
+        for (const key of ["node", "block"]) {
+          const selector = remapSourceSelector(rule2.selector, `data-movcues-${key}-id`, mapping);
+          if (selector !== rule2.selector) {
+            rule2.selector = selector;
+            changed = true;
+          }
+        }
+        if (!changed) rule2.remove();
+        else found = true;
+      };
+      if (copy.type === "rule") remap(copy);
+      else if (copy.type === "atrule") copy.walkRules(remap);
+      else return;
+      if (found) additions.append(copy);
+    });
+    for (const node2 of additions.nodes) styles.append(node2);
+  }
+  newBlock(block, styles) {
+    if (["question", "survey_controls", "checklist_task", "checklist_text", "checklist_control", "checklist_progress"].includes(block.type)) throw new Error("Insert protected components through their canonical editor.");
+    const compiled = compileOnsiteDocument({ schemaVersion: 2, id: "source_insert", root: emptyCell(block) }, this.options.widgetType);
+    const element = parse(compiled.html).querySelector(`[data-movcues-block-id="${block.id}"]`);
+    const css = postcss$1.parse(compiled.css);
+    css.walkRules((rule2) => {
+      var _a;
+      if (((_a = rule2.parent) == null ? void 0 : _a.type) === "root" && rule2.selector.includes(`[data-movcues-block-id="${block.id}"]`)) styles.append(rule2.clone());
+    });
+    return element;
+  }
+  updateCell(el, cell, before, styles) {
+    var _a, _b;
+    const changed = (key) => !before || !same(cell[key], before[key]);
+    if (!before || changed("direction")) {
+      styles.set(el, "display", "flex");
+      styles.set(el, "flex-direction", cell.direction);
+    }
+    if (changed("align")) styles.set(el, "align-items", cell.align);
+    if (changed("justify")) styles.set(el, "justify-content", cell.justify);
+    if (changed("gap")) styles.set(el, "gap", `${cell.gap}px`);
+    if (changed("padding")) {
+      for (const side of ["top", "right", "bottom", "left"]) if (!before || cell.padding[side] !== before.padding[side]) styles.set(el, `padding-${side}`, `${cell.padding[side]}px`);
+    }
+    if (changed("sizing")) {
+      const size = cell.sizing;
+      el.dataset.movcuesSizing = size.mode;
+      if (size.mode === "fixed") {
+        styles.set(el, "flex-basis", `${size.value}px`);
+        const parent = el.parentElement;
+        if (!parent || styles.value(parent, "display") !== "flex") styles.set(el, "width", `${size.value}px`);
+      } else styles.set(el, "flex", size.mode === "hug" ? "0 0 auto" : `${size.weight} 1 0px`);
+    }
+    if (changed("style")) for (const [key, property, unit] of [["background", "background", ""], ["borderWidth", "border-width", "px"], ["borderColor", "border-color", ""], ["borderRadius", "border-radius", "px"]]) {
+      const value = (_a = cell.style) == null ? void 0 : _a[key];
+      if (value !== void 0 && value !== ((_b = before == null ? void 0 : before.style) == null ? void 0 : _b[key])) {
+        styles.set(el, property, `${value}${unit}`);
+        if (key === "borderWidth") styles.set(el, "border-style", "solid");
+      }
+    }
+    if (changed("responsiveStack")) styles.responsiveStack(el, Boolean(cell.responsiveStack));
+  }
+  updateBlock(el, block, before, styles) {
+    var _a, _b;
+    const current = block, previous = before;
+    const changed = (key) => previous && !same(current[key], previous[key]);
+    if ((block.type === "text" || block.type === "heading") && changed("html")) {
+      el.innerHTML = block.html;
+    }
+    if (block.type === "button" && changed("label")) {
+      const edited = this.pendingHtml.get(block.id);
+      if (edited !== void 0) el.innerHTML = edited;
+      else {
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        const nodes = [];
+        let node2;
+        while (node2 = walker.nextNode()) if (((_a = node2.textContent) == null ? void 0 : _a.trim()) && !((_b = node2.parentElement) == null ? void 0 : _b.closest('[aria-hidden="true"],[role="img"]'))) nodes.push(node2);
+        if (nodes.length > 1) throw new Error("This button has composed text. Double-click its label to edit it while preserving its markup.");
+        if (nodes[0]) nodes[0].textContent = block.label;
+        else el.append(document.createTextNode(block.label));
+      }
+    }
+    if (block.type === "image") {
+      if (changed("src")) el.setAttribute("src", block.src);
+      if (changed("alt")) el.setAttribute("alt", block.alt);
+    }
+    const properties = [["align", "text-align", ""], ["fontSize", "font-size", "px"], ["lineHeight", "line-height", ""], ["weight", "font-weight", ""], ["color", block.type === "divider" ? "background" : "color", ""], ["background", "background", ""], ["radius", "border-radius", "px"], ["fit", "object-fit", ""]];
+    for (const [key, property, unit] of properties) if (changed(key) && current[key] !== void 0) styles.set(el, property, `${current[key]}${unit}`);
+    if (block.type === "button") {
+      if (changed("paddingX")) {
+        styles.set(el, "padding-left", `${block.paddingX}px`);
+        styles.set(el, "padding-right", `${block.paddingX}px`);
+      }
+      if (changed("paddingY")) {
+        styles.set(el, "padding-top", `${block.paddingY}px`);
+        styles.set(el, "padding-bottom", `${block.paddingY}px`);
+      }
+      if (changed("width")) styles.set(el, "width", block.width === "full" ? "100%" : "auto");
+      if (changed("variant")) {
+        styles.set(el, "background", block.variant === "primary" ? "#2563eb" : "transparent");
+        styles.set(el, "border", block.variant === "outline" ? "1px solid currentColor" : "0");
+      }
+    }
+    if (block.type === "image" && changed("width")) styles.set(el, "width", `${block.width}%`);
+    if (block.type === "divider" && changed("thickness")) styles.set(el, "height", `${block.thickness}px`);
+    if (block.type === "spacer" && changed("size")) styles.set(el, "height", `${block.size}px`);
+    if (block.type === "icon" && changed("size")) styles.set(el, "font-size", `${block.size}px`);
+    if (block.type === "icon" && changed("icon")) {
+      const compiled = this.newBlock(block, new SourceStyles("", this.root));
+      el.innerHTML = compiled.innerHTML;
+      el.setAttribute("aria-label", block.icon);
+    }
+  }
+}
 async function prepareImageFile(file) {
   if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) throw new Error("Choose a PNG, JPG or WebP image.");
   if (!file.size || file.size > 10 * 1024 * 1024) throw new Error("Choose an image smaller than 10 MB.");
   const url = URL.createObjectURL(file);
   const image = new Image();
   try {
-    await new Promise((resolve, reject) => {
+    await new Promise((resolve2, reject) => {
       const timer = window.setTimeout(() => {
         image.onload = image.onerror = null;
         reject(new Error("Image took too long to open. Try another file."));
       }, 15e3);
       image.onload = () => {
         clearTimeout(timer);
-        resolve();
+        resolve2();
       };
       image.onerror = () => {
         clearTimeout(timer);
@@ -2308,96 +7113,6 @@ async function prepareImageFile(file) {
     image.onload = image.onerror = null;
     URL.revokeObjectURL(url);
   }
-}
-const actionIdPattern = /^[A-Za-z][A-Za-z0-9_-]{2,63}$/;
-function parse(html) {
-  const template = document.createElement("template");
-  template.innerHTML = html;
-  return template;
-}
-function validateSourceMarkup(operation, options) {
-  var _a;
-  const errors = [];
-  if (operation.widthPx !== void 0 && (options.widgetType !== "modal" || !Number.isInteger(operation.widthPx) || operation.widthPx < 320 || operation.widthPx > 960)) errors.push("Modal width must be a whole number from 320 to 960px.");
-  if (operation.html.length > 1e5 || operation.css.length > 1e5) errors.push("Source proposal is too large.");
-  if (safeScopedBuilderCss(operation.css) === null) errors.push("Source CSS is unsafe or contains an unscoped selector.");
-  const template = parse(operation.html), elements = Array.from(template.content.querySelectorAll("*"));
-  for (const element of elements) {
-    if (!BUILDER_ALLOWED_TAGS.has(element.tagName) && !(options.survey && BUILDER_SURVEY_INPUT_TAGS.has(element.tagName))) errors.push(`Unsupported element: ${element.tagName.toLowerCase()}`);
-    for (const attribute of Array.from(element.attributes)) if (!BUILDER_ALLOWED_ATTRIBUTES.has(attribute.name) || /^on/i.test(attribute.name)) errors.push(`Unsupported attribute: ${attribute.name}`);
-    if (element instanceof HTMLImageElement && !builderImageUrlIsSafe(element.getAttribute("src") ?? "")) errors.push("Unsafe image URL.");
-    if (element instanceof HTMLAnchorElement && !builderLinkUrlIsSafe(element.getAttribute("href") ?? "")) errors.push("Unsafe link URL.");
-    if (element instanceof HTMLInputElement && !builderInputTypeIsSafe(element.type)) errors.push("Unsafe input type.");
-  }
-  const roots = elements.filter((element) => element.classList.contains("movcues-widget"));
-  if (roots.length !== 1) errors.push("Source HTML must contain exactly one .movcues-widget root.");
-  const topLevelElements = Array.from(template.content.children);
-  if (topLevelElements.length !== 1 || topLevelElements[0] !== roots[0] || Array.from(template.content.childNodes).some((node) => {
-    var _a2;
-    return node.nodeType === Node.TEXT_NODE && ((_a2 = node.textContent) == null ? void 0 : _a2.trim());
-  })) errors.push("The .movcues-widget root must be the sole top-level element.");
-  if (((_a = roots[0]) == null ? void 0 : _a.dataset.movcuesWidgetType) !== options.widgetType) errors.push("The widget root type cannot be changed.");
-  if (roots[0] && !roots[0].dataset.movcuesDocumentVersion) errors.push("The widget root document version must be preserved.");
-  const ids = elements.map((element) => element.id).filter(Boolean);
-  if (new Set(ids).size !== ids.length) errors.push("Source HTML contains duplicate IDs.");
-  const buttons = elements.filter((element) => element instanceof HTMLButtonElement && !element.dataset.movcuesSurveyAction && !element.dataset.movcuesChecklistRole && !element.dataset.movcuesChecklistItemRole);
-  const actionIds = buttons.map((button) => button.dataset.movcuesActionId ?? "");
-  if (actionIds.some((value) => !actionIdPattern.test(value)) || new Set(actionIds).size !== actionIds.length) errors.push("Every ordinary button needs one unique valid action ID.");
-  const bindings = Object.keys(operation.actionBindings);
-  if (bindings.length !== actionIds.length || actionIds.some((value) => !(value in operation.actionBindings))) errors.push("Button actions and action bindings must match exactly.");
-  for (const action of Object.values(operation.actionBindings)) {
-    if (!options.guide && (action.type === "next_step" || action.type === "previous_step")) errors.push(`${action.type} is only supported by Guides.`);
-    if (action.type === "open_url" && !/^https?:\/\//i.test(action.url)) errors.push("Open URL actions must use HTTP(S).");
-    if (action.type === "track_event" && (!action.eventName.trim() || /[\u0000-\u001f\u007f]/.test(action.eventName))) errors.push("Track-event action is invalid.");
-  }
-  if (options.survey) {
-    for (const question of options.survey.questions) {
-      const matches = elements.filter((element) => element.dataset.movcuesQuestionId === question.id);
-      if (matches.length !== 1 || matches[0].dataset.movcuesQuestionType !== question.type) errors.push(`Survey question ${question.id} was changed or removed.`);
-    }
-    if (elements.filter((element) => element.hasAttribute("data-movcues-survey-controls")).length !== 1 || elements.filter((element) => element.dataset.movcuesSurveyAction === "submit").length !== 1) errors.push("Survey controls and submission must be preserved.");
-  }
-  if (options.checklist) {
-    for (const role of ["root", "title", "items", "progress", "launcher-label", "remaining-count", "completion-title", "completion-description", "completion-acknowledge"]) if (elements.filter((element) => element.dataset.movcuesChecklistRole === role).length !== 1) errors.push(`Checklist role ${role} must be preserved.`);
-    for (const item of options.checklist.items) if (elements.filter((element) => element.dataset.movcuesChecklistItemId === item.id).length !== 1) errors.push(`Checklist item ${item.id} must be preserved.`);
-  }
-  return [...new Set(errors)];
-}
-function applySourceMarkup(builder, content, operation, options) {
-  const errors = validateSourceMarkup(operation, options);
-  if (errors.length) throw new Error(errors.join(" "));
-  const previous = builder.projectData.movcues && typeof builder.projectData.movcues === "object" ? builder.projectData.movcues : {};
-  builder.html = operation.html;
-  builder.css = operation.css;
-  builder.projectData = { ...builder.projectData, movcues: { ...previous, authoringSurface: "source", sourceVersion: 1, actionBindings: structuredClone(operation.actionBindings) } };
-  const template = parse(operation.html), heading = template.content.querySelector('[data-movcues-content="heading"]'), body = template.content.querySelector('[data-movcues-content="body"]');
-  if (heading) content.heading = (heading.textContent ?? "").trim().slice(0, 500);
-  if (body) content.body = (body.textContent ?? "").trim().slice(0, 1e4);
-}
-function sourceContext(builder, guide) {
-  const movcues = builder.projectData.movcues && typeof builder.projectData.movcues === "object" ? builder.projectData.movcues : {};
-  return { html: builder.html, css: builder.css, authoringSurface: movcues.authoringSurface === "source" ? "source" : "onsite", actionBindings: structuredClone(movcues.actionBindings ?? {}), supportedActions: guide ? ["dismiss", "next_step", "previous_step", "open_url", "track_event"] : ["dismiss", "open_url", "track_event"] };
-}
-function aiDocumentContext(value) {
-  const clone = structuredClone(value);
-  const visit = (node) => {
-    if (Array.isArray(node)) {
-      node.forEach(visit);
-      return;
-    }
-    if (!node || typeof node !== "object") return;
-    for (const [key, item] of Object.entries(node)) {
-      if (key === "src" && typeof item === "string" && /^data:image\//i.test(item)) {
-        node[key] = `[inline image data omitted from structured context; ${item.length} characters; preserve the image from source HTML]`;
-      } else visit(item);
-    }
-  };
-  visit(clone);
-  return clone;
-}
-function isSourceAuthored(builder) {
-  const movcues = builder == null ? void 0 : builder.projectData.movcues;
-  return Boolean(movcues && typeof movcues === "object" && movcues.authoringSurface === "source");
 }
 const BLOCK_PATCH_KEYS = /* @__PURE__ */ new Set(["align", "fontSize", "weight", "lineHeight", "color", "label", "variant", "background", "width", "paddingX", "paddingY", "radius", "alt", "fit", "size", "thickness", "icon"]);
 const CELL_PATCH_KEYS = /* @__PURE__ */ new Set(["direction", "sizing", "align", "justify", "gap", "padding", "responsiveStack", "style"]);
@@ -2507,7 +7222,7 @@ function normalizePattern(step, pattern) {
   }
 }
 function withPageRuleIds(rules) {
-  return rules.map((rule) => ({ ...cloneOnsite(rule), id: onsiteId("cell") }));
+  return rules.map((rule2) => ({ ...cloneOnsite(rule2), id: onsiteId("cell") }));
 }
 function applyGuideAiProposal(source, proposal, resolvedTargets = /* @__PURE__ */ new Map()) {
   var _a;
@@ -2528,7 +7243,7 @@ function applyGuideAiProposal(source, proposal, resolvedTargets = /* @__PURE__ *
       owner.size = { width: { mode: "fixed", value: replacement.widthPx }, height: ((_a = owner.size) == null ? void 0 : _a.height) ?? { mode: "auto" } };
     }
     applySourceMarkup(owner.builder, owner.content, replacement, { widgetType: getGuideStepPattern(owner), guide: true });
-    return { guide, affectedStepIds: [owner.id], order: guide.steps.map((value) => value.id), warnings: ["This step now uses Source mode; cell controls are disabled until a recoverable conversion is available."] };
+    return { guide, affectedStepIds: [owner.id], order: guide.steps.map((value) => value.id), warnings: ["This source design remains visually editable; Undo restores the complete prior step."] };
   }
   proposal.operations.forEach((operation, operationIndex) => {
     var _a2, _b, _c, _d, _e;
@@ -2625,31 +7340,32 @@ function applyGuideAiProposal(source, proposal, resolvedTargets = /* @__PURE__ *
   if (warnings.length) throw new Error(warnings.join(" "));
   return { guide, affectedStepIds: [...affected], order: guide.steps.map((value) => value.id), warnings };
 }
-function editorAiContext(input) {
-  return { experience: input.experience, selection: cloneOnsite(input.selection), document: aiDocumentContext(input.document), ...input.builder ? { source: sourceContext(input.builder, false) } : {}, ...input.theme ? { theme: cloneOnsite(input.theme) } : {} };
+function editorAiContext(input2) {
+  return { experience: input2.experience, selection: cloneOnsite(input2.selection), document: aiDocumentContext(input2.document), ...input2.builder ? { source: sourceContext(input2.builder, false) } : {}, ...input2.theme ? { theme: cloneOnsite(input2.theme) } : {} };
 }
-function guideAiContext(input) {
+function guideAiContext(input2) {
   var _a;
-  const selected = input.guide.steps.find((step) => step.id === input.currentStepId);
+  const selected = input2.guide.steps.find((step) => step.id === input2.currentStepId);
   if (!selected) throw new Error("Selected Guide step no longer exists.");
   const target = (value) => {
     var _a2;
     return value ? { configured: true, label: value.label, reliability: value.reliability, pagePath: (_a2 = value.targetContext) == null ? void 0 : _a2.pagePath } : { configured: false };
   };
-  const summaries = input.guide.steps.map((step, index) => {
+  const summaries = input2.guide.steps.map((step, index) => {
     const document2 = onsiteDocumentFromBuilder(step.builder), buttons = document2 ? listBlocks(document2.root).filter((block) => block.type === "button").map((block) => ({ id: block.id, label: block.label, action: block.action.type })) : [];
     return { id: step.id, index, label: step.label, pattern: getGuideStepPattern(step), heading: step.content.heading, description: step.content.body, buttons, advance: step.advance ? { ...cloneOnsite(step.advance), ...step.advance.type === "element_click" || step.advance.type === "element_hover" ? { target: target(step.advance.target ?? step.target) } : {} } : { type: "button" }, presentation: step.presentation, dismissible: step.behavior.dismissible, positionTarget: target(step.target) };
   });
-  const layer = (_a = input.guide.behavior) == null ? void 0 : _a.layer;
+  const layer = (_a = input2.guide.behavior) == null ? void 0 : _a.layer;
   const behavior = layer ? { layer: layer.mode === "relative" ? { mode: layer.mode, relation: layer.relation, target: target(layer.target) } : cloneOnsite(layer) } : void 0;
-  return { experience: { ...input.experience, kind: "guide", widgetType: null }, selection: { ...cloneOnsite(input.selection), scope: input.scope ?? "step", stepId: selected.id }, guide: { id: input.experience.id, name: input.experience.name, revision: input.revision, currentStepId: selected.id, totalSteps: input.guide.steps.length, steps: summaries, targeting: cloneOnsite(input.guide.targeting), ...behavior ? { behavior } : {}, theme: cloneOnsite(input.theme ?? null) }, currentDocument: aiDocumentContext(onsiteDocumentFromBuilder(selected.builder) ?? null), ...selected.builder ? { source: sourceContext(selected.builder, true) } : {} };
+  return { experience: { ...input2.experience, kind: "guide", widgetType: null }, selection: { ...cloneOnsite(input2.selection), scope: input2.scope ?? "step", stepId: selected.id }, guide: { id: input2.experience.id, name: input2.experience.name, revision: input2.revision, currentStepId: selected.id, totalSteps: input2.guide.steps.length, steps: summaries, targeting: cloneOnsite(input2.guide.targeting), ...behavior ? { behavior } : {}, theme: cloneOnsite(input2.theme ?? null) }, currentDocument: aiDocumentContext(onsiteDocumentFromBuilder(selected.builder) ?? null), ...selected.builder ? { source: sourceContext(selected.builder, true) } : {} };
 }
 const BLOCK_LABEL = { checklist_task: "Task", checklist_text: "Checklist text", checklist_control: "Checklist control", checklist_progress: "Progress", question: "Question", survey_controls: "Survey controls", heading: "Heading", text: "Text", button: "Button", image: "Image", divider: "Divider", spacer: "Spacer", icon: "Icon" };
 const HISTORY_LIMIT = 50;
 const HISTORY_BYTES = 2e6;
 class OnsiteCompositionEditor {
-  constructor(root, builder, content, widgetType, guide, callbacks, survey, checklist) {
-    this.root = root;
+  constructor(root2, builder, content, widgetType, guide, callbacks, survey, checklist) {
+    var _a, _b;
+    this.root = root2;
     this.builder = builder;
     this.content = content;
     this.widgetType = widgetType;
@@ -2657,6 +7373,7 @@ class OnsiteCompositionEditor {
     this.callbacks = callbacks;
     this.survey = survey;
     this.checklist = checklist;
+    this.source = null;
     this.edgeButtons = [];
     this.insertion = null;
     this.paletteAnchor = null;
@@ -2681,9 +7398,9 @@ class OnsiteCompositionEditor {
     this.moveSource = null;
     this.checklistView = "expanded";
     this.rememberSelection = () => {
-      var _a;
+      var _a2;
       const range = editorRange(this.root);
-      if (range && ((_a = this.surface) == null ? void 0 : _a.contains(range.commonAncestorContainer))) this.savedRange = range.cloneRange();
+      if (range && ((_a2 = this.surface) == null ? void 0 : _a2.contains(range.commonAncestorContainer))) this.savedRange = range.cloneRange();
     };
     this.onSurfaceClick = (event) => {
       const element = event.target instanceof Element ? event.target : null;
@@ -2709,8 +7426,8 @@ class OnsiteCompositionEditor {
       }
     };
     this.onImageDragOver = (event) => {
-      var _a, _b, _c;
-      if (this.moveSource && ((_a = event.dataTransfer) == null ? void 0 : _a.types.includes("application/x-movcues-cell"))) {
+      var _a2, _b2, _c;
+      if (this.moveSource && ((_a2 = event.dataTransfer) == null ? void 0 : _a2.types.includes("application/x-movcues-cell"))) {
         event.preventDefault();
         event.stopPropagation();
         this.clearImageDrop();
@@ -2718,7 +7435,7 @@ class OnsiteCompositionEditor {
         const source = findCell(this.document, this.moveSource);
         if (target2 && source && target2.dataset.movcuesNodeId !== this.document.root.id && !findCell({ ...this.document, root: source }, target2.dataset.movcuesNodeId)) {
           this.imageDropTarget = target2;
-          const row = ((_b = parentCell(this.document, target2.dataset.movcuesNodeId)) == null ? void 0 : _b.direction) === "row";
+          const row = ((_b2 = parentCell(this.document, target2.dataset.movcuesNodeId)) == null ? void 0 : _b2.direction) === "row";
           target2.setAttribute("data-movcues-insertion-edge", this.dropBefore(target2, event) ? row ? "left" : "top" : row ? "right" : "bottom");
           event.dataTransfer.dropEffect = "move";
         } else event.dataTransfer.dropEffect = "none";
@@ -2737,8 +7454,8 @@ class OnsiteCompositionEditor {
       }
     };
     this.onImageDragLeave = (event) => {
-      var _a;
-      if (!(event.relatedTarget instanceof Node) || !((_a = this.imageDropTarget) == null ? void 0 : _a.contains(event.relatedTarget))) this.clearImageDrop();
+      var _a2;
+      if (!(event.relatedTarget instanceof Node) || !((_a2 = this.imageDropTarget) == null ? void 0 : _a2.contains(event.relatedTarget))) this.clearImageDrop();
     };
     this.onMoveDragStart = (event) => {
       if (!(event.target instanceof Element) || !event.target.closest('[data-command="move"]')) return;
@@ -2752,15 +7469,15 @@ class OnsiteCompositionEditor {
       event.dataTransfer.effectAllowed = "move";
     };
     this.cancelMove = () => {
-      var _a, _b;
+      var _a2, _b2;
       this.moveSource = null;
       this.clearImageDrop();
-      (_a = this.surface) == null ? void 0 : _a.removeAttribute("data-movcues-moving");
-      (_b = this.toolbar.querySelector('[data-command="move"]')) == null ? void 0 : _b.setAttribute("aria-pressed", "false");
+      (_a2 = this.surface) == null ? void 0 : _a2.removeAttribute("data-movcues-moving");
+      (_b2 = this.toolbar.querySelector('[data-command="move"]')) == null ? void 0 : _b2.setAttribute("aria-pressed", "false");
     };
     this.onImageDrop = (event) => {
-      var _a, _b;
-      if (this.moveSource && ((_a = event.dataTransfer) == null ? void 0 : _a.types.includes("application/x-movcues-cell"))) {
+      var _a2, _b2;
+      if (this.moveSource && ((_a2 = event.dataTransfer) == null ? void 0 : _a2.types.includes("application/x-movcues-cell"))) {
         event.preventDefault();
         event.stopPropagation();
         const target2 = event.target instanceof Element ? event.target.closest("[data-movcues-node-id]") : null;
@@ -2768,7 +7485,7 @@ class OnsiteCompositionEditor {
         this.cancelMove();
         return;
       }
-      if (!((_b = event.dataTransfer) == null ? void 0 : _b.files.length)) return;
+      if (!((_b2 = event.dataTransfer) == null ? void 0 : _b2.files.length)) return;
       event.preventDefault();
       event.stopPropagation();
       this.clearImageDrop();
@@ -2793,15 +7510,18 @@ class OnsiteCompositionEditor {
       }
     };
     this.onInput = (event) => {
+      var _a2;
       const element = event.target instanceof Element ? event.target.closest("[data-movcues-block-id]") : null;
       const block = element ? findBlock(this.document, element.dataset.movcuesBlockId) : null;
       if (!block || !element) return;
-      if (block.type === "heading" || block.type === "text") block.html = sanitizeRichText(element.innerHTML);
-      else if (block.type === "button") block.label = (element.textContent ?? "").slice(0, 80);
-      else return;
+      if (block.type === "heading" || block.type === "text") block.html = this.source ? element.innerHTML : sanitizeRichText(element.innerHTML);
+      else if (block.type === "button") {
+        (_a2 = this.source) == null ? void 0 : _a2.captureButtonHtml(block.id, element.innerHTML);
+        block.label = (element.textContent ?? "").slice(0, this.source ? 1e4 : 80);
+      } else return;
       this.scheduleCompile();
       this.positionTools();
-      this.callbacks.onChange();
+      this.callbacks.onChange(true);
       clearTimeout(this.typingTimer);
       this.typingTimer = window.setTimeout(() => this.pushHistory(), 300);
     };
@@ -2822,7 +7542,7 @@ class OnsiteCompositionEditor {
       this.scheduleCompile();
     };
     this.onSurfaceKeyDown = (event) => {
-      var _a;
+      var _a2, _b2;
       if (this.composing) return;
       const target = event.target instanceof HTMLElement ? event.target : null;
       if (event.key === "Escape") {
@@ -2849,11 +7569,25 @@ class OnsiteCompositionEditor {
         this.formatInline(event.key.toLowerCase() === "b" ? "strong" : event.key.toLowerCase() === "i" ? "em" : "u");
         return;
       }
+      if (this.source && event.key === "Enter" && (target == null ? void 0 : target.isContentEditable) && ["heading", "text"].includes(((_a2 = this.getSelectedBlock()) == null ? void 0 : _a2.type) ?? "")) {
+        const range = editorRange(this.root);
+        if (range && target.contains(range.commonAncestorContainer)) {
+          event.preventDefault();
+          const br = document.createElement("br");
+          range.deleteContents();
+          range.insertNode(br);
+          range.setStartAfter(br);
+          range.collapse(true);
+          setEditorRange(this.root, range);
+          target.dispatchEvent(new Event("input", { bubbles: true }));
+          return;
+        }
+      }
       if (target == null ? void 0 : target.isContentEditable) return;
       if (this.moveSource && event.key === "Tab" && (target == null ? void 0 : target.hasAttribute("data-movcues-node-id"))) {
         const destinations = this.moveDestinations();
         const index = destinations.indexOf(target);
-        (_a = destinations[(index + (event.shiftKey ? -1 : 1) + destinations.length) % destinations.length]) == null ? void 0 : _a.focus({ preventScroll: true });
+        (_b2 = destinations[(index + (event.shiftKey ? -1 : 1) + destinations.length) % destinations.length]) == null ? void 0 : _b2.focus({ preventScroll: true });
         event.preventDefault();
         return;
       }
@@ -2891,7 +7625,7 @@ class OnsiteCompositionEditor {
       target.dispatchEvent(new Event("input", { bubbles: true }));
     };
     this.onToolbarClick = (event) => {
-      var _a, _b, _c;
+      var _a2, _b2, _c;
       const button = event.target instanceof Element ? event.target.closest("button[data-command]") : null;
       if (!button || button.disabled) return;
       event.preventDefault();
@@ -2910,8 +7644,8 @@ class OnsiteCompositionEditor {
       else if (command === "move") {
         if (this.moveSource) this.cancelMove();
         else {
-          this.moveSource = ((_a = this.getSelectedCell()) == null ? void 0 : _a.id) ?? null;
-          (_b = this.surface) == null ? void 0 : _b.setAttribute("data-movcues-moving", "");
+          this.moveSource = ((_a2 = this.getSelectedCell()) == null ? void 0 : _a2.id) ?? null;
+          (_b2 = this.surface) == null ? void 0 : _b2.setAttribute("data-movcues-moving", "");
           button.setAttribute("aria-pressed", "true");
           button.title = "Choose a destination cell, or press Escape to cancel";
           if (event.detail === 0) (_c = this.moveDestinations()[0]) == null ? void 0 : _c.focus({ preventScroll: true });
@@ -2919,7 +7653,7 @@ class OnsiteCompositionEditor {
       }
     };
     this.onPaletteClick = (event) => {
-      var _a;
+      var _a2;
       const button = event.target instanceof Element ? event.target.closest("[data-insert-block],[data-insert-question],[data-insert-task]") : null;
       if (!button) return;
       event.preventDefault();
@@ -2927,7 +7661,7 @@ class OnsiteCompositionEditor {
       if (button.hasAttribute("data-insert-task") ? this.insertTask(this.insertion ?? void 0) : button.dataset.insertQuestion ? this.insertQuestion(button.dataset.insertQuestion, this.insertion ?? void 0) : this.insertBlock(button.dataset.insertBlock, this.insertion ?? void 0)) {
         this.closePalette();
         const block = this.getSelectedBlock();
-        const element = block ? (_a = this.surface) == null ? void 0 : _a.querySelector(`[data-movcues-block-id="${block.id}"]`) : null;
+        const element = block ? (_a2 = this.surface) == null ? void 0 : _a2.querySelector(`[data-movcues-block-id="${block.id}"]`) : null;
         if (element) {
           element.tabIndex = -1;
           element.focus({ preventScroll: true });
@@ -2935,7 +7669,7 @@ class OnsiteCompositionEditor {
       }
     };
     this.dismissPalette = (event) => {
-      if (!this.palette.hidden && !event.composedPath().some((node) => node === this.palette || node === this.paletteAnchor)) this.closePalette();
+      if (!this.palette.hidden && !event.composedPath().some((node2) => node2 === this.palette || node2 === this.paletteAnchor)) this.closePalette();
     };
     this.onPaletteKeyDown = (event) => {
       if (event.key === "Escape" && this.moveSource) {
@@ -2955,13 +7689,13 @@ class OnsiteCompositionEditor {
       });
     };
     this.startResize = (event) => {
-      var _a, _b, _c;
+      var _a2, _b2, _c;
       if (this.composing) return;
       const handle = event.currentTarget;
       const firstId = handle.dataset.first;
       const secondId = handle.dataset.second;
-      const first = (_a = this.surface) == null ? void 0 : _a.querySelector(`[data-movcues-node-id="${firstId}"]`);
-      const second = (_b = this.surface) == null ? void 0 : _b.querySelector(`[data-movcues-node-id="${secondId}"]`);
+      const first = (_a2 = this.surface) == null ? void 0 : _a2.querySelector(`[data-movcues-node-id="${firstId}"]`);
+      const second = (_b2 = this.surface) == null ? void 0 : _b2.querySelector(`[data-movcues-node-id="${secondId}"]`);
       if (!first || !second) return;
       if (!this.beforeTransaction()) return;
       const row = handle.dataset.movcuesResizeHandle === "row";
@@ -3002,7 +7736,7 @@ class OnsiteCompositionEditor {
       window.addEventListener("pointercancel", cancel);
     };
     this.resizeWithKeyboard = (event) => {
-      var _a;
+      var _a2;
       if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
       const handle = event.currentTarget;
       const first = findCell(this.document, handle.dataset.first);
@@ -3010,15 +7744,16 @@ class OnsiteCompositionEditor {
       const increase = event.key === "ArrowRight" || event.key === "ArrowDown";
       if (!this.beforeTransaction()) return;
       if (resizeSiblings(this.document, handle.dataset.first, handle.dataset.second, weight + (increase ? 0.1 : -0.1))) this.commit(this.selection);
-      (_a = this.root.querySelector(`[data-movcues-resize-handle][data-first="${handle.dataset.first}"][data-second="${handle.dataset.second}"]`)) == null ? void 0 : _a.focus({ preventScroll: true });
+      (_a2 = this.root.querySelector(`[data-movcues-resize-handle][data-first="${handle.dataset.first}"][data-second="${handle.dataset.second}"]`)) == null ? void 0 : _a2.focus({ preventScroll: true });
       event.preventDefault();
     };
-    const existing = onsiteDocumentFromBuilder(builder);
+    this.source = isSourceAuthored(builder) ? new SourceDocumentAdapter(builder, content, { widgetType, guide, survey: survey ? { questions: survey.step.questions } : void 0, checklist: checklist ? { items: checklist.items } : void 0 }) : null;
+    const existing = ((_a = this.source) == null ? void 0 : _a.getDocument()) ?? onsiteDocumentFromBuilder(builder);
     this.document = existing ?? migrateV1Builder(builder, content, widgetType, guide) ?? (() => {
       throw new Error("This v1 layout cannot be converted safely. Continue editing it with the compatibility editor.");
     })();
-    this.migrated = !existing;
-    this.surface = root.querySelector("[data-movcues-builder-surface]");
+    this.migrated = ((_b = this.source) == null ? void 0 : _b.upgraded) ?? !existing;
+    this.surface = root2.querySelector("[data-movcues-builder-surface]");
     this.toolbar = document.createElement("div");
     this.toolbar.dataset.movcuesCompositionToolbar = "";
     this.palette = document.createElement("div");
@@ -3030,10 +7765,10 @@ class OnsiteCompositionEditor {
     this.imageInput.hidden = true;
     this.imageInput.dataset.movcuesImageFile = "";
     this.imageInput.addEventListener("change", () => {
-      var _a;
+      var _a2;
       const id = this.imageFileTarget;
       this.imageFileTarget = null;
-      const file = (_a = this.imageInput.files) == null ? void 0 : _a[0];
+      const file = (_a2 = this.imageInput.files) == null ? void 0 : _a2[0];
       if (id && file) void this.setImageFile(file, id);
     });
   }
@@ -3061,7 +7796,7 @@ class OnsiteCompositionEditor {
     this.toolbar.innerHTML = tools.map(([command, label, icon]) => `<button type="button" data-command="${command}" title="${label}" aria-label="${label}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></button>`).join("");
     this.toolbar.querySelector('[data-command="move"]').draggable = true;
     this.palette.innerHTML = Object.keys(BLOCK_LABEL).filter((type) => type !== "question" && type !== "survey_controls" && !type.startsWith("checklist_") && !(this.checklist && type === "button")).map((type) => `<button type="button" data-insert-block="${type}">${BLOCK_LABEL[type]}</button>`).join("");
-    if (this.survey) this.palette.insertAdjacentHTML("beforeend", QUESTION_TYPES.map((type) => `<button type="button" data-insert-question="${type}">${{ single_choice: "Single choice", multiple_choice: "Multiple choice", short_text: "Short text", long_text: "Long text", rating: "Rating", nps: "NPS" }[type]}</button>`).join(""));
+    if (this.survey && !this.source) this.palette.insertAdjacentHTML("beforeend", QUESTION_TYPES.map((type) => `<button type="button" data-insert-question="${type}">${{ single_choice: "Single choice", multiple_choice: "Multiple choice", short_text: "Short text", long_text: "Long text", rating: "Rating", nps: "NPS" }[type]}</button>`).join(""));
     this.root.append(this.toolbar, this.palette, this.imageInput);
     const edgeLabels = { top: "Add above", right: "Add to the right", bottom: "Add below", left: "Add to the left" };
     this.edgeButtons = ["top", "right", "bottom", "left"].map((edge) => {
@@ -3080,7 +7815,7 @@ class OnsiteCompositionEditor {
       this.root.append(button);
       return button;
     });
-    if (this.checklist) this.palette.insertAdjacentHTML("afterbegin", '<button type="button" data-insert-task>Task</button>');
+    if (this.checklist && !this.source) this.palette.insertAdjacentHTML("afterbegin", '<button type="button" data-insert-task>Task</button>');
     this.surface.addEventListener("click", this.onSurfaceClick);
     this.surface.addEventListener("dblclick", this.onDoubleClick);
     this.surface.addEventListener("input", this.onInput);
@@ -3107,6 +7842,20 @@ class OnsiteCompositionEditor {
     this.pushHistory();
     if (this.migrated || repaired) this.callbacks.onChange();
   }
+  restoreBuilder(builder, content) {
+    var _a;
+    Object.assign(this.builder, cloneOnsite(builder));
+    for (const key of Object.keys(this.content)) Reflect.deleteProperty(this.content, key);
+    Object.assign(this.content, cloneOnsite(content));
+    this.source = isSourceAuthored(this.builder) ? new SourceDocumentAdapter(this.builder, this.content, { widgetType: this.widgetType, guide: this.guide, survey: this.survey ? { questions: this.survey.step.questions } : void 0, checklist: this.checklist ? { items: this.checklist.items } : void 0 }) : null;
+    this.document = ((_a = this.source) == null ? void 0 : _a.getDocument()) ?? onsiteDocumentFromBuilder(this.builder);
+    this.compileAndPatch();
+    this.restoreSelection(this.selection);
+    this.callbacks.onChange();
+  }
+  isSource() {
+    return Boolean(this.source);
+  }
   getDocument() {
     return this.document;
   }
@@ -3114,22 +7863,29 @@ class OnsiteCompositionEditor {
     return this.selection;
   }
   getSelectedCell() {
-    const id = this.selection.kind === "step" ? this.checklist ? this.document.root.children.find((cell) => cell.checklistRole === this.checklistView).id : this.document.root.id : this.selection.cellId;
+    const id = this.selection.kind === "step" ? this.checklist && !this.source ? this.document.root.children.find((cell) => cell.checklistRole === this.checklistView).id : this.document.root.id : this.selection.cellId;
     return findCell(this.document, id);
   }
   getSelectedBlock() {
     return this.selection.kind === "block" ? findBlock(this.document, this.selection.blockId) : null;
   }
   canUndo() {
+    if (this.callbacks.canUndo) return this.callbacks.canUndo();
     return this.historyIndex > 0 || this.historyIndex >= 0 && this.historyState() !== this.historyState(this.history[this.historyIndex]);
   }
   canRedo() {
+    if (this.callbacks.canRedo) return this.callbacks.canRedo();
     return this.historyIndex >= 0 && this.historyIndex < this.history.length - 1 && this.historyState() === this.historyState(this.history[this.historyIndex]);
   }
   isComposing() {
     return this.composing;
   }
   getValidation() {
+    var _a, _b;
+    if (this.source) {
+      this.source.setContracts((_a = this.survey) == null ? void 0 : _a.step.questions, (_b = this.checklist) == null ? void 0 : _b.items);
+      return this.source.validate(this.document);
+    }
     return [...validateOnsiteDocument(this.document).errors, ...this.survey ? validateOnsiteSurveyDocument(this.document, this.surveyContext()) : [], ...this.checklist ? validateOnsiteChecklistDocument(this.document, this.checklist) : []];
   }
   /** Commits an already-reviewed AI proposal as one undoable transaction. */
@@ -3137,8 +7893,7 @@ class OnsiteCompositionEditor {
     if (this.guide || this.survey || this.checklist || this.composing || !this.beforeTransaction()) return false;
     try {
       this.document = applyEditorAiProposal(this.document, proposal);
-      this.commit(this.selection);
-      return true;
+      return this.commit(this.selection);
     } catch (error) {
       const previous = this.history[this.historyIndex];
       if (previous) this.document = cloneOnsite(previous.document);
@@ -3147,6 +7902,7 @@ class OnsiteCompositionEditor {
     }
   }
   flush() {
+    var _a, _b;
     if (this.composing) return false;
     clearTimeout(this.compileTimer);
     this.compileTimer = 0;
@@ -3156,16 +7912,26 @@ class OnsiteCompositionEditor {
     const errors = this.getValidation();
     this.callbacks.onValidation(errors);
     if (errors.length) return false;
-    const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext(), this.checklist);
-    Object.assign(this.content, compiled.content);
-    this.compiledState = state;
-    return true;
+    try {
+      const compiled = this.compile();
+      Object.assign(this.content, compiled.content);
+      this.compiledState = state;
+      (_b = (_a = this.callbacks).onTransaction) == null ? void 0 : _b.call(_a);
+      return true;
+    } catch (error) {
+      this.callbacks.onValidation([error instanceof Error ? error.message : "Source edit failed."]);
+      return false;
+    }
   }
   snapshot() {
     this.flush();
     return { builder: cloneOnsite(this.builder), content: cloneOnsite(this.content) };
   }
   undo() {
+    if (this.callbacks.onUndo) {
+      this.callbacks.onUndo();
+      return;
+    }
     if (this.composing) return;
     if (!this.flush()) {
       clearTimeout(this.typingTimer);
@@ -3180,16 +7946,35 @@ class OnsiteCompositionEditor {
     this.restore(this.history[this.historyIndex]);
   }
   redo() {
+    if (this.callbacks.onRedo) {
+      this.callbacks.onRedo();
+      return;
+    }
     if (!this.canRedo() || this.composing) return;
     this.historyIndex++;
     this.restore(this.history[this.historyIndex]);
+  }
+  restoreSelection(selection) {
+    if (selection.kind === "block") {
+      const cell = cellForBlock(this.document, selection.blockId);
+      if (cell == null ? void 0 : cell.block) {
+        this.select({ ...selection, cellId: cell.id, blockType: cell.block.type });
+        return;
+      }
+    } else if (selection.kind === "step" || findCell(this.document, selection.cellId)) {
+      this.select(selection);
+      return;
+    }
+    this.selectStep();
   }
   selectStep() {
     this.select({ kind: "step", label: "Step" });
   }
   selectParent() {
+    var _a;
     if (this.selection.kind === "block") {
-      this.select({ kind: "cell", label: "Cell", cellId: this.selection.cellId });
+      const cell = ((_a = this.source) == null ? void 0 : _a.componentIsCell(this.selection.cellId)) ? parentCell(this.document, this.selection.cellId) : findCell(this.document, this.selection.cellId);
+      cell ? this.select({ kind: "cell", label: "Cell", cellId: cell.id }) : this.selectStep();
       return;
     }
     if (this.selection.kind === "cell") {
@@ -3207,7 +7992,10 @@ class OnsiteCompositionEditor {
     const cell = findCell(this.document, this.selection.cellId);
     if (!cell) return;
     if (cell.block) this.select({ kind: "block", label: BLOCK_LABEL[cell.block.type], cellId: cell.id, blockId: cell.block.id, blockType: cell.block.type });
-    else if ((_a = cell.children) == null ? void 0 : _a[0]) this.select({ kind: "cell", label: "Child cell", cellId: cell.children[0].id });
+    else if ((_a = cell.children) == null ? void 0 : _a[0]) {
+      const child = cell.children[0];
+      this.select(this.source && child.block ? { kind: "block", label: BLOCK_LABEL[child.block.type], cellId: child.id, blockId: child.block.id, blockType: child.block.type } : { kind: "cell", label: "Child cell", cellId: child.id });
+    }
   }
   insertBlock(type, insertion) {
     const cell = this.getSelectedCell();
@@ -3219,40 +8007,38 @@ class OnsiteCompositionEditor {
       const id = insertAdjacentCell(candidate, insertion.cellId, insertion.edge);
       if (!id) return false;
       findCell(candidate, id).block = block;
-      const validation = validateOnsiteDocument(candidate);
+      const validation = this.source ? (() => {
+        const errors = this.source.validate(candidate);
+        return { valid: !errors.length, errors };
+      })() : validateOnsiteDocument(candidate);
       this.callbacks.onValidation(validation.errors);
       if (!validation.valid) return false;
       this.document = candidate;
-      this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: id, blockId: block.id, blockType: type });
-      return true;
+      return this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: id, blockId: block.id, blockType: type });
     }
     if (cell.children) {
       const added2 = emptyCell(block);
       cell.children.push(added2);
-      this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: added2.id, blockId: block.id, blockType: type });
-      return true;
+      return this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: added2.id, blockId: block.id, blockType: type });
     }
     if (!cell.block) {
       cell.block = block;
-      this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: cell.id, blockId: block.id, blockType: type });
-      return true;
+      return this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: cell.id, blockId: block.id, blockType: type });
     }
     const addedId = duplicateCell(this.document, cell.id) ?? splitCell(this.document, cell.id, "column");
     const added = addedId ? findCell(this.document, addedId) : null;
     if (!added) return false;
     delete added.children;
     added.block = block;
-    this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: added.id, blockId: block.id, blockType: type });
-    return true;
+    return this.commit({ kind: "block", label: BLOCK_LABEL[type], cellId: added.id, blockId: block.id, blockType: type });
   }
   split(direction) {
     const cell = this.getSelectedCell();
     if (!cell || this.composing) return false;
     if (!this.beforeTransaction()) return false;
-    const id = splitCell(this.document, cell.id, direction);
+    const id = this.source ? insertAdjacentCell(this.document, cell.id, direction === "row" ? "right" : "bottom") : splitCell(this.document, cell.id, direction);
     if (!id) return false;
-    this.commit({ kind: "cell", label: direction === "row" ? "Right cell" : "Lower cell", cellId: id });
-    return true;
+    return this.commit({ kind: "cell", label: direction === "row" ? "Right cell" : "Lower cell", cellId: id });
   }
   addEdge(edge) {
     if (this.composing) return;
@@ -3261,10 +8047,11 @@ class OnsiteCompositionEditor {
     this.commit({ kind: "cell", label: `${edge} cell`, cellId: id });
   }
   duplicate() {
+    var _a;
     const cell = this.getSelectedCell();
     if (!cell || cell === this.document.root || this.composing) return false;
     if (!this.beforeTransaction()) return false;
-    if (this.checklist) {
+    if (this.checklist && !this.source) {
       const duplicated = duplicateChecklistCell(this.document, this.checklist, cell.id);
       if (!duplicated) {
         this.callbacks.onValidation(["Required Checklist components cannot be duplicated."]);
@@ -3275,18 +8062,17 @@ class OnsiteCompositionEditor {
       this.commit({ kind: "cell", label: "Duplicated cell", cellId: duplicated.cellId });
       return true;
     }
-    if (this.survey) {
+    if (this.survey && !this.source) {
       const duplicated = duplicateSurveyCell(this.document, this.survey.step.questions, cell.id);
       if (!duplicated) return false;
       this.document = duplicated.document;
       this.survey.step.questions = duplicated.questions;
-      this.commit({ kind: "cell", label: "Duplicated cell", cellId: duplicated.cellId });
-      return true;
+      return this.commit({ kind: "cell", label: "Duplicated cell", cellId: duplicated.cellId });
     }
     const id = duplicateCell(this.document, cell.id);
     if (!id) return false;
-    this.commit({ kind: "cell", label: "Duplicated cell", cellId: id });
-    return true;
+    (_a = this.source) == null ? void 0 : _a.duplicate(cell.id, id);
+    return this.commit({ kind: "cell", label: "Duplicated cell", cellId: id });
   }
   remove() {
     const cell = this.getSelectedCell();
@@ -3296,13 +8082,13 @@ class OnsiteCompositionEditor {
       this.callbacks.onValidation(["Keep the Survey navigation block so visitors can continue or submit."]);
       return false;
     }
-    if (this.checklist) {
-      const components = listBlocks(cell);
-      if (cell.checklistRole || components.some((block) => block.type.startsWith("checklist_") && block.type !== "checklist_task")) {
+    if (this.checklist && !this.source) {
+      const components2 = listBlocks(cell);
+      if (cell.checklistRole || components2.some((block) => block.type.startsWith("checklist_") && block.type !== "checklist_task")) {
         this.callbacks.onValidation(["Keep the required Checklist views and controls. You can style or move them within their view."]);
         return false;
       }
-      const removedTasks = new Set(components.filter((block) => block.type === "checklist_task").map((block) => block.itemId));
+      const removedTasks = new Set(components2.filter((block) => block.type === "checklist_task").map((block) => block.itemId));
       if (this.checklist.items.length - removedTasks.size < 1) {
         this.callbacks.onValidation(["Keep at least one task in this Checklist."]);
         return false;
@@ -3311,21 +8097,19 @@ class OnsiteCompositionEditor {
     }
     const removed = new Set(listBlocks(cell).filter((block) => block.type === "question").map((block) => block.type === "question" ? block.questionId : ""));
     const parent = parentCell(this.document, cell.id);
-    if (!removeCell(this.document, cell.id)) return false;
-    if (this.survey) {
+    if (!(this.source ? this.source.removeCell(this.document, cell.id) : removeCell(this.document, cell.id))) return false;
+    if (this.survey && !this.source) {
       this.survey.step.questions = this.survey.step.questions.filter((question) => !removed.has(question.id));
-      if (this.survey.step.branching) this.survey.step.branching.rules = this.survey.step.branching.rules.filter((rule) => !removed.has(rule.questionId));
+      if (this.survey.step.branching) this.survey.step.branching.rules = this.survey.step.branching.rules.filter((rule2) => !removed.has(rule2.questionId));
     }
-    this.commit(parent ? { kind: "cell", label: "Parent cell", cellId: parent.id } : { kind: "step", label: "Step" });
-    return true;
+    return this.commit(parent ? { kind: "cell", label: "Parent cell", cellId: parent.id } : { kind: "step", label: "Step" });
   }
   move(delta) {
     const cell = this.getSelectedCell();
     if (!cell || this.composing) return false;
     if (!this.beforeTransaction()) return false;
     if (!moveCell(this.document, cell.id, delta)) return false;
-    this.commit(this.selection);
-    return true;
+    return this.commit(this.selection);
   }
   /** Move the existing subtree; never regenerate its cell/block/action IDs. */
   moveTo(targetId, before = false, sourceId = this.moveSource ?? ((_a) => (_a = this.getSelectedCell()) == null ? void 0 : _a.id)()) {
@@ -3343,21 +8127,23 @@ class OnsiteCompositionEditor {
       if (!(to == null ? void 0 : to.children)) return false;
       to.children.splice(to.children.indexOf(target) + (before ? 0 : 1), 0, source);
     }
-    const validation = validateOnsiteDocument(candidate);
+    const validation = this.source ? (() => {
+      const errors = this.source.validate(candidate);
+      return { valid: !errors.length, errors };
+    })() : validateOnsiteDocument(candidate);
     this.callbacks.onValidation(validation.errors);
     if (!validation.valid) return false;
     if (!this.beforeTransaction()) return false;
     this.document = candidate;
     this.cancelMove();
-    this.commit(source.block ? { kind: "block", label: BLOCK_LABEL[source.block.type], cellId: source.id, blockId: source.block.id, blockType: source.block.type } : { kind: "cell", label: "Cell", cellId: source.id });
-    return true;
+    return this.commit(source.block ? { kind: "block", label: BLOCK_LABEL[source.block.type], cellId: source.id, blockId: source.block.id, blockType: source.block.type } : { kind: "cell", label: "Cell", cellId: source.id });
   }
   checklistState() {
     const value = this.checklist;
     return cloneOnsite({ title: value.title, description: value.description, items: value.items, behavior: value.behavior, completionMessage: value.completionMessage });
   }
   updateChecklistViewWidth(width) {
-    if (!this.checklist || !this.beforeTransaction()) return;
+    if (this.source || !this.checklist || !this.beforeTransaction()) return;
     const view = this.document.root.children.find((cell) => cell.checklistRole === this.checklistView);
     view.checklistWidth = width;
     this.commit(this.selection);
@@ -3386,25 +8172,33 @@ class OnsiteCompositionEditor {
       this.callbacks.onValidation(["Use a title and valid task settings. Tasks without an action must complete when clicked."]);
       return false;
     }
+    if (this.source) {
+      try {
+        this.source.synchronizeChecklist(next);
+        this.document = this.source.getDocument();
+      } catch (error) {
+        this.callbacks.onValidation([error instanceof Error ? error.message : "Checklist update failed."]);
+        return false;
+      }
+    }
     Object.assign(this.checklist, next);
-    this.commit(this.selection);
-    return true;
+    return this.commit(this.selection);
   }
   insertTask(insertion) {
-    if (!this.checklist || this.checklist.items.length >= 20 || !this.beforeTransaction()) return false;
-    let container;
+    if (this.source || !this.checklist || this.checklist.items.length >= 20 || !this.beforeTransaction()) return false;
+    let container2;
     const visit = (cell2) => {
       var _a;
-      if (cell2.checklistRole === "items") container = cell2;
+      if (cell2.checklistRole === "items") container2 = cell2;
       (_a = cell2.children) == null ? void 0 : _a.forEach(visit);
     };
     visit(this.document.root);
-    if (!container) return false;
+    if (!container2) return false;
     const item = { id: onsiteId("item"), title: "New task", description: "Describe the next step.", action: { type: "none" }, completion: { type: "item_clicked" } };
     let cell;
     if (insertion) {
       let target = findCell(this.document, insertion.cellId);
-      while (target && target !== container) target = parentCell(this.document, target.id);
+      while (target && target !== container2) target = parentCell(this.document, target.id);
       if (!target) {
         this.callbacks.onValidation(["Insert tasks inside the Expanded task list."]);
         return false;
@@ -3415,7 +8209,7 @@ class OnsiteCompositionEditor {
       cell.block = { id: onsiteId("block"), type: "checklist_task", itemId: item.id, fontSize: 14, indicator: "check" };
     } else {
       cell = emptyCell({ id: onsiteId("block"), type: "checklist_task", itemId: item.id, fontSize: 14, indicator: "check" });
-      container.children.push(cell);
+      container2.children.push(cell);
     }
     cell.sizing = { mode: "hug" };
     this.checklist.items.push(item);
@@ -3435,11 +8229,15 @@ class OnsiteCompositionEditor {
     return (block == null ? void 0 : block.type) === "question" ? ((_a = this.survey) == null ? void 0 : _a.step.questions.find((question) => question.id === block.questionId)) ?? null : null;
   }
   refreshSurvey() {
+    if (this.source) {
+      this.source.refresh();
+      this.document = this.source.getDocument();
+    }
     this.compileAndPatch();
     this.select(this.selection);
   }
   insertQuestion(type, insertion) {
-    if (!this.survey || !QUESTION_TYPES.includes(type) || this.survey.step.questions.length >= 20 || !this.beforeTransaction()) return false;
+    if (this.source || !this.survey || !QUESTION_TYPES.includes(type) || this.survey.step.questions.length >= 20 || !this.beforeTransaction()) return false;
     const selected = this.getSelectedCell();
     if (!selected) return false;
     const candidate = cloneOnsite(this.document), question = newSurveyQuestion(type);
@@ -3468,8 +8266,7 @@ class OnsiteCompositionEditor {
     }
     this.document = candidate;
     this.survey.step.questions = questions;
-    this.commit({ kind: "block", label: "Question", cellId: cell.id, blockId: block.id, blockType: block.type });
-    return true;
+    return this.commit({ kind: "block", label: "Question", cellId: cell.id, blockId: block.id, blockType: block.type });
   }
   updateStepHeading(label) {
     if (!this.survey || !this.beforeTransaction()) return false;
@@ -3479,8 +8276,7 @@ class OnsiteCompositionEditor {
       return false;
     }
     heading.html = escapeHtmlAttribute(label.slice(0, 160));
-    this.commit(this.selection);
-    return true;
+    return this.commit(this.selection);
   }
   updateBranching(branching) {
     if (!this.survey || !this.beforeTransaction()) return false;
@@ -3491,8 +8287,7 @@ class OnsiteCompositionEditor {
       return false;
     }
     this.survey.step.branching = step.branching;
-    this.commit(this.selection);
-    return true;
+    return this.commit(this.selection);
   }
   updateQuestion(question) {
     const current = this.getSelectedQuestion();
@@ -3503,14 +8298,22 @@ class OnsiteCompositionEditor {
       this.callbacks.onValidation(errors);
       return false;
     }
+    if (this.source) {
+      try {
+        this.source.synchronizeQuestion(question, current, questions);
+        this.document = this.source.getDocument();
+      } catch (error) {
+        this.callbacks.onValidation([error instanceof Error ? error.message : "Question update failed."]);
+        return false;
+      }
+    }
     this.survey.step.questions = questions;
-    if (this.survey.step.branching) this.survey.step.branching.rules = this.survey.step.branching.rules.filter((rule) => {
-      if (rule.questionId !== question.id) return true;
-      const step = { ...this.survey.step, branching: { rules: [rule] } };
+    if (this.survey.step.branching) this.survey.step.branching.rules = this.survey.step.branching.rules.filter((rule2) => {
+      if (rule2.questionId !== question.id) return true;
+      const step = { ...this.survey.step, branching: { rules: [rule2] } };
       return !surveyBranchErrors({ ...this.survey.config, steps: this.survey.config.steps.map((value) => value.id === step.id ? step : value) }).length;
     });
-    this.commit(this.selection);
-    return true;
+    return this.commit(this.selection);
   }
   updateCell(update) {
     const cell = this.getSelectedCell();
@@ -3566,13 +8369,15 @@ class OnsiteCompositionEditor {
       const image = findBlock(candidate, id);
       if ((image == null ? void 0 : image.type) !== "image") return false;
       image.src = src;
-      const validation = validateOnsiteDocument(candidate);
+      const validation = this.source ? (() => {
+        const errors = this.source.validate(candidate);
+        return { valid: !errors.length, errors };
+      })() : validateOnsiteDocument(candidate);
       this.callbacks.onValidation(validation.errors);
       if (!validation.valid) return false;
       if (!this.flush()) return false;
       this.document = candidate;
-      this.commit(this.selection);
-      return true;
+      return this.commit(this.selection);
     } catch (error) {
       if (!this.destroyed && request === this.imageRequest) this.callbacks.onValidation([error instanceof Error ? error.message : "Image could not be added. Try another file."]);
       return false;
@@ -3615,8 +8420,7 @@ class OnsiteCompositionEditor {
     if (!this.beforeTransaction()) return false;
     const current = block.html.trim();
     block.html = current.startsWith(`<${tag}>`) ? current.replace(new RegExp(`^<${tag}><li>|</li></${tag}>$`, "g"), "") : `<${tag}><li>${current}</li></${tag}>`;
-    this.commit(this.selection);
-    return true;
+    return this.commit(this.selection);
   }
   applyLink(url) {
     if (!builderLinkUrlIsSafe(url)) return false;
@@ -3651,7 +8455,7 @@ class OnsiteCompositionEditor {
         wrapper.append(range.extractContents());
         range.insertNode(wrapper);
       }
-      block.html = sanitizeRichText(element.innerHTML);
+      block.html = this.source ? element.innerHTML : sanitizeRichText(element.innerHTML);
     } else {
       const open = tag === "a" ? `<a href="${escapeHtmlAttribute(href ?? "")}"${/^https?:\/\//i.test(href ?? "") ? ' target="_blank" rel="noopener noreferrer"' : ""}>` : `<${tag}>`;
       block.html = `${open}${block.html}</${tag}>`;
@@ -3687,7 +8491,7 @@ class OnsiteCompositionEditor {
   }
   commit(selection) {
     this.repairDocumentStructure();
-    if (this.checklist) {
+    if (this.checklist && !this.source) {
       const byId = new Map(this.checklist.items.map((item) => [item.id, item]));
       this.checklist.items = listBlocks(this.document.root).filter((block) => block.type === "checklist_task").map((block) => byId.get(block.itemId)).filter(Boolean);
     }
@@ -3706,36 +8510,38 @@ class OnsiteCompositionEditor {
         this.select(previous.selection);
       }
       this.callbacks.onValidation(validation.errors);
-      return;
+      return false;
     }
     if (this.historyState() === this.compiledState) {
       this.select(selection);
-      return;
+      return true;
     }
     this.selection = selection;
     this.compileAndPatch();
     this.pushHistory();
     this.callbacks.onChange();
     this.select(selection);
+    return true;
   }
   compileAndPatch() {
-    var _a, _b, _c, _d, _e, _f;
-    const compiled = applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext(), this.checklist);
+    var _a, _b, _c, _d, _e, _f, _g;
+    const compiled = this.compile();
     Object.assign(this.content, compiled.content);
     this.compiledState = this.historyState();
     const template = document.createElement("template");
     template.innerHTML = compiled.html;
     (_a = this.surface) == null ? void 0 : _a.replaceChildren(...Array.from(template.content.childNodes));
+    if (this.surface) (_b = this.source) == null ? void 0 : _b.prepareSurface(this.surface);
     this.imagePlaceholders.clear();
-    (_b = this.surface) == null ? void 0 : _b.querySelectorAll("[data-movcues-question-input]").forEach((input) => {
-      input.readOnly = true;
-      input.tabIndex = -1;
+    (_c = this.surface) == null ? void 0 : _c.querySelectorAll("[data-movcues-question-input]").forEach((input2) => {
+      input2.readOnly = true;
+      input2.tabIndex = -1;
     });
     this.savedRange = null;
-    (_c = this.surface) == null ? void 0 : _c.querySelectorAll("[data-movcues-node-id]").forEach((cell) => {
+    (_d = this.surface) == null ? void 0 : _d.querySelectorAll("[data-movcues-node-id]").forEach((cell) => {
       cell.tabIndex = 0;
-      cell.setAttribute("aria-label", "Layout cell");
-      if (!cell.children.length) {
+      if (!cell.hasAttribute("data-movcues-block-id")) cell.setAttribute("aria-label", "Layout cell");
+      if (!cell.children.length && !cell.hasAttribute("data-movcues-block-id")) {
         const add = document.createElement("button");
         add.type = "button";
         add.dataset.movcuesEmptyCell = "";
@@ -3743,11 +8549,12 @@ class OnsiteCompositionEditor {
         cell.append(add);
       }
     });
-    (_d = this.surface) == null ? void 0 : _d.querySelectorAll('img[data-movcues-block-id][src=""]').forEach((image) => {
+    (_e = this.surface) == null ? void 0 : _e.querySelectorAll('img[data-movcues-block-id][src=""]').forEach((image) => {
       const placeholder = document.createElement("button");
       placeholder.type = "button";
       placeholder.className = image.className;
       placeholder.dataset.movcuesBlockId = image.dataset.movcuesBlockId;
+      if (image.dataset.movcuesNodeId) placeholder.dataset.movcuesNodeId = image.dataset.movcuesNodeId;
       placeholder.dataset.movcuesImagePlaceholder = "";
       placeholder.setAttribute("aria-label", "Choose image");
       placeholder.innerHTML = '<svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 3-3 6 6"/></svg><span>Drop an image or click to browse</span>';
@@ -3757,7 +8564,7 @@ class OnsiteCompositionEditor {
     const style = this.root.querySelector("style[data-movcues-builder-style]");
     if (style) style.textContent = `${compiled.css}
 [data-movcues-builder-surface]{position:relative;overflow:visible;contain:layout style}[data-movcues-builder-surface]>.movcues-widget{position:relative!important;inset:auto!important}`;
-    (_f = (_e = this.callbacks).onPatch) == null ? void 0 : _f.call(_e);
+    (_g = (_f = this.callbacks).onPatch) == null ? void 0 : _g.call(_f);
   }
   scheduleCompile() {
     clearTimeout(this.compileTimer);
@@ -3765,7 +8572,11 @@ class OnsiteCompositionEditor {
       if (!this.destroyed && !this.composing) this.flush();
     }, 160);
   }
+  compile() {
+    return this.source ? this.source.apply(this.document) : applyOnsiteDocument(this.builder, this.document, this.widgetType, this.surveyContext(), this.checklist);
+  }
   repairDocumentStructure() {
+    if (this.source) return false;
     let repaired = false;
     const blockIds = /* @__PURE__ */ new Set();
     const repair = (cell) => {
@@ -3789,11 +8600,17 @@ class OnsiteCompositionEditor {
     return repaired;
   }
   pushHistory() {
-    var _a;
+    var _a, _b;
     const document2 = cloneOnsite(this.document), questions = this.survey ? cloneOnsite(this.survey.step.questions) : void 0, branching = ((_a = this.survey) == null ? void 0 : _a.step.branching) ? cloneOnsite(this.survey.step.branching) : void 0;
     const bytes = this.historyState().length;
-    const entry = { document: document2, questions, branching, checklist: this.checklist ? this.checklistState() : void 0, selection: cloneOnsite(this.selection), bytes };
+    const entry = { source: (_b = this.source) == null ? void 0 : _b.snapshot(), document: document2, questions, branching, checklist: this.checklist ? this.checklistState() : void 0, selection: cloneOnsite(this.selection), bytes };
     if (this.historyIndex >= 0 && this.historyState(this.history[this.historyIndex]) === this.historyState()) return;
+    if (this.callbacks.onUndo) {
+      this.history = [entry];
+      this.historyIndex = 0;
+      this.historyBytes = bytes;
+      return;
+    }
     if (this.historyIndex < this.history.length - 1) {
       this.historyBytes -= this.history.slice(this.historyIndex + 1).reduce((sum, item) => sum + item.bytes, 0);
       this.history.splice(this.historyIndex + 1);
@@ -3808,6 +8625,7 @@ class OnsiteCompositionEditor {
   }
   restore(entry) {
     this.document = cloneOnsite(entry.document);
+    if (this.source && entry.source) this.source.restore(entry.source, this.document);
     if (this.checklist && entry.checklist) Object.assign(this.checklist, cloneOnsite(entry.checklist));
     if (this.survey && entry.questions) {
       this.survey.step.questions = cloneOnsite(entry.questions);
@@ -3854,13 +8672,15 @@ class OnsiteCompositionEditor {
     (_b = this.surface) == null ? void 0 : _b.querySelectorAll("[data-movcues-insertion-edge]").forEach((element) => element.removeAttribute("data-movcues-insertion-edge"));
   }
   syncToolbarState() {
+    var _a;
     const cell = this.getSelectedCell();
     const atRoot = !cell || cell === this.document.root;
     for (const command of ["delete", "duplicate", "move"]) {
       const button = this.toolbar.querySelector(`[data-command="${command}"]`);
       if (!button) continue;
-      button.disabled = atRoot;
-      button.title = atRoot ? "Select an element to use this action" : command === "delete" ? "Delete selected element (Undo is available)" : "Duplicate";
+      const protectedSource = cell && ((_a = this.source) == null ? void 0 : _a.isProtected(cell.id));
+      button.disabled = atRoot || Boolean(protectedSource);
+      button.title = protectedSource ? "Protected functional structure is preserved; its visual styles remain editable" : atRoot ? "Select an element to use this action" : command === "delete" ? "Delete selected element (Undo is available)" : "Duplicate";
     }
   }
   updateToolPositions() {
@@ -3896,9 +8716,9 @@ class OnsiteCompositionEditor {
     const edges = { left: Math.min(rect.left, (blockRect == null ? void 0 : blockRect.left) ?? rect.left), right: Math.max(rect.right, (blockRect == null ? void 0 : blockRect.right) ?? rect.right), top: Math.min(rect.top, (blockRect == null ? void 0 : blockRect.top) ?? rect.top), bottom: Math.max(rect.bottom, (blockRect == null ? void 0 : blockRect.bottom) ?? rect.bottom) };
     for (const button of this.edgeButtons) {
       const edge = button.dataset.movcuesInsertEdge;
-      const x = edge === "left" ? edges.left - 16 : edge === "right" ? edges.right + 16 : (edges.left + edges.right) / 2;
+      const x2 = edge === "left" ? edges.left - 16 : edge === "right" ? edges.right + 16 : (edges.left + edges.right) / 2;
       const y = edge === "top" ? edges.top - 16 : edge === "bottom" ? edges.bottom + 16 : (edges.top + edges.bottom) / 2;
-      button.style.transform = `translate(${Math.max(2, Math.min(innerWidth - 26, x - 12))}px,${Math.max(2, Math.min(innerHeight - 26, y - 12))}px)`;
+      button.style.transform = `translate(${Math.max(2, Math.min(innerWidth - 26, x2 - 12))}px,${Math.max(2, Math.min(innerHeight - 26, y - 12))}px)`;
     }
     if (!this.palette.hidden && this.paletteAnchor) {
       const palettePoint = placeOutside(this.paletteAnchor.getBoundingClientRect(), this.palette.getBoundingClientRect(), bounds);
@@ -3929,7 +8749,7 @@ class OnsiteCompositionEditor {
     this.handles = [];
     const cell = this.getSelectedCell();
     const parent = cell ? parentCell(this.document, cell.id) : null;
-    if (!cell || !(parent == null ? void 0 : parent.children)) return;
+    if (!cell || !(parent == null ? void 0 : parent.children) || this.source && !this.source.canResize(parent.id)) return;
     const index = parent.children.indexOf(cell);
     for (const firstIndex of [index - 1, index]) {
       const first = parent.children[firstIndex];
@@ -4009,7 +8829,7 @@ class OnsiteCompositionEditor {
   }
 }
 function placeOutside(rect, size, bounds) {
-  const clampX = (x) => Math.max(bounds.left, Math.min(bounds.right - size.width, x));
+  const clampX = (x2) => Math.max(bounds.left, Math.min(bounds.right - size.width, x2));
   const clampY = (y) => Math.max(bounds.top, Math.min(bounds.bottom - size.height, y));
   const candidates = [
     { left: clampX(rect.left), top: rect.bottom + 10 },
@@ -4061,12 +8881,12 @@ function resolvedTheme(state) {
 }
 const text = (value, max) => sanitizeRichText(value.trim().slice(0, max).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]));
 const isDocumentOperation$1 = (operation) => ["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell"].includes(operation.type);
-function questionFromInput(input, id = onsiteId("question")) {
+function questionFromInput(input2, id = onsiteId("question")) {
   var _a;
-  const base = { id, label: input.label.trim().slice(0, 500), required: input.required ?? false };
-  if (input.type === "single_choice" || input.type === "multiple_choice") return { ...base, type: input.type, options: input.options.map((option) => ({ id: onsiteId("option"), label: option.label.trim().slice(0, 200) })) };
-  if (input.type === "short_text" || input.type === "long_text") return { ...base, type: input.type, placeholder: ((_a = input.placeholder) == null ? void 0 : _a.slice(0, 500)) ?? "", maxLength: input.maxLength ?? (input.type === "short_text" ? 200 : 2e3) };
-  if (input.type === "rating") return { ...base, type: input.type, min: input.min, max: input.max };
+  const base = { id, label: input2.label.trim().slice(0, 500), required: input2.required ?? false };
+  if (input2.type === "single_choice" || input2.type === "multiple_choice") return { ...base, type: input2.type, options: input2.options.map((option) => ({ id: onsiteId("option"), label: option.label.trim().slice(0, 200) })) };
+  if (input2.type === "short_text" || input2.type === "long_text") return { ...base, type: input2.type, placeholder: ((_a = input2.placeholder) == null ? void 0 : _a.slice(0, 500)) ?? "", maxLength: input2.maxLength ?? (input2.type === "short_text" ? 200 : 2e3) };
+  if (input2.type === "rating") return { ...base, type: input2.type, min: input2.min, max: input2.max };
   return { ...base, type: "nps" };
 }
 function documentFor$1(step) {
@@ -4075,24 +8895,24 @@ function documentFor$1(step) {
   return document2;
 }
 function referenceCell(document2, questionId) {
-  let result = null;
+  let result2 = null;
   const walk = (cell) => {
     var _a, _b;
-    if (((_a = cell.block) == null ? void 0 : _a.type) === "question" && cell.block.questionId === questionId) result = cell;
+    if (((_a = cell.block) == null ? void 0 : _a.type) === "question" && cell.block.questionId === questionId) result2 = cell;
     (_b = cell.children) == null ? void 0 : _b.forEach(walk);
   };
   walk(document2.root);
-  return result;
+  return result2;
 }
 function controlsCell(document2) {
-  let result = null;
+  let result2 = null;
   const walk = (cell) => {
     var _a, _b;
-    if (((_a = cell.block) == null ? void 0 : _a.type) === "survey_controls") result = cell;
+    if (((_a = cell.block) == null ? void 0 : _a.type) === "survey_controls") result2 = cell;
     (_b = cell.children) == null ? void 0 : _b.forEach(walk);
   };
   walk(document2.root);
-  return result;
+  return result2;
 }
 function insertQuestionReference(document2, questionId, afterQuestionId) {
   const target = afterQuestionId ? referenceCell(document2, afterQuestionId) : controlsCell(document2);
@@ -4163,7 +8983,7 @@ function applySurveyAiProposal(source, proposal) {
     if (proposal.operations.length !== 1 || !replacement.stepId) throw new Error("A Survey source replacement must be one atomic step-scoped operation.");
     const owner = step(replacement.stepId);
     if (!owner.builder) throw new Error("Survey step has no builder source.");
-    applySourceMarkup(owner.builder, owner.content, replacement, { widgetType: "survey", guide: false, survey: { questions: owner.questions.map((question2) => ({ id: question2.id, type: question2.type })) } });
+    applySourceMarkup(owner.builder, owner.content, replacement, { widgetType: "survey", guide: false, survey: { questions: owner.questions } });
     const branchErrors2 = surveyBranchErrors(survey);
     if (branchErrors2.length) throw new Error(branchErrors2.join(" "));
     return { definition, affectedStepIds: [owner.id], order: survey.steps.map((value) => value.id), warnings: ["This Survey step now uses Source mode; its protected questions and controls remain canonical."] };
@@ -4194,12 +9014,12 @@ function applySurveyAiProposal(source, proposal) {
       affected.add(copy.id);
     } else if (operation.type === "remove_survey_step") {
       if (survey.steps.length <= 1) throw new Error("The final Survey step cannot be removed.");
-      const inbound = referencedByBranch(survey, (rule) => rule.nextStepId === operation.stepId);
+      const inbound = referencedByBranch(survey, (rule2) => rule2.nextStepId === operation.stepId);
       if (inbound && !operation.removeBranchRules) throw new Error("This step is a branch destination. Explicitly allow removal of dependent branch rules.");
       if (inbound) {
         survey.steps.forEach((value) => {
           if (value.branching) {
-            value.branching.rules = value.branching.rules.filter((rule) => rule.nextStepId !== operation.stepId);
+            value.branching.rules = value.branching.rules.filter((rule2) => rule2.nextStepId !== operation.stepId);
             if (value.branching.defaultNextStepId === operation.stepId) delete value.branching.defaultNextStepId;
           }
         });
@@ -4241,10 +9061,10 @@ function applySurveyAiProposal(source, proposal) {
     } else if (operation.type === "remove_survey_question") {
       const owner = step(operation.stepId);
       question(owner, operation.questionId);
-      const dependent = (_b = owner.branching) == null ? void 0 : _b.rules.some((rule) => rule.questionId === operation.questionId);
+      const dependent = (_b = owner.branching) == null ? void 0 : _b.rules.some((rule2) => rule2.questionId === operation.questionId);
       if (dependent && !operation.removeBranchRules) throw new Error("This question controls branching. Explicitly allow removal of dependent branch rules.");
       if (dependent) {
-        owner.branching.rules = owner.branching.rules.filter((rule) => rule.questionId !== operation.questionId);
+        owner.branching.rules = owner.branching.rules.filter((rule2) => rule2.questionId !== operation.questionId);
         warnings.push("Dependent branch rules were removed with the Survey question.");
       }
       owner.questions = owner.questions.filter((value) => value.id !== operation.questionId);
@@ -4276,9 +9096,9 @@ function applySurveyAiProposal(source, proposal) {
       const owner = step(operation.stepId), value = question(owner, operation.questionId), replacement2 = questionFromInput(operation.question, value.id), oldRules = ((_c = owner.branching) == null ? void 0 : _c.rules) ?? [];
       owner.questions.splice(owner.questions.indexOf(value), 1, replacement2);
       const invalid = surveyBranchErrors(survey);
-      if (invalid.length && oldRules.some((rule) => rule.questionId === value.id)) {
+      if (invalid.length && oldRules.some((rule2) => rule2.questionId === value.id)) {
         if (!operation.removeInvalidBranchRules) throw new Error("Changing this question type invalidates branching. Explicitly allow removal of dependent rules.");
-        owner.branching.rules = oldRules.filter((rule) => rule.questionId !== value.id);
+        owner.branching.rules = oldRules.filter((rule2) => rule2.questionId !== value.id);
         warnings.push("Branch rules using the converted question were removed.");
       }
       warnings.push(`Question type changed from ${value.type} to ${replacement2.type}; existing answers may no longer be comparable.`);
@@ -4300,10 +9120,10 @@ function applySurveyAiProposal(source, proposal) {
           if (destination < 0) throw new Error("Survey option move destination no longer exists.");
           value.options.splice(destination, 0, item);
         } else {
-          const dependent = (_d = owner.branching) == null ? void 0 : _d.rules.some((rule) => rule.questionId === value.id && rule.value === op.optionId);
+          const dependent = (_d = owner.branching) == null ? void 0 : _d.rules.some((rule2) => rule2.questionId === value.id && rule2.value === op.optionId);
           if (dependent && !op.removeBranchRules) throw new Error("This option controls branching. Explicitly allow removal of dependent branch rules.");
           if (dependent) {
-            owner.branching.rules = owner.branching.rules.filter((rule) => !(rule.questionId === value.id && rule.value === op.optionId));
+            owner.branching.rules = owner.branching.rules.filter((rule2) => !(rule2.questionId === value.id && rule2.value === op.optionId));
             warnings.push("Dependent branch rules were removed with the Survey option.");
           }
           value.options.splice(index, 1);
@@ -4352,22 +9172,22 @@ function applySurveyAiProposal(source, proposal) {
   if (branchErrors.length) throw new Error(branchErrors.join(" "));
   return { definition, affectedStepIds: [...affected], order: survey.steps.map((value) => value.id), warnings };
 }
-function surveyAiContext(input) {
-  const survey = ensureSurvey(input.definition), current = survey.steps.find((step) => step.id === input.currentStepId);
+function surveyAiContext(input2) {
+  const survey = ensureSurvey(input2.definition), current = survey.steps.find((step) => step.id === input2.currentStepId);
   if (!current) throw new Error("Current Survey step no longer exists.");
   const document2 = documentFor$1(current);
   return {
-    experience: { ...input.experience, kind: "widget", widgetType: "survey" },
-    revision: input.revision,
-    scope: input.scope ?? (input.selection.kind === "step" ? "survey" : "step"),
+    experience: { ...input2.experience, kind: "widget", widgetType: "survey" },
+    revision: input2.revision,
+    scope: input2.scope ?? (input2.selection.kind === "step" ? "survey" : "step"),
     currentStepId: current.id,
-    selection: cloneOnsite(input.selection),
+    selection: cloneOnsite(input2.selection),
     configuration: { showProgress: survey.showProgress, allowBack: survey.allowBack, submitLabel: survey.submitLabel },
     steps: survey.steps.map((step) => ({ id: step.id, heading: step.content.heading, body: step.content.body, questions: cloneOnsite(step.questions), branching: cloneOnsite(step.branching) })),
     currentDocument: aiDocumentContext({ schemaVersion: document2.schemaVersion, id: document2.id, root: document2.root }),
     ...current.builder ? { source: sourceContext(current.builder, false) } : {},
-    targeting: cloneOnsite(input.definition.targeting),
-    visualTheme: cloneOnsite(input.definition.visualTheme)
+    targeting: cloneOnsite(input2.definition.targeting),
+    visualTheme: cloneOnsite(input2.definition.visualTheme)
   };
 }
 const isDocumentOperation = (operation) => ["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell"].includes(operation.type);
@@ -4397,22 +9217,22 @@ function itemContainer(document2) {
   return found;
 }
 function insertReference(document2, itemId, afterItemId) {
-  const container = itemContainer(document2);
-  if (!(container == null ? void 0 : container.children)) throw new Error("Checklist task container is missing.");
+  const container2 = itemContainer(document2);
+  if (!(container2 == null ? void 0 : container2.children)) throw new Error("Checklist task container is missing.");
   const target = afterItemId ? itemCell(document2, afterItemId) : null;
-  if (afterItemId && (!target || parentCell(document2, target.id) !== container)) throw new Error("Checklist task insertion point no longer exists.");
+  if (afterItemId && (!target || parentCell(document2, target.id) !== container2)) throw new Error("Checklist task insertion point no longer exists.");
   const cell = { ...emptyCell({ id: onsiteId("block"), type: "checklist_task", itemId, fontSize: 14, indicator: "check" }), sizing: { mode: "hug" } };
-  container.children.splice(target ? container.children.indexOf(target) + 1 : container.children.length, 0, cell);
+  container2.children.splice(target ? container2.children.indexOf(target) + 1 : container2.children.length, 0, cell);
 }
 function removeReference(document2, itemId) {
   const cell = itemCell(document2, itemId);
   if (!cell || !removeCell(document2, cell.id)) throw new Error("Checklist task reference no longer exists.");
 }
 function moveReference(document2, itemId, beforeItemId) {
-  const container = itemContainer(document2), source = itemCell(document2, itemId), target = beforeItemId ? itemCell(document2, beforeItemId) : null;
-  if (!(container == null ? void 0 : container.children) || !source || parentCell(document2, source.id) !== container || beforeItemId && (!target || parentCell(document2, target.id) !== container)) throw new Error("Checklist task move target is invalid.");
-  container.children.splice(container.children.indexOf(source), 1);
-  container.children.splice(target ? container.children.indexOf(target) : container.children.length, 0, source);
+  const container2 = itemContainer(document2), source = itemCell(document2, itemId), target = beforeItemId ? itemCell(document2, beforeItemId) : null;
+  if (!(container2 == null ? void 0 : container2.children) || !source || parentCell(document2, source.id) !== container2 || beforeItemId && (!target || parentCell(document2, target.id) !== container2)) throw new Error("Checklist task move target is invalid.");
+  container2.children.splice(container2.children.indexOf(source), 1);
+  container2.children.splice(target ? container2.children.indexOf(target) : container2.children.length, 0, source);
 }
 function validateResource(item, references, warnings) {
   if (item.action.type === "launch_guide") {
@@ -4472,9 +9292,9 @@ function applyChecklistAiProposal(source, proposal, references) {
       if (!operation.items.length || operation.items.length > 20) throw new Error("A Checklist needs 1–20 tasks.");
       definition.title = ((_a = operation.title) == null ? void 0 : _a.trim().slice(0, 160)) || definition.title;
       definition.description = ((_b = operation.description) == null ? void 0 : _b.trim().slice(0, 2e3)) || definition.description;
-      const container = itemContainer(document2);
-      if (!container) throw new Error("Checklist task container is missing.");
-      container.children = [];
+      const container2 = itemContainer(document2);
+      if (!container2) throw new Error("Checklist task container is missing.");
+      container2.children = [];
       definition.items = operation.items.map((value) => ({ ...cloneOnsite(value), id: onsiteId("item") }));
       definition.items.forEach((value) => insertReference(document2, value.id));
       definition.items.forEach((value) => affected.add(value.id));
@@ -4547,9 +9367,9 @@ function applyChecklistAiProposal(source, proposal, references) {
   validateAndCompile(definition, finalDocument, references, warnings);
   return { definition, affectedItemIds: [...affected], order: definition.items.map((value) => value.id), warnings: [...new Set(warnings)] };
 }
-function checklistAiContext(input) {
-  const document2 = documentFor(input.checklist), blockId = input.selection.kind === "block" ? input.selection.blockId : void 0, selected = blockId ? listBlocks(document2.root).find((block) => block.id === blockId) : void 0, selectedItemId = (selected == null ? void 0 : selected.type) === "checklist_task" ? selected.itemId : void 0;
-  return { experience: { ...input.experience, kind: "checklist", widgetType: null }, revision: input.revision, currentView: input.currentView, selection: cloneOnsite(input.selection), selectedItemId, checklist: { title: input.checklist.title, description: input.checklist.description, totalTasks: input.checklist.items.length, behavior: cloneOnsite(input.checklist.behavior), completionMessage: cloneOnsite(input.checklist.completionMessage), items: input.checklist.items.map((item, index) => ({ ...cloneOnsite(item), position: index })) }, resources: { guides: input.references.guides.map((value) => ({ id: value.id, name: value.name, status: value.status })), segments: input.references.segments.map((value) => ({ id: value.id, name: value.name })) }, currentDocument: aiDocumentContext(document2), source: sourceContext(input.checklist.builder, false), targeting: cloneOnsite(input.checklist.targeting), theme: cloneOnsite(input.theme) };
+function checklistAiContext(input2) {
+  const document2 = documentFor(input2.checklist), blockId = input2.selection.kind === "block" ? input2.selection.blockId : void 0, selected = blockId ? listBlocks(document2.root).find((block) => block.id === blockId) : void 0, selectedItemId = (selected == null ? void 0 : selected.type) === "checklist_task" ? selected.itemId : void 0;
+  return { experience: { ...input2.experience, kind: "checklist", widgetType: null }, revision: input2.revision, currentView: input2.currentView, selection: cloneOnsite(input2.selection), selectedItemId, checklist: { title: input2.checklist.title, description: input2.checklist.description, totalTasks: input2.checklist.items.length, behavior: cloneOnsite(input2.checklist.behavior), completionMessage: cloneOnsite(input2.checklist.completionMessage), items: input2.checklist.items.map((item, index) => ({ ...cloneOnsite(item), position: index })) }, resources: { guides: input2.references.guides.map((value) => ({ id: value.id, name: value.name, status: value.status })), segments: input2.references.segments.map((value) => ({ id: value.id, name: value.name })) }, currentDocument: aiDocumentContext(document2), source: sourceContext(input2.checklist.builder, false), targeting: cloneOnsite(input2.checklist.targeting), theme: cloneOnsite(input2.theme) };
 }
 class EditorModeController {
   constructor(apiBase) {
@@ -4585,6 +9405,11 @@ class EditorModeController {
     this.mode = "design";
     this.dirty = false;
     this.editGeneration = 0;
+    this.history = new EditorHistory((value) => JSON.stringify(value.definition));
+    this.historyTyping = false;
+    this.restoringHistory = false;
+    this.preferredSelection = null;
+    this.aiPreviewLocation = null;
     this.saveState = "clean";
     this.recoveryDraft = null;
     this.lifecycle = 0;
@@ -4600,20 +9425,12 @@ class EditorModeController {
     this.aiPreviewOriginal = null;
     this.aiPreviewCandidate = null;
     this.aiPreviewReturnMode = null;
-    this.guideAiUndo = [];
-    this.guideAiRedo = [];
     this.surveyAiPreviewOriginal = null;
     this.surveyAiPreviewCandidate = null;
-    this.surveyAiUndo = [];
-    this.surveyAiRedo = [];
     this.checklistAiPreviewOriginal = null;
     this.checklistAiPreviewCandidate = null;
-    this.checklistAiUndo = [];
-    this.checklistAiRedo = [];
     this.widgetAiPreviewOriginal = null;
     this.widgetAiPreviewCandidate = null;
-    this.widgetAiUndo = [];
-    this.widgetAiRedo = [];
     this.aiAbort = null;
     this.aiRequestGeneration = 0;
     this.persistBeforePageLeave = () => this.updateContinuation();
@@ -4630,15 +9447,15 @@ class EditorModeController {
       const viewport = window.visualViewport;
       const width = (viewport == null ? void 0 : viewport.width) ?? innerWidth;
       const height = (viewport == null ? void 0 : viewport.height) ?? innerHeight;
-      const x = (viewport == null ? void 0 : viewport.offsetLeft) ?? 0;
+      const x2 = (viewport == null ? void 0 : viewport.offsetLeft) ?? 0;
       const y = (viewport == null ? void 0 : viewport.offsetTop) ?? 0;
       const toolbar = (_b = this.root) == null ? void 0 : _b.querySelector("[data-editor-toolbar]");
       if (toolbar) {
         toolbar.style.maxWidth = `${Math.max(0, width - 8)}px`;
         const bounds = toolbar.getBoundingClientRect();
-        if (bounds.left < x + 4 || bounds.right > x + width - 4 || bounds.top < y + 4 || bounds.bottom > y + height - 4) {
+        if (bounds.left < x2 + 4 || bounds.right > x2 + width - 4 || bounds.top < y + 4 || bounds.bottom > y + height - 4) {
           toolbar.style.transform = "none";
-          toolbar.style.left = `${Math.max(x + 4, Math.min(x + width - bounds.width - 4, bounds.left))}px`;
+          toolbar.style.left = `${Math.max(x2 + 4, Math.min(x2 + width - bounds.width - 4, bounds.left))}px`;
           toolbar.style.top = `${Math.max(y + 4, Math.min(y + height - bounds.height - 4, bounds.top))}px`;
         }
       }
@@ -4647,7 +9464,7 @@ class EditorModeController {
       const main = (_c = this.root) == null ? void 0 : _c.querySelector("main");
       if (main) main.style.maxHeight = `${Math.max(0, width <= 480 ? height * 0.38 : height - 32)}px`;
       const rect = aside.getBoundingClientRect();
-      if (aside.style.left) aside.style.left = `${Math.max(x + 4, Math.min(x + width - rect.width - 4, rect.left))}px`;
+      if (aside.style.left) aside.style.left = `${Math.max(x2 + 4, Math.min(x2 + width - rect.width - 4, rect.left))}px`;
       if (width <= 480) {
         aside.style.top = "auto";
         aside.style.bottom = this.guide || this.survey ? "70px" : "8px";
@@ -4663,7 +9480,7 @@ class EditorModeController {
     };
     this.protectPreviewNavigation = (event) => {
       if (this.mode !== "preview") return;
-      const link = event.composedPath().find((node) => node instanceof HTMLAnchorElement);
+      const link = event.composedPath().find((node2) => node2 instanceof HTMLAnchorElement);
       if (!link) return;
       try {
         const url = new URL(link.href, location.href);
@@ -4730,6 +9547,7 @@ class EditorModeController {
     this.draft = draft;
     this.checklist = isChecklistDefinition(draft.version.definition) ? draft.version.definition : null;
     this.definition = this.checklist ? checklistEditorAdapter(this.checklist) : draft.version.definition;
+    this.history.reset({ definition: cloneOnsite(this.checklist ?? this.definition), selection: null, stepIndex: this.stepIndex });
     this.guide = isGuideDefinition(this.definition) ? this.definition : null;
     this.survey = !this.guide && draft.experience.widgetType === "survey" ? this.definition.survey ?? null : null;
     const selectableSteps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
@@ -4913,141 +9731,141 @@ class EditorModeController {
   }
   bindPanel() {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F;
-    const root = this.root;
-    root.querySelectorAll("[data-inspector-tab]").forEach((button) => button.addEventListener("click", () => this.setInspectorTab(button.dataset.inspectorTab)));
-    (_a = root.querySelector("[data-ai-form]")) == null ? void 0 : _a.addEventListener("submit", (event) => {
+    const root2 = this.root;
+    root2.querySelectorAll("[data-inspector-tab]").forEach((button) => button.addEventListener("click", () => this.setInspectorTab(button.dataset.inspectorTab)));
+    (_a = root2.querySelector("[data-ai-form]")) == null ? void 0 : _a.addEventListener("submit", (event) => {
       event.preventDefault();
       void this.sendAiPrompt();
     });
-    (_b = root.querySelector("[data-ai-cancel]")) == null ? void 0 : _b.addEventListener("click", () => this.cancelAiRequest());
-    (_c = root.querySelector("[data-ai-target]")) == null ? void 0 : _c.addEventListener("click", () => this.resolveAiGuideTarget());
-    (_d = root.querySelector("[data-ai-preview]")) == null ? void 0 : _d.addEventListener("click", () => this.checklist ? this.previewAiChecklistProposal() : this.survey ? this.previewAiSurveyProposal() : this.guide ? this.previewAiGuideProposal() : this.previewAiWidgetSourceProposal());
-    (_e = root.querySelector("[data-ai-apply]")) == null ? void 0 : _e.addEventListener("click", () => this.applyAiProposal());
-    (_f = root.querySelector("[data-ai-discard]")) == null ? void 0 : _f.addEventListener("click", () => this.discardAiProposal());
-    root.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this.setMode(button.dataset.mode)));
-    root.querySelectorAll("[data-pick]").forEach((button) => button.addEventListener("click", () => {
+    (_b = root2.querySelector("[data-ai-cancel]")) == null ? void 0 : _b.addEventListener("click", () => this.cancelAiRequest());
+    (_c = root2.querySelector("[data-ai-target]")) == null ? void 0 : _c.addEventListener("click", () => this.resolveAiGuideTarget());
+    (_d = root2.querySelector("[data-ai-preview]")) == null ? void 0 : _d.addEventListener("click", () => this.checklist ? this.previewAiChecklistProposal() : this.survey ? this.previewAiSurveyProposal() : this.guide ? this.previewAiGuideProposal() : this.previewAiWidgetSourceProposal());
+    (_e = root2.querySelector("[data-ai-apply]")) == null ? void 0 : _e.addEventListener("click", () => this.applyAiProposal());
+    (_f = root2.querySelector("[data-ai-discard]")) == null ? void 0 : _f.addEventListener("click", () => this.discardAiProposal());
+    root2.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this.setMode(button.dataset.mode)));
+    root2.querySelectorAll("[data-pick]").forEach((button) => button.addEventListener("click", () => {
       if (this.mode !== "target") this.setMode("target");
       else this.startPicker();
     }));
-    (_g = root.querySelector("[data-pick-layer]")) == null ? void 0 : _g.addEventListener("click", () => this.startLayerPicker());
-    root.querySelectorAll("[data-step]").forEach((button) => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
-    (_h = root.querySelector("[data-minimize]")) == null ? void 0 : _h.addEventListener("click", () => {
-      const aside = root.querySelector("aside");
+    (_g = root2.querySelector("[data-pick-layer]")) == null ? void 0 : _g.addEventListener("click", () => this.startLayerPicker());
+    root2.querySelectorAll("[data-step]").forEach((button) => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
+    (_h = root2.querySelector("[data-minimize]")) == null ? void 0 : _h.addEventListener("click", () => {
+      const aside = root2.querySelector("aside");
       aside.classList.toggle("minimized");
-      root.querySelector("[data-minimize]").setAttribute("aria-expanded", String(!aside.classList.contains("minimized")));
+      root2.querySelector("[data-minimize]").setAttribute("aria-expanded", String(!aside.classList.contains("minimized")));
     });
-    (_i = root.querySelector("[data-save]")) == null ? void 0 : _i.addEventListener("click", () => void this.persist());
-    (_j = root.querySelector("[data-close]")) == null ? void 0 : _j.addEventListener("click", () => void this.close());
-    (_k = root.querySelector("[data-return-dashboard]")) == null ? void 0 : _k.addEventListener("click", () => {
+    (_i = root2.querySelector("[data-save]")) == null ? void 0 : _i.addEventListener("click", () => void this.persist());
+    (_j = root2.querySelector("[data-close]")) == null ? void 0 : _j.addEventListener("click", () => void this.close());
+    (_k = root2.querySelector("[data-return-dashboard]")) == null ? void 0 : _k.addEventListener("click", () => {
       var _a2;
       (_a2 = window.opener) == null ? void 0 : _a2.focus();
       void this.close();
     });
-    (_l = root.querySelector("[data-retry-save]")) == null ? void 0 : _l.addEventListener("click", () => void this.persist());
-    (_m = root.querySelector("[data-reload-draft]")) == null ? void 0 : _m.addEventListener("click", () => {
+    (_l = root2.querySelector("[data-retry-save]")) == null ? void 0 : _l.addEventListener("click", () => void this.persist());
+    (_m = root2.querySelector("[data-reload-draft]")) == null ? void 0 : _m.addEventListener("click", () => {
       if (window.confirm("Reloading discards local edits. Copy / Export them first if you need them. Reload latest?")) {
         this.recoveryDraft = null;
         window.location.reload();
       }
     });
-    (_n = root.querySelector("[data-export-draft]")) == null ? void 0 : _n.addEventListener("click", () => this.exportRecovery());
-    (_o = root.querySelector("[data-discard-draft]")) == null ? void 0 : _o.addEventListener("click", () => {
+    (_n = root2.querySelector("[data-export-draft]")) == null ? void 0 : _n.addEventListener("click", () => this.exportRecovery());
+    (_o = root2.querySelector("[data-discard-draft]")) == null ? void 0 : _o.addEventListener("click", () => {
       if (window.confirm("Discard unsaved edits and close?")) {
         this.recoveryDraft = null;
         this.destroy();
       }
     });
-    (_p = root.querySelector("[data-reset-preview]")) == null ? void 0 : _p.addEventListener("click", () => this.guide ? this.startGuidePreview() : this.renderPreview());
-    (_q = root.querySelector("[data-global-undo]")) == null ? void 0 : _q.addEventListener("click", () => this.globalUndo());
-    (_r = root.querySelector("[data-global-redo]")) == null ? void 0 : _r.addEventListener("click", () => this.globalRedo());
-    (_s = root.querySelector("[data-move-side]")) == null ? void 0 : _s.addEventListener("click", () => {
+    (_p = root2.querySelector("[data-reset-preview]")) == null ? void 0 : _p.addEventListener("click", () => this.guide ? this.startGuidePreview() : this.renderPreview());
+    (_q = root2.querySelector("[data-global-undo]")) == null ? void 0 : _q.addEventListener("click", () => this.globalUndo());
+    (_r = root2.querySelector("[data-global-redo]")) == null ? void 0 : _r.addEventListener("click", () => this.globalRedo());
+    (_s = root2.querySelector("[data-move-side]")) == null ? void 0 : _s.addEventListener("click", () => {
       var _a2;
-      return (_a2 = root.querySelector("aside")) == null ? void 0 : _a2.classList.toggle("left-side");
+      return (_a2 = root2.querySelector("aside")) == null ? void 0 : _a2.classList.toggle("left-side");
     });
-    (_t = root.querySelector("[data-select-step]")) == null ? void 0 : _t.addEventListener("click", () => {
+    (_t = root2.querySelector("[data-select-step]")) == null ? void 0 : _t.addEventListener("click", () => {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.selectStep();
     });
-    root.querySelectorAll("[data-edge]").forEach((button) => button.addEventListener("click", () => {
+    root2.querySelectorAll("[data-edge]").forEach((button) => button.addEventListener("click", () => {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.addEdge(button.dataset.edge);
     }));
-    root.querySelectorAll("[data-add-step]").forEach((button) => button.addEventListener("click", () => this.addGuideStep(button.dataset.addStep)));
-    (_u = root.querySelector("[data-add-current-step]")) == null ? void 0 : _u.addEventListener("click", () => this.addGuideStep(getGuideStepPattern(this.guide.steps[this.stepIndex])));
-    (_v = root.querySelector("[data-duplicate-step]")) == null ? void 0 : _v.addEventListener("click", () => this.duplicateGuideStep());
-    (_w = root.querySelector("[data-delete-step]")) == null ? void 0 : _w.addEventListener("click", () => this.deleteGuideStep());
-    (_x = root.querySelector("[data-step-left]")) == null ? void 0 : _x.addEventListener("click", () => this.moveGuideStep(-1));
-    (_y = root.querySelector("[data-step-right]")) == null ? void 0 : _y.addEventListener("click", () => this.moveGuideStep(1));
-    (_z = root.querySelector("[data-step-name]")) == null ? void 0 : _z.addEventListener("change", (event) => {
+    root2.querySelectorAll("[data-add-step]").forEach((button) => button.addEventListener("click", () => this.addGuideStep(button.dataset.addStep)));
+    (_u = root2.querySelector("[data-add-current-step]")) == null ? void 0 : _u.addEventListener("click", () => this.addGuideStep(getGuideStepPattern(this.guide.steps[this.stepIndex])));
+    (_v = root2.querySelector("[data-duplicate-step]")) == null ? void 0 : _v.addEventListener("click", () => this.duplicateGuideStep());
+    (_w = root2.querySelector("[data-delete-step]")) == null ? void 0 : _w.addEventListener("click", () => this.deleteGuideStep());
+    (_x = root2.querySelector("[data-step-left]")) == null ? void 0 : _x.addEventListener("click", () => this.moveGuideStep(-1));
+    (_y = root2.querySelector("[data-step-right]")) == null ? void 0 : _y.addEventListener("click", () => this.moveGuideStep(1));
+    (_z = root2.querySelector("[data-step-name]")) == null ? void 0 : _z.addEventListener("change", (event) => {
       if (!this.guide) return;
       this.guide.steps[this.stepIndex].label = event.currentTarget.value.trim().slice(0, 80) || void 0;
       this.changed();
       this.refreshStepBar();
     });
-    (_A = root.querySelector("[data-edit-component]")) == null ? void 0 : _A.addEventListener("click", () => {
+    (_A = root2.querySelector("[data-edit-component]")) == null ? void 0 : _A.addEventListener("click", () => {
       var _a2, _b2;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.editSelected();
       (_b2 = this.contentEditor) == null ? void 0 : _b2.editSelected();
     });
-    root.querySelectorAll("[data-format]").forEach((button) => button.addEventListener("click", () => {
+    root2.querySelectorAll("[data-format]").forEach((button) => button.addEventListener("click", () => {
       var _a2, _b2;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.formatInline(button.dataset.format);
       (_b2 = this.contentEditor) == null ? void 0 : _b2.formatInline(button.dataset.format);
       this.syncContentInspector();
     }));
-    root.querySelectorAll("[data-list]").forEach((button) => button.addEventListener("click", () => {
+    root2.querySelectorAll("[data-list]").forEach((button) => button.addEventListener("click", () => {
       var _a2, _b2;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.toggleList(button.dataset.list);
       (_b2 = this.contentEditor) == null ? void 0 : _b2.toggleList(button.dataset.list);
       this.syncContentInspector();
     }));
-    (_B = root.querySelector("[data-text-align]")) == null ? void 0 : _B.addEventListener("change", (event) => {
+    (_B = root2.querySelector("[data-text-align]")) == null ? void 0 : _B.addEventListener("change", (event) => {
       var _a2, _b2;
       const value = event.currentTarget.value;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.setAlignment(value);
       (_b2 = this.contentEditor) == null ? void 0 : _b2.setAlignment(value);
       this.syncContentInspector();
     });
-    (_C = root.querySelector("[data-apply-link]")) == null ? void 0 : _C.addEventListener("click", () => {
+    (_C = root2.querySelector("[data-apply-link]")) == null ? void 0 : _C.addEventListener("click", () => {
       var _a2, _b2;
-      const input = root.querySelector("[data-link-url]");
-      const applied = input ? ((_a2 = this.compositionEditor) == null ? void 0 : _a2.applyLink(input.value)) ?? ((_b2 = this.contentEditor) == null ? void 0 : _b2.applyLink(input.value)) : false;
-      if (input && !applied) {
-        input.setCustomValidity("Select text in a heading or body and use an HTTP(S), email, phone, relative, or hash URL.");
-        input.reportValidity();
-      } else input == null ? void 0 : input.setCustomValidity("");
+      const input2 = root2.querySelector("[data-link-url]");
+      const applied = input2 ? ((_a2 = this.compositionEditor) == null ? void 0 : _a2.applyLink(input2.value)) ?? ((_b2 = this.contentEditor) == null ? void 0 : _b2.applyLink(input2.value)) : false;
+      if (input2 && !applied) {
+        input2.setCustomValidity("Select text in a heading or body and use an HTTP(S), email, phone, relative, or hash URL.");
+        input2.reportValidity();
+      } else input2 == null ? void 0 : input2.setCustomValidity("");
       this.syncContentInspector();
     });
-    (_D = root.querySelector("[data-apply-image]")) == null ? void 0 : _D.addEventListener("click", () => {
+    (_D = root2.querySelector("[data-apply-image]")) == null ? void 0 : _D.addEventListener("click", () => {
       var _a2;
-      const source = root.querySelector("[data-image-src]");
-      const alt = root.querySelector("[data-image-alt]");
+      const source = root2.querySelector("[data-image-src]");
+      const alt = root2.querySelector("[data-image-alt]");
       if (source && alt && !((_a2 = this.contentEditor) == null ? void 0 : _a2.updateImage(source.value, alt.value))) source.setCustomValidity("Use an HTTP(S), relative, or supported data image URL.");
       else source == null ? void 0 : source.setCustomValidity("");
       this.syncContentInspector();
     });
-    (_E = root.querySelector("[data-undo]")) == null ? void 0 : _E.addEventListener("click", () => {
+    (_E = root2.querySelector("[data-undo]")) == null ? void 0 : _E.addEventListener("click", () => {
       var _a2;
       (_a2 = this.contentEditor) == null ? void 0 : _a2.undo();
       this.syncContentInspector();
     });
-    (_F = root.querySelector("[data-redo]")) == null ? void 0 : _F.addEventListener("click", () => {
+    (_F = root2.querySelector("[data-redo]")) == null ? void 0 : _F.addEventListener("click", () => {
       var _a2;
       (_a2 = this.contentEditor) == null ? void 0 : _a2.redo();
       this.syncContentInspector();
     });
-    root.addEventListener("pointerdown", (event) => {
+    root2.addEventListener("pointerdown", (event) => {
       var _a2, _b2;
       (_a2 = this.contentEditor) == null ? void 0 : _a2.rememberSelection();
       (_b2 = this.compositionEditor) == null ? void 0 : _b2.rememberSelection();
       if (event.target instanceof Element && event.target.closest("[data-v2-format],[data-v2-list]")) event.preventDefault();
     }, true);
-    root.addEventListener("focusin", () => {
+    root2.addEventListener("focusin", () => {
       var _a2, _b2;
       (_a2 = this.contentEditor) == null ? void 0 : _a2.rememberSelection();
       (_b2 = this.compositionEditor) == null ? void 0 : _b2.rememberSelection();
     }, true);
-    root.addEventListener("keydown", (rawEvent) => {
+    root2.addEventListener("keydown", (rawEvent) => {
       var _a2;
       const event = rawEvent;
       if (event.key === "Escape") {
@@ -5094,7 +9912,7 @@ class EditorModeController {
     this.onInput("[data-offset]", (value) => {
       this.currentBehavior().offset = numberValue(value, 8);
     });
-    root.querySelectorAll("[data-placement]").forEach((button) => button.addEventListener("click", () => {
+    root2.querySelectorAll("[data-placement]").forEach((button) => button.addEventListener("click", () => {
       this.currentBehavior().placement = button.dataset.placement;
       this.changed();
     }));
@@ -5139,10 +9957,10 @@ class EditorModeController {
   }
   bindCompositionInspector() {
     var _a, _b, _c, _d, _e;
-    const root = this.root;
+    const root2 = this.root;
     const change = (selector, run) => {
       var _a2;
-      return (_a2 = root.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => run(event.currentTarget.value));
+      return (_a2 = root2.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => run(event.currentTarget.value));
     };
     const number = (value, fallback) => {
       const parsed = Number(value);
@@ -5190,7 +10008,7 @@ class EditorModeController {
       const cell = (_a2 = this.compositionEditor) == null ? void 0 : _a2.getSelectedCell();
       (_b2 = this.compositionEditor) == null ? void 0 : _b2.updateCell({ style: { ...cell == null ? void 0 : cell.style, borderRadius: Math.max(0, Math.min(100, number(value, 0))) } });
     });
-    (_a = root.querySelector("[data-cell-stack]")) == null ? void 0 : _a.addEventListener("change", (event) => {
+    (_a = root2.querySelector("[data-cell-stack]")) == null ? void 0 : _a.addEventListener("change", (event) => {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateCell({ responsiveStack: event.currentTarget.checked });
     });
@@ -5264,7 +10082,7 @@ class EditorModeController {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.setImageSource(value.trim());
     });
-    (_b = root.querySelector("[data-choose-image]")) == null ? void 0 : _b.addEventListener("click", () => {
+    (_b = root2.querySelector("[data-choose-image]")) == null ? void 0 : _b.addEventListener("click", () => {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.chooseImageFile();
     });
@@ -5308,27 +10126,27 @@ class EditorModeController {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateBlock({ color: value });
     });
-    root.querySelectorAll("[data-v2-format]").forEach((button) => button.addEventListener("click", () => {
+    root2.querySelectorAll("[data-v2-format]").forEach((button) => button.addEventListener("click", () => {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.formatInline(button.dataset.v2Format);
     }));
-    root.querySelectorAll("[data-v2-list]").forEach((button) => button.addEventListener("click", () => {
+    root2.querySelectorAll("[data-v2-list]").forEach((button) => button.addEventListener("click", () => {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.toggleList(button.dataset.v2List);
     }));
-    (_c = root.querySelector("[data-v2-apply-link]")) == null ? void 0 : _c.addEventListener("click", () => {
+    (_c = root2.querySelector("[data-v2-apply-link]")) == null ? void 0 : _c.addEventListener("click", () => {
       var _a2;
-      const input = root.querySelector("[data-v2-link-url]");
-      if (input && !((_a2 = this.compositionEditor) == null ? void 0 : _a2.applyLink(input.value))) {
-        input.setCustomValidity("Use an HTTP(S), email, phone, relative, or hash URL.");
-        input.reportValidity();
-      } else input == null ? void 0 : input.setCustomValidity("");
+      const input2 = root2.querySelector("[data-v2-link-url]");
+      if (input2 && !((_a2 = this.compositionEditor) == null ? void 0 : _a2.applyLink(input2.value))) {
+        input2.setCustomValidity("Use an HTTP(S), email, phone, relative, or hash URL.");
+        input2.reportValidity();
+      } else input2 == null ? void 0 : input2.setCustomValidity("");
     });
-    (_d = root.querySelector("[data-v2-undo]")) == null ? void 0 : _d.addEventListener("click", () => {
+    (_d = root2.querySelector("[data-v2-undo]")) == null ? void 0 : _d.addEventListener("click", () => {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.undo();
     });
-    (_e = root.querySelector("[data-v2-redo]")) == null ? void 0 : _e.addEventListener("click", () => {
+    (_e = root2.querySelector("[data-v2-redo]")) == null ? void 0 : _e.addEventListener("click", () => {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.redo();
     });
@@ -5361,10 +10179,10 @@ class EditorModeController {
   }
   bindThemeControls() {
     var _a, _b, _c, _d, _e, _f, _g;
-    const root = this.root;
+    const root2 = this.root;
     this.ensureThemeState();
     this.applyVisualTheme(false);
-    (_a = root.querySelector("[data-theme-source]")) == null ? void 0 : _a.addEventListener("change", (event) => {
+    (_a = root2.querySelector("[data-theme-source]")) == null ? void 0 : _a.addEventListener("change", (event) => {
       var _a2, _b2;
       const value = event.currentTarget.value, state2 = this.ensureThemeState();
       if (value === "template") {
@@ -5395,15 +10213,15 @@ class EditorModeController {
     };
     const color = (selector, key) => {
       var _a2;
-      return (_a2 = root.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => override(key, event.currentTarget.value));
+      return (_a2 = root2.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => override(key, event.currentTarget.value));
     };
     const textInput = (selector, key) => {
       var _a2;
-      return (_a2 = root.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => override(key, event.currentTarget.value.trim()));
+      return (_a2 = root2.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => override(key, event.currentTarget.value.trim()));
     };
     const number = (selector, key, min, max) => {
       var _a2;
-      return (_a2 = root.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => {
+      return (_a2 = root2.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => {
         const value = Number(event.currentTarget.value);
         override(key, Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : void 0);
       });
@@ -5419,19 +10237,19 @@ class EditorModeController {
     number("[data-theme-radius]", "radius", 0, 48);
     number("[data-theme-button-radius]", "buttonRadius", 0, 48);
     number("[data-theme-spacing]", "spacing", 0, 64);
-    (_b = root.querySelector("[data-theme-shadow]")) == null ? void 0 : _b.addEventListener("change", (event) => {
+    (_b = root2.querySelector("[data-theme-shadow]")) == null ? void 0 : _b.addEventListener("change", (event) => {
       const mode = event.currentTarget.value;
       if (mode === "theme") return override("shadow", void 0);
       if (mode === "none") return override("shadow", { x: 0, y: 0, blur: 0, spread: 0, color: "transparent" });
       const source = this.ensureThemeState().baseTokens.shadows.md;
       override("shadow", { ...source, y: mode === "soft" ? Math.min(source.y, 10) : Math.max(source.y, 20), blur: mode === "soft" ? Math.min(source.blur, 28) : Math.max(source.blur, 56) });
     });
-    (_c = root.querySelector("[data-theme-reset]")) == null ? void 0 : _c.addEventListener("click", () => {
+    (_c = root2.querySelector("[data-theme-reset]")) == null ? void 0 : _c.addEventListener("click", () => {
       this.ensureThemeState().overrides = {};
       this.applyVisualTheme();
       this.setText("[data-style-status]", "Experience overrides reset. Block and cell customizations were preserved.");
     });
-    (_d = root.querySelector("[data-saved-style]")) == null ? void 0 : _d.addEventListener("change", (event) => {
+    (_d = root2.querySelector("[data-saved-style]")) == null ? void 0 : _d.addEventListener("change", (event) => {
       var _a2, _b2, _c2;
       const style = (_c2 = (_b2 = (_a2 = this.draft) == null ? void 0 : _a2.references) == null ? void 0 : _b2.stylePresets) == null ? void 0 : _c2.find((item) => item.id === event.currentTarget.value);
       if (!style) return;
@@ -5442,9 +10260,9 @@ class EditorModeController {
       this.applyVisualTheme();
       this.setText("[data-style-status]", `Applied ${style.name}.`);
     });
-    (_e = root.querySelector("[data-style-save]")) == null ? void 0 : _e.addEventListener("click", () => void this.saveCurrentStyle());
-    (_f = root.querySelector("[data-style-rename]")) == null ? void 0 : _f.addEventListener("click", () => void this.renameCurrentStyle());
-    (_g = root.querySelector("[data-style-delete]")) == null ? void 0 : _g.addEventListener("click", () => void this.deleteCurrentStyle());
+    (_e = root2.querySelector("[data-style-save]")) == null ? void 0 : _e.addEventListener("click", () => void this.saveCurrentStyle());
+    (_f = root2.querySelector("[data-style-rename]")) == null ? void 0 : _f.addEventListener("click", () => void this.renameCurrentStyle());
+    (_g = root2.querySelector("[data-style-delete]")) == null ? void 0 : _g.addEventListener("click", () => void this.deleteCurrentStyle());
   }
   async saveCurrentStyle() {
     var _a, _b;
@@ -5452,8 +10270,8 @@ class EditorModeController {
     if (!name || !this.bridge) return this.setText("[data-style-status]", "Enter a style name.");
     try {
       const preset = await this.bridge.saveStyle(name, resolvedTheme(this.ensureThemeState()));
-      const list = this.draft.references.stylePresets ?? (this.draft.references.stylePresets = []);
-      list.unshift(preset);
+      const list2 = this.draft.references.stylePresets ?? (this.draft.references.stylePresets = []);
+      list2.unshift(preset);
       this.refreshStyleOptions(preset.id);
       this.setText("[data-style-status]", "Style saved for this site.");
     } catch (error) {
@@ -5553,15 +10371,15 @@ class EditorModeController {
     });
     const route = () => {
       const advance = this.guide.steps[this.stepIndex].advance;
-      return (advance == null ? void 0 : advance.type) === "route" ? advance.pageRules.find((rule) => rule.kind === "include") : void 0;
+      return (advance == null ? void 0 : advance.type) === "route" ? advance.pageRules.find((rule2) => rule2.kind === "include") : void 0;
     };
     change("[data-guide-route]", (value) => {
-      const rule = route();
-      if (rule) rule.value = value.trim();
+      const rule2 = route();
+      if (rule2) rule2.value = value.trim();
     });
     change("[data-guide-route-operator]", (value) => {
-      const rule = route();
-      if (rule) rule.operator = value;
+      const rule2 = route();
+      if (rule2) rule2.operator = value;
     });
     change("[data-guide-delay]", (value) => {
       const step = this.guide.steps[this.stepIndex];
@@ -5657,9 +10475,9 @@ class EditorModeController {
     this.setText("[data-guide-interaction-status]", target ? `${capitalize(target.reliability)} selector · ${count} primary matches · ${this.targetStatus(target) === "found" ? "Found" : "Missing or on another page"}` : "Select an element or configure a positioning target first.");
     this.setValue("[data-guide-hover]", String((advance == null ? void 0 : advance.type) === "element_hover" ? advance.durationMs ?? 500 : 500));
     this.setValue("[data-guide-event]", (advance == null ? void 0 : advance.type) === "custom_event" ? advance.eventName : "");
-    const rule = (advance == null ? void 0 : advance.type) === "route" ? advance.pageRules.find((item) => item.kind === "include") : void 0;
-    this.setValue("[data-guide-route]", (rule == null ? void 0 : rule.value) ?? "");
-    this.setValue("[data-guide-route-operator]", (rule == null ? void 0 : rule.operator) ?? "equals");
+    const rule2 = (advance == null ? void 0 : advance.type) === "route" ? advance.pageRules.find((item) => item.kind === "include") : void 0;
+    this.setValue("[data-guide-route]", (rule2 == null ? void 0 : rule2.value) ?? "");
+    this.setValue("[data-guide-route-operator]", (rule2 == null ? void 0 : rule2.operator) ?? "equals");
     this.root.querySelector("[data-guide-route-extra]").hidden = (advance == null ? void 0 : advance.type) !== "route" || advance.pageRules.length <= 1;
     this.setValue("[data-guide-delay]", String(((_a = step.presentation) == null ? void 0 : _a.delayMs) ?? 0));
     this.setValue("[data-guide-missing-action]", ((_c = (_b = step.presentation) == null ? void 0 : _b.missingTarget) == null ? void 0 : _c.action) ?? "wait");
@@ -5724,7 +10542,7 @@ class EditorModeController {
     copy.id = editorId("step");
     copy.label = `${source.label || source.content.heading || "Step"} copy`;
     const document2 = onsiteDocumentFromBuilder(copy.builder);
-    if (document2 && copy.builder) {
+    if (document2 && copy.builder && !isSourceAuthored(copy.builder)) {
       const next = duplicateDocument(document2);
       const compiled = applyOnsiteDocument(copy.builder, next, getGuideStepPattern(copy));
       copy.content = compiled.content;
@@ -5935,15 +10753,10 @@ class EditorModeController {
     return !!document.querySelector("[data-movcues-picker-overlay]");
   }
   changed(render = true, preserveAiHistory = false) {
+    var _a, _b;
     if (this.saveState === "expired") return;
-    if (!preserveAiHistory) {
-      this.guideAiUndo = [];
-      this.guideAiRedo = [];
-      this.surveyAiUndo = [];
-      this.surveyAiRedo = [];
-      this.checklistAiUndo = [];
-      this.checklistAiRedo = [];
-    }
+    if (!render && !((_a = this.compositionEditor) == null ? void 0 : _a.isComposing())) (_b = this.compositionEditor) == null ? void 0 : _b.flush();
+    this.recordHistory();
     this.dirty = true;
     this.editGeneration++;
     this.updateContinuation();
@@ -5972,6 +10785,7 @@ class EditorModeController {
     }
     const allErrors = [...errors, ...((_b = this.compositionEditor) == null ? void 0 : _b.getValidation()) ?? [], ...((_c = this.guide) == null ? void 0 : _c.steps.flatMap(guideStepConfigurationErrors)) ?? [], ...this.survey ? surveyBranchErrors(this.survey) : []];
     this.showValidation(allErrors);
+    if (!allErrors.length) this.recordHistory();
     return !allErrors.length;
   }
   showValidation(errors) {
@@ -6226,7 +11040,7 @@ class EditorModeController {
     }
   }
   attachContentEditor() {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c;
     if (((_a = this.draft) == null ? void 0 : _a.experience.builderMode) !== "onsite" || this.mode !== "design") return;
     const host = Array.from(document.querySelectorAll("[data-movcues-experience],[data-movcues-checklist]")).find(
       (element) => (element.dataset.movcuesExperience ?? element.dataset.movcuesChecklist) === this.draft.experience.id
@@ -6237,54 +11051,58 @@ class EditorModeController {
     if (document.body && !document.body.contains(host)) document.body.appendChild(host);
     (_b = this.contentEditor) == null ? void 0 : _b.destroy();
     (_c = this.compositionEditor) == null ? void 0 : _c.destroy();
-    if (isSourceAuthored(builder)) {
-      this.contentEditor = null;
-      this.compositionEditor = null;
-      this.componentSelection = null;
-      this.compositionSelection = { kind: "step", label: "Source-authored widget" };
-      (_d = this.root) == null ? void 0 : _d.querySelectorAll("main button:not([data-inspector-tab]):not([data-ai-panel] *),main input:not([data-ai-panel] *),main select:not([data-ai-panel] *)").forEach((control) => {
-        if (!control.disabled) {
-          control.disabled = true;
-          control.dataset.movcuesSourceDisabled = "";
-        }
-      });
-      this.setText("[data-mode-hint]", "Source mode · full HTML/CSS is preserved exactly; use Movcues AI to redesign it.");
-      this.syncAiPanel();
-      return;
-    }
-    (_e = this.root) == null ? void 0 : _e.querySelectorAll("[data-movcues-source-disabled]").forEach((control) => {
-      control.disabled = false;
-      delete control.dataset.movcuesSourceDisabled;
-    });
     try {
       this.compositionEditor = new OnsiteCompositionEditor(host.shadowRoot, builder, content, this.checklist ? "checklist" : this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : this.draft.experience.widgetType ?? "modal", Boolean(this.guide), {
         onPatch: () => {
           var _a2;
           (_a2 = this.checklistEditor) == null ? void 0 : _a2.applyDesign(this.draft.experience.id);
         },
-        onChange: () => {
-          this.syncOnsiteAnchoredPointer(host.shadowRoot, builder);
-          this.changed(false);
+        onChange: (typing) => {
+          this.historyTyping = Boolean(typing);
+          try {
+            this.syncOnsiteAnchoredPointer(host.shadowRoot, builder);
+            this.changed(false);
+          } finally {
+            this.historyTyping = false;
+          }
         },
         onValidation: (errors) => this.showValidation(errors),
         onImageStatus: (message) => this.setText("[data-image-status]", message),
         onSelectionChange: (selection) => {
-          var _a2, _b2, _c2, _d2;
+          var _a2, _b2, _c2, _d;
+          this.history.endGroup();
           if (this.checklist && selection.kind !== "step") {
             (_b2 = (_a2 = this.root) == null ? void 0 : _a2.querySelector("aside")) == null ? void 0 : _b2.classList.remove("minimized");
-            (_d2 = (_c2 = this.root) == null ? void 0 : _c2.querySelector("[data-minimize]")) == null ? void 0 : _d2.setAttribute("aria-expanded", "true");
+            (_d = (_c2 = this.root) == null ? void 0 : _c2.querySelector("[data-minimize]")) == null ? void 0 : _d.setAttribute("aria-expanded", "true");
           }
           this.compositionSelection = selection;
+          this.recordHistory();
           this.syncCompositionInspector();
           this.syncAiPanel();
-        }
+        },
+        onUndo: () => this.globalUndo(),
+        onRedo: () => this.globalRedo(),
+        canUndo: () => this.history.canUndo(),
+        canRedo: () => this.history.canRedo(),
+        onTransaction: () => this.recordHistory()
       }, this.survey ? { config: this.survey, step: this.survey.steps[this.stepIndex] } : void 0, this.checklist ?? void 0);
       this.compositionEditor.start();
+      if (this.preferredSelection) {
+        this.compositionEditor.restoreSelection(this.preferredSelection);
+        this.preferredSelection = null;
+      }
       this.syncOnsiteAnchoredPointer(host.shadowRoot, builder);
       return;
     } catch (error) {
       this.showValidation([error instanceof Error ? error.message : "This layout could not be converted safely."]);
       this.compositionEditor = null;
+    }
+    if (isSourceAuthored(builder)) {
+      this.contentEditor = null;
+      this.compositionSelection = { kind: "step", label: "Source design" };
+      this.syncCompositionInspector();
+      this.syncAiPanel();
+      return;
     }
     this.contentEditor = new OnsiteContentEditor(host.shadowRoot, builder, content, {
       onChange: () => this.changed(false),
@@ -6296,9 +11114,9 @@ class EditorModeController {
     });
     this.contentEditor.start();
   }
-  syncOnsiteAnchoredPointer(root, builder) {
+  syncOnsiteAnchoredPointer(root2, builder) {
     var _a, _b;
-    const pointer = root.querySelector(".movcues-anchor-pointer");
+    const pointer = root2.querySelector(".movcues-anchor-pointer");
     if (!pointer) return;
     const color = (_b = (_a = onsiteDocumentFromBuilder(builder)) == null ? void 0 : _a.root.style) == null ? void 0 : _b.background;
     if (color) {
@@ -6364,8 +11182,8 @@ class EditorModeController {
     if (!inspector) return;
     const globalUndo = this.root.querySelector("[data-global-undo]");
     const globalRedo = this.root.querySelector("[data-global-redo]");
-    if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !this.surveyAiUndo.length && !this.checklistAiUndo.length && !this.widgetAiUndo.length && !(editor == null ? void 0 : editor.canUndo()) && !((_c = this.contentEditor) == null ? void 0 : _c.canUndo());
-    if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !this.surveyAiRedo.length && !this.checklistAiRedo.length && !this.widgetAiRedo.length && !(editor == null ? void 0 : editor.canRedo()) && !((_d = this.contentEditor) == null ? void 0 : _d.canRedo());
+    if (globalUndo) globalUndo.disabled = !this.history.canUndo() && !((_c = this.contentEditor) == null ? void 0 : _c.canUndo());
+    if (globalRedo) globalRedo.disabled = !this.history.canRedo() && !((_d = this.contentEditor) == null ? void 0 : _d.canRedo());
     inspector.hidden = this.mode !== "design" || !editor || !selection;
     this.root.querySelector("[data-content-inspector]").hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
     if (!editor || !selection) return;
@@ -6454,8 +11272,8 @@ class EditorModeController {
     if (undo) undo.disabled = !editor.canUndo();
     const redo = this.root.querySelector("[data-v2-redo]");
     if (redo) redo.disabled = !editor.canRedo();
-    if (globalUndo) globalUndo.disabled = !this.guideAiUndo.length && !this.surveyAiUndo.length && !this.checklistAiUndo.length && !this.widgetAiUndo.length && !editor.canUndo();
-    if (globalRedo) globalRedo.disabled = !this.guideAiRedo.length && !this.surveyAiRedo.length && !this.checklistAiRedo.length && !this.widgetAiRedo.length && !editor.canRedo();
+    if (globalUndo) globalUndo.disabled = !editor.canUndo();
+    if (globalRedo) globalRedo.disabled = !editor.canRedo();
   }
   setInspectorTab(tab) {
     var _a;
@@ -6495,8 +11313,8 @@ class EditorModeController {
     if (proposal) proposal.hidden = !this.aiProposal;
     if (!this.aiProposal) return;
     this.setText("[data-ai-summary]", this.aiProposal.value.summary);
-    const list = this.root.querySelector("[data-ai-operations]");
-    if (list) {
+    const list2 = this.root.querySelector("[data-ai-operations]");
+    if (list2) {
       const items = this.aiProposal.value.operations.map((operation, index) => {
         var _a2, _b2;
         const item = document.createElement("li");
@@ -6508,14 +11326,14 @@ class EditorModeController {
       });
       try {
         const warnings = this.survey && this.definition ? applySurveyAiProposal(this.definition, this.aiProposal.value).warnings : this.checklist ? applyChecklistAiProposal(this.checklist, this.aiProposal.value, ((_b = this.draft) == null ? void 0 : _b.references) ?? { guides: [], segments: [] }).warnings : [];
-        for (const warning of warnings) {
+        for (const warning2 of warnings) {
           const item = document.createElement("li");
-          item.textContent = `Warning · ${warning}`;
+          item.textContent = `Warning · ${warning2}`;
           items.push(item);
         }
       } catch {
       }
-      list.replaceChildren(...items);
+      list2.replaceChildren(...items);
     }
     const stale = this.aiProposalIsStale();
     const unresolved = this.aiProposal.value.operations.some((operation, index) => operation.type === "request_guide_target" && !this.aiResolvedTargets.has(index));
@@ -6537,8 +11355,8 @@ class EditorModeController {
   }
   async sendAiPrompt() {
     var _a, _b, _c, _d;
-    const input = (_a = this.root) == null ? void 0 : _a.querySelector("[data-ai-prompt]");
-    const prompt = input == null ? void 0 : input.value.trim();
+    const input2 = (_a = this.root) == null ? void 0 : _a.querySelector("[data-ai-prompt]");
+    const prompt = input2 == null ? void 0 : input2.value.trim();
     const builder = this.currentBuilder(), sourceMode = isSourceAuthored(builder);
     if (!prompt || !this.bridge || !this.draft || !builder || !this.compositionSelection || !this.compositionEditor && !sourceMode) return;
     if (!this.flushContent() || this.dirty && !await this.persist()) return;
@@ -6551,7 +11369,7 @@ class EditorModeController {
     const cancel = (_c = this.root) == null ? void 0 : _c.querySelector("[data-ai-cancel]");
     if (cancel) cancel.hidden = false;
     this.aiMessages.push({ role: "user", text: prompt });
-    if (input) input.value = "";
+    if (input2) input2.value = "";
     this.setText("[data-ai-status]", "Generating a validated proposal…");
     this.discardAiPreview();
     this.aiProposal = null;
@@ -6561,10 +11379,11 @@ class EditorModeController {
       const document2 = onsiteDocumentFromBuilder(builder);
       if (!document2) throw new Error("This draft has no recoverable on-site document.");
       const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.ensureThemeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : this.survey ? surveyAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, definition: this.definition, currentStepId: this.survey.steps[this.stepIndex].id, selection: this.compositionSelection, scope: this.compositionSelection.kind === "step" ? "survey" : "step" }) : this.checklist ? checklistAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, checklist: this.checklist, references: this.draft.references ?? { guides: [], segments: [] }, selection: this.compositionSelection, currentView: ((_d = this.checklistEditor) == null ? void 0 : _d.getView()) ?? "expanded", theme: resolvedTheme(this.ensureThemeState()) }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: document2, builder });
+      const requestEditGeneration = this.editGeneration, requestSelectionKey = this.aiSelectionKey();
       const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context }, abort.signal);
       if (generation !== this.aiRequestGeneration) return;
       this.aiConversationId = response.conversationId;
-      this.aiProposal = response.proposal ? { value: response.proposal, revision: response.revision, generation: this.editGeneration, selectionKey: this.aiSelectionKey() } : null;
+      this.aiProposal = response.proposal ? { value: response.proposal, revision: response.revision, generation: requestEditGeneration, selectionKey: requestSelectionKey } : null;
       this.aiMessages.push({ role: "assistant", text: response.markdown.trim() || "Proposal generated." });
       this.setText("[data-ai-status]", "");
       this.syncAiPanel();
@@ -6604,15 +11423,12 @@ class EditorModeController {
     if (this.checklist) {
       try {
         const before = cloneOnsite(this.checklistAiPreviewOriginal ?? this.checklist), candidate = this.checklistAiPreviewCandidate ?? applyChecklistAiProposal(before, this.aiProposal.value, this.draft.references ?? { guides: [], segments: [] }).definition;
-        this.checklistAiUndo.push(before);
-        if (this.checklistAiUndo.length > 20) this.checklistAiUndo.shift();
-        this.checklistAiRedo = [];
         this.setChecklistDefinition(cloneOnsite(candidate));
         this.checklistAiPreviewOriginal = null;
         this.checklistAiPreviewCandidate = null;
         this.aiPreviewReturnMode = null;
         this.aiProposal = null;
-        this.changed(true, true);
+        this.finishAiApply();
         this.setText("[data-ai-status]", "Applied. Undo restores the complete Checklist in one step.");
         this.syncAiPanel();
       } catch (error) {
@@ -6624,15 +11440,12 @@ class EditorModeController {
       try {
         const before = cloneOnsite(this.surveyAiPreviewOriginal ?? this.definition);
         const candidate = this.surveyAiPreviewCandidate ?? applySurveyAiProposal(before, this.aiProposal.value).definition;
-        this.surveyAiUndo.push(before);
-        if (this.surveyAiUndo.length > 20) this.surveyAiUndo.shift();
-        this.surveyAiRedo = [];
         this.setSurveyDefinition(cloneOnsite(candidate));
         this.surveyAiPreviewOriginal = null;
         this.surveyAiPreviewCandidate = null;
         this.aiPreviewReturnMode = null;
         this.aiProposal = null;
-        this.changed(true, true);
+        this.finishAiApply();
         this.refreshStepBar();
         this.setText("[data-ai-status]", "Applied. Undo restores the complete Survey in one step.");
         this.syncAiPanel();
@@ -6645,16 +11458,13 @@ class EditorModeController {
       if (this.aiProposal.value.operations.some((operation) => operation.type === "replace_markup")) {
         try {
           const before = cloneOnsite(this.widgetAiPreviewOriginal ?? this.definition), candidate = this.widgetAiPreviewCandidate ?? this.applyWidgetSourceProposal(before);
-          this.widgetAiUndo.push(before);
-          if (this.widgetAiUndo.length > 20) this.widgetAiUndo.shift();
-          this.widgetAiRedo = [];
           this.definition = cloneOnsite(candidate);
           this.widgetAiPreviewOriginal = null;
           this.widgetAiPreviewCandidate = null;
           this.aiPreviewReturnMode = null;
           this.aiProposal = null;
-          this.changed(true, true);
-          this.setText("[data-ai-status]", "Applied atomically. This widget is now in Source mode; Undo restores the prior structured design.");
+          this.finishAiApply();
+          this.setText("[data-ai-status]", "Applied. You can continue editing this design directly. Undo restores the entire proposal.");
           this.syncAiPanel();
         } catch (error) {
           this.setText("[data-ai-status]", error instanceof Error ? error.message : "The source proposal is invalid.");
@@ -6671,16 +11481,13 @@ class EditorModeController {
     try {
       const before = cloneOnsite(this.aiPreviewOriginal ?? this.guide);
       const candidate = this.aiPreviewCandidate ?? applyGuideAiProposal(before, this.aiProposal.value, this.aiResolvedTargets).guide;
-      this.guideAiUndo.push(before);
-      if (this.guideAiUndo.length > 20) this.guideAiUndo.shift();
-      this.guideAiRedo = [];
       this.setGuideDefinition(cloneOnsite(candidate));
       this.aiPreviewOriginal = null;
       this.aiPreviewCandidate = null;
       this.aiPreviewReturnMode = null;
       this.aiProposal = null;
       this.aiResolvedTargets.clear();
-      this.changed(true, true);
+      this.finishAiApply();
       this.refreshStepBar();
       this.setText("[data-ai-status]", "Applied. Undo restores the complete Guide in one step.");
       this.syncAiPanel();
@@ -6722,12 +11529,13 @@ class EditorModeController {
     if (!this.aiProposal || !this.guide || !this.draft || this.aiProposal.revision !== this.draft.version.revision || this.aiProposal.generation !== this.editGeneration) return;
     try {
       this.discardAiPreview();
+      this.aiPreviewLocation = { index: this.stepIndex, selection: this.compositionSelection };
       const original = cloneOnsite(this.guide);
       this.aiPreviewReturnMode = this.mode;
-      const result = applyGuideAiProposal(original, this.aiProposal.value, this.aiResolvedTargets);
+      const result2 = applyGuideAiProposal(original, this.aiProposal.value, this.aiResolvedTargets);
       this.aiPreviewOriginal = original;
-      this.aiPreviewCandidate = cloneOnsite(result.guide);
-      this.setGuideDefinition(cloneOnsite(result.guide));
+      this.aiPreviewCandidate = cloneOnsite(result2.guide);
+      this.setGuideDefinition(cloneOnsite(result2.guide));
       this.stepIndex = 0;
       this.refreshStepBar();
       this.startGuidePreview();
@@ -6792,8 +11600,10 @@ class EditorModeController {
     this.definition = value;
   }
   setSurveyDefinition(value) {
+    var _a;
     this.definition = value;
     this.survey = value.survey ?? null;
+    if (this.survey) (_a = this.surveyEditor) == null ? void 0 : _a.setDefinition(this.survey);
   }
   setChecklistDefinition(value) {
     var _a;
@@ -6819,6 +11629,7 @@ class EditorModeController {
     if (!this.aiProposal || !this.draft || !this.definition || this.aiProposalIsStale()) return;
     try {
       this.discardAiPreview();
+      this.aiPreviewLocation = { index: this.stepIndex, selection: this.compositionSelection };
       const original = cloneOnsite(this.definition), candidate = this.applyWidgetSourceProposal(original);
       this.aiPreviewReturnMode = this.mode;
       this.widgetAiPreviewOriginal = original;
@@ -6834,13 +11645,14 @@ class EditorModeController {
     if (!this.aiProposal || !this.checklist || !this.draft || this.aiProposalIsStale()) return;
     try {
       this.discardAiPreview();
-      const original = cloneOnsite(this.checklist), result = applyChecklistAiProposal(original, this.aiProposal.value, this.draft.references ?? { guides: [], segments: [] });
+      this.aiPreviewLocation = { index: this.stepIndex, selection: this.compositionSelection };
+      const original = cloneOnsite(this.checklist), result2 = applyChecklistAiProposal(original, this.aiProposal.value, this.draft.references ?? { guides: [], segments: [] });
       this.aiPreviewReturnMode = this.mode;
       this.checklistAiPreviewOriginal = original;
-      this.checklistAiPreviewCandidate = cloneOnsite(result.definition);
-      this.setChecklistDefinition(cloneOnsite(result.definition));
+      this.checklistAiPreviewCandidate = cloneOnsite(result2.definition);
+      this.setChecklistDefinition(cloneOnsite(result2.definition));
       this.setMode("preview");
-      this.setText("[data-ai-status]", `Previewing the complete proposed Checklist.${result.warnings.length ? ` ${result.warnings.join(" ")}` : ""} Apply or Discard to finish.`);
+      this.setText("[data-ai-status]", `Previewing the complete proposed Checklist.${result2.warnings.length ? ` ${result2.warnings.join(" ")}` : ""} Apply or Discard to finish.`);
     } catch (error) {
       this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Checklist proposal is invalid.");
     }
@@ -6857,94 +11669,91 @@ class EditorModeController {
     if (!this.aiProposal || !this.survey || !this.draft || this.aiProposal.revision !== this.draft.version.revision || this.aiProposal.generation !== this.editGeneration) return;
     try {
       this.discardAiPreview();
-      const original = cloneOnsite(this.definition), result = applySurveyAiProposal(original, this.aiProposal.value);
+      this.aiPreviewLocation = { index: this.stepIndex, selection: this.compositionSelection };
+      const original = cloneOnsite(this.definition), result2 = applySurveyAiProposal(original, this.aiProposal.value);
       this.aiPreviewReturnMode = this.mode;
       this.surveyAiPreviewOriginal = original;
-      this.surveyAiPreviewCandidate = cloneOnsite(result.definition);
-      this.setSurveyDefinition(cloneOnsite(result.definition));
+      this.surveyAiPreviewCandidate = cloneOnsite(result2.definition);
+      this.setSurveyDefinition(cloneOnsite(result2.definition));
       this.stepIndex = 0;
       this.refreshStepBar();
       this.setMode("preview");
-      this.setText("[data-ai-status]", `Previewing the complete proposed Survey.${result.warnings.length ? ` ${result.warnings.join(" ")}` : ""} Apply or Discard to finish.`);
+      this.setText("[data-ai-status]", `Previewing the complete proposed Survey.${result2.warnings.length ? ` ${result2.warnings.join(" ")}` : ""} Apply or Discard to finish.`);
     } catch (error) {
       this.setText("[data-ai-status]", error instanceof Error ? error.message : "The Survey proposal is invalid.");
     }
   }
-  globalUndo() {
+  recordHistory() {
+    var _a;
+    if (this.restoringHistory || !this.definition || ((_a = this.compositionEditor) == null ? void 0 : _a.isComposing()) || this.widgetAiPreviewOriginal || this.aiPreviewOriginal || this.surveyAiPreviewOriginal || this.checklistAiPreviewOriginal) return;
+    this.history.record({ definition: cloneOnsite(this.checklist ?? this.definition), selection: this.compositionSelection, stepIndex: this.stepIndex }, this.historyTyping);
+  }
+  finishAiApply() {
     var _a, _b;
-    if (!this.guide && !this.survey && !this.checklist && this.widgetAiUndo.length && this.flushContent()) {
-      const previous = this.widgetAiUndo.pop();
-      this.widgetAiRedo.push(cloneOnsite(this.definition));
-      this.definition = previous;
-      this.changed(true, true);
-      return;
-    }
-    if (this.guide && this.guideAiUndo.length && this.flushContent()) {
-      const previous = this.guideAiUndo.pop();
-      this.guideAiRedo.push(cloneOnsite(this.guide));
-      this.setGuideDefinition(previous);
-      this.stepIndex = clampStep(this.stepIndex, previous.steps.length);
-      this.changed(true, true);
-      this.refreshStepBar();
-      return;
-    }
-    if (this.survey && this.surveyAiUndo.length && this.flushContent()) {
-      const previous = this.surveyAiUndo.pop();
-      this.surveyAiRedo.push(cloneOnsite(this.definition));
-      this.setSurveyDefinition(previous);
-      this.stepIndex = clampStep(this.stepIndex, this.survey.steps.length);
-      this.changed(true, true);
-      this.refreshStepBar();
-      return;
-    }
-    if (this.checklist && this.checklistAiUndo.length && this.flushContent()) {
-      const previous = this.checklistAiUndo.pop();
-      this.checklistAiRedo.push(cloneOnsite(this.checklist));
-      this.setChecklistDefinition(previous);
-      this.changed(true, true);
-      return;
-    }
-    (_a = this.compositionEditor) == null ? void 0 : _a.undo();
-    (_b = this.contentEditor) == null ? void 0 : _b.undo();
-    this.syncContentInspector();
+    const location2 = this.aiPreviewLocation;
+    this.preferredSelection = (location2 == null ? void 0 : location2.selection) ?? this.compositionSelection;
+    if (location2) this.stepIndex = location2.index;
+    this.aiPreviewLocation = null;
+    (_a = this.contentEditor) == null ? void 0 : _a.destroy();
+    this.contentEditor = null;
+    (_b = this.compositionEditor) == null ? void 0 : _b.destroy();
+    this.compositionEditor = null;
+    this.mode = "design";
+    this.guidePreviewComplete = false;
+    this.changed(true, true);
+  }
+  globalUndo() {
+    var _a;
+    if (!this.flushContent()) return;
+    this.recordHistory();
+    const value = this.history.undo();
+    if (value) this.restoreHistory(value);
+    else (_a = this.contentEditor) == null ? void 0 : _a.undo();
   }
   globalRedo() {
-    var _a, _b;
-    if (!this.guide && !this.survey && !this.checklist && this.widgetAiRedo.length && this.flushContent()) {
-      const next = this.widgetAiRedo.pop();
-      this.widgetAiUndo.push(cloneOnsite(this.definition));
-      this.definition = next;
-      this.changed(true, true);
-      return;
-    }
-    if (this.guide && this.guideAiRedo.length && this.flushContent()) {
-      const next = this.guideAiRedo.pop();
-      this.guideAiUndo.push(cloneOnsite(this.guide));
-      this.setGuideDefinition(next);
-      this.stepIndex = clampStep(this.stepIndex, next.steps.length);
+    var _a;
+    if (!this.flushContent()) return;
+    const value = this.history.redo();
+    if (value) this.restoreHistory(value);
+    else (_a = this.contentEditor) == null ? void 0 : _a.redo();
+  }
+  restoreHistory(entry) {
+    var _a, _b, _c, _d;
+    const value = entry.definition;
+    this.restoringHistory = true;
+    try {
+      if (this.compositionEditor && !this.checklist && entry.stepIndex === this.stepIndex) {
+        const current = cloneOnsite(this.definition), target = cloneOnsite(value);
+        const owner = (definition) => "steps" in definition ? definition.steps[this.stepIndex] : definition.survey ? definition.survey.steps[this.stepIndex] : definition;
+        const a = owner(current), b = owner(target);
+        if ((a == null ? void 0 : a.builder) && (b == null ? void 0 : b.builder)) {
+          const builder = b.builder, content = b.content;
+          a.builder = b.builder;
+          a.content = b.content;
+          if (JSON.stringify(current) === JSON.stringify(target)) {
+            this.compositionEditor.restoreBuilder(builder, content);
+            this.compositionEditor.restoreSelection(entry.selection ?? { kind: "step", label: "Step" });
+            this.changed(false, true);
+            return;
+          }
+        }
+      }
+      this.preferredSelection = entry.selection;
+      this.stepIndex = entry.stepIndex;
+      (_a = this.compositionEditor) == null ? void 0 : _a.destroy();
+      this.compositionEditor = null;
+      (_b = this.contentEditor) == null ? void 0 : _b.destroy();
+      this.contentEditor = null;
+      if (this.checklist) this.setChecklistDefinition(value);
+      else if (this.guide) this.setGuideDefinition(value);
+      else if (this.survey) this.setSurveyDefinition(value);
+      else this.definition = value;
+      this.stepIndex = clampStep(this.stepIndex, ((_c = this.guide) == null ? void 0 : _c.steps.length) ?? ((_d = this.survey) == null ? void 0 : _d.steps.length) ?? 1);
       this.changed(true, true);
       this.refreshStepBar();
-      return;
+    } finally {
+      this.restoringHistory = false;
     }
-    if (this.survey && this.surveyAiRedo.length && this.flushContent()) {
-      const next = this.surveyAiRedo.pop();
-      this.surveyAiUndo.push(cloneOnsite(this.definition));
-      this.setSurveyDefinition(next);
-      this.stepIndex = clampStep(this.stepIndex, this.survey.steps.length);
-      this.changed(true, true);
-      this.refreshStepBar();
-      return;
-    }
-    if (this.checklist && this.checklistAiRedo.length && this.flushContent()) {
-      const next = this.checklistAiRedo.pop();
-      this.checklistAiUndo.push(cloneOnsite(this.checklist));
-      this.setChecklistDefinition(next);
-      this.changed(true, true);
-      return;
-    }
-    (_a = this.compositionEditor) == null ? void 0 : _a.redo();
-    (_b = this.contentEditor) == null ? void 0 : _b.redo();
-    this.syncContentInspector();
   }
   syncPanel() {
     var _a, _b;
@@ -6972,8 +11781,8 @@ class EditorModeController {
     const layer = this.currentLayer();
     const layerMode = (layer == null ? void 0 : layer.mode) ?? "always_on_top";
     this.setValue("[data-layer-mode]", layerMode);
-    const relative = this.root.querySelector("[data-layer-relative]");
-    if (relative) relative.hidden = (layer == null ? void 0 : layer.mode) !== "relative";
+    const relative2 = this.root.querySelector("[data-layer-relative]");
+    if (relative2) relative2.hidden = (layer == null ? void 0 : layer.mode) !== "relative";
     const custom = this.root.querySelector("[data-layer-custom]");
     if (custom) custom.hidden = (layer == null ? void 0 : layer.mode) !== "custom";
     this.setText("[data-layer-description]", layerMode === "auto" ? "Respect the application's UI layers." : layerMode === "relative" ? "Place this experience around a selected page element." : layerMode === "custom" ? "Use an advanced numeric layer." : layer ? "Keep this experience above normal application UI." : "Legacy compatibility: keep this experience above normal application UI.");
@@ -7013,7 +11822,7 @@ class EditorModeController {
   }
   hideChecklistWidgetControls() {
     if (!this.checklist || !this.root) return;
-    this.root.querySelectorAll("[data-step-only],[data-edge]").forEach((node) => node.hidden = true);
+    this.root.querySelectorAll("[data-step-only],[data-edge]").forEach((node2) => node2.hidden = true);
     const target = this.root.querySelector("[data-mode=target]");
     if (target) {
       target.hidden = true;
@@ -7208,14 +12017,6 @@ class EditorModeController {
     this.widgetAiPreviewOriginal = null;
     this.widgetAiPreviewCandidate = null;
     this.aiPreviewReturnMode = null;
-    this.guideAiUndo = [];
-    this.guideAiRedo = [];
-    this.surveyAiUndo = [];
-    this.surveyAiRedo = [];
-    this.checklistAiUndo = [];
-    this.checklistAiRedo = [];
-    this.widgetAiUndo = [];
-    this.widgetAiRedo = [];
     clearTimeout(this.expiryTimer);
     clearInterval(this.validationTimer);
     clearTimeout(this.saveTimer);
@@ -7302,7 +12103,7 @@ function formatFrequency(value) {
 }
 function formatPageRules(rules) {
   if (!rules.length) return "All pages";
-  return rules.map((rule) => `${rule.kind === "exclude" ? "Exclude" : "Include"} ${rule.value}`).join(" · ");
+  return rules.map((rule2) => `${rule2.kind === "exclude" ? "Exclude" : "Include"} ${rule2.value}`).join(" · ");
 }
 function formatAdvance(advance) {
   if (!advance || advance.type === "button") return "Button click";
@@ -7336,4 +12137,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-by6uUZP4.js.map
+//# sourceMappingURL=EditorModeController-BG0NqxAg.js.map
