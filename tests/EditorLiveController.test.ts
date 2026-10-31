@@ -510,6 +510,26 @@ describe("live placement editor", () => {
     prompt.value = "Add it"; editorRoot().querySelector<HTMLFormElement>("[data-ai-form]")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await vi.waitFor(() => { expect(turns).toBe(2); expect(editorRoot().querySelector<HTMLElement>("[data-ai-proposal]")?.hidden).toBe(false); }); editorRoot().querySelector<HTMLButtonElement>("[data-ai-apply]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(3); editorRoot().querySelector<HTMLButtonElement>("[data-global-undo]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(2); editorRoot().querySelector<HTMLButtonElement>("[data-global-redo]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(3);
   });
 
+  it("rejects an AI response if a manual edit happened while the request was running", async () => {
+    const base = editorFetch(onsiteDraft()); let release: (() => void) | undefined, requested = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/ai/chat")) {
+        const body = JSON.parse(String(init?.body)); requested = true;
+        await new Promise<void>(resolve => { release = resolve; });
+        return { ok: true, status: 200, json: async () => ({ conversationId: "pending_ai", revision: body.revision, markdown: "Ready", proposal: { summary: "A late proposal", operations: [{ type: "update_text", blockId: "old_block", text: "Stale" }] } }) };
+      }
+      return base(input, init);
+    }));
+    controller = new EditorModeController("https://api.example.com"); await controller.start("token");
+    editorRoot().querySelector<HTMLButtonElement>('[data-inspector-tab="ai"]')!.click(); editorRoot().querySelector<HTMLTextAreaElement>("[data-ai-prompt]")!.value = "Improve the heading";
+    editorRoot().querySelector<HTMLFormElement>("[data-ai-form]")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(requested).toBe(true));
+    const heading = document.querySelector<HTMLElement>("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLElement>("h2")!;
+    heading.textContent = "Latest manual edit"; heading.dispatchEvent(new Event("input", { bubbles: true })); release!();
+    await vi.waitFor(() => expect(editorRoot().querySelector<HTMLElement>("[data-ai-proposal]")?.hidden).toBe(false));
+    expect(editorRoot().querySelector<HTMLButtonElement>("[data-ai-apply]")!.disabled).toBe(true); expect(heading.textContent).toBe("Latest manual edit");
+  });
+
 });
 
 function editorFetch(draft: EditorDraft) {
