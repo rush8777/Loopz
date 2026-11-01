@@ -2,14 +2,10 @@ import { BUILDER_ALLOWED_ATTRIBUTES, BUILDER_ALLOWED_TAGS, BUILDER_SURVEY_INPUT_
 import { SOURCE_EDITABILITY, sourceEditabilityErrors, type SourceElement } from "./SourceEditability";
 import { sourceEditingCssErrors } from "./SourceStyles";
 import type { ExperienceContent, WidgetBuilderState } from "../types";
+import { ORDINARY_ACTION_ID_PATTERN, ordinaryButtonActionErrors, ordinaryButtonActionsFor, type OrdinaryButtonActionConfig } from "../OrdinaryButtonAction";
 
-export type SourceAction =
-  | { type: "dismiss" | "next_step" | "previous_step" }
-  | { type: "open_url"; url: string }
-  | { type: "track_event"; eventName: string };
+export type SourceAction = OrdinaryButtonActionConfig;
 export interface ReplaceMarkupOperation { type: "replace_markup"; stepId?: string; widthPx?: number; html: string; css: string; actionBindings: Record<string, SourceAction> }
-
-const actionIdPattern = /^[A-Za-z][A-Za-z0-9_-]{2,63}$/;
 
 function parse(html: string): HTMLTemplateElement { const template = document.createElement("template"); template.innerHTML = html; return template; }
 
@@ -34,14 +30,11 @@ export function validateSourceMarkup(operation: ReplaceMarkupOperation, options:
   const ids = elements.map(element => element.id).filter(Boolean); if (new Set(ids).size !== ids.length) errors.push("Source HTML contains duplicate IDs.");
   const buttons = elements.filter((element): element is HTMLButtonElement => element instanceof HTMLButtonElement && !element.dataset.movcuesSurveyAction && !element.dataset.movcuesOptionId && !element.dataset.movcuesChecklistRole && !element.dataset.movcuesChecklistItemRole);
   const actionIds = buttons.map(button => button.dataset.movcuesActionId ?? "");
-  if (actionIds.some(value => !actionIdPattern.test(value)) || new Set(actionIds).size !== actionIds.length) errors.push("Every ordinary button needs one unique valid action ID.");
+  if (actionIds.some(value => !ORDINARY_ACTION_ID_PATTERN.test(value)) || new Set(actionIds).size !== actionIds.length) errors.push("Every ordinary button needs one unique valid action ID.");
   const bindings = Object.keys(operation.actionBindings);
   if (bindings.length !== actionIds.length || actionIds.some(value => !(value in operation.actionBindings))) errors.push("Button actions and action bindings must match exactly.");
-  for (const action of Object.values(operation.actionBindings)) {
-    if (!options.guide && (action.type === "next_step" || action.type === "previous_step")) errors.push(`${action.type} is only supported by Guides.`);
-    if (action.type === "open_url" && !/^https?:\/\//i.test(action.url)) errors.push("Open URL actions must use HTTP(S).");
-    if (action.type === "track_event" && (!action.eventName.trim() || /[\u0000-\u001f\u007f]/.test(action.eventName))) errors.push("Track-event action is invalid.");
-  }
+  if (buttons.some(button => isRuntimeOwnedCloseControl(button, operation.actionBindings[button.dataset.movcuesActionId ?? ""]))) errors.push("Do not include an icon-only close button in authored HTML; the runtime supplies the dismiss control.");
+  for (const action of Object.values(operation.actionBindings)) errors.push(...ordinaryButtonActionErrors(action, options.guide ? "guide" : "widget"));
   if (options.survey) {
     for (const question of options.survey.questions) { const matches = elements.filter(element => element.dataset.movcuesQuestionId === question.id); if (matches.length !== 1 || matches[0].dataset.movcuesQuestionType !== question.type) errors.push(`Survey question ${question.id} was changed or removed.`); }
     if (elements.filter(element => element.hasAttribute("data-movcues-survey-controls")).length !== 1 || elements.filter(element => element.dataset.movcuesSurveyAction === "submit").length !== 1) errors.push("Survey controls and submission must be preserved.");
@@ -69,7 +62,14 @@ export function applySourceMarkup(builder: WidgetBuilderState, content: Experien
 
 export function sourceContext(builder: WidgetBuilderState, guide: boolean) {
   const movcues = builder.projectData.movcues && typeof builder.projectData.movcues === "object" ? builder.projectData.movcues as Record<string, unknown> : {};
-  return { html: builder.html, css: builder.css, authoringSurface: movcues.authoringSurface === "source" ? "source" as const : "onsite" as const, actionBindings: structuredClone(movcues.actionBindings ?? {}), supportedActions: guide ? ["dismiss", "next_step", "previous_step", "open_url", "track_event"] as const : ["dismiss", "open_url", "track_event"] as const };
+  return { html: builder.html, css: builder.css, authoringSurface: movcues.authoringSurface === "source" ? "source" as const : "onsite" as const, actionBindings: structuredClone(movcues.actionBindings ?? {}), supportedActions: ordinaryButtonActionsFor(guide ? "guide" : "widget").map(action => action.type) };
+}
+
+function isRuntimeOwnedCloseControl(button: HTMLButtonElement, binding?: SourceAction): boolean {
+  const icon = (button.textContent ?? "").replace(/\s+/g, "");
+  if (!/^(?:x|\u00d7|\u2715|\u2716)$/i.test(icon)) return false;
+  const accessibleName = `${button.getAttribute("aria-label") ?? ""} ${button.title}`;
+  return binding?.type === "dismiss" || /\b(?:close|dismiss)\b/i.test(accessibleName);
 }
 
 /**

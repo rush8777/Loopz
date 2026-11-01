@@ -1,10 +1,11 @@
 import type { WidgetBuilderState } from "../types";
 import type { RenderCallbacks } from "./AnchoredCardRenderer";
 import { BUILDER_ALLOWED_ATTRIBUTES, BUILDER_ALLOWED_TAGS, BUILDER_BLOCKED_TAGS, BUILDER_SURVEY_INPUT_TAGS, builderImageUrlIsSafe, builderInputTypeIsSafe, builderLinkUrlIsSafe, safeScopedBuilderCss } from "./BuilderContentContract";
-export type BuilderAction = { id: string; type: "next_step" | "previous_step" | "dismiss" } | { id: string; type: "open_url"; url: string } | { id: string; type: "track_event"; eventName: string };
+import { resolveOrdinaryButtonAction, type OrdinaryButtonAction as BuilderAction, type OrdinaryButtonContext } from "../OrdinaryButtonAction";
+export type { OrdinaryButtonAction as BuilderAction } from "../OrdinaryButtonAction";
 export type BuilderRenderCallbacks = RenderCallbacks & { onActionId?: (action: BuilderAction, label: string) => void };
 
-export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder: WidgetBuilderState, callbacks: BuilderRenderCallbacks, allowSurveyInputs = false): boolean {
+export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder: WidgetBuilderState, callbacks: BuilderRenderCallbacks, allowSurveyInputs = false, actionContext: OrdinaryButtonContext = "widget"): boolean {
   const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
   const css = safeBuilderCss(builder.css);
   if (!html || css === null) return false;
@@ -24,7 +25,7 @@ export function mountBuilderContent(root: ShadowRoot, card: HTMLElement, builder
     if (actionId === "primary") callbacks.onPrimary();
     else if (actionId === "secondary") callbacks.onSecondary();
     else {
-      const action = findOnsiteAction(builder, actionId ?? "");
+      const action = findOnsiteAction(builder, actionId ?? "", actionContext);
       if (action) callbacks.onActionId?.(action, target.textContent?.trim() ?? "");
     }
   });
@@ -83,15 +84,12 @@ export function sanitizeBuilderHtml(input: string, allowSurveyInputs = false): C
   return Array.from(template.content.childNodes);
 }
 
-function findOnsiteAction(builder: WidgetBuilderState, id: string): BuilderAction | null {
+function findOnsiteAction(builder: WidgetBuilderState, id: string, context: OrdinaryButtonContext): BuilderAction | null {
   const movcues = builder.projectData.movcues; const bindings = movcues && typeof movcues === "object" ? (movcues as Record<string, unknown>).actionBindings : null;
   const candidate = bindings && typeof bindings === "object" ? (bindings as Record<string, unknown>)[id] : null;
-  if (!candidate || typeof candidate !== "object") return null;
-  const action = candidate as Record<string, unknown>;
-  if (action.id !== id || !["next_step", "previous_step", "dismiss", "open_url", "track_event"].includes(String(action.type))) return null;
-  if (action.type === "open_url" && (typeof action.url !== "string" || !/^https?:\/\//i.test(action.url) || !builderLinkUrlIsSafe(action.url))) return null;
-  if (action.type === "track_event" && (typeof action.eventName !== "string" || !action.eventName.trim() || action.eventName.length > 200)) return null;
-  return action as BuilderAction;
+  const action = resolveOrdinaryButtonAction(id, candidate, context);
+  if (action?.type === "open_url" && !builderLinkUrlIsSafe(action.url)) return null;
+  return action;
 }
 
 export function safeBuilderCss(input: string): string | null {

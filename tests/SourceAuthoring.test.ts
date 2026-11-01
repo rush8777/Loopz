@@ -27,6 +27,13 @@ describe("SDK source authoring", () => {
       expect(validateSourceMarkup({ type: "replace_markup", html, css: unsafe, actionBindings: {} }, { widgetType: "modal", guide: true }).join(" ")).toMatch(/unsafe|scoped/i);
   });
 
+  it("rejects an authored icon-only close control while allowing a labeled dismiss CTA", () => {
+    const duplicateClose = html.replace("</div></section>", '<button type="button" aria-label="Dismiss" data-movcues-action-id="close_icon">×</button></div></section>');
+    const errors = validateSourceMarkup({ type: "replace_markup", html: duplicateClose, css, actionBindings: { continue_1: { type: "next_step" }, close_icon: { type: "dismiss" } } }, { widgetType: "modal", guide: true });
+    expect(errors).toContain("Do not include an icon-only close button in authored HTML; the runtime supplies the dismiss control.");
+    expect(validateSourceMarkup({ type: "replace_markup", html: html.replace("Continue", "Close tour"), css, actionBindings: { continue_1: { type: "dismiss" } } }, { widgetType: "modal", guide: true })).toEqual([]);
+  });
+
   it("applies a Guide source redesign atomically to only the selected step", () => {
     const builder: WidgetBuilderState = { version: 1, projectData: {}, html: "", css: "" }, compiled = applyOnsiteDocument(builder, createOnsiteDocument(true), "modal");
     const guide: RuntimeGuideDefinition & { targeting: ExperienceTargeting } = { steps: [{ id: "step_1", pattern: "modal", content: compiled.content, builder, behavior: { dismissible: true }, advance: { type: "button" } }], design: { width: "sm", theme: { background: "#fff", foreground: "#111827", primary: "#2563eb", borderRadius: "md" } }, targeting: { pageRules: [], audience: { type: "all" }, trigger: { type: "page_load" }, frequency: { mode: "once" }, priority: 0 } };

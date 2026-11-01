@@ -17,7 +17,7 @@ test("AI redesign → live edits → save/reopen → second AI redesign retains 
       const body = route.request().postDataJSON(); latestSource = body.context.source; turn++;
       const find = (cell: any, type: string): any => cell.block?.type === type ? cell.block : cell.children?.map((child: any) => find(child, type)).find(Boolean);
       const heading = find(body.context.document.root, "heading"), text = find(body.context.document.root, "text");
-      const html = turn === 1 ? fixture.html.replaceAll("title_block", heading.id).replaceAll("body_block", text.id) : body.context.source.html.replace("Manual welcome", "AI refined welcome");
+      const html = turn === 1 ? fixture.html.replaceAll("title_block", heading.id).replaceAll("body_block", text.id).replace(">Start</button>", '><span class="button-label">Start</span></button>') : body.context.source.html.replace("Manual welcome", "AI refined welcome");
       return route.fulfill({ json: { conversationId: "source_conversation", revision: body.revision, markdown: "Redesign ready", proposal: { summary: "A full source design", operations: [{ type: "replace_markup", html, css: turn === 1 ? fixture.css : body.context.source.css, actionBindings: turn === 1 ? fixture.actionBindings : body.context.source.actionBindings }] } } });
     }
     if (route.request().method() === "PATCH") { definition = route.request().postDataJSON().definition; revision++; saves++; return route.fulfill({ json: { version: { id: "source_version", revision, versionNumber: 1, definition } } }); }
@@ -37,6 +37,13 @@ test("AI redesign → live edits → save/reopen → second AI redesign retains 
   await widget.locator("h2").dblclick(); await widget.locator("h2").press("ControlOrMeta+a"); await widget.locator("h2").pressSequentially("Before AI");
   await requestAi("Create a richer onboarding modal", true);
   await expect(widget.locator(".hero-title")).toBeVisible();
+  await widget.getByRole("button", { name: "Start" }).click();
+  await editor.locator("[data-button-action]").selectOption("track_event");
+  await expect(editor.locator("[data-action-status]")).toContainText("Enter an event name");
+  await editor.locator("[data-button-event]").fill("onboarding_started"); await editor.locator("[data-button-event]").dispatchEvent("change");
+  await expect.poll(() => definition.builder.projectData.movcues.actionBindings.start_now).toEqual({ type: "track_event", eventName: "onboarding_started" });
+  await editor.locator('[data-mode="preview"]').click(); await widget.locator(".button-label").click(); await expect(widget).toBeVisible();
+  await editor.locator('[data-mode="design"]').click(); await expect.poll(() => saves).toBeGreaterThan(0);
   await widget.locator(".hero-title").dblclick(); await widget.locator(".hero-title").press("ControlOrMeta+a"); await widget.locator(".hero-title").pressSequentially("Manual welcome");
   await widget.locator(".hero-title").press("Enter"); await widget.locator(".hero-title").pressSequentially("Second line"); await expect(widget.locator(".hero-title br")).toHaveCount(1);
   await editor.locator("[data-block-font-size]").fill("40"); await editor.locator("[data-block-font-size]").dispatchEvent("change");
@@ -52,6 +59,13 @@ test("AI redesign → live edits → save/reopen → second AI redesign retains 
   await expect.poll(() => saves).toBeGreaterThan(0);
   await start(); await widget.locator(".hero-title").click();
   await expect(editor.locator("[data-block-font-size]")).toHaveValue("40"); await expect(widget.locator("img")).toHaveAttribute("src", "https://example.com/welcome.png");
+  await page.evaluate((savedDefinition: any) => {
+    const f = (window as any).fixture; f.controller.destroy(); f.runtime = new f.ExperienceRenderer(); f.runtimeActions = [];
+    f.runtime.render({ id: "source_runtime", versionId: "source_version", kind: "widget", widgetType: "modal", priority: 0, definition: savedDefinition }, { onVisible() {}, onDismiss() {}, onComplete() {}, onAction(action: any) { f.runtimeActions.push(action); } });
+  }, definition);
+  await page.locator('[data-movcues-experience="source_runtime"] .button-label').click();
+  expect(await page.evaluate(() => (window as any).fixture.runtimeActions)).toMatchObject([{ id: "start_now", type: "track_event", eventName: "onboarding_started" }]);
+  await page.evaluate(() => (window as any).fixture.runtime.destroy()); await start();
   await requestAi("Refine the welcome copy");
   expect(latestSource?.html).toContain("Manual welcome"); expect(latestSource?.css).toContain("40px");
   await expect(widget.locator(".hero-title")).toContainText("AI refined welcome");
@@ -61,4 +75,5 @@ test("AI redesign → live edits → save/reopen → second AI redesign retains 
   await editor.locator("[data-global-undo]").click(); await expect(widget.locator(".hero-title")).toContainText("Manual welcome");
   await editor.locator("[data-global-redo]").click(); await expect(widget.locator(".hero-title")).toContainText("AI refined welcome");
   expect(definition.builder.projectData.movcues.authoringSurface).toBe("source");
+  expect(definition.builder.projectData.movcues.actionBindings.start_now).toEqual({ type: "track_event", eventName: "onboarding_started" });
 });

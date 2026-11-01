@@ -1,14 +1,7 @@
 import { type SourceElement } from "./SourceEditability";
 import type { ExperienceContent, WidgetBuilderState } from "../types";
-export type SourceAction = {
-    type: "dismiss" | "next_step" | "previous_step";
-} | {
-    type: "open_url";
-    url: string;
-} | {
-    type: "track_event";
-    eventName: string;
-};
+import { type OrdinaryButtonActionConfig } from "../OrdinaryButtonAction";
+export type SourceAction = OrdinaryButtonActionConfig;
 export interface ReplaceMarkupOperation {
     type: "replace_markup";
     stepId?: string;
@@ -47,7 +40,7 @@ export declare function sourceContext(builder: WidgetBuilderState, guide: boolea
     css: string;
     authoringSurface: "source" | "onsite";
     actionBindings: {};
-    supportedActions: readonly ["dismiss", "next_step", "previous_step", "open_url", "track_event"] | readonly ["dismiss", "open_url", "track_event"];
+    supportedActions: import("../OrdinaryButtonAction").OrdinaryButtonActionType[];
 };
 /**
  * Keep the structured document useful to the AI without duplicating large inline

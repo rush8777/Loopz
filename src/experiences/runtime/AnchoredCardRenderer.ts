@@ -2,8 +2,9 @@ import type { ExperienceBehavior, ExperienceContent, ExperienceDesign, Experienc
 import { mountBuilderContent } from "./BuilderContent";
 import { applyBuilderSizeContent, applyWidgetSizeEnvelope } from "./WidgetSizing";
 import { AnchoredTargetBackdrop } from "./AnchoredTargetBackdrop";
+import type { OrdinaryButtonContext } from "../OrdinaryButtonAction";
 
-export interface RenderCallbacks { onDismiss: () => void; onPrimary: () => void; onSecondary: () => void; onBack?: () => void }
+export interface RenderCallbacks { onDismiss: () => void; onPrimary: () => void; onSecondary: () => void; onBack?: () => void; ordinaryActionContext?: OrdinaryButtonContext }
 
 export function findTarget(target?: ExperienceTarget): Element | null {
   if (!target) return null;
@@ -57,7 +58,7 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
   }
   card.dataset.width = design.width; card.dataset.radius = design.theme.borderRadius;
   if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
-  const mountedBuilder = Boolean(builder && mountBuilderContent(root, card, builder, callbacks, widgetType === "survey"));
+  const mountedBuilder = Boolean(builder && mountBuilderContent(root, card, builder, callbacks, widgetType === "survey", callbacks.ordinaryActionContext ?? "widget"));
   if (mountedBuilder && widgetType) applyBuilderSizeContent(card, widgetType, design);
   if (!mountedBuilder) {
     const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText(content.primaryAction.label)}</button>` : "";

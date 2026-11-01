@@ -112,6 +112,7 @@ export class ExperienceRenderer {
     const guarded = { ...callbacks, onGuideAdvance: advance, onGuideBack: back, onDismiss: dismiss };
     const stepDesign = step.size ? { ...definition.design, size: step.size } : definition.design;
     const stepCallbacks: BuilderRenderCallbacks = {
+      ordinaryActionContext: "guide",
       onDismiss: dismiss, onSecondary: dismiss,
       onPrimary: () => { if (!alive()) return; const action = step.content.primaryAction; if (action) callbacks.onAction(action); if ((step.advance?.type ?? "button") === "button") advance(); },
       onActionId: (action, label) => { if (generation === this.renderGeneration && (!finished || !["next_step", "previous_step"].includes(action.type))) this.dispatchBuilderAction(action, label, guarded); },

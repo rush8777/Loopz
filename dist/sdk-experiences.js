@@ -40,7 +40,33 @@
     }
     return css;
   }
-  function mountBuilderContent(root, card, builder, callbacks, allowSurveyInputs = false) {
+  const ORDINARY_BUTTON_ACTIONS = [
+    { type: "dismiss", label: "Dismiss", contexts: ["widget", "guide"], requiredConfiguration: [], runtimeRequirement: "dismiss" },
+    { type: "next_step", label: "Next step", contexts: ["guide"], requiredConfiguration: [], runtimeRequirement: "guide_advance" },
+    { type: "previous_step", label: "Previous step", contexts: ["guide"], requiredConfiguration: [], runtimeRequirement: "guide_back" },
+    { type: "open_url", label: "Open URL", contexts: ["widget", "guide"], requiredConfiguration: ["url"], runtimeRequirement: "navigation" },
+    { type: "track_event", label: "Track event", contexts: ["widget", "guide"], requiredConfiguration: ["eventName"], runtimeRequirement: "analytics" }
+  ];
+  const ORDINARY_ACTION_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{2,63}$/;
+  function ordinaryButtonActionErrors(value, context) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return ["Action configuration is missing."];
+    const action = value;
+    const definition = ORDINARY_BUTTON_ACTIONS.find((candidate) => candidate.type === action.type);
+    if (!definition) return ["Action type is unsupported."];
+    if (!definition.contexts.includes(context)) return [`${definition.label} is only supported by Guides.`];
+    if (definition.type === "open_url" && (typeof action.url !== "string" || action.url.length > 2e3 || !/^https?:\/\//i.test(action.url))) return ["Open URL actions must use a complete HTTP(S) URL."];
+    if (definition.type === "track_event" && (typeof action.eventName !== "string" || !action.eventName.trim() || action.eventName.length > 200 || /[\u0000-\u001f\u007f]/.test(action.eventName))) return ["Track event actions require an event name of 1-200 characters."];
+    return [];
+  }
+  function resolveOrdinaryButtonAction(id, value, context) {
+    if (!ORDINARY_ACTION_ID_PATTERN.test(id) || ordinaryButtonActionErrors(value, context).length) return null;
+    const candidate = value;
+    if (candidate.id !== void 0 && candidate.id !== id) return null;
+    if (candidate.type === "open_url") return { id, type: "open_url", url: candidate.url };
+    if (candidate.type === "track_event") return { id, type: "track_event", eventName: candidate.eventName };
+    return { id, type: candidate.type };
+  }
+  function mountBuilderContent(root, card, builder, callbacks, allowSurveyInputs = false, actionContext = "widget") {
     const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
     const css = safeBuilderCss(builder.css);
     if (!html || css === null) return false;
@@ -66,7 +92,7 @@ ${ISOLATION_CSS}`;
       if (actionId === "primary") callbacks.onPrimary();
       else if (actionId === "secondary") callbacks.onSecondary();
       else {
-        const action = findOnsiteAction(builder, actionId ?? "");
+        const action = findOnsiteAction(builder, actionId ?? "", actionContext);
         if (action) (_b = callbacks.onActionId) == null ? void 0 : _b.call(callbacks, action, ((_a = target.textContent) == null ? void 0 : _a.trim()) ?? "");
       }
     });
@@ -120,15 +146,12 @@ ${ISOLATION_CSS}`;
     }
     return Array.from(template.content.childNodes);
   }
-  function findOnsiteAction(builder, id) {
+  function findOnsiteAction(builder, id, context) {
     const movcues = builder.projectData.movcues;
     const bindings = movcues && typeof movcues === "object" ? movcues.actionBindings : null;
     const candidate = bindings && typeof bindings === "object" ? bindings[id] : null;
-    if (!candidate || typeof candidate !== "object") return null;
-    const action = candidate;
-    if (action.id !== id || !["next_step", "previous_step", "dismiss", "open_url", "track_event"].includes(String(action.type))) return null;
-    if (action.type === "open_url" && (typeof action.url !== "string" || !/^https?:\/\//i.test(action.url) || !builderLinkUrlIsSafe(action.url))) return null;
-    if (action.type === "track_event" && (typeof action.eventName !== "string" || !action.eventName.trim() || action.eventName.length > 200)) return null;
+    const action = resolveOrdinaryButtonAction(id, candidate, context);
+    if ((action == null ? void 0 : action.type) === "open_url" && !builderLinkUrlIsSafe(action.url)) return null;
     return action;
   }
   function safeBuilderCss(input) {
@@ -183,6 +206,7 @@ ${ISOLATION_CSS}`;
     content.style.width = "100%";
     content.style.height = fillsHeight ? "100%" : "auto";
     widget.style.setProperty("box-sizing", "border-box");
+    if (widgetType === "banner") widget.style.setProperty("width", "100%", "important");
     widget.style.setProperty("min-width", "0", "important");
     widget.style.setProperty("max-width", "100%", "important");
     widget.style.setProperty("height", fillsHeight ? "100%" : "auto", "important");
@@ -394,7 +418,7 @@ ${ISOLATION_CSS}`;
     card.dataset.width = design.width;
     card.dataset.radius = design.theme.borderRadius;
     if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
-    const mountedBuilder = Boolean(builder && mountBuilderContent(root, card, builder, callbacks, widgetType === "survey"));
+    const mountedBuilder = Boolean(builder && mountBuilderContent(root, card, builder, callbacks, widgetType === "survey", callbacks.ordinaryActionContext ?? "widget"));
     if (mountedBuilder && widgetType) applyBuilderSizeContent(card, widgetType, design);
     if (!mountedBuilder) {
       const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText(content.primaryAction.label)}</button>` : "";
@@ -405,7 +429,7 @@ ${ISOLATION_CSS}`;
     }
     if (behavior.dismissible) mountRuntimeDismissControl(card, callbacks.onDismiss);
     root.appendChild(card);
-    if (mountedBuilder && widgetType) fitBuilderWidthEnvelope(card);
+    if (mountedBuilder && widgetType && widgetType !== "banner") fitBuilderWidthEnvelope(card);
     if (mountedBuilder && widgetType === "anchored_card") fitAnchoredBuilderEnvelope(card);
     return card;
   }
@@ -813,6 +837,7 @@ ${ISOLATION_CSS}`;
       const card = buildCard(root, content, design, behavior, callbacks, builder, "banner");
       card.classList.add("banner");
       card.dataset.position = behavior.bannerPosition ?? "top";
+      card.dataset.displayMode = behavior.bannerDisplayMode ?? "overlay";
       return card;
     }
     destroy() {
@@ -1309,6 +1334,32 @@ ${ISOLATION_CSS}`;
     };
     return rules.some((rule) => rule.kind === "include" && match(rule)) && !rules.some((rule) => rule.kind === "exclude" && match(rule));
   }
+  function mountInlineBannerHost(host, position) {
+    host.style.cssText = "display:block;position:relative;box-sizing:border-box;width:100%;max-width:100%;min-width:0;pointer-events:none";
+    const body = document.body;
+    const documentElement = document.documentElement;
+    const mountInDocument = !body || bodyLayoutNeedsDocumentLane(body);
+    host.dataset.movcuesBannerMount = mountInDocument ? "document" : "body";
+    if (!body) {
+      documentElement.appendChild(host);
+      return "document";
+    }
+    if (!mountInDocument) {
+      if (position === "top") body.prepend(host);
+      else body.append(host);
+      return "body";
+    }
+    if (position === "top") documentElement.insertBefore(host, body);
+    else documentElement.insertBefore(host, body.nextSibling);
+    return "document";
+  }
+  function bodyLayoutNeedsDocumentLane(body) {
+    const style = getComputedStyle(body);
+    if (style.display === "grid" || style.display === "inline-grid" || style.display === "contents") return true;
+    if (style.display === "inline-flex") return true;
+    if (style.display !== "flex") return false;
+    return style.flexDirection !== "column";
+  }
   class ExperienceRenderer {
     constructor() {
       this.host = null;
@@ -1328,16 +1379,27 @@ ${ISOLATION_CSS}`;
       return this.renderWidget(experience, experience.definition, callbacks, guideStepId);
     }
     root(experienceId, behavior, targetElement) {
+      const root = this.createRoot(experienceId);
+      this.host.style.cssText = "position:fixed;inset:0;pointer-events:none";
+      document.documentElement.appendChild(this.host);
+      this.applyLayer(behavior, targetElement);
+      return root;
+    }
+    bannerRoot(experienceId, behavior) {
+      if (behavior.bannerDisplayMode !== "inline") return this.root(experienceId, behavior);
+      const root = this.createRoot(experienceId);
+      mountInlineBannerHost(this.host, behavior.bannerPosition ?? "top");
+      this.applyLayer(behavior);
+      return root;
+    }
+    createRoot(experienceId) {
       this.host = document.createElement("div");
       this.host.dataset.movcuesExperience = experienceId;
       this.host.dataset.movcuesExperienceRoot = experienceId;
-      this.host.style.cssText = "position:fixed;inset:0;pointer-events:none";
       const root = this.host.attachShadow({ mode: "open" });
       const style = document.createElement("style");
       style.textContent = STYLES;
       root.appendChild(style);
-      document.documentElement.appendChild(this.host);
-      this.applyLayer(behavior, targetElement);
       return root;
     }
     applyLayer(behavior, targetElement) {
@@ -1403,7 +1465,7 @@ ${ISOLATION_CSS}`;
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else if (experience.widgetType === "banner") {
-        const root = this.root(experience.id, definition.behavior);
+        const root = this.bannerRoot(experience.id, definition.behavior);
         const renderer = new BannerRenderer();
         this.renderer = renderer;
         renderer.render(root, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
@@ -1441,6 +1503,7 @@ ${ISOLATION_CSS}`;
       const guarded = { ...callbacks, onGuideAdvance: advance, onGuideBack: back, onDismiss: dismiss };
       const stepDesign = step.size ? { ...definition.design, size: step.size } : definition.design;
       const stepCallbacks = {
+        ordinaryActionContext: "guide",
         onDismiss: dismiss,
         onSecondary: dismiss,
         onPrimary: () => {
@@ -1648,7 +1711,7 @@ ${ISOLATION_CSS}`;
   .backdrop{pointer-events:auto;position:fixed;inset:0;background:rgba(0,0,0,var(--movcues-backdrop-opacity,.45))}
   .modal{left:50%;top:50%;transform:translate(-50%,-50%)}.modal[data-layout=fullscreen],.modal[data-size-width=full]{inset:12px;width:auto!important;max-width:none!important;transform:none;display:flex;flex-direction:column;justify-content:center}.modal[data-layout=fullscreen] footer,.modal[data-size-width=full] footer{justify-content:center}
   .slideout[data-position=top-left]{top:16px;left:16px}.slideout[data-position=top-right]{top:16px;right:16px}.slideout[data-position=bottom-left]{bottom:16px;left:16px}.slideout[data-position=bottom-right]{bottom:16px;right:16px}.slideout[data-position=center-left]{left:16px;top:50%;transform:translateY(-50%)}.slideout[data-position=center-right]{right:16px;top:50%;transform:translateY(-50%)}
-  .banner{left:0;right:0;width:auto!important;max-width:none;border-radius:0!important;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner[data-position=top]{top:0}.banner[data-position=bottom]{bottom:0}.banner h2,.banner p{grid-column:1}.banner footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
+  .banner{max-width:none;border-radius:0!important}.banner[data-display-mode=overlay]{left:0;right:0;width:auto!important}.banner[data-display-mode=overlay][data-position=top]{top:0}.banner[data-display-mode=overlay][data-position=bottom]{bottom:0}.banner[data-display-mode=inline]{position:relative;inset:auto;width:100%!important;max-width:none}.banner.builder-card{display:block}.banner .builder-content{width:100%;max-width:100%}.banner:not(.builder-card) .legacy-content{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner:not(.builder-card) h2,.banner:not(.builder-card) p{grid-column:1}.banner:not(.builder-card) footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
   .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--movcues-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--movcues-hotspot);border-radius:50%;animation:movcues-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes movcues-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
   .movcues-survey-question.has-error{outline:2px solid #fecaca;outline-offset:6px;border-radius:6px}.movcues-survey-validation{color:#b91c1c}:where(.movcues-survey-option.is-selected){border-color:var(--movcues-primary);background:color-mix(in srgb,var(--movcues-primary) 12%,white)}.movcues-survey-input{font:inherit}
 `;

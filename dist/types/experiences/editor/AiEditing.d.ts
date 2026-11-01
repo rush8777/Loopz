@@ -146,7 +146,7 @@ export declare function editorAiContext(input: {
         css: string;
         authoringSurface: "source" | "onsite";
         actionBindings: {};
-        supportedActions: readonly ["dismiss", "next_step", "previous_step", "open_url", "track_event"] | readonly ["dismiss", "open_url", "track_event"];
+        supportedActions: import("../OrdinaryButtonAction").OrdinaryButtonActionType[];
     } | undefined;
     experience: {
         id: string;
@@ -177,7 +177,7 @@ export declare function guideAiContext(input: {
         css: string;
         authoringSurface: "source" | "onsite";
         actionBindings: {};
-        supportedActions: readonly ["dismiss", "next_step", "previous_step", "open_url", "track_event"] | readonly ["dismiss", "open_url", "track_event"];
+        supportedActions: import("../OrdinaryButtonAction").OrdinaryButtonActionType[];
     } | undefined;
     experience: {
         kind: "guide";

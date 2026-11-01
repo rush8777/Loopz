@@ -1,9 +1,11 @@
 import type { ExperienceBehavior, ExperienceContent, ExperienceDesign, ExperienceTarget, WidgetBuilderState, WidgetType } from "../types";
+import type { OrdinaryButtonContext } from "../OrdinaryButtonAction";
 export interface RenderCallbacks {
     onDismiss: () => void;
     onPrimary: () => void;
     onSecondary: () => void;
     onBack?: () => void;
+    ordinaryActionContext?: OrdinaryButtonContext;
 }
 export declare function findTarget(target?: ExperienceTarget): Element | null;
 /** Resolves a selector that may be rendered after the experience manifest arrives. */

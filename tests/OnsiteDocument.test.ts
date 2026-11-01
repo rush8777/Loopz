@@ -84,6 +84,22 @@ describe("OnsiteDocument", () => {
     expect(mountBuilderContent(host, card, builder, { onPrimary: vi.fn(), onSecondary: vi.fn(), onDismiss: vi.fn(), onActionId: action })).toBe(true);
     card.querySelectorAll("button").forEach(button => button.click()); expect(action).toHaveBeenCalledTimes(2); expect(action.mock.calls.map(call => call[0].type)).toEqual(["dismiss", "open_url"]);
   });
+
+  it("resolves id-less source bindings from nested button content exactly once and enforces context", () => {
+    const builder: WidgetBuilderState = {
+      version: 1,
+      html: '<section class="movcues-widget"><button data-movcues-action-id="continue_1"><span>Continue</span></button></section>',
+      css: ".movcues-widget{display:block}",
+      projectData: { movcues: { authoringSurface: "source", actionBindings: { continue_1: { type: "next_step" } } } },
+    };
+    const guideRoot = documentObject(); const guideCard = window.document.createElement("section"); guideRoot.append(guideCard); const guideAction = vi.fn();
+    expect(mountBuilderContent(guideRoot, guideCard, builder, { onPrimary: vi.fn(), onSecondary: vi.fn(), onDismiss: vi.fn(), onActionId: guideAction }, false, "guide")).toBe(true);
+    guideCard.querySelector("span")!.click(); expect(guideAction).toHaveBeenCalledOnce(); expect(guideAction).toHaveBeenCalledWith({ id: "continue_1", type: "next_step" }, "Continue");
+
+    const widgetRoot = documentObject(); const widgetCard = window.document.createElement("section"); widgetRoot.append(widgetCard); const widgetAction = vi.fn();
+    mountBuilderContent(widgetRoot, widgetCard, builder, { onPrimary: vi.fn(), onSecondary: vi.fn(), onDismiss: vi.fn(), onActionId: widgetAction }, false, "widget");
+    widgetCard.querySelector("span")!.click(); expect(widgetAction).not.toHaveBeenCalled();
+  });
 });
 
 function documentObject(): ShadowRoot { const host = window.document.createElement("div"); window.document.body.append(host); return host.attachShadow({ mode: "open" }); }

@@ -26,6 +26,8 @@ export declare class ExperienceRenderer {
     private renderGeneration;
     render(experience: DeliveredExperience, callbacks: ExperienceRendererCallbacks, guideStepId?: string): boolean;
     private root;
+    private bannerRoot;
+    private createRoot;
     private applyLayer;
     private renderWidget;
     private renderGuide;

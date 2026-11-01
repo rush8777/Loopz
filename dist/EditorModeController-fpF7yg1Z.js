@@ -1,4 +1,4 @@
-import { s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, C as ChecklistRenderer, f as surveyBranchErrors, g as computeElementRole, h as computeElementLabel, i as sanitizeBuilderHtml, j as getGuideStepPattern, k as guideStepRequiresTarget, l as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, m as clearEditorContinuation, n as isChecklistDefinition, o as isGuideDefinition, p as guideInteractionTarget, q as matchesGuideRoute, r as findTarget, t as storeEditorContinuation } from "./module-Dlj9p7uW.js";
+import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as clearEditorContinuation, p as isChecklistDefinition, q as isGuideDefinition, r as guideInteractionTarget, t as matchesGuideRoute, u as findTarget, v as storeEditorContinuation } from "./module-sdxYK7kr.js";
 class EditorHistory {
   constructor(keyOf = JSON.stringify) {
     this.keyOf = keyOf;
@@ -4229,7 +4229,6 @@ function remapSourceSelector(selector, attribute, ids) {
   for (const [before, after] of ids) for (const quote of ['"', "'", ""]) selector = selector.split(`[${attribute}=${quote}${before}${quote}]`).join(`[${attribute}=${quote}${after}${quote}]`);
   return selector;
 }
-const actionIdPattern = /^[A-Za-z][A-Za-z0-9_-]{2,63}$/;
 function parse$1(html) {
   const template = document.createElement("template");
   template.innerHTML = html;
@@ -4262,14 +4261,10 @@ function validateSourceMarkup(operation, options) {
   if (new Set(ids).size !== ids.length) errors.push("Source HTML contains duplicate IDs.");
   const buttons = elements.filter((element) => element instanceof HTMLButtonElement && !element.dataset.movcuesSurveyAction && !element.dataset.movcuesOptionId && !element.dataset.movcuesChecklistRole && !element.dataset.movcuesChecklistItemRole);
   const actionIds = buttons.map((button) => button.dataset.movcuesActionId ?? "");
-  if (actionIds.some((value) => !actionIdPattern.test(value)) || new Set(actionIds).size !== actionIds.length) errors.push("Every ordinary button needs one unique valid action ID.");
+  if (actionIds.some((value) => !ORDINARY_ACTION_ID_PATTERN.test(value)) || new Set(actionIds).size !== actionIds.length) errors.push("Every ordinary button needs one unique valid action ID.");
   const bindings = Object.keys(operation.actionBindings);
   if (bindings.length !== actionIds.length || actionIds.some((value) => !(value in operation.actionBindings))) errors.push("Button actions and action bindings must match exactly.");
-  for (const action of Object.values(operation.actionBindings)) {
-    if (!options.guide && (action.type === "next_step" || action.type === "previous_step")) errors.push(`${action.type} is only supported by Guides.`);
-    if (action.type === "open_url" && !/^https?:\/\//i.test(action.url)) errors.push("Open URL actions must use HTTP(S).");
-    if (action.type === "track_event" && (!action.eventName.trim() || /[\u0000-\u001f\u007f]/.test(action.eventName))) errors.push("Track-event action is invalid.");
-  }
+  for (const action of Object.values(operation.actionBindings)) errors.push(...ordinaryButtonActionErrors(action, options.guide ? "guide" : "widget"));
   if (options.survey) {
     for (const question of options.survey.questions) {
       const matches = elements.filter((element) => element.dataset.movcuesQuestionId === question.id);
@@ -4301,7 +4296,7 @@ function applySourceMarkup(builder, content, operation, options) {
 }
 function sourceContext(builder, guide) {
   const movcues = builder.projectData.movcues && typeof builder.projectData.movcues === "object" ? builder.projectData.movcues : {};
-  return { html: builder.html, css: builder.css, authoringSurface: movcues.authoringSurface === "source" ? "source" : "onsite", actionBindings: structuredClone(movcues.actionBindings ?? {}), supportedActions: guide ? ["dismiss", "next_step", "previous_step", "open_url", "track_event"] : ["dismiss", "open_url", "track_event"] };
+  return { html: builder.html, css: builder.css, authoringSurface: movcues.authoringSurface === "source" ? "source" : "onsite", actionBindings: structuredClone(movcues.actionBindings ?? {}), supportedActions: ordinaryButtonActionsFor(guide ? "guide" : "widget").map((action) => action.type) };
 }
 function aiDocumentContext(value) {
   const clone = structuredClone(value);
@@ -4978,7 +4973,7 @@ function validateOnsiteDocument(value) {
   return { valid: errors.length === 0, errors };
 }
 function validateBlock(block, path, addId, number, errors) {
-  var _a, _b, _c, _d, _e;
+  var _a, _b;
   addId(block.id, path);
   const base = ["id", "type", "align"];
   const keys = { checklist_task: [...base, "itemId", "fontSize", "color", "indicator"], checklist_text: [...base, "role", "fontSize", "color", "text"], checklist_control: [...base, "role", "fontSize", "color"], checklist_progress: [...base, "fontSize", "color"], question: [...base, "questionId", "fontSize", "color"], survey_controls: base, heading: [...base, "html", "level", "fontSize", "weight", "color", "lineHeight"], text: [...base, "html", "fontSize", "weight", "color", "lineHeight"], button: [...base, "label", "action", "variant", "background", "color", "radius", "paddingX", "paddingY", "width"], image: [...base, "src", "alt", "fit", "width", "height", "radius"], divider: [...base, "orientation", "thickness", "color"], spacer: [...base, "size"], icon: [...base, "icon", "size", "color"] };
@@ -5007,9 +5002,10 @@ function validateBlock(block, path, addId, number, errors) {
     if (!((_a = block.label) == null ? void 0 : _a.trim()) || block.label.length > 80) errors.push(`${path} label must contain 1–80 characters.`);
     addId((_b = block.action) == null ? void 0 : _b.id, `${path} action`);
     if (!block.action || !["next_step", "previous_step", "dismiss", "open_url", "track_event"].includes(block.action.type)) errors.push(`${path} has an invalid action.`);
-    else unexpectedKeys(block.action, block.action.type === "open_url" ? ["id", "type", "url"] : block.action.type === "track_event" ? ["id", "type", "eventName"] : ["id", "type"], `${path} action`, errors);
-    if (((_c = block.action) == null ? void 0 : _c.type) === "open_url" && (!builderLinkUrlIsSafe(block.action.url) || !/^https?:\/\//i.test(block.action.url))) errors.push(`${path} URL must use HTTP(S).`);
-    if (((_d = block.action) == null ? void 0 : _d.type) === "track_event" && (!((_e = block.action.eventName) == null ? void 0 : _e.trim()) || block.action.eventName.length > 200)) errors.push(`${path} custom event must contain 1–200 characters.`);
+    else {
+      unexpectedKeys(block.action, block.action.type === "open_url" ? ["id", "type", "url"] : block.action.type === "track_event" ? ["id", "type", "eventName"] : ["id", "type"], `${path} action`, errors);
+      errors.push(...ordinaryButtonActionErrors(block.action, "guide").map((error) => `${path}: ${error}`));
+    }
     if (!["primary", "secondary", "outline"].includes(block.variant)) errors.push(`${path} has an invalid variant.`);
     if (!["hug", "full"].includes(block.width)) errors.push(`${path} has an invalid width behavior.`);
     number(block.radius, 0, 48, `${path} radius`);
@@ -9666,7 +9662,7 @@ class EditorModeController {
           </div>
           <div data-inspector="block" hidden>
             <div data-block="heading,text"><div class="formatbar"><button type="button" data-v2-format="strong"><b>B</b></button><button type="button" data-v2-format="em"><i>I</i></button><button type="button" data-v2-format="u"><u>U</u></button><button type="button" data-v2-list="ul">• List</button><button type="button" data-v2-list="ol">1. List</button></div><div class="link-row"><input data-v2-link-url aria-label="Link URL" type="text" inputmode="url" placeholder="https://… or /path"><button type="button" class="secondary-button compact" data-v2-apply-link>Link</button></div><label>Font size<div class="number"><input data-block-font-size type="number" min="10" max="72"><span>px</span></div></label><label>Line height<input data-block-line-height type="number" min="0.9" max="3" step="0.05"></label><label>Weight<select data-block-weight><option value="400">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label><label>Text color<input data-block-color type="color"></label></div>
-            <div data-block="button"><label>Label<input data-button-label type="text" maxlength="80"></label><label>Variant<select data-button-variant><option value="primary">Primary</option><option value="secondary">Secondary</option><option value="outline">Outline</option></select></label><label>Action<select data-button-action><option value="dismiss">Dismiss</option>${this.guide ? '<option value="next_step">Next step</option><option value="previous_step">Previous step</option>' : ""}<option value="open_url">Open URL</option><option value="track_event">Track event</option></select></label><label data-action-url hidden>URL<input data-button-url type="url" placeholder="https://example.com"></label><label data-action-event hidden>Event<input data-button-event type="text" maxlength="200" placeholder="feature_clicked"></label><label>Background<input data-button-background type="color"></label><label>Text color<input data-button-color type="color"></label><label>Width<select data-button-width><option value="hug">Hug content</option><option value="full">Full width</option></select></label><label>Horizontal pad<div class="number"><input data-button-padding-x type="number" min="4" max="48"><span>px</span></div></label><label>Vertical pad<div class="number"><input data-button-padding-y type="number" min="4" max="32"><span>px</span></div></label><label>Radius<div class="number"><input data-button-radius type="number" min="0" max="48"><span>px</span></div></label></div>
+            <div data-block="button"><label>Label<input data-button-label type="text" maxlength="80"></label><label>Variant<select data-button-variant><option value="primary">Primary</option><option value="secondary">Secondary</option><option value="outline">Outline</option></select></label><label>Action<select data-button-action>${ordinaryButtonActionsFor(this.guide ? "guide" : "widget").map((action) => `<option value="${action.type}">${action.label}</option>`).join("")}</select></label><label data-action-url hidden>URL<input data-button-url type="url" placeholder="https://example.com/path"></label><label data-action-event hidden>Event<input data-button-event type="text" maxlength="200" placeholder="feature_clicked"></label><p class="muted" data-action-status role="status" aria-live="polite"></p><label>Background<input data-button-background type="color"></label><label>Text color<input data-button-color type="color"></label><label>Width<select data-button-width><option value="hug">Hug content</option><option value="full">Full width</option></select></label><label>Horizontal pad<div class="number"><input data-button-padding-x type="number" min="4" max="48"><span>px</span></div></label><label>Vertical pad<div class="number"><input data-button-padding-y type="number" min="4" max="32"><span>px</span></div></label><label>Radius<div class="number"><input data-button-radius type="number" min="0" max="48"><span>px</span></div></label></div>
             <div data-block="image"><button type="button" class="secondary-button" data-choose-image>Choose image</button><p class="muted">PNG, JPG or WebP · up to 10 MB. You can also drop a file onto the image.</p><p class="muted" data-image-status role="status" aria-live="polite"></p><label>Image URL<input data-v2-image-src type="url" placeholder="https://… (optional)"></label><label>Alt text<input data-v2-image-alt type="text" maxlength="500"></label><label>Fit<select data-image-fit><option value="cover">Cover</option><option value="contain">Contain</option></select></label><label>Width<div class="number"><input data-image-width type="number" min="1" max="100"><span>%</span></div></label><label>Radius<div class="number"><input data-image-radius type="number" min="0" max="100"><span>px</span></div></label></div>
             <div data-block="divider"><label>Thickness<div class="number"><input data-divider-thickness type="number" min="1" max="16"><span>px</span></div></label><label>Color<input data-divider-color type="color"></label></div>
             <div data-block="spacer"><label>Space<div class="number"><input data-spacer-size type="number" min="4" max="240"><span>px</span></div></label></div>
@@ -9702,7 +9698,7 @@ class EditorModeController {
           <div data-for="modal"><label>Layout<select data-modal-layout><option value="center">Centered</option><option value="fullscreen">Fullscreen</option></select></label></div>
           <div data-for="backdrop"><label class="check"><input data-backdrop type="checkbox"> Backdrop</label><label>Backdrop opacity<input data-backdrop-opacity type="number" min="0" max="0.9" step="0.05"></label><label class="check"><input data-close-backdrop type="checkbox"> Dismiss on backdrop click</label></div>
           <div data-for="slideout"><label>Position<select data-slideout-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="center-left">Center left</option><option value="center-right">Center right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label></div>
-          <div data-for="banner"><label>Position<select data-banner-position><option value="top">Top</option><option value="bottom">Bottom</option></select></label></div>
+          <div data-for="banner"><label>Display<select data-banner-display-mode><option value="inline">Inline with page</option><option value="overlay">Overlay viewport</option></select></label><label>Position<select data-banner-position><option value="top">Top</option><option value="bottom">Bottom</option></select></label></div>
           <div data-for="cursor"><label>X offset<div class="number"><input data-cursor-x type="number"><span>px</span></div></label><label>Y offset<div class="number"><input data-cursor-y type="number"><span>px</span></div></label></div>
           <div data-for="hotspot"><label>Beacon style<select data-hotspot-style><option value="pulse">Pulse</option><option value="dot">Dot</option><option value="question">Question mark</option></select></label><label>Beacon color<input data-hotspot-color type="color"></label></div>
         </section>
@@ -9937,6 +9933,9 @@ class EditorModeController {
     this.onSelect("[data-slideout-position]", (value) => {
       this.currentBehavior().slideoutPosition = value;
     });
+    this.onSelect("[data-banner-display-mode]", (value) => {
+      this.currentBehavior().bannerDisplayMode = value;
+    });
     this.onSelect("[data-banner-position]", (value) => {
       this.currentBehavior().bannerPosition = value;
     });
@@ -10065,18 +10064,43 @@ class EditorModeController {
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateBlock({ radius: Math.max(0, Math.min(48, number(value, 8))) });
     });
     change("[data-button-action]", (value) => {
-      var _a2, _b2, _c2;
-      if (value === "open_url") (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateButtonAction({ type: "open_url", url: "https://example.com" });
-      else if (value === "track_event") (_b2 = this.compositionEditor) == null ? void 0 : _b2.updateButtonAction({ type: "track_event", eventName: "button_clicked" });
-      else (_c2 = this.compositionEditor) == null ? void 0 : _c2.updateButtonAction({ type: value });
+      var _a2, _b2, _c2, _d2;
+      if (value === "open_url" || value === "track_event") {
+        (_a2 = this.root) == null ? void 0 : _a2.querySelectorAll("[data-action-url],[data-action-event]").forEach((group) => {
+          group.hidden = true;
+        });
+        const field = (_b2 = this.root) == null ? void 0 : _b2.querySelector(value === "open_url" ? "[data-action-url]" : "[data-action-event]");
+        if (field) field.hidden = false;
+        const input2 = (_c2 = this.root) == null ? void 0 : _c2.querySelector(value === "open_url" ? "[data-button-url]" : "[data-button-event]");
+        if (input2) {
+          input2.value = "";
+          input2.focus();
+        }
+        this.setText("[data-action-status]", value === "open_url" ? "Enter a complete HTTP(S) URL to apply this action." : "Enter an event name to apply this action.");
+        return;
+      }
+      this.setText("[data-action-status]", "");
+      (_d2 = this.compositionEditor) == null ? void 0 : _d2.updateButtonAction({ type: value });
     });
     change("[data-button-url]", (value) => {
       var _a2;
-      return (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateButtonAction({ type: "open_url", url: value.trim() });
+      const url = value.trim();
+      if (!/^https?:\/\//i.test(url)) {
+        this.setText("[data-action-status]", "Enter a complete HTTP(S) URL to apply this action.");
+        return;
+      }
+      this.setText("[data-action-status]", "");
+      (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateButtonAction({ type: "open_url", url });
     });
     change("[data-button-event]", (value) => {
       var _a2;
-      return (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateButtonAction({ type: "track_event", eventName: value.trim() });
+      const eventName = value.trim();
+      if (!eventName) {
+        this.setText("[data-action-status]", "Enter an event name to apply this action.");
+        return;
+      }
+      this.setText("[data-action-status]", "");
+      (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateButtonAction({ type: "track_event", eventName });
     });
     change("[data-v2-image-src]", (value) => {
       var _a2;
@@ -11800,6 +11824,7 @@ class EditorModeController {
     this.setValue("[data-backdrop-opacity]", String(behavior.backdropOpacity ?? 0.45));
     this.setChecked("[data-close-backdrop]", behavior.closeOnBackdrop ?? false);
     this.setValue("[data-slideout-position]", behavior.slideoutPosition ?? "bottom-right");
+    this.setValue("[data-banner-display-mode]", behavior.bannerDisplayMode ?? "overlay");
     this.setValue("[data-banner-position]", behavior.bannerPosition ?? "top");
     this.setValue("[data-cursor-x]", String(((_a = behavior.cursorOffset) == null ? void 0 : _a.x) ?? 16));
     this.setValue("[data-cursor-y]", String(((_b = behavior.cursorOffset) == null ? void 0 : _b.y) ?? 16));
@@ -12137,4 +12162,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-BG0NqxAg.js.map
+//# sourceMappingURL=EditorModeController-fpF7yg1Z.js.map

@@ -4256,7 +4256,35 @@
     for (const [before, after] of ids) for (const quote of ['"', "'", ""]) selector = selector.split(`[${attribute}=${quote}${before}${quote}]`).join(`[${attribute}=${quote}${after}${quote}]`);
     return selector;
   }
-  const actionIdPattern = /^[A-Za-z][A-Za-z0-9_-]{2,63}$/;
+  const ORDINARY_BUTTON_ACTIONS = [
+    { type: "dismiss", label: "Dismiss", contexts: ["widget", "guide"], requiredConfiguration: [], runtimeRequirement: "dismiss" },
+    { type: "next_step", label: "Next step", contexts: ["guide"], requiredConfiguration: [], runtimeRequirement: "guide_advance" },
+    { type: "previous_step", label: "Previous step", contexts: ["guide"], requiredConfiguration: [], runtimeRequirement: "guide_back" },
+    { type: "open_url", label: "Open URL", contexts: ["widget", "guide"], requiredConfiguration: ["url"], runtimeRequirement: "navigation" },
+    { type: "track_event", label: "Track event", contexts: ["widget", "guide"], requiredConfiguration: ["eventName"], runtimeRequirement: "analytics" }
+  ];
+  const ORDINARY_ACTION_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{2,63}$/;
+  function ordinaryButtonActionsFor(context) {
+    return ORDINARY_BUTTON_ACTIONS.filter((action) => action.contexts.includes(context));
+  }
+  function ordinaryButtonActionErrors(value, context) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return ["Action configuration is missing."];
+    const action = value;
+    const definition = ORDINARY_BUTTON_ACTIONS.find((candidate) => candidate.type === action.type);
+    if (!definition) return ["Action type is unsupported."];
+    if (!definition.contexts.includes(context)) return [`${definition.label} is only supported by Guides.`];
+    if (definition.type === "open_url" && (typeof action.url !== "string" || action.url.length > 2e3 || !/^https?:\/\//i.test(action.url))) return ["Open URL actions must use a complete HTTP(S) URL."];
+    if (definition.type === "track_event" && (typeof action.eventName !== "string" || !action.eventName.trim() || action.eventName.length > 200 || /[\u0000-\u001f\u007f]/.test(action.eventName))) return ["Track event actions require an event name of 1-200 characters."];
+    return [];
+  }
+  function resolveOrdinaryButtonAction(id, value, context) {
+    if (!ORDINARY_ACTION_ID_PATTERN.test(id) || ordinaryButtonActionErrors(value, context).length) return null;
+    const candidate = value;
+    if (candidate.id !== void 0 && candidate.id !== id) return null;
+    if (candidate.type === "open_url") return { id, type: "open_url", url: candidate.url };
+    if (candidate.type === "track_event") return { id, type: "track_event", eventName: candidate.eventName };
+    return { id, type: candidate.type };
+  }
   function parse$1(html) {
     const template = document.createElement("template");
     template.innerHTML = html;
@@ -4289,14 +4317,11 @@
     if (new Set(ids).size !== ids.length) errors.push("Source HTML contains duplicate IDs.");
     const buttons = elements.filter((element) => element instanceof HTMLButtonElement && !element.dataset.movcuesSurveyAction && !element.dataset.movcuesOptionId && !element.dataset.movcuesChecklistRole && !element.dataset.movcuesChecklistItemRole);
     const actionIds = buttons.map((button) => button.dataset.movcuesActionId ?? "");
-    if (actionIds.some((value) => !actionIdPattern.test(value)) || new Set(actionIds).size !== actionIds.length) errors.push("Every ordinary button needs one unique valid action ID.");
+    if (actionIds.some((value) => !ORDINARY_ACTION_ID_PATTERN.test(value)) || new Set(actionIds).size !== actionIds.length) errors.push("Every ordinary button needs one unique valid action ID.");
     const bindings = Object.keys(operation.actionBindings);
     if (bindings.length !== actionIds.length || actionIds.some((value) => !(value in operation.actionBindings))) errors.push("Button actions and action bindings must match exactly.");
-    for (const action of Object.values(operation.actionBindings)) {
-      if (!options.guide && (action.type === "next_step" || action.type === "previous_step")) errors.push(`${action.type} is only supported by Guides.`);
-      if (action.type === "open_url" && !/^https?:\/\//i.test(action.url)) errors.push("Open URL actions must use HTTP(S).");
-      if (action.type === "track_event" && (!action.eventName.trim() || /[\u0000-\u001f\u007f]/.test(action.eventName))) errors.push("Track-event action is invalid.");
-    }
+    if (buttons.some((button) => isRuntimeOwnedCloseControl(button, operation.actionBindings[button.dataset.movcuesActionId ?? ""]))) errors.push("Do not include an icon-only close button in authored HTML; the runtime supplies the dismiss control.");
+    for (const action of Object.values(operation.actionBindings)) errors.push(...ordinaryButtonActionErrors(action, options.guide ? "guide" : "widget"));
     if (options.survey) {
       for (const question of options.survey.questions) {
         const matches2 = elements.filter((element) => element.dataset.movcuesQuestionId === question.id);
@@ -4328,7 +4353,13 @@
   }
   function sourceContext(builder, guide) {
     const movcues = builder.projectData.movcues && typeof builder.projectData.movcues === "object" ? builder.projectData.movcues : {};
-    return { html: builder.html, css: builder.css, authoringSurface: movcues.authoringSurface === "source" ? "source" : "onsite", actionBindings: structuredClone(movcues.actionBindings ?? {}), supportedActions: guide ? ["dismiss", "next_step", "previous_step", "open_url", "track_event"] : ["dismiss", "open_url", "track_event"] };
+    return { html: builder.html, css: builder.css, authoringSurface: movcues.authoringSurface === "source" ? "source" : "onsite", actionBindings: structuredClone(movcues.actionBindings ?? {}), supportedActions: ordinaryButtonActionsFor(guide ? "guide" : "widget").map((action) => action.type) };
+  }
+  function isRuntimeOwnedCloseControl(button, binding) {
+    const icon = (button.textContent ?? "").replace(/\s+/g, "");
+    if (!/^(?:x|\u00d7|\u2715|\u2716)$/i.test(icon)) return false;
+    const accessibleName = `${button.getAttribute("aria-label") ?? ""} ${button.title}`;
+    return (binding == null ? void 0 : binding.type) === "dismiss" || /\b(?:close|dismiss)\b/i.test(accessibleName);
   }
   function aiDocumentContext(value) {
     const clone = structuredClone(value);
@@ -4354,7 +4385,7 @@
   function sourceElement(element) {
     return { tag: element.tagName.toLowerCase(), attrs: Object.fromEntries(Array.from(element.attributes, (attr) => [attr.name, attr.value])), text: Array.from(element.childNodes).filter((node2) => node2.nodeType === Node.TEXT_NODE).map((node2) => node2.textContent ?? "").join(""), children: Array.from(element.children, sourceElement) };
   }
-  function mountBuilderContent(root2, card, builder, callbacks, allowSurveyInputs = false) {
+  function mountBuilderContent(root2, card, builder, callbacks, allowSurveyInputs = false, actionContext = "widget") {
     const html = sanitizeBuilderHtml(builder.html, allowSurveyInputs);
     const css = safeBuilderCss(builder.css);
     if (!html || css === null) return false;
@@ -4380,7 +4411,7 @@ ${ISOLATION_CSS}`;
       if (actionId === "primary") callbacks.onPrimary();
       else if (actionId === "secondary") callbacks.onSecondary();
       else {
-        const action = findOnsiteAction(builder, actionId ?? "");
+        const action = findOnsiteAction(builder, actionId ?? "", actionContext);
         if (action) (_b = callbacks.onActionId) == null ? void 0 : _b.call(callbacks, action, ((_a = target.textContent) == null ? void 0 : _a.trim()) ?? "");
       }
     });
@@ -4434,15 +4465,12 @@ ${ISOLATION_CSS}`;
     }
     return Array.from(template.content.childNodes);
   }
-  function findOnsiteAction(builder, id) {
+  function findOnsiteAction(builder, id, context) {
     const movcues = builder.projectData.movcues;
     const bindings = movcues && typeof movcues === "object" ? movcues.actionBindings : null;
     const candidate = bindings && typeof bindings === "object" ? bindings[id] : null;
-    if (!candidate || typeof candidate !== "object") return null;
-    const action = candidate;
-    if (action.id !== id || !["next_step", "previous_step", "dismiss", "open_url", "track_event"].includes(String(action.type))) return null;
-    if (action.type === "open_url" && (typeof action.url !== "string" || !/^https?:\/\//i.test(action.url) || !builderLinkUrlIsSafe(action.url))) return null;
-    if (action.type === "track_event" && (typeof action.eventName !== "string" || !action.eventName.trim() || action.eventName.length > 200)) return null;
+    const action = resolveOrdinaryButtonAction(id, candidate, context);
+    if ((action == null ? void 0 : action.type) === "open_url" && !builderLinkUrlIsSafe(action.url)) return null;
     return action;
   }
   function safeBuilderCss(input2) {
@@ -5367,7 +5395,7 @@ ${ISOLATION_CSS}`;
     return { valid: errors.length === 0, errors };
   }
   function validateBlock(block, path, addId, number, errors) {
-    var _a, _b, _c, _d, _e;
+    var _a, _b;
     addId(block.id, path);
     const base = ["id", "type", "align"];
     const keys = { checklist_task: [...base, "itemId", "fontSize", "color", "indicator"], checklist_text: [...base, "role", "fontSize", "color", "text"], checklist_control: [...base, "role", "fontSize", "color"], checklist_progress: [...base, "fontSize", "color"], question: [...base, "questionId", "fontSize", "color"], survey_controls: base, heading: [...base, "html", "level", "fontSize", "weight", "color", "lineHeight"], text: [...base, "html", "fontSize", "weight", "color", "lineHeight"], button: [...base, "label", "action", "variant", "background", "color", "radius", "paddingX", "paddingY", "width"], image: [...base, "src", "alt", "fit", "width", "height", "radius"], divider: [...base, "orientation", "thickness", "color"], spacer: [...base, "size"], icon: [...base, "icon", "size", "color"] };
@@ -5396,9 +5424,10 @@ ${ISOLATION_CSS}`;
       if (!((_a = block.label) == null ? void 0 : _a.trim()) || block.label.length > 80) errors.push(`${path} label must contain 1–80 characters.`);
       addId((_b = block.action) == null ? void 0 : _b.id, `${path} action`);
       if (!block.action || !["next_step", "previous_step", "dismiss", "open_url", "track_event"].includes(block.action.type)) errors.push(`${path} has an invalid action.`);
-      else unexpectedKeys(block.action, block.action.type === "open_url" ? ["id", "type", "url"] : block.action.type === "track_event" ? ["id", "type", "eventName"] : ["id", "type"], `${path} action`, errors);
-      if (((_c = block.action) == null ? void 0 : _c.type) === "open_url" && (!builderLinkUrlIsSafe(block.action.url) || !/^https?:\/\//i.test(block.action.url))) errors.push(`${path} URL must use HTTP(S).`);
-      if (((_d = block.action) == null ? void 0 : _d.type) === "track_event" && (!((_e = block.action.eventName) == null ? void 0 : _e.trim()) || block.action.eventName.length > 200)) errors.push(`${path} custom event must contain 1–200 characters.`);
+      else {
+        unexpectedKeys(block.action, block.action.type === "open_url" ? ["id", "type", "url"] : block.action.type === "track_event" ? ["id", "type", "eventName"] : ["id", "type"], `${path} action`, errors);
+        errors.push(...ordinaryButtonActionErrors(block.action, "guide").map((error) => `${path}: ${error}`));
+      }
       if (!["primary", "secondary", "outline"].includes(block.variant)) errors.push(`${path} has an invalid variant.`);
       if (!["hug", "full"].includes(block.width)) errors.push(`${path} has an invalid width behavior.`);
       number(block.radius, 0, 48, `${path} radius`);
@@ -6215,6 +6244,7 @@ ${ISOLATION_CSS}`;
     content.style.width = "100%";
     content.style.height = fillsHeight ? "100%" : "auto";
     widget.style.setProperty("box-sizing", "border-box");
+    if (widgetType === "banner") widget.style.setProperty("width", "100%", "important");
     widget.style.setProperty("min-width", "0", "important");
     widget.style.setProperty("max-width", "100%", "important");
     widget.style.setProperty("height", fillsHeight ? "100%" : "auto", "important");
@@ -6426,7 +6456,7 @@ ${ISOLATION_CSS}`;
     card.dataset.width = design.width;
     card.dataset.radius = design.theme.borderRadius;
     if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
-    const mountedBuilder = Boolean(builder && mountBuilderContent(root2, card, builder, callbacks, widgetType === "survey"));
+    const mountedBuilder = Boolean(builder && mountBuilderContent(root2, card, builder, callbacks, widgetType === "survey", callbacks.ordinaryActionContext ?? "widget"));
     if (mountedBuilder && widgetType) applyBuilderSizeContent(card, widgetType, design);
     if (!mountedBuilder) {
       const primary = content.primaryAction ? `<button class="primary" data-primary>${escapeText$1(content.primaryAction.label)}</button>` : "";
@@ -6437,7 +6467,7 @@ ${ISOLATION_CSS}`;
     }
     if (behavior.dismissible) mountRuntimeDismissControl(card, callbacks.onDismiss);
     root2.appendChild(card);
-    if (mountedBuilder && widgetType) fitBuilderWidthEnvelope(card);
+    if (mountedBuilder && widgetType && widgetType !== "banner") fitBuilderWidthEnvelope(card);
     if (mountedBuilder && widgetType === "anchored_card") fitAnchoredBuilderEnvelope(card);
     return card;
   }
@@ -6845,6 +6875,7 @@ ${ISOLATION_CSS}`;
       const card = buildCard(root2, content, design, behavior, callbacks, builder, "banner");
       card.classList.add("banner");
       card.dataset.position = behavior.bannerPosition ?? "top";
+      card.dataset.displayMode = behavior.bannerDisplayMode ?? "overlay";
       return card;
     }
     destroy() {
@@ -7194,6 +7225,32 @@ ${ISOLATION_CSS}`;
     if (advance.type === "route" && (!advance.pageRules.length || !advance.pageRules.some((rule2) => rule2.kind === "include") || advance.pageRules.some((rule2) => !rule2.value.trim() || rule2.value.length > 500))) add("Enter at least one valid matching page rule.");
     return errors;
   }
+  function mountInlineBannerHost(host, position) {
+    host.style.cssText = "display:block;position:relative;box-sizing:border-box;width:100%;max-width:100%;min-width:0;pointer-events:none";
+    const body = document.body;
+    const documentElement = document.documentElement;
+    const mountInDocument = !body || bodyLayoutNeedsDocumentLane(body);
+    host.dataset.movcuesBannerMount = mountInDocument ? "document" : "body";
+    if (!body) {
+      documentElement.appendChild(host);
+      return "document";
+    }
+    if (!mountInDocument) {
+      if (position === "top") body.prepend(host);
+      else body.append(host);
+      return "body";
+    }
+    if (position === "top") documentElement.insertBefore(host, body);
+    else documentElement.insertBefore(host, body.nextSibling);
+    return "document";
+  }
+  function bodyLayoutNeedsDocumentLane(body) {
+    const style = getComputedStyle(body);
+    if (style.display === "grid" || style.display === "inline-grid" || style.display === "contents") return true;
+    if (style.display === "inline-flex") return true;
+    if (style.display !== "flex") return false;
+    return style.flexDirection !== "column";
+  }
   class ExperienceRenderer {
     constructor() {
       this.host = null;
@@ -7213,16 +7270,27 @@ ${ISOLATION_CSS}`;
       return this.renderWidget(experience, experience.definition, callbacks, guideStepId);
     }
     root(experienceId, behavior, targetElement) {
+      const root2 = this.createRoot(experienceId);
+      this.host.style.cssText = "position:fixed;inset:0;pointer-events:none";
+      document.documentElement.appendChild(this.host);
+      this.applyLayer(behavior, targetElement);
+      return root2;
+    }
+    bannerRoot(experienceId, behavior) {
+      if (behavior.bannerDisplayMode !== "inline") return this.root(experienceId, behavior);
+      const root2 = this.createRoot(experienceId);
+      mountInlineBannerHost(this.host, behavior.bannerPosition ?? "top");
+      this.applyLayer(behavior);
+      return root2;
+    }
+    createRoot(experienceId) {
       this.host = document.createElement("div");
       this.host.dataset.movcuesExperience = experienceId;
       this.host.dataset.movcuesExperienceRoot = experienceId;
-      this.host.style.cssText = "position:fixed;inset:0;pointer-events:none";
       const root2 = this.host.attachShadow({ mode: "open" });
       const style = document.createElement("style");
       style.textContent = STYLES;
       root2.appendChild(style);
-      document.documentElement.appendChild(this.host);
-      this.applyLayer(behavior, targetElement);
       return root2;
     }
     applyLayer(behavior, targetElement) {
@@ -7288,7 +7356,7 @@ ${ISOLATION_CSS}`;
         this.renderer = renderer;
         renderer.render(root2, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
       } else if (experience.widgetType === "banner") {
-        const root2 = this.root(experience.id, definition.behavior);
+        const root2 = this.bannerRoot(experience.id, definition.behavior);
         const renderer = new BannerRenderer();
         this.renderer = renderer;
         renderer.render(root2, definition.content, definition.design, definition.behavior, this.callbacks(definition.content, callbacks), definition.builder);
@@ -7326,6 +7394,7 @@ ${ISOLATION_CSS}`;
       const guarded = { ...callbacks, onGuideAdvance: advance, onGuideBack: back, onDismiss: dismiss };
       const stepDesign = step.size ? { ...definition.design, size: step.size } : definition.design;
       const stepCallbacks = {
+        ordinaryActionContext: "guide",
         onDismiss: dismiss,
         onSecondary: dismiss,
         onPrimary: () => {
@@ -7533,7 +7602,7 @@ ${ISOLATION_CSS}`;
   .backdrop{pointer-events:auto;position:fixed;inset:0;background:rgba(0,0,0,var(--movcues-backdrop-opacity,.45))}
   .modal{left:50%;top:50%;transform:translate(-50%,-50%)}.modal[data-layout=fullscreen],.modal[data-size-width=full]{inset:12px;width:auto!important;max-width:none!important;transform:none;display:flex;flex-direction:column;justify-content:center}.modal[data-layout=fullscreen] footer,.modal[data-size-width=full] footer{justify-content:center}
   .slideout[data-position=top-left]{top:16px;left:16px}.slideout[data-position=top-right]{top:16px;right:16px}.slideout[data-position=bottom-left]{bottom:16px;left:16px}.slideout[data-position=bottom-right]{bottom:16px;right:16px}.slideout[data-position=center-left]{left:16px;top:50%;transform:translateY(-50%)}.slideout[data-position=center-right]{right:16px;top:50%;transform:translateY(-50%)}
-  .banner{left:0;right:0;width:auto!important;max-width:none;border-radius:0!important;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner[data-position=top]{top:0}.banner[data-position=bottom]{bottom:0}.banner h2,.banner p{grid-column:1}.banner footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
+  .banner{max-width:none;border-radius:0!important}.banner[data-display-mode=overlay]{left:0;right:0;width:auto!important}.banner[data-display-mode=overlay][data-position=top]{top:0}.banner[data-display-mode=overlay][data-position=bottom]{bottom:0}.banner[data-display-mode=inline]{position:relative;inset:auto;width:100%!important;max-width:none}.banner.builder-card{display:block}.banner .builder-content{width:100%;max-width:100%}.banner:not(.builder-card) .legacy-content{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center}.banner:not(.builder-card) h2,.banner:not(.builder-card) p{grid-column:1}.banner:not(.builder-card) footer{grid-column:2;grid-row:1/span 2;margin:0;padding-right:24px}
   .hotspot{pointer-events:auto;position:fixed;width:18px;height:18px;padding:0;border:3px solid #fff;border-radius:50%;background:var(--movcues-hotspot);box-shadow:0 1px 5px rgba(0,0,0,.35);color:#fff;font:700 12px/12px ui-sans-serif,system-ui,sans-serif}.hotspot[data-style=pulse]::after{content:"";position:absolute;inset:-7px;border:2px solid var(--movcues-hotspot);border-radius:50%;animation:movcues-pulse 1.8s ease-out infinite}.hotspot[data-style=dot]{width:14px;height:14px}.hotspot[data-style=question]{width:22px;height:22px}@keyframes movcues-pulse{0%{transform:scale(.65);opacity:.85}100%{transform:scale(1.45);opacity:0}}@media(prefers-reduced-motion:reduce){.hotspot::after{animation:none}}
   .movcues-survey-question.has-error{outline:2px solid #fecaca;outline-offset:6px;border-radius:6px}.movcues-survey-validation{color:#b91c1c}:where(.movcues-survey-option.is-selected){border-color:var(--movcues-primary);background:color-mix(in srgb,var(--movcues-primary) 12%,white)}.movcues-survey-input{font:inherit}
 `;
@@ -11646,7 +11715,7 @@ ${ISOLATION_CSS}`;
           </div>
           <div data-inspector="block" hidden>
             <div data-block="heading,text"><div class="formatbar"><button type="button" data-v2-format="strong"><b>B</b></button><button type="button" data-v2-format="em"><i>I</i></button><button type="button" data-v2-format="u"><u>U</u></button><button type="button" data-v2-list="ul">• List</button><button type="button" data-v2-list="ol">1. List</button></div><div class="link-row"><input data-v2-link-url aria-label="Link URL" type="text" inputmode="url" placeholder="https://… or /path"><button type="button" class="secondary-button compact" data-v2-apply-link>Link</button></div><label>Font size<div class="number"><input data-block-font-size type="number" min="10" max="72"><span>px</span></div></label><label>Line height<input data-block-line-height type="number" min="0.9" max="3" step="0.05"></label><label>Weight<select data-block-weight><option value="400">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label><label>Text color<input data-block-color type="color"></label></div>
-            <div data-block="button"><label>Label<input data-button-label type="text" maxlength="80"></label><label>Variant<select data-button-variant><option value="primary">Primary</option><option value="secondary">Secondary</option><option value="outline">Outline</option></select></label><label>Action<select data-button-action><option value="dismiss">Dismiss</option>${this.guide ? '<option value="next_step">Next step</option><option value="previous_step">Previous step</option>' : ""}<option value="open_url">Open URL</option><option value="track_event">Track event</option></select></label><label data-action-url hidden>URL<input data-button-url type="url" placeholder="https://example.com"></label><label data-action-event hidden>Event<input data-button-event type="text" maxlength="200" placeholder="feature_clicked"></label><label>Background<input data-button-background type="color"></label><label>Text color<input data-button-color type="color"></label><label>Width<select data-button-width><option value="hug">Hug content</option><option value="full">Full width</option></select></label><label>Horizontal pad<div class="number"><input data-button-padding-x type="number" min="4" max="48"><span>px</span></div></label><label>Vertical pad<div class="number"><input data-button-padding-y type="number" min="4" max="32"><span>px</span></div></label><label>Radius<div class="number"><input data-button-radius type="number" min="0" max="48"><span>px</span></div></label></div>
+            <div data-block="button"><label>Label<input data-button-label type="text" maxlength="80"></label><label>Variant<select data-button-variant><option value="primary">Primary</option><option value="secondary">Secondary</option><option value="outline">Outline</option></select></label><label>Action<select data-button-action>${ordinaryButtonActionsFor(this.guide ? "guide" : "widget").map((action) => `<option value="${action.type}">${action.label}</option>`).join("")}</select></label><label data-action-url hidden>URL<input data-button-url type="url" placeholder="https://example.com/path"></label><label data-action-event hidden>Event<input data-button-event type="text" maxlength="200" placeholder="feature_clicked"></label><p class="muted" data-action-status role="status" aria-live="polite"></p><label>Background<input data-button-background type="color"></label><label>Text color<input data-button-color type="color"></label><label>Width<select data-button-width><option value="hug">Hug content</option><option value="full">Full width</option></select></label><label>Horizontal pad<div class="number"><input data-button-padding-x type="number" min="4" max="48"><span>px</span></div></label><label>Vertical pad<div class="number"><input data-button-padding-y type="number" min="4" max="32"><span>px</span></div></label><label>Radius<div class="number"><input data-button-radius type="number" min="0" max="48"><span>px</span></div></label></div>
             <div data-block="image"><button type="button" class="secondary-button" data-choose-image>Choose image</button><p class="muted">PNG, JPG or WebP · up to 10 MB. You can also drop a file onto the image.</p><p class="muted" data-image-status role="status" aria-live="polite"></p><label>Image URL<input data-v2-image-src type="url" placeholder="https://… (optional)"></label><label>Alt text<input data-v2-image-alt type="text" maxlength="500"></label><label>Fit<select data-image-fit><option value="cover">Cover</option><option value="contain">Contain</option></select></label><label>Width<div class="number"><input data-image-width type="number" min="1" max="100"><span>%</span></div></label><label>Radius<div class="number"><input data-image-radius type="number" min="0" max="100"><span>px</span></div></label></div>
             <div data-block="divider"><label>Thickness<div class="number"><input data-divider-thickness type="number" min="1" max="16"><span>px</span></div></label><label>Color<input data-divider-color type="color"></label></div>
             <div data-block="spacer"><label>Space<div class="number"><input data-spacer-size type="number" min="4" max="240"><span>px</span></div></label></div>
@@ -11682,7 +11751,7 @@ ${ISOLATION_CSS}`;
           <div data-for="modal"><label>Layout<select data-modal-layout><option value="center">Centered</option><option value="fullscreen">Fullscreen</option></select></label></div>
           <div data-for="backdrop"><label class="check"><input data-backdrop type="checkbox"> Backdrop</label><label>Backdrop opacity<input data-backdrop-opacity type="number" min="0" max="0.9" step="0.05"></label><label class="check"><input data-close-backdrop type="checkbox"> Dismiss on backdrop click</label></div>
           <div data-for="slideout"><label>Position<select data-slideout-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="center-left">Center left</option><option value="center-right">Center right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label></div>
-          <div data-for="banner"><label>Position<select data-banner-position><option value="top">Top</option><option value="bottom">Bottom</option></select></label></div>
+          <div data-for="banner"><label>Display<select data-banner-display-mode><option value="inline">Inline with page</option><option value="overlay">Overlay viewport</option></select></label><label>Position<select data-banner-position><option value="top">Top</option><option value="bottom">Bottom</option></select></label></div>
           <div data-for="cursor"><label>X offset<div class="number"><input data-cursor-x type="number"><span>px</span></div></label><label>Y offset<div class="number"><input data-cursor-y type="number"><span>px</span></div></label></div>
           <div data-for="hotspot"><label>Beacon style<select data-hotspot-style><option value="pulse">Pulse</option><option value="dot">Dot</option><option value="question">Question mark</option></select></label><label>Beacon color<input data-hotspot-color type="color"></label></div>
         </section>
@@ -11917,6 +11986,9 @@ ${ISOLATION_CSS}`;
       this.onSelect("[data-slideout-position]", (value) => {
         this.currentBehavior().slideoutPosition = value;
       });
+      this.onSelect("[data-banner-display-mode]", (value) => {
+        this.currentBehavior().bannerDisplayMode = value;
+      });
       this.onSelect("[data-banner-position]", (value) => {
         this.currentBehavior().bannerPosition = value;
       });
@@ -12045,18 +12117,43 @@ ${ISOLATION_CSS}`;
         return (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateBlock({ radius: Math.max(0, Math.min(48, number(value, 8))) });
       });
       change("[data-button-action]", (value) => {
-        var _a2, _b2, _c2;
-        if (value === "open_url") (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateButtonAction({ type: "open_url", url: "https://example.com" });
-        else if (value === "track_event") (_b2 = this.compositionEditor) == null ? void 0 : _b2.updateButtonAction({ type: "track_event", eventName: "button_clicked" });
-        else (_c2 = this.compositionEditor) == null ? void 0 : _c2.updateButtonAction({ type: value });
+        var _a2, _b2, _c2, _d2;
+        if (value === "open_url" || value === "track_event") {
+          (_a2 = this.root) == null ? void 0 : _a2.querySelectorAll("[data-action-url],[data-action-event]").forEach((group) => {
+            group.hidden = true;
+          });
+          const field = (_b2 = this.root) == null ? void 0 : _b2.querySelector(value === "open_url" ? "[data-action-url]" : "[data-action-event]");
+          if (field) field.hidden = false;
+          const input2 = (_c2 = this.root) == null ? void 0 : _c2.querySelector(value === "open_url" ? "[data-button-url]" : "[data-button-event]");
+          if (input2) {
+            input2.value = "";
+            input2.focus();
+          }
+          this.setText("[data-action-status]", value === "open_url" ? "Enter a complete HTTP(S) URL to apply this action." : "Enter an event name to apply this action.");
+          return;
+        }
+        this.setText("[data-action-status]", "");
+        (_d2 = this.compositionEditor) == null ? void 0 : _d2.updateButtonAction({ type: value });
       });
       change("[data-button-url]", (value) => {
         var _a2;
-        return (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateButtonAction({ type: "open_url", url: value.trim() });
+        const url = value.trim();
+        if (!/^https?:\/\//i.test(url)) {
+          this.setText("[data-action-status]", "Enter a complete HTTP(S) URL to apply this action.");
+          return;
+        }
+        this.setText("[data-action-status]", "");
+        (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateButtonAction({ type: "open_url", url });
       });
       change("[data-button-event]", (value) => {
         var _a2;
-        return (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateButtonAction({ type: "track_event", eventName: value.trim() });
+        const eventName = value.trim();
+        if (!eventName) {
+          this.setText("[data-action-status]", "Enter an event name to apply this action.");
+          return;
+        }
+        this.setText("[data-action-status]", "");
+        (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateButtonAction({ type: "track_event", eventName });
       });
       change("[data-v2-image-src]", (value) => {
         var _a2;
@@ -13780,6 +13877,7 @@ ${ISOLATION_CSS}`;
       this.setValue("[data-backdrop-opacity]", String(behavior.backdropOpacity ?? 0.45));
       this.setChecked("[data-close-backdrop]", behavior.closeOnBackdrop ?? false);
       this.setValue("[data-slideout-position]", behavior.slideoutPosition ?? "bottom-right");
+      this.setValue("[data-banner-display-mode]", behavior.bannerDisplayMode ?? "overlay");
       this.setValue("[data-banner-position]", behavior.bannerPosition ?? "top");
       this.setValue("[data-cursor-x]", String(((_a = behavior.cursorOffset) == null ? void 0 : _a.x) ?? 16));
       this.setValue("[data-cursor-y]", String(((_b = behavior.cursorOffset) == null ? void 0 : _b.y) ?? 16));
