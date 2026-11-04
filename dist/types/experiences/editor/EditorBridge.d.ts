@@ -1,6 +1,7 @@
 import type { EditorDraft } from "../types";
 import type { SiteThemeTokens } from "../../themes/types";
 import type { EditorAiProposal } from "./AiEditing";
+import { type EditorAiStreamEvent } from "./EditorAiProgress";
 export interface EditorAiResponse {
     conversationId: string;
     revision: number;
@@ -20,7 +21,7 @@ export declare class EditorBridge {
         prompt: string;
         revision: number;
         context: unknown;
-    }, signal?: AbortSignal): Promise<EditorAiResponse>;
+    }, signal?: AbortSignal, onEvent?: (event: EditorAiStreamEvent) => void): Promise<EditorAiResponse>;
     saveStyle(name: string, tokens: SiteThemeTokens): Promise<{
         id: string;
         name: string;

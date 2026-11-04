@@ -530,6 +530,47 @@ describe("live placement editor", () => {
     expect(editorRoot().querySelector<HTMLButtonElement>("[data-ai-apply]")!.disabled).toBe(true); expect(heading.textContent).toBe("Latest manual edit");
   });
 
+  it("applies a normal widget AI proposal when the composition editor is temporarily unmounted", async () => {
+    const base = editorFetch(onsiteDraft());
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(input).endsWith("/ai/chat")) return base(input, init);
+      const body = JSON.parse(String(init?.body));
+      const blockId = body.context.document.root.children[0].block.id;
+      return { ok: true, status: 200, json: async () => ({ conversationId: "widget_apply", revision: body.revision, markdown: "Ready", proposal: { summary: "Rewrite the heading", operations: [{ type: "update_text", blockId, text: "A clearer heading" }] } }) };
+    });
+    vi.stubGlobal("fetch", fetchMock); controller = new EditorModeController("https://api.example.com"); await controller.start("token");
+    editorRoot().querySelector<HTMLButtonElement>('[data-inspector-tab="ai"]')!.click(); const prompt = editorRoot().querySelector<HTMLTextAreaElement>("[data-ai-prompt]")!; prompt.value = "Improve the heading";
+    editorRoot().querySelector<HTMLFormElement>("[data-ai-form]")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(editorRoot().querySelector<HTMLElement>("[data-ai-proposal]")?.hidden).toBe(false));
+    const internals = controller as unknown as { compositionEditor: { destroy(): void } | null }; internals.compositionEditor?.destroy(); internals.compositionEditor = null;
+    editorRoot().querySelector<HTMLButtonElement>("[data-ai-apply]")!.click();
+    await vi.waitFor(() => expect(activePreviewText()).toContain("A clearer heading"));
+    expect(editorRoot().querySelector("[data-ai-status]")?.textContent).toContain("Applied");
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, request]) => request?.method === "PATCH" && JSON.parse(String(request.body)).definition.content.heading === "A clearer heading")).toBe(true));
+  });
+
+  it("shows in-message streamed progress, preserves disclosure state, and ignores a late result after cancel", async () => {
+    const base = editorFetch(onsiteDraft()); const streams: ReadableStreamDefaultController<Uint8Array>[] = []; const encoder = new TextEncoder(); let requests = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(input).endsWith("/ai/chat")) return base(input, init);
+      requests++; const stream = new ReadableStream<Uint8Array>({ start(control) { streams.push(control); } });
+      return new Response(stream, { headers: { "content-type": "application/x-ndjson" } });
+    });
+    const emit = (index: number, event: unknown) => streams[index].enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+    vi.stubGlobal("fetch", fetchMock); controller = new EditorModeController("https://api.example.com"); await controller.start("token"); editorRoot().querySelector<HTMLButtonElement>('[data-inspector-tab="ai"]')!.click();
+    const prompt = editorRoot().querySelector<HTMLTextAreaElement>("[data-ai-prompt]")!; prompt.value = "Improve the heading"; editorRoot().querySelector<HTMLFormElement>("[data-ai-form]")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(editorRoot().querySelector("[data-ai-history]")?.textContent).toContain("Preparing your request"); expect(editorRoot().querySelector<HTMLButtonElement>("[data-ai-send]")!.disabled).toBe(true);
+    await vi.waitFor(() => expect(streams).toHaveLength(1)); emit(0, { type: "progress", requestId: "req_1", sequence: 1, elapsedMs: 5, stage: "creating", detail: "Creating a proposal.", attempt: 1 });
+    await vi.waitFor(() => expect(editorRoot().querySelector("[data-ai-progress-current]")?.textContent).toBe("Creating your change.")); const details = editorRoot().querySelector<HTMLDetailsElement>("[data-ai-progress] details")!; details.open = true;
+    emit(0, { type: "progress", requestId: "req_1", sequence: 2, elapsedMs: 10, stage: "checking", detail: "Checking it.", attempt: 1 }); emit(0, { type: "progress", requestId: "req_1", sequence: 3, elapsedMs: 15, stage: "repairing", detail: "Adjusting it.", attempt: 2 });
+    await vi.waitFor(() => expect(editorRoot().querySelector("[data-ai-progress-current]")?.textContent).toBe("Adjusting the change after checks.")); expect(details.open).toBe(true);
+    emit(0, { type: "progress", requestId: "req_1", sequence: 4, elapsedMs: 20, stage: "rechecking", detail: "Checking again.", attempt: 2 }); emit(0, { type: "result", requestId: "req_1", sequence: 5, elapsedMs: 25, result: { conversationId: "c1", revision: 1, markdown: "Ready", proposal: { summary: "Rewrite", operations: [{ type: "update_text", blockId: "block_heading", text: "Clearer" }] } } }); streams[0].close();
+    await vi.waitFor(() => expect(editorRoot().querySelector<HTMLElement>("[data-ai-proposal]")?.hidden).toBe(false)); expect(editorRoot().querySelector("[data-ai-history]")?.textContent).toContain("Proposal ready."); expect(details.open).toBe(false);
+    editorRoot().querySelector<HTMLButtonElement>("[data-ai-discard]")!.click(); prompt.value = "Try another"; editorRoot().querySelector<HTMLFormElement>("[data-ai-form]")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await vi.waitFor(() => expect(requests).toBe(2)); editorRoot().querySelector<HTMLButtonElement>("[data-ai-cancel]")!.click();
+    emit(1, { type: "result", requestId: "req_2", sequence: 1, elapsedMs: 30, result: { conversationId: "c2", revision: 1, markdown: "Too late", proposal: { summary: "Late", operations: [{ type: "update_text", blockId: "block_heading", text: "Late" }] } } }); streams[1].close();
+    await new Promise(resolve => setTimeout(resolve, 0)); expect(editorRoot().querySelector("[data-ai-history]")?.textContent).toContain("Request canceled."); expect(editorRoot().querySelector("[data-ai-history]")?.textContent).not.toContain("Too late"); expect(editorRoot().querySelector<HTMLElement>("[data-ai-proposal]")?.hidden).toBe(true);
+  });
+
 });
 
 function editorFetch(draft: EditorDraft) {

@@ -61,6 +61,8 @@ export declare class EditorModeController {
     private widgetAiPreviewCandidate;
     private aiAbort;
     private aiRequestGeneration;
+    private aiMessageSequence;
+    private aiProgressTimer;
     private persistBeforePageLeave;
     private protectUnsavedChanges;
     constructor(apiBase: string);
@@ -122,6 +124,10 @@ export declare class EditorModeController {
     private syncCompositionInspector;
     private setInspectorTab;
     private syncAiPanel;
+    private syncAiProgressItem;
+    private updateAiProgress;
+    private syncAiElapsed;
+    private finishAiProgress;
     private sendAiPrompt;
     private cancelAiRequest;
     private applyAiProposal;

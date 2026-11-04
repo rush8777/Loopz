@@ -1,0 +1,24 @@
+<!doctype html><meta charset="utf-8"><title>Movcues AI progress evidence</title>
+<style>body{margin:0;min-height:100vh;background:linear-gradient(135deg,#eef2ff,#f8fafc);font:16px system-ui}#target{margin:120px 0 0 80px;padding:18px 24px}.evidence-controls{position:fixed;left:16px;bottom:16px;display:flex;gap:8px;z-index:2147483647}.evidence-controls button{padding:9px 12px}</style>
+<button id="target">Fixture page target</button><div class="evidence-controls"><button id="repair">Trigger repair</button><button id="finish">Finish response</button><button id="error">Trigger timeout</button></div>
+<script type="module">
+import { EditorModeController } from '/src/experiences/editor/EditorModeController.ts';
+import { applyOnsiteDocument, createOnsiteDocument } from '/src/experiences/onsite/OnsiteDocument.ts';
+const builder={version:1,projectData:{},html:'',css:''};
+const applied=applyOnsiteDocument(builder,createOnsiteDocument(false),'modal');
+let revision=1,stream,sequence=0;
+const frame=value=>stream?.enqueue(new TextEncoder().encode(`${JSON.stringify({...value,requestId:'evidence_request',sequence:++sequence,elapsedMs:sequence*900})}\n`));
+const definition={content:applied.content,builder,design:{width:'md',theme:{background:'#ffffff',foreground:'#111827',primary:'#2563eb',borderRadius:'md'}},behavior:{dismissible:true},targeting:{pageRules:[],audience:{type:'all'},trigger:{type:'page_load'},frequency:{mode:'once'},priority:0,interruptPolicy:'queue'}};
+window.fetch=async(input,init={})=>{
+ const url=String(input);
+ if(url.endsWith('/exchange'))return new Response(JSON.stringify({sessionId:'evidence_session',accessToken:'access',expiresAt:new Date(Date.now()+600000).toISOString()}),{headers:{'content-type':'application/json'}});
+ if(url.endsWith('/draft')&&init.method==='PATCH'){revision++;return new Response(JSON.stringify({version:{id:'evidence_version',versionNumber:1,revision,definition}}),{headers:{'content-type':'application/json'}});}
+ if(url.endsWith('/draft'))return new Response(JSON.stringify({experience:{id:'evidence_experience',name:'AI progress evidence',kind:'widget',widgetType:'modal',builderMode:'onsite'},version:{id:'evidence_version',versionNumber:1,revision,definition}}),{headers:{'content-type':'application/json'}});
+ if(url.endsWith('/ai/chat')){sequence=0;const body=new ReadableStream({start(controller){stream=controller;frame({type:'progress',stage:'creating',detail:'Creating a proposal from the verified editor context.',attempt:1});}});return new Response(body,{headers:{'content-type':'application/x-ndjson'}});}
+ return new Response('{}',{status:404,headers:{'content-type':'application/json'}});
+};
+document.querySelector('#repair').onclick=()=>{frame({type:'progress',stage:'checking',detail:'Checking layout, protected content, and button actions.',attempt:1});frame({type:'progress',stage:'repairing',detail:'Adjusting the proposal so it passes the editor checks.',attempt:2});};
+document.querySelector('#finish').onclick=()=>{frame({type:'progress',stage:'rechecking',detail:'Checking the updated proposal with the same complete rules.',attempt:2});frame({type:'progress',stage:'ready',detail:'Validation complete; finalizing the response.',attempt:2});frame({type:'result',result:{conversationId:'evidence_conversation',revision,markdown:'The updated design is ready to review.',proposal:{summary:'Clarify the welcome heading',operations:[{type:'update_text',blockId:'block_heading',text:'A clearer welcome'}]}}});stream.close();stream=null;};
+document.querySelector('#error').onclick=()=>{frame({type:'error',error:'ai_deadline_exceeded',message:'The AI request reached its total deadline.',conversationId:'evidence_conversation'});stream.close();stream=null;};
+const controller=new EditorModeController(location.origin);await controller.start('evidence_token');window.evidenceController=controller;
+</script>

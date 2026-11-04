@@ -26,6 +26,7 @@ import { RouteObserver } from "../../dom/RouteObserver";
 import { ExperienceRenderer } from "../runtime/ExperienceRenderer";
 import { findTarget } from "../runtime/AnchoredCardRenderer";
 import { DraftConflictError, EditorAiRequestError, EditorBridge, EditorSessionExpiredError } from "./EditorBridge";
+import type { EditorAiStreamEvent, EditorAiProgressStage } from "./EditorAiProgress";
 import { ElementPicker } from "./ElementPicker";
 import { OnsiteContentEditor, type OnsiteComponentSelection } from "./OnsiteContentEditor";
 import { OnsiteCompositionEditor, type CompositionSelection } from "./OnsiteCompositionEditor";
@@ -33,7 +34,7 @@ import { applyOnsiteDocument, cloneOnsite, createOnsiteDocument, duplicateDocume
 import { guideInteractionTarget, guideStepConfigurationErrors, matchesGuideRoute } from "../runtime/GuideStepLogic";
 import type { SiteThemeTokens, VisualPresetId, VisualThemeState } from "../../themes/types";
 import { EXPERIENCE_PRESETS, resolvedTheme } from "../../themes/ExperienceTheme";
-import { applyGuideAiProposal, editorAiContext, guideAiContext, type EditorAiProposal } from "./AiEditing";
+import { applyEditorAiProposal, applyGuideAiProposal, editorAiContext, guideAiContext, type EditorAiProposal } from "./AiEditing";
 import { applySurveyAiProposal, surveyAiContext, type SurveyAiProposal } from "./SurveyAiEditing";
 import { applyChecklistAiProposal, checklistAiContext, type ChecklistAiProposal } from "./ChecklistAiEditing";
 import { applySourceMarkup, isSourceAuthored, type ReplaceMarkupOperation } from "./SourceAuthoring";
@@ -41,7 +42,8 @@ import { ordinaryButtonActionsFor } from "../OrdinaryButtonAction";
 
 type EditorMode = "design" | "target" | "navigate" | "preview";
 type TargetStatus = "found" | "off-page" | "missing" | "unconfigured";
-type AiChatMessage = { role: "user" | "assistant"; text: string };
+type AiProgressItem = { key: "preparing" | EditorAiProgressStage | "complete"; label: string; detail: string; status: "waiting" | "active" | "complete" | "error" | "cancelled" };
+type AiChatMessage = { id: string; role: "user" | "assistant"; text: string; progress?: { startedAt: number; current: string; finished: boolean; items: AiProgressItem[] } };
 
 export class EditorModeController {
   private host: HTMLElement | null = null;
@@ -104,6 +106,8 @@ export class EditorModeController {
   private widgetAiPreviewCandidate: (RuntimeWidgetDefinition & { targeting: ExperienceTargeting }) | null = null;
   private aiAbort: AbortController | null = null;
   private aiRequestGeneration = 0;
+  private aiMessageSequence = 0;
+  private aiProgressTimer = 0;
   private persistBeforePageLeave = () => this.updateContinuation();
   private protectUnsavedChanges = (event: BeforeUnloadEvent) => { if (!this.dirty && !this.saveInFlight && !this.contentEditor?.isComposing() && !this.compositionEditor?.isComposing()) return; event.preventDefault(); event.returnValue = ""; };
 
@@ -1023,13 +1027,20 @@ export class EditorModeController {
     this.setText("[data-ai-context]", this.guide ? `Guide · step ${this.stepIndex + 1} of ${this.guide.steps.length}${selection ? ` · ${selection.label}` : ""}` : this.survey ? `Survey · step ${this.stepIndex + 1} of ${this.survey.steps.length}${selection ? ` · ${selection.label}` : ""}` : this.checklist ? `Checklist · ${this.checklistEditor?.getView() ?? "expanded"}${selection ? ` · ${selection.label}` : ""}` : selection ? `Editing ${selection.label} · ${selection.kind}` : "Choose an element or ask about the whole widget.");
     const history = this.root.querySelector<HTMLElement>("[data-ai-history]");
     if (history) {
-      const messages = this.aiMessages.map(message => {
-        const item = document.createElement("article"); item.className = `ai-chat-message ai-chat-message--${message.role}`;
-        const label = document.createElement("span"); label.className = "ai-chat-message__role"; label.textContent = message.role === "user" ? "You" : "Movcues AI";
-        const text = document.createElement("p"); text.textContent = message.text;
-        item.append(label, text); return item;
-      });
-      history.replaceChildren(...messages); history.scrollTop = history.scrollHeight;
+      const following = history.scrollHeight - history.scrollTop - history.clientHeight < 28;
+      const ids = new Set(this.aiMessages.map(message => message.id));
+      history.querySelectorAll<HTMLElement>("[data-ai-message-id]").forEach(item => { if (!ids.has(item.dataset.aiMessageId ?? "")) item.remove(); });
+      for (const message of this.aiMessages) {
+        let item = history.querySelector<HTMLElement>(`[data-ai-message-id="${message.id}"]`);
+        if (!item) {
+          item = document.createElement("article"); item.dataset.aiMessageId = message.id; item.className = `ai-chat-message ai-chat-message--${message.role}`;
+          const label = document.createElement("span"); label.className = "ai-chat-message__role"; label.textContent = message.role === "user" ? "You" : "Movcues AI";
+          const text = document.createElement("p"); text.dataset.aiMessageText = ""; item.append(label, text); history.append(item);
+        }
+        const text = item.querySelector<HTMLElement>("[data-ai-message-text]"); if (text && text.textContent !== message.text) text.textContent = message.text;
+        this.syncAiProgressItem(item, message);
+      }
+      if (following) history.scrollTop = history.scrollHeight;
     }
     const proposal = this.root.querySelector<HTMLElement>("[data-ai-proposal]"); if (proposal) proposal.hidden = !this.aiProposal;
     if (!this.aiProposal) return;
@@ -1044,30 +1055,76 @@ export class EditorModeController {
     if (stale) this.setText("[data-ai-status]", "The draft changed. Discard this proposal and generate a fresh one.");
   }
 
+  private syncAiProgressItem(item: HTMLElement, message: AiChatMessage): void {
+    let progress = item.querySelector<HTMLElement>("[data-ai-progress]");
+    if (!message.progress) { progress?.remove(); return; }
+    const wasOpen = progress?.querySelector("details")?.hasAttribute("open") ?? false;
+    if (!progress) { progress = document.createElement("div"); progress.dataset.aiProgress = ""; item.append(progress); }
+    let current = progress.querySelector<HTMLElement>("[data-ai-progress-current]");
+    if (!current) { current = document.createElement("div"); current.className = "ai-progress-current"; current.dataset.aiProgressCurrent = ""; current.setAttribute("role", "status"); current.setAttribute("aria-live", "polite"); progress.append(current); }
+    const active = message.progress.items.find(stage => stage.status === "active") ?? message.progress.items[message.progress.items.length - 1];
+    const currentLabel = active?.label ?? message.progress.current; if (current.textContent !== currentLabel) current.textContent = currentLabel;
+    let elapsed = progress.querySelector<HTMLElement>("[data-ai-progress-elapsed]");
+    if (!elapsed) { elapsed = document.createElement("span"); elapsed.className = "ai-progress-elapsed"; elapsed.dataset.aiProgressElapsed = ""; elapsed.setAttribute("aria-hidden", "true"); progress.append(elapsed); }
+    elapsed.textContent = formatAiElapsed(Date.now() - message.progress.startedAt);
+    let details = progress.querySelector<HTMLDetailsElement>("details");
+    if (!details) { details = document.createElement("details"); const summary = document.createElement("summary"); summary.textContent = "Show progress"; const list = document.createElement("ol"); list.dataset.aiProgressList = ""; details.append(summary, list); progress.append(details); }
+    const list = details.querySelector<HTMLOListElement>("[data-ai-progress-list]")!;
+    const stages = message.progress.items.map(stage => { const row = document.createElement("li"); row.dataset.status = stage.status; const label = document.createElement("strong"); label.textContent = stage.label; const detail = document.createElement("span"); detail.textContent = stage.detail; row.append(label, detail); return row; });
+    list.replaceChildren(...stages); details.open = !message.progress.finished && wasOpen;
+  }
+
+  private updateAiProgress(messageId: string, event: EditorAiStreamEvent): void {
+    const message = this.aiMessages.find(value => value.id === messageId); if (!message?.progress) return;
+    if (event.type === "heartbeat") { this.syncAiElapsed(messageId); return; }
+    if (event.type !== "progress") return;
+    message.progress.items.forEach(item => { if (item.status === "active") item.status = "complete"; });
+    const labels: Record<EditorAiProgressStage, string> = { creating: "Creating your change.", checking: "Checking layout and button actions.", repairing: "Adjusting the change after checks.", rechecking: "Checking the updated change.", ready: "Finalizing your response." };
+    const existing = message.progress.items.find(item => item.key === event.stage);
+    if (existing) { existing.status = "active"; existing.detail = event.detail; } else message.progress.items.push({ key: event.stage, label: labels[event.stage], detail: event.detail, status: "active" });
+    message.progress.current = labels[event.stage]; this.syncAiPanel();
+  }
+
+  private syncAiElapsed(messageId: string): void {
+    const message = this.aiMessages.find(value => value.id === messageId); const elapsed = this.root?.querySelector<HTMLElement>(`[data-ai-message-id="${messageId}"] [data-ai-progress-elapsed]`);
+    if (message?.progress && elapsed) elapsed.textContent = formatAiElapsed(Date.now() - message.progress.startedAt);
+  }
+
+  private finishAiProgress(messageId: string, outcome: "proposal" | "response" | "error" | "cancelled", detail: string): void {
+    const message = this.aiMessages.find(value => value.id === messageId); if (!message?.progress) return;
+    message.progress.items.forEach(item => { if (item.status === "active") item.status = outcome === "error" ? "error" : outcome === "cancelled" ? "cancelled" : "complete"; });
+    const label = outcome === "proposal" ? "Proposal ready." : outcome === "response" ? "Response ready." : outcome === "cancelled" ? "Request canceled." : "Request stopped.";
+    message.progress.items.push({ key: "complete", label, detail, status: outcome === "error" ? "error" : outcome === "cancelled" ? "cancelled" : "complete" });
+    message.progress.current = label; message.progress.finished = true; clearInterval(this.aiProgressTimer); this.aiProgressTimer = 0; this.syncAiPanel();
+  }
+
   private async sendAiPrompt(): Promise<void> {
     const input = this.root?.querySelector<HTMLTextAreaElement>("[data-ai-prompt]"); const prompt = input?.value.trim();
     const builder = this.currentBuilder(), sourceMode = isSourceAuthored(builder);
-    if (!prompt || !this.bridge || !this.draft || !builder || !this.compositionSelection || (!this.compositionEditor && !sourceMode)) return;
-    if (!this.flushContent() || this.dirty && !await this.persist()) return;
-    this.cancelAiRequest(); const generation = ++this.aiRequestGeneration; const abort = new AbortController(); this.aiAbort = abort;
+    if (!prompt || this.aiAbort || !this.bridge || !this.draft || !builder || !this.compositionSelection || (!this.compositionEditor && !sourceMode) || !this.flushContent()) return;
+    const generation = ++this.aiRequestGeneration; const abort = new AbortController(); this.aiAbort = abort; const messageId = `ai_${++this.aiMessageSequence}`;
     const send = this.root?.querySelector<HTMLButtonElement>("[data-ai-send]"); if (send) send.disabled = true;
     const cancel = this.root?.querySelector<HTMLButtonElement>("[data-ai-cancel]"); if (cancel) cancel.hidden = false;
-    this.aiMessages.push({ role: "user", text: prompt }); if (input) input.value = "";
-    this.setText("[data-ai-status]", "Generating a validated proposal…"); this.discardAiPreview(); this.aiProposal = null; this.aiResolvedTargets.clear(); this.syncAiPanel();
+    this.aiMessages.push({ id: `user_${++this.aiMessageSequence}`, role: "user", text: prompt }, { id: messageId, role: "assistant", text: "Preparing your request...", progress: { startedAt: Date.now(), current: "Preparing your request.", finished: false, items: [{ key: "preparing", label: "Preparing your request.", detail: this.dirty || this.saveInFlight ? "Saving the current draft before generation starts." : "Building verified editor context locally.", status: "active" }] } }); if (input) input.value = "";
+    this.setText("[data-ai-status]", ""); this.discardAiPreview(); this.aiProposal = null; this.aiResolvedTargets.clear(); this.syncAiPanel();
+    clearInterval(this.aiProgressTimer); this.aiProgressTimer = window.setInterval(() => this.syncAiElapsed(messageId), 1_000);
     try {
+      if (this.dirty && !await this.persist()) throw new Error("The current draft could not be saved, so generation did not start.");
+      if (generation !== this.aiRequestGeneration || abort.signal.aborted) return;
+      this.setText("[data-ai-status]", "");
       const document = onsiteDocumentFromBuilder(builder); if (!document) throw new Error("This draft has no recoverable on-site document.");
       const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting }, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.ensureThemeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : this.survey ? surveyAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, definition: this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }, currentStepId: this.survey.steps[this.stepIndex].id, selection: this.compositionSelection, scope: this.compositionSelection.kind === "step" ? "survey" : "step" }) : this.checklist ? checklistAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, checklist: this.checklist, references: this.draft.references ?? { guides: [], segments: [] }, selection: this.compositionSelection, currentView: this.checklistEditor?.getView() ?? "expanded", theme: resolvedTheme(this.ensureThemeState()) }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document, builder });
       const requestEditGeneration = this.editGeneration, requestSelectionKey = this.aiSelectionKey();
-      const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context }, abort.signal);
+      const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context }, abort.signal, event => { if (generation === this.aiRequestGeneration && !abort.signal.aborted) this.updateAiProgress(messageId, event); });
       if (generation !== this.aiRequestGeneration) return;
       this.aiConversationId = response.conversationId; this.aiProposal = response.proposal ? { value: response.proposal as EditorAiProposal | SurveyAiProposal | ChecklistAiProposal, revision: response.revision, generation: requestEditGeneration, selectionKey: requestSelectionKey } : null;
-      this.aiMessages.push({ role: "assistant", text: response.markdown.trim() || "Proposal generated." }); this.setText("[data-ai-status]", ""); this.syncAiPanel();
+      const message = this.aiMessages.find(value => value.id === messageId); if (message) message.text = response.markdown.trim() || (response.proposal ? "Proposal generated." : "Response complete."); this.finishAiProgress(messageId, response.proposal ? "proposal" : "response", response.proposal ? "The validated proposal is ready for Preview or Apply." : "No proposal was needed for this response."); this.setText("[data-ai-status]", ""); this.syncAiPanel();
     } catch (error) {
-      if (generation === this.aiRequestGeneration && !abort.signal.aborted) { if (error instanceof DraftConflictError) this.saveState = "conflict"; if (error instanceof EditorAiRequestError && error.conversationId) this.aiConversationId = error.conversationId; this.setText("[data-ai-status]", error instanceof Error ? error.message : "Movcues AI could not complete this request."); this.showSaveState(); }
-    } finally { if (generation === this.aiRequestGeneration) { this.aiAbort = null; if (send) send.disabled = false; if (cancel) cancel.hidden = true; } }
+      if (generation === this.aiRequestGeneration && !abort.signal.aborted) { const message = this.aiMessages.find(value => value.id === messageId); const detail = error instanceof Error ? error.message : "Movcues AI could not complete this request."; if (message) message.text = detail; this.finishAiProgress(messageId, "error", detail); if (error instanceof DraftConflictError) this.saveState = "conflict"; if (error instanceof EditorAiRequestError && error.conversationId) this.aiConversationId = error.conversationId; this.setText("[data-ai-status]", detail); this.showSaveState(); }
+    } finally { if (generation === this.aiRequestGeneration) { clearInterval(this.aiProgressTimer); this.aiProgressTimer = 0; this.aiAbort = null; if (send) send.disabled = false; if (cancel) cancel.hidden = true; } }
   }
 
-  private cancelAiRequest(): void { if (!this.aiAbort) return; this.aiAbort.abort(); this.aiAbort = null; this.aiRequestGeneration++; this.setText("[data-ai-status]", "Request canceled. Your prompt is still here."); const send = this.root?.querySelector<HTMLButtonElement>("[data-ai-send]"); if (send) send.disabled = false; const cancel = this.root?.querySelector<HTMLButtonElement>("[data-ai-cancel]"); if (cancel) cancel.hidden = true; }
+  private cancelAiRequest(): void { if (!this.aiAbort) return; this.aiAbort.abort(); this.aiAbort = null; this.aiRequestGeneration++; clearInterval(this.aiProgressTimer); this.aiProgressTimer = 0; const pending = [...this.aiMessages].reverse().find(message => message.progress && !message.progress.finished); if (pending) { pending.text = "Request canceled."; this.finishAiProgress(pending.id, "cancelled", "No proposal from this request can be applied."); } this.setText("[data-ai-status]", "Request canceled."); const send = this.root?.querySelector<HTMLButtonElement>("[data-ai-send]"); if (send) send.disabled = false; const cancel = this.root?.querySelector<HTMLButtonElement>("[data-ai-cancel]"); if (cancel) cancel.hidden = true; }
 
   private applyAiProposal(): void {
     if (!this.aiProposal || !this.draft || this.aiProposalIsStale()) { this.syncAiPanel(); return; }
@@ -1077,7 +1134,19 @@ export class EditorModeController {
     }
     if (!this.guide) {
       if (this.aiProposal.value.operations.some(operation => operation.type === "replace_markup")) { try { const before = cloneOnsite(this.widgetAiPreviewOriginal ?? this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }), candidate = this.widgetAiPreviewCandidate ?? this.applyWidgetSourceProposal(before);  this.definition = cloneOnsite(candidate); this.widgetAiPreviewOriginal = null; this.widgetAiPreviewCandidate = null; this.aiPreviewReturnMode = null; this.aiProposal = null; this.finishAiApply(); this.setText("[data-ai-status]", "Applied. You can continue editing this design directly. Undo restores the entire proposal."); this.syncAiPanel(); } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The source proposal is invalid."); } return; }
-      if (this.compositionEditor?.applyAiProposal(this.aiProposal.value as EditorAiProposal)) { this.aiProposal = null; this.setText("[data-ai-status]", "Applied. Use Undo to revert the entire proposal."); this.syncAiPanel(); } return;
+      if (this.compositionEditor) {
+        if (this.compositionEditor.applyAiProposal(this.aiProposal.value as EditorAiProposal)) { this.aiProposal = null; this.setText("[data-ai-status]", "Applied. Use Undo to revert the entire proposal."); this.syncAiPanel(); }
+        return;
+      }
+      try {
+        const candidate = cloneOnsite(this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting });
+        const document = onsiteDocumentFromBuilder(candidate.builder); if (!candidate.builder || !document) throw new Error("The current design is unavailable. Reopen Design mode and try again.");
+        const next = applyEditorAiProposal(document, this.aiProposal.value as EditorAiProposal);
+        const compiled = applyOnsiteDocument(candidate.builder, next, this.draft.experience.widgetType ?? "modal");
+        candidate.content = compiled.content; this.definition = candidate; this.aiProposal = null;
+        this.finishAiApply(); this.setText("[data-ai-status]", "Applied. Use Undo to revert the entire proposal."); this.syncAiPanel();
+      } catch (error) { this.setText("[data-ai-status]", error instanceof Error ? error.message : "The proposal could not be applied."); }
+      return;
     }
     try {
       const before = cloneOnsite(this.aiPreviewOriginal ?? this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting });
@@ -1461,6 +1530,7 @@ export class EditorModeController {
   private teardown(clearContinuation: boolean): void {
     this.lifecycle++;
     this.cancelAiRequest(); this.aiProposal = null; this.aiConversationId = undefined; this.aiMessages = []; this.aiResolvedTargets.clear(); this.aiPreviewOriginal = null; this.aiPreviewCandidate = null; this.surveyAiPreviewOriginal = null; this.surveyAiPreviewCandidate = null; this.checklistAiPreviewOriginal = null; this.checklistAiPreviewCandidate = null; this.widgetAiPreviewOriginal = null; this.widgetAiPreviewCandidate = null; this.aiPreviewReturnMode = null;
+    clearInterval(this.aiProgressTimer); this.aiProgressTimer = 0;
     clearTimeout(this.expiryTimer);
     clearInterval(this.validationTimer);
     clearTimeout(this.saveTimer);
@@ -1498,6 +1568,7 @@ function clampStep(value: number, length: number): number { return Number.isFini
 function validSession(value: Partial<EditorSession> | null): value is EditorSession { return !!value && typeof value.sessionId === "string" && !!value.sessionId && typeof value.accessToken === "string" && !!value.accessToken && typeof value.expiresAt === "string" && Number.isFinite(Date.parse(value.expiresAt)) && Date.parse(value.expiresAt) > Date.now(); }
 function numberValue(value: string, fallback: number): number { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : fallback; }
 function currentPagePath(): string { return `${location.pathname}${location.search}${location.hash}`; }
+function formatAiElapsed(milliseconds: number): string { const seconds = Math.max(0, Math.floor(milliseconds / 1_000)); return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`; }
 function capitalize(value: string): string { return value.charAt(0).toUpperCase() + value.slice(1); }
 function reliabilityIcon(value: ExperienceTarget["reliability"]): string { return value === "reliable" ? "✓" : value === "moderate" ? "●" : "⚠"; }
 function formatFrequency(value: ExperienceTargeting["frequency"]): string {
@@ -1528,6 +1599,7 @@ const STYLE = `${BASE_STYLE}
 .editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-drag-handle{flex:none;padding:2px 1px;color:#94a3b8;font-size:16px;line-height:1;cursor:move;touch-action:none;user-select:none}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .history-row{gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .step-bar-action{width:24px;height:24px;padding:0;font-size:16px;line-height:1}.step-navigator .step-bar-action svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.step-navigator .step-bar-delete{border-color:#fecaca;background:#fff1f2;color:#dc2626}.step-navigator .step-bar-delete:hover{border-color:#fca5a5;background:#fee2e2;color:#b91c1c}.step-navigator .step-bar-action:disabled{cursor:not-allowed;opacity:.4}.step-navigator .content-heading>.history-row{display:none}
 .inspector-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.inspector-tabs button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#475569;padding:6px;font:600 11px inherit;cursor:pointer}.inspector-tabs button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.inspector-tabs button:disabled{opacity:.4;cursor:not-allowed}main.ai-mode>:not(.inspector-tabs):not(.ai-panel),main.theme-mode>:not(.inspector-tabs):not(.theme-panel){display:none!important}.ai-panel{min-height:min(580px,calc(100dvh - 130px));display:flex;flex-direction:column;gap:10px;background:#fcfcfd}.ai-panel .content-heading{flex:none}.ai-panel .muted{margin:0}.ai-chat-history{display:grid;align-content:start;gap:8px;flex:1;min-height:260px;overflow:auto;padding:2px}.ai-chat-message{display:grid;gap:3px;max-width:92%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#334155}.ai-chat-message--user{justify-self:end;border-color:#dbeafe;background:#eff6ff;color:#1e3a8a}.ai-chat-message__role{font-size:10px;font-weight:700;color:#64748b}.ai-chat-message--user .ai-chat-message__role{color:#2563eb}.ai-chat-message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45}.ai-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:7px;padding-top:8px;border-top:1px solid #eef0f3}.ai-panel textarea{min-height:72px;width:100%;resize:vertical;padding:8px;border:1px solid #d7dce3;border-radius:8px;font:12px/1.4 inherit}.ai-composer button{padding:8px 10px}.ai-status{min-height:16px;margin:0;white-space:pre-wrap;color:#64748b;font-size:11px}.ai-proposal{display:grid;gap:6px;padding:8px;border:1px solid #bfdbfe;border-radius:8px;background:#f8fbff}.ai-proposal ul{margin:0;padding-left:18px;color:#475569;font-size:11px}
 .ai-composer{grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:7px;border:1px solid #d9e1ec;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgb(15 23 42 / .04);transition:border-color .16s ease,box-shadow .16s ease}.ai-composer:focus-within{border-color:#93c5fd;box-shadow:0 0 0 3px rgb(59 130 246 / .12)}.ai-composer textarea{min-height:54px;padding:5px 3px;border:0;border-radius:0;background:transparent;outline:0;box-shadow:none;line-height:1.45}.ai-composer textarea:focus{outline:0}.ai-composer textarea::placeholder{color:#94a3b8}.ai-composer button{min-width:58px;min-height:34px;margin-bottom:2px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;box-shadow:0 1px 2px rgb(37 99 235 / .25);transition:background .16s ease,transform .16s ease,box-shadow .16s ease}.ai-composer button:hover:not(:disabled){background:#1d4ed8;box-shadow:0 4px 10px rgb(37 99 235 / .24);transform:translateY(-1px)}.ai-composer button:active:not(:disabled){transform:translateY(0);box-shadow:none}.ai-composer button:disabled{opacity:.5;cursor:not-allowed}
+.ai-chat-message [data-ai-progress]{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;padding-top:5px;border-top:1px solid #eef2f7;color:#64748b;font-size:10px}.ai-progress-current{font-weight:700;color:#475569}.ai-progress-elapsed{font-variant-numeric:tabular-nums}.ai-chat-message [data-ai-progress] details{grid-column:1/-1}.ai-chat-message [data-ai-progress] summary{cursor:pointer;color:#2563eb;font-weight:600}.ai-chat-message [data-ai-progress] ol{display:grid;gap:5px;margin:6px 0 0;padding-left:18px}.ai-chat-message [data-ai-progress] li{color:#94a3b8}.ai-chat-message [data-ai-progress] li[data-status=active]{color:#1d4ed8}.ai-chat-message [data-ai-progress] li[data-status=error],.ai-chat-message [data-ai-progress] li[data-status=cancelled]{color:#b91c1c}.ai-chat-message [data-ai-progress] li strong,.ai-chat-message [data-ai-progress] li span{display:block}.ai-chat-message [data-ai-progress] li span{margin-top:1px;font-weight:400;color:#64748b}@media(prefers-reduced-motion:reduce){.ai-composer,.ai-composer button{transition:none!important}}
 [data-composition-inspector]>.history-row{display:none}
 @media(max-width:800px){.editor-toolbar{width:min(350px,calc(100vw - 8px))}aside{width:min(300px,calc(100vw - 8px))}}
 @media(max-width:480px){.editor-toolbar{left:4px;top:4px;transform:none}.header-copy strong{font-size:10px}.header-copy small{font-size:9px}.header-actions [data-return-dashboard],.header-actions [data-move-side]{display:none}aside{width:calc(100vw - 8px)}.step-navigator{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:calc(100vw - 8px);box-shadow:0 4px 14px rgba(15,23,42,.12)}.step-navigator>.history-row:not([data-step-bar-actions]){display:none}.step-navigator .content-heading{display:none}}

@@ -1,4 +1,4 @@
-import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as clearEditorContinuation, p as isChecklistDefinition, q as isGuideDefinition, r as guideInteractionTarget, t as matchesGuideRoute, u as findTarget, v as storeEditorContinuation } from "./module-sdxYK7kr.js";
+import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as clearEditorContinuation, p as isChecklistDefinition, q as isGuideDefinition, r as guideInteractionTarget, t as matchesGuideRoute, u as findTarget, v as storeEditorContinuation } from "./module-WLR82jpm.js";
 class EditorHistory {
   constructor(keyOf = JSON.stringify) {
     this.keyOf = keyOf;
@@ -4264,6 +4264,7 @@ function validateSourceMarkup(operation, options) {
   if (actionIds.some((value) => !ORDINARY_ACTION_ID_PATTERN.test(value)) || new Set(actionIds).size !== actionIds.length) errors.push("Every ordinary button needs one unique valid action ID.");
   const bindings = Object.keys(operation.actionBindings);
   if (bindings.length !== actionIds.length || actionIds.some((value) => !(value in operation.actionBindings))) errors.push("Button actions and action bindings must match exactly.");
+  if (buttons.some((button) => isRuntimeOwnedCloseControl(button, operation.actionBindings[button.dataset.movcuesActionId ?? ""]))) errors.push("Do not include an icon-only close button in authored HTML; the runtime supplies the dismiss control.");
   for (const action of Object.values(operation.actionBindings)) errors.push(...ordinaryButtonActionErrors(action, options.guide ? "guide" : "widget"));
   if (options.survey) {
     for (const question of options.survey.questions) {
@@ -4297,6 +4298,12 @@ function applySourceMarkup(builder, content, operation, options) {
 function sourceContext(builder, guide) {
   const movcues = builder.projectData.movcues && typeof builder.projectData.movcues === "object" ? builder.projectData.movcues : {};
   return { html: builder.html, css: builder.css, authoringSurface: movcues.authoringSurface === "source" ? "source" : "onsite", actionBindings: structuredClone(movcues.actionBindings ?? {}), supportedActions: ordinaryButtonActionsFor(guide ? "guide" : "widget").map((action) => action.type) };
+}
+function isRuntimeOwnedCloseControl(button, binding) {
+  const icon = (button.textContent ?? "").replace(/\s+/g, "");
+  if (!/^(?:x|\u00d7|\u2715|\u2716)$/i.test(icon)) return false;
+  const accessibleName = `${button.getAttribute("aria-label") ?? ""} ${button.title}`;
+  return (binding == null ? void 0 : binding.type) === "dismiss" || /\b(?:close|dismiss)\b/i.test(accessibleName);
 }
 function aiDocumentContext(value) {
   const clone = structuredClone(value);
@@ -5641,6 +5648,15 @@ class SurveyEditor {
 function escape(value) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
+const EDITOR_AI_STREAM_MEDIA_TYPE = "application/x-ndjson";
+function parseEditorAiStreamEvent(line) {
+  const value = JSON.parse(line);
+  if (!value || typeof value !== "object" || !["progress", "heartbeat", "result", "error"].includes(value.type ?? "") || typeof value.requestId !== "string" || !value.requestId || !Number.isSafeInteger(value.sequence) || (value.sequence ?? 0) < 1 || !Number.isFinite(value.elapsedMs) || (value.elapsedMs ?? -1) < 0) throw new Error("The AI progress stream contained an invalid event.");
+  if (value.type === "progress" && (!["creating", "checking", "repairing", "rechecking", "ready"].includes(value.stage ?? "") || typeof value.detail !== "string" || ![1, 2].includes(value.attempt ?? 0))) throw new Error("The AI progress stream contained an invalid progress update.");
+  if (value.type === "result" && (!value.result || typeof value.result.conversationId !== "string" || typeof value.result.revision !== "number" || typeof value.result.markdown !== "string")) throw new Error("The AI progress stream contained an invalid result.");
+  if (value.type === "error" && (typeof value.error !== "string" || typeof value.message !== "string")) throw new Error("The AI progress stream contained an invalid error.");
+  return value;
+}
 function editorAiErrorMessage(body) {
   var _a, _b;
   if (body == null ? void 0 : body.message) return body.message;
@@ -5677,8 +5693,11 @@ class EditorBridge {
     const body = await response.json();
     return body.version;
   }
-  async chat(input2, signal) {
-    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/ai/chat`, { method: "POST", headers: this.headers(), credentials: "omit", body: JSON.stringify(input2), signal });
+  async chat(input2, signal, onEvent) {
+    var _a, _b, _c;
+    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/ai/chat`, { method: "POST", headers: { ...this.headers(), Accept: `${EDITOR_AI_STREAM_MEDIA_TYPE}, application/json` }, credentials: "omit", body: JSON.stringify(input2), signal });
+    const streaming = response.ok && ((_c = (_b = (_a = response.headers) == null ? void 0 : _a.get) == null ? void 0 : _b.call(_a, "content-type")) == null ? void 0 : _c.toLowerCase().includes(EDITOR_AI_STREAM_MEDIA_TYPE));
+    if (streaming) return consumeEditorAiStream(response, onEvent);
     const body = await response.json().catch(() => null);
     if (response.status === 409 && (body == null ? void 0 : body.error) === "draft_conflict") throw new DraftConflictError(body.currentRevision);
     if ([401, 403, 404, 410].includes(response.status) && (body == null ? void 0 : body.error) !== "conversation_not_found") throw new EditorSessionExpiredError();
@@ -5700,6 +5719,47 @@ class EditorBridge {
     const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/style-presets/${encodeURIComponent(id)}`, { method: "DELETE", headers: this.headers(), credentials: "omit" });
     if (!response.ok) throw new Error("Style could not be deleted");
   }
+}
+async function consumeEditorAiStream(response, onEvent) {
+  if (!response.body) throw new EditorAiRequestError("The AI progress stream ended before a result was received.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  let requestId = "";
+  let sequence = 0;
+  let terminal = null;
+  const accept = (line) => {
+    if (!line.trim()) return;
+    if (line.length > 35e4) throw new EditorAiRequestError("The AI progress stream contained an oversized event.");
+    const event = parseEditorAiStreamEvent(line);
+    if (requestId && event.requestId !== requestId) throw new EditorAiRequestError("The AI progress stream changed request identity.");
+    if (event.sequence <= sequence) throw new EditorAiRequestError("The AI progress stream contained a stale or duplicate update.");
+    if (terminal) throw new EditorAiRequestError("The AI progress stream contained more than one terminal event.");
+    requestId = event.requestId;
+    sequence = event.sequence;
+    try {
+      onEvent == null ? void 0 : onEvent(event);
+    } catch {
+    }
+    if (event.type === "result" || event.type === "error") terminal = event;
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    buffered += decoder.decode(value, { stream: !done });
+    let newline;
+    while ((newline = buffered.indexOf("\n")) >= 0) {
+      const line = buffered.slice(0, newline);
+      buffered = buffered.slice(newline + 1);
+      accept(line);
+    }
+    if (done) break;
+  }
+  buffered += decoder.decode();
+  if (buffered.trim()) accept(buffered);
+  const completed = terminal;
+  if (!completed) throw new EditorAiRequestError("The AI progress stream was interrupted before completion.");
+  if (completed.type === "error") throw new EditorAiRequestError(completed.message, completed.conversationId);
+  return completed.result;
 }
 class DraftConflictError extends Error {
   constructor(currentRevision) {
@@ -9429,6 +9489,8 @@ class EditorModeController {
     this.widgetAiPreviewCandidate = null;
     this.aiAbort = null;
     this.aiRequestGeneration = 0;
+    this.aiMessageSequence = 0;
+    this.aiProgressTimer = 0;
     this.persistBeforePageLeave = () => this.updateContinuation();
     this.protectUnsavedChanges = (event) => {
       var _a, _b;
@@ -11319,19 +11381,30 @@ class EditorModeController {
     this.setText("[data-ai-context]", this.guide ? `Guide · step ${this.stepIndex + 1} of ${this.guide.steps.length}${selection ? ` · ${selection.label}` : ""}` : this.survey ? `Survey · step ${this.stepIndex + 1} of ${this.survey.steps.length}${selection ? ` · ${selection.label}` : ""}` : this.checklist ? `Checklist · ${((_a = this.checklistEditor) == null ? void 0 : _a.getView()) ?? "expanded"}${selection ? ` · ${selection.label}` : ""}` : selection ? `Editing ${selection.label} · ${selection.kind}` : "Choose an element or ask about the whole widget.");
     const history2 = this.root.querySelector("[data-ai-history]");
     if (history2) {
-      const messages = this.aiMessages.map((message) => {
-        const item = document.createElement("article");
-        item.className = `ai-chat-message ai-chat-message--${message.role}`;
-        const label = document.createElement("span");
-        label.className = "ai-chat-message__role";
-        label.textContent = message.role === "user" ? "You" : "Movcues AI";
-        const text2 = document.createElement("p");
-        text2.textContent = message.text;
-        item.append(label, text2);
-        return item;
+      const following = history2.scrollHeight - history2.scrollTop - history2.clientHeight < 28;
+      const ids = new Set(this.aiMessages.map((message) => message.id));
+      history2.querySelectorAll("[data-ai-message-id]").forEach((item) => {
+        if (!ids.has(item.dataset.aiMessageId ?? "")) item.remove();
       });
-      history2.replaceChildren(...messages);
-      history2.scrollTop = history2.scrollHeight;
+      for (const message of this.aiMessages) {
+        let item = history2.querySelector(`[data-ai-message-id="${message.id}"]`);
+        if (!item) {
+          item = document.createElement("article");
+          item.dataset.aiMessageId = message.id;
+          item.className = `ai-chat-message ai-chat-message--${message.role}`;
+          const label = document.createElement("span");
+          label.className = "ai-chat-message__role";
+          label.textContent = message.role === "user" ? "You" : "Movcues AI";
+          const text22 = document.createElement("p");
+          text22.dataset.aiMessageText = "";
+          item.append(label, text22);
+          history2.append(item);
+        }
+        const text2 = item.querySelector("[data-ai-message-text]");
+        if (text2 && text2.textContent !== message.text) text2.textContent = message.text;
+        this.syncAiProgressItem(item, message);
+      }
+      if (following) history2.scrollTop = history2.scrollHeight;
     }
     const proposal = this.root.querySelector("[data-ai-proposal]");
     if (proposal) proposal.hidden = !this.aiProposal;
@@ -11377,49 +11450,161 @@ class EditorModeController {
     }
     if (stale) this.setText("[data-ai-status]", "The draft changed. Discard this proposal and generate a fresh one.");
   }
+  syncAiProgressItem(item, message) {
+    var _a;
+    let progress = item.querySelector("[data-ai-progress]");
+    if (!message.progress) {
+      progress == null ? void 0 : progress.remove();
+      return;
+    }
+    const wasOpen = ((_a = progress == null ? void 0 : progress.querySelector("details")) == null ? void 0 : _a.hasAttribute("open")) ?? false;
+    if (!progress) {
+      progress = document.createElement("div");
+      progress.dataset.aiProgress = "";
+      item.append(progress);
+    }
+    let current = progress.querySelector("[data-ai-progress-current]");
+    if (!current) {
+      current = document.createElement("div");
+      current.className = "ai-progress-current";
+      current.dataset.aiProgressCurrent = "";
+      current.setAttribute("role", "status");
+      current.setAttribute("aria-live", "polite");
+      progress.append(current);
+    }
+    const active = message.progress.items.find((stage) => stage.status === "active") ?? message.progress.items[message.progress.items.length - 1];
+    const currentLabel = (active == null ? void 0 : active.label) ?? message.progress.current;
+    if (current.textContent !== currentLabel) current.textContent = currentLabel;
+    let elapsed = progress.querySelector("[data-ai-progress-elapsed]");
+    if (!elapsed) {
+      elapsed = document.createElement("span");
+      elapsed.className = "ai-progress-elapsed";
+      elapsed.dataset.aiProgressElapsed = "";
+      elapsed.setAttribute("aria-hidden", "true");
+      progress.append(elapsed);
+    }
+    elapsed.textContent = formatAiElapsed(Date.now() - message.progress.startedAt);
+    let details = progress.querySelector("details");
+    if (!details) {
+      details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = "Show progress";
+      const list22 = document.createElement("ol");
+      list22.dataset.aiProgressList = "";
+      details.append(summary, list22);
+      progress.append(details);
+    }
+    const list2 = details.querySelector("[data-ai-progress-list]");
+    const stages = message.progress.items.map((stage) => {
+      const row = document.createElement("li");
+      row.dataset.status = stage.status;
+      const label = document.createElement("strong");
+      label.textContent = stage.label;
+      const detail = document.createElement("span");
+      detail.textContent = stage.detail;
+      row.append(label, detail);
+      return row;
+    });
+    list2.replaceChildren(...stages);
+    details.open = !message.progress.finished && wasOpen;
+  }
+  updateAiProgress(messageId, event) {
+    const message = this.aiMessages.find((value) => value.id === messageId);
+    if (!(message == null ? void 0 : message.progress)) return;
+    if (event.type === "heartbeat") {
+      this.syncAiElapsed(messageId);
+      return;
+    }
+    if (event.type !== "progress") return;
+    message.progress.items.forEach((item) => {
+      if (item.status === "active") item.status = "complete";
+    });
+    const labels = { creating: "Creating your change.", checking: "Checking layout and button actions.", repairing: "Adjusting the change after checks.", rechecking: "Checking the updated change.", ready: "Finalizing your response." };
+    const existing = message.progress.items.find((item) => item.key === event.stage);
+    if (existing) {
+      existing.status = "active";
+      existing.detail = event.detail;
+    } else message.progress.items.push({ key: event.stage, label: labels[event.stage], detail: event.detail, status: "active" });
+    message.progress.current = labels[event.stage];
+    this.syncAiPanel();
+  }
+  syncAiElapsed(messageId) {
+    var _a;
+    const message = this.aiMessages.find((value) => value.id === messageId);
+    const elapsed = (_a = this.root) == null ? void 0 : _a.querySelector(`[data-ai-message-id="${messageId}"] [data-ai-progress-elapsed]`);
+    if ((message == null ? void 0 : message.progress) && elapsed) elapsed.textContent = formatAiElapsed(Date.now() - message.progress.startedAt);
+  }
+  finishAiProgress(messageId, outcome, detail) {
+    const message = this.aiMessages.find((value) => value.id === messageId);
+    if (!(message == null ? void 0 : message.progress)) return;
+    message.progress.items.forEach((item) => {
+      if (item.status === "active") item.status = outcome === "error" ? "error" : outcome === "cancelled" ? "cancelled" : "complete";
+    });
+    const label = outcome === "proposal" ? "Proposal ready." : outcome === "response" ? "Response ready." : outcome === "cancelled" ? "Request canceled." : "Request stopped.";
+    message.progress.items.push({ key: "complete", label, detail, status: outcome === "error" ? "error" : outcome === "cancelled" ? "cancelled" : "complete" });
+    message.progress.current = label;
+    message.progress.finished = true;
+    clearInterval(this.aiProgressTimer);
+    this.aiProgressTimer = 0;
+    this.syncAiPanel();
+  }
   async sendAiPrompt() {
     var _a, _b, _c, _d;
     const input2 = (_a = this.root) == null ? void 0 : _a.querySelector("[data-ai-prompt]");
     const prompt = input2 == null ? void 0 : input2.value.trim();
     const builder = this.currentBuilder(), sourceMode = isSourceAuthored(builder);
-    if (!prompt || !this.bridge || !this.draft || !builder || !this.compositionSelection || !this.compositionEditor && !sourceMode) return;
-    if (!this.flushContent() || this.dirty && !await this.persist()) return;
-    this.cancelAiRequest();
+    if (!prompt || this.aiAbort || !this.bridge || !this.draft || !builder || !this.compositionSelection || !this.compositionEditor && !sourceMode || !this.flushContent()) return;
     const generation = ++this.aiRequestGeneration;
     const abort = new AbortController();
     this.aiAbort = abort;
+    const messageId = `ai_${++this.aiMessageSequence}`;
     const send = (_b = this.root) == null ? void 0 : _b.querySelector("[data-ai-send]");
     if (send) send.disabled = true;
     const cancel = (_c = this.root) == null ? void 0 : _c.querySelector("[data-ai-cancel]");
     if (cancel) cancel.hidden = false;
-    this.aiMessages.push({ role: "user", text: prompt });
+    this.aiMessages.push({ id: `user_${++this.aiMessageSequence}`, role: "user", text: prompt }, { id: messageId, role: "assistant", text: "Preparing your request...", progress: { startedAt: Date.now(), current: "Preparing your request.", finished: false, items: [{ key: "preparing", label: "Preparing your request.", detail: this.dirty || this.saveInFlight ? "Saving the current draft before generation starts." : "Building verified editor context locally.", status: "active" }] } });
     if (input2) input2.value = "";
-    this.setText("[data-ai-status]", "Generating a validated proposal…");
+    this.setText("[data-ai-status]", "");
     this.discardAiPreview();
     this.aiProposal = null;
     this.aiResolvedTargets.clear();
     this.syncAiPanel();
+    clearInterval(this.aiProgressTimer);
+    this.aiProgressTimer = window.setInterval(() => this.syncAiElapsed(messageId), 1e3);
     try {
+      if (this.dirty && !await this.persist()) throw new Error("The current draft could not be saved, so generation did not start.");
+      if (generation !== this.aiRequestGeneration || abort.signal.aborted) return;
+      this.setText("[data-ai-status]", "");
       const document2 = onsiteDocumentFromBuilder(builder);
       if (!document2) throw new Error("This draft has no recoverable on-site document.");
       const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.ensureThemeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : this.survey ? surveyAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, definition: this.definition, currentStepId: this.survey.steps[this.stepIndex].id, selection: this.compositionSelection, scope: this.compositionSelection.kind === "step" ? "survey" : "step" }) : this.checklist ? checklistAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, checklist: this.checklist, references: this.draft.references ?? { guides: [], segments: [] }, selection: this.compositionSelection, currentView: ((_d = this.checklistEditor) == null ? void 0 : _d.getView()) ?? "expanded", theme: resolvedTheme(this.ensureThemeState()) }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: document2, builder });
       const requestEditGeneration = this.editGeneration, requestSelectionKey = this.aiSelectionKey();
-      const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context }, abort.signal);
+      const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context }, abort.signal, (event) => {
+        if (generation === this.aiRequestGeneration && !abort.signal.aborted) this.updateAiProgress(messageId, event);
+      });
       if (generation !== this.aiRequestGeneration) return;
       this.aiConversationId = response.conversationId;
       this.aiProposal = response.proposal ? { value: response.proposal, revision: response.revision, generation: requestEditGeneration, selectionKey: requestSelectionKey } : null;
-      this.aiMessages.push({ role: "assistant", text: response.markdown.trim() || "Proposal generated." });
+      const message = this.aiMessages.find((value) => value.id === messageId);
+      if (message) message.text = response.markdown.trim() || (response.proposal ? "Proposal generated." : "Response complete.");
+      this.finishAiProgress(messageId, response.proposal ? "proposal" : "response", response.proposal ? "The validated proposal is ready for Preview or Apply." : "No proposal was needed for this response.");
       this.setText("[data-ai-status]", "");
       this.syncAiPanel();
     } catch (error) {
       if (generation === this.aiRequestGeneration && !abort.signal.aborted) {
+        const message = this.aiMessages.find((value) => value.id === messageId);
+        const detail = error instanceof Error ? error.message : "Movcues AI could not complete this request.";
+        if (message) message.text = detail;
+        this.finishAiProgress(messageId, "error", detail);
         if (error instanceof DraftConflictError) this.saveState = "conflict";
         if (error instanceof EditorAiRequestError && error.conversationId) this.aiConversationId = error.conversationId;
-        this.setText("[data-ai-status]", error instanceof Error ? error.message : "Movcues AI could not complete this request.");
+        this.setText("[data-ai-status]", detail);
         this.showSaveState();
       }
     } finally {
       if (generation === this.aiRequestGeneration) {
+        clearInterval(this.aiProgressTimer);
+        this.aiProgressTimer = 0;
         this.aiAbort = null;
         if (send) send.disabled = false;
         if (cancel) cancel.hidden = true;
@@ -11432,7 +11617,14 @@ class EditorModeController {
     this.aiAbort.abort();
     this.aiAbort = null;
     this.aiRequestGeneration++;
-    this.setText("[data-ai-status]", "Request canceled. Your prompt is still here.");
+    clearInterval(this.aiProgressTimer);
+    this.aiProgressTimer = 0;
+    const pending = [...this.aiMessages].reverse().find((message) => message.progress && !message.progress.finished);
+    if (pending) {
+      pending.text = "Request canceled.";
+      this.finishAiProgress(pending.id, "cancelled", "No proposal from this request can be applied.");
+    }
+    this.setText("[data-ai-status]", "Request canceled.");
     const send = (_a = this.root) == null ? void 0 : _a.querySelector("[data-ai-send]");
     if (send) send.disabled = false;
     const cancel = (_b = this.root) == null ? void 0 : _b.querySelector("[data-ai-cancel]");
@@ -12042,6 +12234,8 @@ class EditorModeController {
     this.widgetAiPreviewOriginal = null;
     this.widgetAiPreviewCandidate = null;
     this.aiPreviewReturnMode = null;
+    clearInterval(this.aiProgressTimer);
+    this.aiProgressTimer = 0;
     clearTimeout(this.expiryTimer);
     clearInterval(this.validationTimer);
     clearTimeout(this.saveTimer);
@@ -12115,6 +12309,10 @@ function numberValue(value, fallback) {
 function currentPagePath() {
   return `${location.pathname}${location.search}${location.hash}`;
 }
+function formatAiElapsed(milliseconds) {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1e3));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
 function capitalize(value) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
@@ -12151,6 +12349,7 @@ const STYLE = `${BASE_STYLE}
 .editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-drag-handle{flex:none;padding:2px 1px;color:#94a3b8;font-size:16px;line-height:1;cursor:move;touch-action:none;user-select:none}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .history-row{gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .step-bar-action{width:24px;height:24px;padding:0;font-size:16px;line-height:1}.step-navigator .step-bar-action svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.step-navigator .step-bar-delete{border-color:#fecaca;background:#fff1f2;color:#dc2626}.step-navigator .step-bar-delete:hover{border-color:#fca5a5;background:#fee2e2;color:#b91c1c}.step-navigator .step-bar-action:disabled{cursor:not-allowed;opacity:.4}.step-navigator .content-heading>.history-row{display:none}
 .inspector-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.inspector-tabs button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#475569;padding:6px;font:600 11px inherit;cursor:pointer}.inspector-tabs button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.inspector-tabs button:disabled{opacity:.4;cursor:not-allowed}main.ai-mode>:not(.inspector-tabs):not(.ai-panel),main.theme-mode>:not(.inspector-tabs):not(.theme-panel){display:none!important}.ai-panel{min-height:min(580px,calc(100dvh - 130px));display:flex;flex-direction:column;gap:10px;background:#fcfcfd}.ai-panel .content-heading{flex:none}.ai-panel .muted{margin:0}.ai-chat-history{display:grid;align-content:start;gap:8px;flex:1;min-height:260px;overflow:auto;padding:2px}.ai-chat-message{display:grid;gap:3px;max-width:92%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#334155}.ai-chat-message--user{justify-self:end;border-color:#dbeafe;background:#eff6ff;color:#1e3a8a}.ai-chat-message__role{font-size:10px;font-weight:700;color:#64748b}.ai-chat-message--user .ai-chat-message__role{color:#2563eb}.ai-chat-message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45}.ai-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:7px;padding-top:8px;border-top:1px solid #eef0f3}.ai-panel textarea{min-height:72px;width:100%;resize:vertical;padding:8px;border:1px solid #d7dce3;border-radius:8px;font:12px/1.4 inherit}.ai-composer button{padding:8px 10px}.ai-status{min-height:16px;margin:0;white-space:pre-wrap;color:#64748b;font-size:11px}.ai-proposal{display:grid;gap:6px;padding:8px;border:1px solid #bfdbfe;border-radius:8px;background:#f8fbff}.ai-proposal ul{margin:0;padding-left:18px;color:#475569;font-size:11px}
 .ai-composer{grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:7px;border:1px solid #d9e1ec;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgb(15 23 42 / .04);transition:border-color .16s ease,box-shadow .16s ease}.ai-composer:focus-within{border-color:#93c5fd;box-shadow:0 0 0 3px rgb(59 130 246 / .12)}.ai-composer textarea{min-height:54px;padding:5px 3px;border:0;border-radius:0;background:transparent;outline:0;box-shadow:none;line-height:1.45}.ai-composer textarea:focus{outline:0}.ai-composer textarea::placeholder{color:#94a3b8}.ai-composer button{min-width:58px;min-height:34px;margin-bottom:2px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;box-shadow:0 1px 2px rgb(37 99 235 / .25);transition:background .16s ease,transform .16s ease,box-shadow .16s ease}.ai-composer button:hover:not(:disabled){background:#1d4ed8;box-shadow:0 4px 10px rgb(37 99 235 / .24);transform:translateY(-1px)}.ai-composer button:active:not(:disabled){transform:translateY(0);box-shadow:none}.ai-composer button:disabled{opacity:.5;cursor:not-allowed}
+.ai-chat-message [data-ai-progress]{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;padding-top:5px;border-top:1px solid #eef2f7;color:#64748b;font-size:10px}.ai-progress-current{font-weight:700;color:#475569}.ai-progress-elapsed{font-variant-numeric:tabular-nums}.ai-chat-message [data-ai-progress] details{grid-column:1/-1}.ai-chat-message [data-ai-progress] summary{cursor:pointer;color:#2563eb;font-weight:600}.ai-chat-message [data-ai-progress] ol{display:grid;gap:5px;margin:6px 0 0;padding-left:18px}.ai-chat-message [data-ai-progress] li{color:#94a3b8}.ai-chat-message [data-ai-progress] li[data-status=active]{color:#1d4ed8}.ai-chat-message [data-ai-progress] li[data-status=error],.ai-chat-message [data-ai-progress] li[data-status=cancelled]{color:#b91c1c}.ai-chat-message [data-ai-progress] li strong,.ai-chat-message [data-ai-progress] li span{display:block}.ai-chat-message [data-ai-progress] li span{margin-top:1px;font-weight:400;color:#64748b}@media(prefers-reduced-motion:reduce){.ai-composer,.ai-composer button{transition:none!important}}
 [data-composition-inspector]>.history-row{display:none}
 @media(max-width:800px){.editor-toolbar{width:min(350px,calc(100vw - 8px))}aside{width:min(300px,calc(100vw - 8px))}}
 @media(max-width:480px){.editor-toolbar{left:4px;top:4px;transform:none}.header-copy strong{font-size:10px}.header-copy small{font-size:9px}.header-actions [data-return-dashboard],.header-actions [data-move-side]{display:none}aside{width:calc(100vw - 8px)}.step-navigator{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:calc(100vw - 8px);box-shadow:0 4px 14px rgba(15,23,42,.12)}.step-navigator>.history-row:not([data-step-bar-actions]){display:none}.step-navigator .content-heading{display:none}}
@@ -12162,4 +12361,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-fpF7yg1Z.js.map
+//# sourceMappingURL=EditorModeController-DH7nf45h.js.map
