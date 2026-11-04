@@ -1,3 +1,4 @@
+import { EDITOR_PANEL_DESIGN, panelIcon } from "./EditorPanelDesign";
 import { EditorHistory } from "./EditorHistory";
 import { ChecklistEditor } from "./ChecklistEditor";
 import type { EditorChecklistDefinition } from "../types";
@@ -186,7 +187,7 @@ export class EditorModeController {
     this.host.dataset.movcuesEditor = "";
     this.host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647";
     this.root = this.host.attachShadow({ mode: "open" });
-    this.root.innerHTML = `<style>${STYLE}${GUIDE_STYLE}</style>${this.panelMarkup(this.draft)}`;
+    this.root.innerHTML = `<style>${STYLE}${GUIDE_STYLE}${EDITOR_PANEL_DESIGN}</style>${this.panelMarkup(this.draft)}`;
     if (this.guide) this.root.querySelector('[data-inspector="step"]')?.insertAdjacentHTML("beforeend", this.guideBehaviorMarkup());
     if (this.guide) this.root.querySelectorAll("[data-guide] .history-row:not([data-step-bar-actions])").forEach(actions => this.root!.querySelector('[data-inspector="step"]')?.append(actions));
     (document.body ?? document.documentElement).appendChild(this.host);
@@ -231,12 +232,12 @@ export class EditorModeController {
       </div>
       ${guideMarkup}
       <aside aria-label="Contextual inspector"><main>
-        <nav class="inspector-tabs" aria-label="Inspector mode"><button type="button" class="active" data-inspector-tab="properties">Properties</button><button type="button" data-inspector-tab="theme">Theme</button><button type="button" data-inspector-tab="ai"${aiEligible ? "" : " disabled"}>AI</button></nav>
+        <nav class="inspector-tabs" aria-label="Inspector mode"><span class="panel-wordmark"><span class="panel-mark">${panelIcon("ai")}</span>movcues</span>${([['properties','Properties'],['theme','Theme'],['ai','AI assistant']] as const).map(([tab,label]) => `<button type="button" class="${tab === 'properties' ? 'active' : ''}" data-inspector-tab="${tab}" aria-label="${label}" title="${label}" aria-pressed="${tab === 'properties'}"${tab === 'ai' && !aiEligible ? ' disabled' : ''}>${panelIcon(tab)}</button>`).join('')}</nav>
         <section class="section ai-panel" data-ai-panel hidden>
-          <div class="content-heading"><div><div class="eyebrow">Movcues AI</div><strong>Design assistant</strong></div><button type="button" class="secondary-button compact" data-ai-cancel hidden>Stop</button></div>
+          <div class="content-heading"><div><div class="eyebrow">Your creative partner</div><strong>Make it yours.</strong></div><button type="button" class="secondary-button compact" data-ai-cancel hidden>Stop</button></div>
           <p class="muted" data-ai-context>Choose an element or ask about the whole widget.</p>
           <div class="ai-chat-history" data-ai-history aria-label="AI chat history" aria-live="polite"></div>
-          <form class="ai-composer" data-ai-form><textarea data-ai-prompt maxlength="4000" rows="3" placeholder="Describe the change…"></textarea><button type="submit" class="secondary-button" data-ai-send>Send</button></form>
+          <form class="ai-composer" data-ai-form><textarea data-ai-prompt aria-label="Describe your design change" maxlength="4000" rows="3" placeholder="What would you like to create?"></textarea><div class="ai-composer-footer"><span class="ai-composer-note">${panelIcon("ai")} Design with Movcues</span><button type="submit" class="secondary-button" data-ai-send aria-label="Send message" title="Send message">${panelIcon("send")}</button></div></form>
           <div class="ai-status" data-ai-status role="status" aria-live="polite"></div>
           <article class="ai-proposal" data-ai-proposal hidden><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Preview only. Nothing changes until you apply it.</p><div class="history-row"><button type="button" class="secondary-button" data-ai-target hidden>Select target</button><button type="button" class="secondary-button" data-ai-preview hidden>Preview Guide</button><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div></article>
         </section>
@@ -303,11 +304,11 @@ export class EditorModeController {
           <div class="content-heading"><div><div class="eyebrow">Design system</div><strong>Experience theme</strong></div><button type="button" class="secondary-button compact" data-theme-reset>Reset to theme</button></div>
           <label>Base style<select data-theme-source><option value="template">Template defaults</option><option value="site">Match my website</option><option value="preset" disabled>Saved style</option><option value="minimal">Minimal</option><option value="modern">Modern</option><option value="soft">Soft</option><option value="dark">Dark</option></select></label>
           <label>Saved style<select data-saved-style><option value="">Choose saved style…</option>${(draft.references?.stylePresets??[]).map(style=>`<option value="${escapeText(style.id)}">${escapeText(style.name)}</option>`).join("")}</select></label>
-          <label>Primary<input type="color" data-theme-primary></label><label>Secondary / surface<input type="color" data-theme-secondary></label><label>Background<input type="color" data-theme-background></label><label>Text<input type="color" data-theme-text></label>
-          <label>Body font<input type="text" maxlength="200" data-theme-body-font></label><label>Heading font<input type="text" maxlength="200" data-theme-heading-font></label>
+          <div class="theme-group-title">Color palette</div><label>Primary<input type="color" data-theme-primary></label><label>Secondary / surface<input type="color" data-theme-secondary></label><label>Background<input type="color" data-theme-background></label><label>Text<input type="color" data-theme-text></label>
+          <div class="theme-group-title">Typography</div><label>Body font<input type="text" maxlength="200" data-theme-body-font></label><label>Heading font<input type="text" maxlength="200" data-theme-heading-font></label>
           <label>Body size<div class="number"><input type="number" min="8" max="72" data-theme-body-size><span>px</span></div></label><label>Heading size<div class="number"><input type="number" min="10" max="72" data-theme-heading-size><span>px</span></div></label>
-          <label>Radius<div class="number"><input type="number" min="0" max="48" data-theme-radius><span>px</span></div></label><label>Button radius<div class="number"><input type="number" min="0" max="48" data-theme-button-radius><span>px</span></div></label><label>Shadow<select data-theme-shadow><option value="theme">Theme shadow</option><option value="none">None</option><option value="soft">Soft</option><option value="strong">Strong</option></select></label><label>Spacing<div class="number"><input type="number" min="0" max="64" data-theme-spacing><span>px</span></div></label>
-          <label>Style name<input type="text" maxlength="80" placeholder="My product style" data-style-name></label><div class="history-row"><button type="button" class="secondary-button compact" data-style-save>Save style</button><button type="button" class="secondary-button compact" data-style-rename>Rename</button><button type="button" class="secondary-button compact" data-style-delete>Delete</button></div><p class="muted" data-style-status role="status"></p>
+          <div class="theme-group-title">Shape & spacing</div><label>Radius<div class="number"><input type="number" min="0" max="48" data-theme-radius><span>px</span></div></label><label>Button radius<div class="number"><input type="number" min="0" max="48" data-theme-button-radius><span>px</span></div></label><label>Shadow<select data-theme-shadow><option value="theme">Theme shadow</option><option value="none">None</option><option value="soft">Soft</option><option value="strong">Strong</option></select></label><label>Spacing<div class="number"><input type="number" min="0" max="64" data-theme-spacing><span>px</span></div></label>
+          <div class="theme-group-title">Your style library</div><label>Style name<input type="text" maxlength="80" placeholder="My product style" data-style-name></label><div class="history-row"><button type="button" class="secondary-button compact" data-style-save>Save style</button><button type="button" class="secondary-button compact" data-style-rename>Rename</button><button type="button" class="secondary-button compact" data-style-delete>Delete</button></div><p class="muted" data-style-status role="status"></p>
         </section>
         <details class="section live"><summary>Connection & target status</summary><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></details>
         <p class="hint status-error" role="alert" data-content-error hidden></p>
@@ -1016,10 +1017,11 @@ export class EditorModeController {
     const main = this.root.querySelector("main");
     main?.classList.toggle("ai-mode", tab === "ai");
     main?.classList.toggle("theme-mode", tab === "theme");
-    this.root.querySelectorAll<HTMLButtonElement>("[data-inspector-tab]").forEach(button => button.classList.toggle("active", button.dataset.inspectorTab === tab));
+    this.root.querySelectorAll<HTMLButtonElement>("[data-inspector-tab]").forEach(button => { const active = button.dataset.inspectorTab === tab; button.classList.toggle("active", active); button.setAttribute("aria-pressed", String(active)); });
     const panel = this.root.querySelector<HTMLElement>("[data-ai-panel]"); if (panel) panel.hidden = tab !== "ai";
     const themePanel = this.root.querySelector<HTMLElement>("[data-theme-section]"); if (themePanel) themePanel.hidden = tab !== "theme";
     if (tab === "ai") this.syncAiPanel();
+    this.fitPanel();
   }
 
   private syncAiPanel(): void {
@@ -1037,7 +1039,7 @@ export class EditorModeController {
           const label = document.createElement("span"); label.className = "ai-chat-message__role"; label.textContent = message.role === "user" ? "You" : "Movcues AI";
           const text = document.createElement("p"); text.dataset.aiMessageText = ""; item.append(label, text); history.append(item);
         }
-        const text = item.querySelector<HTMLElement>("[data-ai-message-text]"); if (text && text.textContent !== message.text) text.textContent = message.text;
+        const text = item.querySelector<HTMLElement>("[data-ai-message-text]"); if (text) { if (text.textContent !== message.text) text.textContent = message.text; text.hidden = Boolean(message.progress && !message.progress.finished); }
         this.syncAiProgressItem(item, message);
       }
       if (following) history.scrollTop = history.scrollHeight;
@@ -1059,7 +1061,7 @@ export class EditorModeController {
     let progress = item.querySelector<HTMLElement>("[data-ai-progress]");
     if (!message.progress) { progress?.remove(); return; }
     const wasOpen = progress?.querySelector("details")?.hasAttribute("open") ?? false;
-    if (!progress) { progress = document.createElement("div"); progress.dataset.aiProgress = ""; item.append(progress); }
+    if (!progress) { progress = document.createElement("div"); progress.dataset.aiProgress = ""; progress.className = "ai-progress"; item.append(progress); }
     let current = progress.querySelector<HTMLElement>("[data-ai-progress-current]");
     if (!current) { current = document.createElement("div"); current.className = "ai-progress-current"; current.dataset.aiProgressCurrent = ""; current.setAttribute("role", "status"); current.setAttribute("aria-live", "polite"); progress.append(current); }
     const active = message.progress.items.find(stage => stage.status === "active") ?? message.progress.items[message.progress.items.length - 1];
@@ -1067,11 +1069,12 @@ export class EditorModeController {
     let elapsed = progress.querySelector<HTMLElement>("[data-ai-progress-elapsed]");
     if (!elapsed) { elapsed = document.createElement("span"); elapsed.className = "ai-progress-elapsed"; elapsed.dataset.aiProgressElapsed = ""; elapsed.setAttribute("aria-hidden", "true"); progress.append(elapsed); }
     elapsed.textContent = formatAiElapsed(Date.now() - message.progress.startedAt);
+    progress.dataset.status = active?.status ?? "active";
     let details = progress.querySelector<HTMLDetailsElement>("details");
-    if (!details) { details = document.createElement("details"); const summary = document.createElement("summary"); summary.textContent = "Show progress"; const list = document.createElement("ol"); list.dataset.aiProgressList = ""; details.append(summary, list); progress.append(details); }
-    const list = details.querySelector<HTMLOListElement>("[data-ai-progress-list]")!;
-    const stages = message.progress.items.map(stage => { const row = document.createElement("li"); row.dataset.status = stage.status; const label = document.createElement("strong"); label.textContent = stage.label; const detail = document.createElement("span"); detail.textContent = stage.detail; row.append(label, detail); return row; });
-    list.replaceChildren(...stages); details.open = !message.progress.finished && wasOpen;
+    if (!details) { details = document.createElement("details"); const summary = document.createElement("summary"); summary.textContent = "Step details"; const detail = document.createElement("p"); detail.dataset.aiProgressDetail = ""; details.append(summary, detail); progress.append(details); }
+    const detail = details.querySelector<HTMLElement>("[data-ai-progress-detail]")!;
+    if (detail.textContent !== (active?.detail ?? "")) detail.textContent = active?.detail ?? "";
+    details.open = !message.progress.finished && wasOpen;
   }
 
   private updateAiProgress(messageId: string, event: EditorAiStreamEvent): void {
@@ -1418,7 +1421,7 @@ export class EditorModeController {
       }
     }
     aside.style.maxWidth = `${Math.max(0, width - 8)}px`; aside.style.maxHeight = `${Math.max(48, height - 8)}px`;
-    const main = this.root?.querySelector<HTMLElement>("main"); if (main) main.style.maxHeight = `${Math.max(0, width <= 480 ? height * .38 : height - 32)}px`;
+    const main = this.root?.querySelector<HTMLElement>("main"); if (main) main.style.maxHeight = `${Math.max(0, width <= 480 ? height * (main.classList.contains("ai-mode") ? .76 : .38) : height - 32)}px`;
     const rect = aside.getBoundingClientRect();
     if (aside.style.left) aside.style.left = `${Math.max(x + 4, Math.min(x + width - rect.width - 4, rect.left))}px`;
     if (width <= 480) { aside.style.top = "auto"; aside.style.bottom = this.guide || this.survey ? "70px" : "8px"; }

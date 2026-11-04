@@ -1,5 +1,98 @@
 (function() {
   "use strict";
+  function panelIcon(name) {
+    const paths = {
+      properties: '<path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+      theme: '<path d="M12 3a9 9 0 1 0 0 18h1.5a2.5 2.5 0 0 0 1.8-4.2 1.3 1.3 0 0 1 .9-2.3H18a3 3 0 0 0 3-3A8.5 8.5 0 0 0 12 3Z"/><circle cx="7.5" cy="10" r=".6"/><circle cx="10" cy="6.8" r=".6"/><circle cx="14.5" cy="7" r=".6"/><circle cx="17.3" cy="10.5" r=".6"/>',
+      ai: '<path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3Zm7-1 .8 2.2L22 5l-2.2.8L19 8l-.8-2.2L16 5l2.2-.8L19 2Z"/>',
+      send: '<path d="M12 19V5m-6 6 6-6 6 6"/>'
+    };
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
+  }
+  const EDITOR_PANEL_DESIGN = `
+:host{--ep-ink:#202e44;--ep-muted:#62718a;--ep-line:rgba(111,135,174,.18);--ep-blue:#3269ee;--ep-surface:rgba(249,251,255,.93)}
+aside{width:min(390px,calc(100vw - 24px));border:1px solid rgba(255,255,255,.86);border-radius:22px;background:var(--ep-surface);color:var(--ep-ink);box-shadow:0 22px 70px rgba(27,47,88,.2),0 2px 8px rgba(27,47,88,.08),inset 0 0 0 5px rgba(221,231,249,.32);overflow:hidden;-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px)}
+aside main{background:transparent;border-radius:21px;padding:6px;scrollbar-width:thin;scrollbar-color:#c5d1e5 transparent}
+.inspector-tabs{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:4px;padding:10px 12px 12px;background:rgba(245,248,254,.96);border-bottom:1px solid var(--ep-line)}
+.panel-wordmark{display:flex;align-items:center;gap:8px;margin-right:auto;font-size:13px;font-weight:700;letter-spacing:-.3px;color:var(--ep-ink)}
+.panel-mark{display:grid;place-items:center;width:28px;height:28px;border-radius:9px;color:white;background:linear-gradient(145deg,#427cf8,#2454d8);box-shadow:0 3px 8px #3269ee26}
+.panel-mark svg{width:17px;height:17px}
+.inspector-tabs button{position:relative;display:grid;place-items:center;flex:none;width:38px;height:36px;padding:0;border:1px solid transparent;border-radius:11px;background:transparent;color:#74839c;cursor:pointer;transition:background .15s,color .15s,box-shadow .15s}
+.inspector-tabs button svg{width:19px;height:19px}
+.inspector-tabs button:hover{background:#e6edf9;color:#244a98}
+.inspector-tabs button.active{background:#fff;color:var(--ep-blue);border-color:#dce5f6;box-shadow:0 2px 5px #244a9810}
+.inspector-tabs button.active:after{content:'';position:absolute;bottom:3px;width:3px;height:3px;border-radius:50%;background:currentColor}
+.inspector-tabs button:disabled{opacity:.35;cursor:not-allowed}
+aside .section{padding:18px 16px;border-color:var(--ep-line);background:transparent}
+aside .content-heading{align-items:center;gap:10px;margin-bottom:14px}
+aside .content-heading strong{display:block;margin-top:5px;font-size:18px;font-weight:650;letter-spacing:-.55px;color:var(--ep-ink);line-height:1.3}
+aside .eyebrow{font-size:9px;font-weight:700;letter-spacing:1.65px;text-transform:uppercase;color:#7a89a2}
+aside label{grid-template-columns:104px minmax(0,1fr);gap:12px;margin:0;padding:7px 0;font-size:12px;color:#596981;align-items:center}
+aside input,aside select{min-width:0;min-height:36px;border:1px solid #dbe3f0;border-radius:9px;padding:8px 10px;background:rgba(255,255,255,.86);color:var(--ep-ink);font:12px/1.4 ui-sans-serif,system-ui,sans-serif;box-shadow:0 1px 2px #20386004}
+aside input:hover,aside select:hover{border-color:#b4c6e6}
+aside input[type=color]{width:100%;height:36px;padding:5px;cursor:pointer}
+aside input[type=color]::-webkit-color-swatch-wrapper{padding:0}
+aside input[type=color]::-webkit-color-swatch{border:0;border-radius:5px}
+aside .secondary-button{min-height:32px;padding:7px 11px;border:1px solid #d8e2f1;border-radius:9px;background:rgba(255,255,255,.75);color:#50627e;font-size:11px;box-shadow:0 1px 2px #263a5c05}
+aside .secondary-button:hover{border-color:#abc0e6;background:#fff;color:#245bd0}
+aside .secondary-button:disabled{opacity:.4;cursor:not-allowed}
+aside .muted,aside .hint{font-size:11px;line-height:1.6;color:var(--ep-muted)}
+aside .hint{padding:10px 16px;margin:0}
+aside .history-row{gap:6px;flex-wrap:wrap}
+aside .number{gap:7px}
+.theme-group-title{margin:20px 0 7px;padding-top:16px;border-top:1px solid var(--ep-line);font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#7a89a2}
+aside .theme-panel .content-heading{margin-bottom:18px}
+aside .live summary{font-size:11px;color:#71809a}
+main.ai-mode{display:flex;flex-direction:column;height:min(760px,calc(100dvh - 40px));overflow:hidden}
+main.ai-mode .inspector-tabs{flex:none}
+aside .ai-panel{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:0;padding:18px 12px 10px;background:radial-gradient(ellipse at 5% 10%,#d9e7fc52,transparent 60%)}
+.ai-panel .content-heading{margin:0 4px 10px}
+.ai-panel .content-heading strong{font-size:21px}
+.ai-panel [data-ai-context]{flex:none;max-width:100%;margin:0 4px 10px;padding:7px 10px;border:1px solid #dce5f2;border-radius:8px;background:#ffffff70;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ai-chat-history{display:flex;flex-direction:column;gap:21px;min-height:80px;padding:12px 5px 22px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#c4d1e6 transparent}
+.ai-chat-history:empty:before{content:'A little direction. A better design.';display:block;margin-top:35px;font-size:20px;line-height:1.4;letter-spacing:-.6px;color:#415675;max-width:230px}
+.ai-chat-history:empty:after{content:'Describe what you’d like to change. Refine the details, or explore a whole new look.';display:block;max-width:265px;font-size:13px;line-height:1.8;color:#7a89a1}
+.ai-chat-message{display:block;flex:none;max-width:100%;padding:0 5px;border:0;border-radius:0;background:transparent;color:var(--ep-ink)}
+.ai-chat-message--user{align-self:stretch;max-width:100%;padding:13px 14px;border:1px solid #ffffffc9;border-radius:13px;background:linear-gradient(135deg,#fff9,#e4ebf6c9);color:#26384f;box-shadow:0 2px 5px #253f7105}
+.ai-chat-message__role{display:block;margin-bottom:8px;font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#7a89a1}
+.ai-chat-message--user .ai-chat-message__role{color:#76849b}
+.ai-chat-message p{font-size:13px;line-height:1.85;white-space:pre-wrap;overflow-wrap:anywhere;letter-spacing:-.1px}
+.ai-composer{position:relative;flex:none;display:flex;flex-direction:column;align-items:stretch;gap:0;padding:11px;border:1px solid #ffffffd9;border-radius:15px;background:linear-gradient(140deg,#fff9,#e8edf8d9);box-shadow:0 3px 12px #3c5b8d0a,inset 0 1px 0 #fff}
+.ai-composer:focus-within{border-color:#a8bff3;box-shadow:0 0 0 3px #3269ee0d}
+.ai-panel textarea{display:block;flex:none;min-height:65px;max-height:160px;margin:0;width:100%;padding:3px 2px 10px;resize:vertical;border:0;border-radius:0;background:transparent;box-shadow:none;font:13px/1.7 ui-sans-serif,system-ui,sans-serif;color:#26384f}
+.ai-panel textarea:focus-visible{outline:none}
+.ai-panel textarea::placeholder{color:#8a97ac}
+.ai-composer-footer{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ai-composer-note{display:flex;align-items:center;gap:6px;color:#7b89a1;font-size:10px}
+.ai-composer-note svg{width:13px;height:13px}
+.ai-composer [data-ai-send]{display:grid;place-items:center;min-width:35px;min-height:34px;width:35px;height:34px;padding:0;border:1px solid #2d5fdd;border-radius:10px;background:linear-gradient(150deg,#4d7dfa,#2f63e6);color:#fff;box-shadow:0 3px 7px #3269ee24}
+.ai-composer [data-ai-send]:hover{background:#2658d7;color:#fff}
+.ai-composer [data-ai-send] svg{width:20px;height:20px}
+.ai-composer [data-ai-send]:disabled{opacity:.4}
+.ai-status{flex:none;min-height:0;margin:0;padding:0 4px;font-size:11px;line-height:1.5;color:#647690}
+.ai-status:not(:empty){padding:8px 4px}
+.ai-proposal{flex:none;max-height:190px;overflow:auto;margin-top:10px;padding:13px;border:1px solid #cbdaf4;border-radius:12px;background:#f8fbffd9;box-shadow:0 2px 8px #3269ee08}
+.ai-proposal strong{font-size:12px;line-height:1.6}
+.ai-proposal ul{font-size:10px;line-height:1.7}
+.ai-proposal [data-ai-apply]{background:#3269ee;border-color:#3269ee;color:white}
+.ai-chat-message .ai-progress[data-ai-progress]{position:relative;margin-top:12px;padding:14px 13px 14px 39px;border:1px solid #dce6f7;border-radius:12px;background:linear-gradient(125deg,#eef4ff,#f8faff);box-shadow:0 2px 8px #3269ee05;gap:4px 8px}
+.ai-progress:before{content:'';position:absolute;left:15px;top:17px;width:11px;height:11px;border:2px solid #c7d8fa;border-top-color:#3269ee;border-radius:50%;animation:ep-working 1.2s linear infinite}
+.ai-progress[data-status=complete]:before{animation:none;border:0;width:8px;height:8px;left:18px;top:19px;background:#409b7a}
+.ai-progress[data-status=error]:before,.ai-progress[data-status=cancelled]:before{animation:none;border-color:#b27b7b;background:#fff}
+.ai-progress [data-ai-progress-detail]{margin:6px 0 0;font-size:11px;line-height:1.7;color:#7384a0}
+@keyframes ep-working{to{transform:rotate(360deg)}}
+.ai-progress-current{font-size:12px;line-height:1.65;color:#526b98}
+.ai-progress-elapsed{display:inline-block;margin-top:4px;font-size:10px;color:#8a97ad;font-variant-numeric:tabular-nums}
+.ai-progress details{margin-top:9px;color:#6b7e9d;font-size:11px;line-height:1.7}
+.editor-toolbar{border-radius:15px;background:rgba(249,251,255,.95);border-color:#fff;box-shadow:0 8px 30px #243d701c;-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
+.editor-toolbar .modebar{gap:3px;padding:6px;background:#edf2fa75}
+.editor-toolbar .modebar button{border-radius:8px;border-color:transparent;background:transparent;color:#697a95}
+.editor-toolbar .modebar button.active{background:#fff;border-color:#d9e3f4;color:#3269ee}
+aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;outline-offset:3px}
+@supports not (backdrop-filter:blur(1px)){aside{background:#f2f6fd}}
+@media(max-width:600px){aside{width:min(360px,calc(100vw - 16px));border-radius:18px}aside .section{padding:14px 12px}main.ai-mode{height:min(660px,calc(100dvh - 115px))}.ai-panel .content-heading strong{font-size:19px}}
+@media(prefers-reduced-motion:reduce){.inspector-tabs button{transition:none}.ai-progress:before{animation:none}}
+`;
   class EditorHistory {
     constructor(keyOf = JSON.stringify) {
       this.keyOf = keyOf;
@@ -315,14 +408,7 @@
   };
   var cssSyntaxError = CssSyntaxError$3;
   CssSyntaxError$3.default = CssSyntaxError$3;
-  const STYLE_TAG = /(<)(\/?style\b)/gi;
-  const COMMENT_OPEN = /(<)(!--)/g;
   const AT_NAME_END = /[\t\n\f\r "#'()/;[\\\]{}]/;
-  function escapeHTMLInCSS(str) {
-    if (typeof str !== "string") return str;
-    if (!str.includes("<")) return str;
-    return str.replace(STYLE_TAG, "\\3c $2").replace(COMMENT_OPEN, "\\3c $2");
-  }
   const DEFAULT_RAW = {
     after: "\n",
     beforeClose: "\n",
@@ -351,6 +437,11 @@
     }
     return name + afterName + params;
   }
+  function isCustomProperty(node2) {
+    if (!node2.prop.startsWith("--")) return false;
+    let before = node2.raws.before;
+    return typeof before === "undefined" || !/[^\s;]$/.test(before);
+  }
   function pushBody(str, stack, node2) {
     let nodes = node2.nodes;
     let last = nodes.length - 1;
@@ -363,7 +454,7 @@
     for (let i = nodes.length - 1; i >= 0; i--) {
       let child = nodes[i];
       let childSemicolon = last !== i || semicolon;
-      if (!childSemicolon && i < nodes.length - 1 && (child.type === "atrule" && !child.nodes || child.type === "decl" && child.prop.startsWith("--"))) {
+      if (!childSemicolon && i < nodes.length - 1 && (child.type === "atrule" && !child.nodes || child.type === "decl" && isCustomProperty(child))) {
         childSemicolon = true;
       }
       stack.push({
@@ -375,14 +466,14 @@
   }
   function pushBlock(str, stack, node2, start) {
     let between = str.raw(node2, "between", "beforeOpen");
-    str.builder(escapeHTMLInCSS(start + between) + "{", node2, "start");
+    str.builder(start + between + "{", node2, "start");
     let hasNodes = node2.nodes && node2.nodes.length;
     let close = () => {
       let after = hasNodes ? str.raw(node2, "after") : str.raw(node2, "after", "emptyBody");
-      if (after) str.builder(escapeHTMLInCSS(after));
+      if (after) str.builder(after);
       str.builder("}", node2, "end");
       if (node2.type === "rule" && node2.raws.ownSemicolon) {
-        str.builder(escapeHTMLInCSS(node2.raws.ownSemicolon), node2, "end");
+        str.builder(node2.raws.ownSemicolon, node2, "end");
       }
     };
     if (hasNodes) {
@@ -402,7 +493,7 @@
         this.block(node2, start);
       } else {
         let end = (node2.raws.between || "") + (semicolon ? ";" : "");
-        this.builder(escapeHTMLInCSS(start + end), node2);
+        this.builder(start + end, node2);
       }
     }
     beforeAfter(node2, detect) {
@@ -432,7 +523,7 @@
     }
     block(node2, start) {
       let between = this.raw(node2, "between", "beforeOpen");
-      this.builder(escapeHTMLInCSS(start + between) + "{", node2, "start");
+      this.builder(start + between + "{", node2, "start");
       let after;
       if (node2.nodes && node2.nodes.length) {
         this.body(node2);
@@ -440,7 +531,7 @@
       } else {
         after = this.raw(node2, "after", "emptyBody");
       }
-      if (after) this.builder(escapeHTMLInCSS(after));
+      if (after) this.builder(after);
       this.builder("}", node2, "end");
     }
     body(node2) {
@@ -459,7 +550,7 @@
         let child = entry.node;
         let before = this.raw(child, "before");
         if (before) {
-          this.builder(entry.document ? before : escapeHTMLInCSS(before));
+          this.builder(before);
         }
         if (expandable && child.type === "rule") {
           pushBlock(this, stack, child, this.rawValue(child, "selector"));
@@ -473,7 +564,7 @@
     comment(node2) {
       let left = this.raw(node2, "left", "commentLeft");
       let right = this.raw(node2, "right", "commentRight");
-      this.builder(escapeHTMLInCSS("/*" + left + node2.text + right + "*/"), node2);
+      this.builder("/*" + left + node2.text + right + "*/", node2);
     }
     decl(node2, semicolon) {
       let raws = node2.raws;
@@ -483,7 +574,7 @@
         string += raws.important || " !important";
       }
       if (semicolon) string += ";";
-      this.builder(escapeHTMLInCSS(string), node2);
+      this.builder(string, node2);
     }
     document(node2) {
       this.body(node2);
@@ -660,20 +751,19 @@
       return value;
     }
     root(node2) {
-      if (node2.source && node2.source.input.hasBOM) {
+      let inDocument = node2.parent && node2.parent.type === "document";
+      if (!inDocument && node2.source && node2.source.input.hasBOM) {
         this.builder("\uFEFF", node2, "start");
       }
       this.body(node2);
       if (node2.raws.after) {
-        let after = node2.raws.after;
-        let isDocument = node2.parent && node2.parent.type === "document";
-        this.builder(isDocument ? after : escapeHTMLInCSS(after));
+        this.builder(node2.raws.after);
       }
     }
     rule(node2) {
       this.block(node2, this.rawValue(node2, "selector"));
       if (node2.raws.ownSemicolon) {
-        this.builder(escapeHTMLInCSS(node2.raws.ownSemicolon), node2, "end");
+        this.builder(node2.raws.ownSemicolon, node2, "end");
       }
     }
     stringify(node2, semicolon) {
@@ -688,9 +778,78 @@
   var stringifier = Stringifier$2;
   Stringifier$2.default = Stringifier$2;
   let Stringifier$1 = stringifier;
+  const STYLE_TAG = /(<)(\/?style\b)/gi;
+  const COMMENT_OPEN = /(<)(!--)/g;
+  function escapeHTMLInCSS(str) {
+    if (!str.includes("<")) return str;
+    return str.replace(STYLE_TAG, "\\3c $2").replace(COMMENT_OPEN, "\\3c $2");
+  }
+  function cutEscaped(chunks, css, escaped) {
+    let parts = [];
+    let at = 0;
+    let into = 0;
+    for (let i = 0; i < chunks.length; i += 3) {
+      let from = into;
+      let end = at + chunks[i].length;
+      while (at < end) {
+        if (css[at] === escaped[into]) {
+          at += 1;
+          into += 1;
+        } else {
+          at += 1;
+          into += 4;
+        }
+      }
+      parts.push(escaped.slice(from, into));
+    }
+    return parts;
+  }
+  class SafeStringifier extends Stringifier$1 {
+    escapeHTML(print) {
+      let builder = this.builder;
+      let chunks, css;
+      this.builder = (str, child, type) => {
+        if (chunks) {
+          css += str;
+          chunks.push(str, child, type);
+        } else if (str.includes("<")) {
+          css = str;
+          chunks = [str, child, type];
+        } else {
+          builder(str, child, type);
+        }
+      };
+      print();
+      this.builder = builder;
+      if (!chunks) return;
+      let escaped = escapeHTMLInCSS(css);
+      if (escaped === css) {
+        for (let i = 0; i < chunks.length; i += 3) {
+          builder(chunks[i], chunks[i + 1], chunks[i + 2]);
+        }
+      } else {
+        let parts = cutEscaped(chunks, css, escaped);
+        for (let i = 0; i < chunks.length; i += 3) {
+          builder(parts[i / 3], chunks[i + 1], chunks[i + 2]);
+        }
+      }
+    }
+    root(node2) {
+      if (node2.parent && node2.parent.type === "document") {
+        this.escapeHTML(() => this.body(node2));
+        if (node2.raws.after) this.builder(node2.raws.after);
+      } else {
+        this.escapeHTML(() => super.root(node2));
+      }
+    }
+  }
   function stringify$4(node2, builder) {
-    let str = new Stringifier$1(builder);
-    str.stringify(node2);
+    let str = new SafeStringifier(builder);
+    if (node2.type === "root" || node2.type === "document") {
+      str.stringify(node2);
+    } else {
+      str.escapeHTML(() => str.stringify(node2));
+    }
   }
   var stringify_1 = stringify$4;
   stringify$4.default = stringify$4;
@@ -893,7 +1052,7 @@
       } else if (opts.word) {
         let stringRepresentation = inputString.slice(
           sourceOffset(inputString, this.source.start),
-          sourceOffset(inputString, this.source.end)
+          this.rangeBy().end.offset
         );
         let index = stringRepresentation.indexOf(opts.word);
         if (index !== -1) pos = this.positionInside(index);
@@ -948,7 +1107,7 @@
       if (opts.word) {
         let stringRepresentation = inputString.slice(
           sourceOffset(inputString, this.source.start),
-          sourceOffset(inputString, this.source.end)
+          end.offset
         );
         let index = stringRepresentation.indexOf(opts.word);
         if (index !== -1) {
@@ -1591,9 +1750,16 @@
     return id;
   };
   var nonSecure = { nanoid: nanoid$1 };
-  let { existsSync, readFileSync } = require$$2;
+  let { existsSync, readFileSync, realpathSync } = require$$2;
   let { dirname: dirname$1, isAbsolute: isAbsolute$1, join, relative: relative$1, sep: sep$1 } = require$$2;
   let { SourceMapConsumer: SourceMapConsumer$2, SourceMapGenerator: SourceMapGenerator$2 } = require$$2;
+  function realPath(path) {
+    try {
+      return realpathSync(path);
+    } catch {
+      return path;
+    }
+  }
   function fromBase64(str) {
     if (Buffer) {
       return Buffer.from(str, "base64").toString();
@@ -1658,7 +1824,7 @@
       if (!trusted && !this.unsafeMap) {
         if (!/\.map$/i.test(path)) return void 0;
         if (!cssFile) return void 0;
-        let rel = relative$1(dirname$1(cssFile), path);
+        let rel = relative$1(realPath(dirname$1(cssFile)), realPath(path));
         if (rel === ".." || rel.startsWith(".." + sep$1) || isAbsolute$1(rel)) {
           return void 0;
         }
@@ -1907,7 +2073,7 @@
       } else {
         fromUrl = new URL(
           from.source,
-          this.map.consumer().sourceRoot || pathToFileURL$1(this.map.mapFile)
+          pathToFileURL$1(this.map.mapFile || resolve$1(".") + "/")
         );
       }
       let result2 = {
@@ -2012,7 +2178,7 @@
       return list$2.split(string, spaces);
     },
     split(string, separators, last) {
-      if (!string) return [];
+      if (typeof string !== "string") return [];
       let array = [];
       let current = "";
       let split = false;
@@ -2020,7 +2186,18 @@
       let inQuote = false;
       let prevQuote = "";
       let escape2 = false;
-      for (let letter of string) {
+      let inComment = false;
+      for (let i = 0; i < string.length; i++) {
+        let letter = string[i];
+        if (inComment) {
+          current += letter;
+          if (letter === "*" && string[i + 1] === "/") {
+            current += "/";
+            i += 1;
+            inComment = false;
+          }
+          continue;
+        }
         if (escape2) {
           escape2 = false;
         } else if (letter === "\\") {
@@ -2032,6 +2209,11 @@
         } else if (letter === '"' || letter === "'") {
           inQuote = true;
           prevQuote = letter;
+        } else if (letter === "/" && string[i + 1] === "*") {
+          current += "/*";
+          i += 1;
+          inComment = true;
+          continue;
         } else if (letter === "(") {
           func += 1;
         } else if (letter === ")") {
@@ -2040,14 +2222,16 @@
           if (separators.includes(letter)) split = true;
         }
         if (split) {
-          if (current !== "") array.push(current.trim());
+          let value2 = current.trim();
+          if (last || value2 !== "") array.push(value2);
           current = "";
           split = false;
         } else {
           current += letter;
         }
       }
-      if (last || current !== "") array.push(current.trim());
+      let value = current.trim();
+      if (last || value !== "") array.push(value);
       return array;
     }
   };
@@ -2222,15 +2406,20 @@
           }
         }
       } else if (this.css) {
+        let annotation = "/*# sourceMappingURL=";
+        let css = "";
+        let cursor = 0;
         let startIndex;
-        while ((startIndex = this.css.lastIndexOf("/*#")) !== -1) {
-          let endIndex = this.css.indexOf("*/", startIndex + 3);
+        while ((startIndex = this.css.indexOf(annotation, cursor)) !== -1) {
+          let endIndex = this.css.indexOf("*/", startIndex + annotation.length);
           if (endIndex === -1) break;
-          while (startIndex > 0 && this.css[startIndex - 1] === "\n") {
+          while (startIndex > cursor && this.css[startIndex - 1] === "\n") {
             startIndex--;
           }
-          this.css = this.css.slice(0, startIndex) + this.css.slice(endIndex + 2);
+          css += this.css.slice(cursor, startIndex);
+          cursor = endIndex + 2;
         }
+        if (cursor > 0) this.css = css + this.css.slice(cursor);
       }
     }
     generate() {
@@ -2997,7 +3186,7 @@
           prev.raws.ownSemicolon = this.spaces;
           this.spaces = "";
           prev.source.end = this.getPosition(token[2]);
-          prev.source.end.offset += prev.raws.ownSemicolon.length;
+          prev.source.end.offset++;
         }
       }
     }
@@ -3113,6 +3302,7 @@
       let token, type;
       let length = tokens.length;
       let value = "";
+      let last = "";
       let clean2 = true;
       let next, prev;
       for (let i = 0; i < length; i += 1) {
@@ -3124,16 +3314,18 @@
           prev = tokens[i - 1] ? tokens[i - 1][0] : "empty";
           next = tokens[i + 1] ? tokens[i + 1][0] : "empty";
           if (!SAFE_COMMENT_NEIGHBOR[prev] && !SAFE_COMMENT_NEIGHBOR[next]) {
-            if (value.slice(-1) === ",") {
+            if (last === ",") {
               clean2 = false;
             } else {
               value += token[1];
+              last = token[1].slice(-1);
             }
           } else {
             clean2 = false;
           }
         } else {
           value += token[1];
+          last = token[1].slice(-1);
         }
       }
       if (!clean2) {
@@ -3273,6 +3465,7 @@
         return this.node.error(this.text, {
           index: this.index,
           plugin: this.plugin,
+          start: this.start,
           word: this.word
         }).message;
       }
@@ -3497,7 +3690,7 @@
       return this.async().catch(onRejected);
     }
     finally(onFinally) {
-      return this.async().then(onFinally, onFinally);
+      return this.async().finally(onFinally);
     }
     getAsyncError() {
       throw new Error("Use process(css).then(cb) to work with async plugins");
@@ -3927,7 +4120,7 @@
       return this.async().catch(onRejected);
     }
     finally(onFinally) {
-      return this.async().then(onFinally, onFinally);
+      return this.async().finally(onFinally);
     }
     sync() {
       if (this.error) throw this.error;
@@ -3958,7 +4151,7 @@
   let Root$1 = root;
   let Processor$1 = class Processor {
     constructor(plugins = []) {
-      this.version = "8.5.25";
+      this.version = "8.5.32";
       this.plugins = this.normalize(plugins);
     }
     normalize(plugins) {
@@ -4035,7 +4228,7 @@
         console.warn(
           name + ": postcss.plugin was deprecated. Migration guide:\nhttps://evilmartians.com/chronicles/postcss-8-plugin-migration"
         );
-        if (process.env.LANG && process.env.LANG.startsWith("cn")) {
+        if (process.env.LANG && process.env.LANG.startsWith("zh")) {
           console.warn(
             name + ": 里面 postcss.plugin 被弃用. 迁移指南:\nhttps://www.w3ctech.com/topic/2226"
           );
@@ -11566,7 +11759,7 @@ ${ISOLATION_CSS}`;
         aside.style.maxWidth = `${Math.max(0, width - 8)}px`;
         aside.style.maxHeight = `${Math.max(48, height - 8)}px`;
         const main = (_c = this.root) == null ? void 0 : _c.querySelector("main");
-        if (main) main.style.maxHeight = `${Math.max(0, width <= 480 ? height * 0.38 : height - 32)}px`;
+        if (main) main.style.maxHeight = `${Math.max(0, width <= 480 ? height * (main.classList.contains("ai-mode") ? 0.76 : 0.38) : height - 32)}px`;
         const rect = aside.getBoundingClientRect();
         if (aside.style.left) aside.style.left = `${Math.max(x2 + 4, Math.min(x2 + width - rect.width - 4, rect.left))}px`;
         if (width <= 480) {
@@ -11678,7 +11871,7 @@ ${ISOLATION_CSS}`;
       this.host.dataset.movcuesEditor = "";
       this.host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647";
       this.root = this.host.attachShadow({ mode: "open" });
-      this.root.innerHTML = `<style>${STYLE}${GUIDE_STYLE}</style>${this.panelMarkup(this.draft)}`;
+      this.root.innerHTML = `<style>${STYLE}${GUIDE_STYLE}${EDITOR_PANEL_DESIGN}</style>${this.panelMarkup(this.draft)}`;
       if (this.guide) (_a = this.root.querySelector('[data-inspector="step"]')) == null ? void 0 : _a.insertAdjacentHTML("beforeend", this.guideBehaviorMarkup());
       if (this.guide) this.root.querySelectorAll("[data-guide] .history-row:not([data-step-bar-actions])").forEach((actions) => {
         var _a2;
@@ -11744,12 +11937,12 @@ ${ISOLATION_CSS}`;
       </div>
       ${guideMarkup}
       <aside aria-label="Contextual inspector"><main>
-        <nav class="inspector-tabs" aria-label="Inspector mode"><button type="button" class="active" data-inspector-tab="properties">Properties</button><button type="button" data-inspector-tab="theme">Theme</button><button type="button" data-inspector-tab="ai"${aiEligible ? "" : " disabled"}>AI</button></nav>
+        <nav class="inspector-tabs" aria-label="Inspector mode"><span class="panel-wordmark"><span class="panel-mark">${panelIcon("ai")}</span>movcues</span>${[["properties", "Properties"], ["theme", "Theme"], ["ai", "AI assistant"]].map(([tab, label]) => `<button type="button" class="${tab === "properties" ? "active" : ""}" data-inspector-tab="${tab}" aria-label="${label}" title="${label}" aria-pressed="${tab === "properties"}"${tab === "ai" && !aiEligible ? " disabled" : ""}>${panelIcon(tab)}</button>`).join("")}</nav>
         <section class="section ai-panel" data-ai-panel hidden>
-          <div class="content-heading"><div><div class="eyebrow">Movcues AI</div><strong>Design assistant</strong></div><button type="button" class="secondary-button compact" data-ai-cancel hidden>Stop</button></div>
+          <div class="content-heading"><div><div class="eyebrow">Your creative partner</div><strong>Make it yours.</strong></div><button type="button" class="secondary-button compact" data-ai-cancel hidden>Stop</button></div>
           <p class="muted" data-ai-context>Choose an element or ask about the whole widget.</p>
           <div class="ai-chat-history" data-ai-history aria-label="AI chat history" aria-live="polite"></div>
-          <form class="ai-composer" data-ai-form><textarea data-ai-prompt maxlength="4000" rows="3" placeholder="Describe the change…"></textarea><button type="submit" class="secondary-button" data-ai-send>Send</button></form>
+          <form class="ai-composer" data-ai-form><textarea data-ai-prompt aria-label="Describe your design change" maxlength="4000" rows="3" placeholder="What would you like to create?"></textarea><div class="ai-composer-footer"><span class="ai-composer-note">${panelIcon("ai")} Design with Movcues</span><button type="submit" class="secondary-button" data-ai-send aria-label="Send message" title="Send message">${panelIcon("send")}</button></div></form>
           <div class="ai-status" data-ai-status role="status" aria-live="polite"></div>
           <article class="ai-proposal" data-ai-proposal hidden><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Preview only. Nothing changes until you apply it.</p><div class="history-row"><button type="button" class="secondary-button" data-ai-target hidden>Select target</button><button type="button" class="secondary-button" data-ai-preview hidden>Preview Guide</button><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div></article>
         </section>
@@ -11816,11 +12009,11 @@ ${ISOLATION_CSS}`;
           <div class="content-heading"><div><div class="eyebrow">Design system</div><strong>Experience theme</strong></div><button type="button" class="secondary-button compact" data-theme-reset>Reset to theme</button></div>
           <label>Base style<select data-theme-source><option value="template">Template defaults</option><option value="site">Match my website</option><option value="preset" disabled>Saved style</option><option value="minimal">Minimal</option><option value="modern">Modern</option><option value="soft">Soft</option><option value="dark">Dark</option></select></label>
           <label>Saved style<select data-saved-style><option value="">Choose saved style…</option>${(((_c = draft.references) == null ? void 0 : _c.stylePresets) ?? []).map((style) => `<option value="${escapeText(style.id)}">${escapeText(style.name)}</option>`).join("")}</select></label>
-          <label>Primary<input type="color" data-theme-primary></label><label>Secondary / surface<input type="color" data-theme-secondary></label><label>Background<input type="color" data-theme-background></label><label>Text<input type="color" data-theme-text></label>
-          <label>Body font<input type="text" maxlength="200" data-theme-body-font></label><label>Heading font<input type="text" maxlength="200" data-theme-heading-font></label>
+          <div class="theme-group-title">Color palette</div><label>Primary<input type="color" data-theme-primary></label><label>Secondary / surface<input type="color" data-theme-secondary></label><label>Background<input type="color" data-theme-background></label><label>Text<input type="color" data-theme-text></label>
+          <div class="theme-group-title">Typography</div><label>Body font<input type="text" maxlength="200" data-theme-body-font></label><label>Heading font<input type="text" maxlength="200" data-theme-heading-font></label>
           <label>Body size<div class="number"><input type="number" min="8" max="72" data-theme-body-size><span>px</span></div></label><label>Heading size<div class="number"><input type="number" min="10" max="72" data-theme-heading-size><span>px</span></div></label>
-          <label>Radius<div class="number"><input type="number" min="0" max="48" data-theme-radius><span>px</span></div></label><label>Button radius<div class="number"><input type="number" min="0" max="48" data-theme-button-radius><span>px</span></div></label><label>Shadow<select data-theme-shadow><option value="theme">Theme shadow</option><option value="none">None</option><option value="soft">Soft</option><option value="strong">Strong</option></select></label><label>Spacing<div class="number"><input type="number" min="0" max="64" data-theme-spacing><span>px</span></div></label>
-          <label>Style name<input type="text" maxlength="80" placeholder="My product style" data-style-name></label><div class="history-row"><button type="button" class="secondary-button compact" data-style-save>Save style</button><button type="button" class="secondary-button compact" data-style-rename>Rename</button><button type="button" class="secondary-button compact" data-style-delete>Delete</button></div><p class="muted" data-style-status role="status"></p>
+          <div class="theme-group-title">Shape & spacing</div><label>Radius<div class="number"><input type="number" min="0" max="48" data-theme-radius><span>px</span></div></label><label>Button radius<div class="number"><input type="number" min="0" max="48" data-theme-button-radius><span>px</span></div></label><label>Shadow<select data-theme-shadow><option value="theme">Theme shadow</option><option value="none">None</option><option value="soft">Soft</option><option value="strong">Strong</option></select></label><label>Spacing<div class="number"><input type="number" min="0" max="64" data-theme-spacing><span>px</span></div></label>
+          <div class="theme-group-title">Your style library</div><label>Style name<input type="text" maxlength="80" placeholder="My product style" data-style-name></label><div class="history-row"><button type="button" class="secondary-button compact" data-style-save>Save style</button><button type="button" class="secondary-button compact" data-style-rename>Rename</button><button type="button" class="secondary-button compact" data-style-delete>Delete</button></div><p class="muted" data-style-status role="status"></p>
         </section>
         <details class="section live"><summary>Connection & target status</summary><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></details>
         <p class="hint status-error" role="alert" data-content-error hidden></p>
@@ -13413,12 +13606,17 @@ ${ISOLATION_CSS}`;
       const main = this.root.querySelector("main");
       main == null ? void 0 : main.classList.toggle("ai-mode", tab === "ai");
       main == null ? void 0 : main.classList.toggle("theme-mode", tab === "theme");
-      this.root.querySelectorAll("[data-inspector-tab]").forEach((button) => button.classList.toggle("active", button.dataset.inspectorTab === tab));
+      this.root.querySelectorAll("[data-inspector-tab]").forEach((button) => {
+        const active = button.dataset.inspectorTab === tab;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", String(active));
+      });
       const panel = this.root.querySelector("[data-ai-panel]");
       if (panel) panel.hidden = tab !== "ai";
       const themePanel = this.root.querySelector("[data-theme-section]");
       if (themePanel) themePanel.hidden = tab !== "theme";
       if (tab === "ai") this.syncAiPanel();
+      this.fitPanel();
     }
     syncAiPanel() {
       var _a, _b;
@@ -13447,7 +13645,10 @@ ${ISOLATION_CSS}`;
             history2.append(item);
           }
           const text2 = item.querySelector("[data-ai-message-text]");
-          if (text2 && text2.textContent !== message.text) text2.textContent = message.text;
+          if (text2) {
+            if (text2.textContent !== message.text) text2.textContent = message.text;
+            text2.hidden = Boolean(message.progress && !message.progress.finished);
+          }
           this.syncAiProgressItem(item, message);
         }
         if (following) history2.scrollTop = history2.scrollHeight;
@@ -13507,6 +13708,7 @@ ${ISOLATION_CSS}`;
       if (!progress) {
         progress = document.createElement("div");
         progress.dataset.aiProgress = "";
+        progress.className = "ai-progress";
         item.append(progress);
       }
       let current = progress.querySelector("[data-ai-progress-current]");
@@ -13530,28 +13732,19 @@ ${ISOLATION_CSS}`;
         progress.append(elapsed);
       }
       elapsed.textContent = formatAiElapsed(Date.now() - message.progress.startedAt);
+      progress.dataset.status = (active == null ? void 0 : active.status) ?? "active";
       let details = progress.querySelector("details");
       if (!details) {
         details = document.createElement("details");
         const summary = document.createElement("summary");
-        summary.textContent = "Show progress";
-        const list22 = document.createElement("ol");
-        list22.dataset.aiProgressList = "";
-        details.append(summary, list22);
+        summary.textContent = "Step details";
+        const detail2 = document.createElement("p");
+        detail2.dataset.aiProgressDetail = "";
+        details.append(summary, detail2);
         progress.append(details);
       }
-      const list2 = details.querySelector("[data-ai-progress-list]");
-      const stages = message.progress.items.map((stage) => {
-        const row = document.createElement("li");
-        row.dataset.status = stage.status;
-        const label = document.createElement("strong");
-        label.textContent = stage.label;
-        const detail = document.createElement("span");
-        detail.textContent = stage.detail;
-        row.append(label, detail);
-        return row;
-      });
-      list2.replaceChildren(...stages);
+      const detail = details.querySelector("[data-ai-progress-detail]");
+      if (detail.textContent !== ((active == null ? void 0 : active.detail) ?? "")) detail.textContent = (active == null ? void 0 : active.detail) ?? "";
       details.open = !message.progress.finished && wasOpen;
     }
     updateAiProgress(messageId, event) {
