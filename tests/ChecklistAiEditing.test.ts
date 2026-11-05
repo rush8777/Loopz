@@ -40,6 +40,13 @@ describe("Checklist AI editing", () => {
     expect(result.definition.behavior).toMatchObject({ order: "sequential", position: "bottom-left", initialState: "collapsed" }); expect(result.definition.completionMessage).toMatchObject({ title: "You're all set!", acknowledgeLabel: "Celebrate" }); expect(next.root.children!.map(cell => cell.checklistWidth)).toEqual([420, 180, 380]); expect(validateOnsiteChecklistDocument(next, result.definition)).toEqual([]);
   });
 
+  it("applies generic visual cell patches to the schema-v4 Checklist document", () => {
+    const current = source(), document = onsiteDocumentFromBuilder(current.builder)!;
+    const result = applyChecklistAiProposal(current, { summary: "Add more space", operations: [{ type: "update_cell", cellId: document.root.id, patch: { gap: 8 } }] }, references);
+    const next = onsiteDocumentFromBuilder(result.definition.builder)!;
+    expect(next.schemaVersion).toBe(4); expect(next.root.gap).toBe(8); expect(validateOnsiteChecklistDocument(next, result.definition)).toEqual([]);
+  });
+
   it("rolls the complete proposal back when a protected structure or final task would become invalid", () => {
     const current = source(), before = JSON.stringify(current), document = onsiteDocumentFromBuilder(current.builder)!;
     expect(() => applyChecklistAiProposal(current, { summary: "Unsafe", operations: [{ type: "update_checklist_task", itemId: "item_one", patch: { title: "Changed" } }, { type: "remove_cell", cellId: document.root.children![0].id }] }, references)).toThrow(); expect(JSON.stringify(current)).toBe(before);

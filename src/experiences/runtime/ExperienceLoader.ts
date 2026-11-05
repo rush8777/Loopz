@@ -133,7 +133,7 @@ export class ExperienceLoader {
     const ids = (value?: string[]) => new Set(Array.isArray(value) ? value.filter(id => typeof id === "string").slice(0, 20) : []);
     const runtime: ActiveExperience = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId || progress?.shownRequested), shownPromise: null, surveyResponseId: null, surveyResponsePromise: null, surveyResume: null, surveyAnswers: {}, stepStartedAt: null, visibleStepId: null, readyStepId: null, seenStepIds: ids(progress?.seenStepIds), completedStepIds: ids(progress?.completedStepIds), finished: false, stepEntryRoute: location.href, launchContext: progress?.launchContext ?? experience.launchContext };
     this.active = runtime;
-    this.checklist.setTransientActive(true);
+    this.checklist.setTransientActive(runtime.launchContext?.source === "checklist");
     if (currentStepId) this.persistGuide(runtime, "active");
     const mounted = currentStepId
       ? (progress && (!progress.routePath || progress.routePath !== currentPagePath()) && this.advanceForRoute(runtime) ? true : (this.renderActiveGuide(), true))
@@ -309,7 +309,7 @@ export class ExperienceLoader {
 
   private resumeGuide(): void {
     const runtime = this.pausedGuide; if (!runtime) return;
-    this.pausedGuide = null; this.active = runtime; this.checklist.setTransientActive(true); this.persistGuide(runtime, "active"); this.renderActiveGuide();
+    this.pausedGuide = null; this.active = runtime; this.checklist.setTransientActive(runtime.launchContext?.source === "checklist"); this.persistGuide(runtime, "active"); this.renderActiveGuide();
   }
 
   private advanceForRoute(runtime: ActiveExperience): boolean {

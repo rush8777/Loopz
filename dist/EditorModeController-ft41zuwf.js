@@ -1,46 +1,47 @@
-import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as clearEditorContinuation, p as isChecklistDefinition, q as isGuideDefinition, r as guideInteractionTarget, t as matchesGuideRoute, u as findTarget, v as storeEditorContinuation } from "./module-4Em55haL.js";
+import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as clearEditorContinuation, p as isChecklistDefinition, q as isGuideDefinition, r as guideInteractionTarget, t as matchesGuideRoute, u as findTarget, v as storeEditorContinuation } from "./module-DIkfe9C8.js";
 function panelIcon(name) {
   const paths = {
     properties: '<path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
     theme: '<path d="M12 3a9 9 0 1 0 0 18h1.5a2.5 2.5 0 0 0 1.8-4.2 1.3 1.3 0 0 1 .9-2.3H18a3 3 0 0 0 3-3A8.5 8.5 0 0 0 12 3Z"/><circle cx="7.5" cy="10" r=".6"/><circle cx="10" cy="6.8" r=".6"/><circle cx="14.5" cy="7" r=".6"/><circle cx="17.3" cy="10.5" r=".6"/>',
     ai: '<path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3Zm7-1 .8 2.2L22 5l-2.2.8L19 8l-.8-2.2L16 5l2.2-.8L19 2Z"/>',
-    send: '<path d="M12 19V5m-6 6 6-6 6 6"/>'
+    send: '<path d="M12 19V5m-6 6 6-6 6 6"/>',
+    zap: '<path d="m13 2-9 12h8l-1 8 9-12h-8z"/>'
   };
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 }
 const EDITOR_PANEL_DESIGN = `
 :host{--ep-ink:#202e44;--ep-muted:#62718a;--ep-line:rgba(111,135,174,.18);--ep-blue:#3269ee;--ep-surface:rgba(249,251,255,.93)}
-aside{width:min(390px,calc(100vw - 24px));border:1px solid rgba(255,255,255,.86);border-radius:22px;background:var(--ep-surface);color:var(--ep-ink);box-shadow:0 22px 70px rgba(27,47,88,.2),0 2px 8px rgba(27,47,88,.08),inset 0 0 0 5px rgba(221,231,249,.32);overflow:hidden;-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px)}
-aside main{background:transparent;border-radius:21px;padding:6px;scrollbar-width:thin;scrollbar-color:#c5d1e5 transparent}
-.inspector-tabs{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:4px;padding:10px 12px 12px;background:rgba(245,248,254,.96);border-bottom:1px solid var(--ep-line)}
-.panel-wordmark{display:flex;align-items:center;gap:8px;margin-right:auto;font-size:13px;font-weight:700;letter-spacing:-.3px;color:var(--ep-ink)}
-.panel-mark{display:grid;place-items:center;width:28px;height:28px;border-radius:9px;color:white;background:linear-gradient(145deg,#427cf8,#2454d8);box-shadow:0 3px 8px #3269ee26}
-.panel-mark svg{width:17px;height:17px}
-.inspector-tabs button{position:relative;display:grid;place-items:center;flex:none;width:38px;height:36px;padding:0;border:1px solid transparent;border-radius:11px;background:transparent;color:#74839c;cursor:pointer;transition:background .15s,color .15s,box-shadow .15s}
-.inspector-tabs button svg{width:19px;height:19px}
+aside{width:min(330px,calc(100vw - 24px));border:1px solid rgba(255,255,255,.86);border-radius:18px;background:var(--ep-surface);color:var(--ep-ink);box-shadow:0 18px 52px rgba(27,47,88,.18),0 2px 7px rgba(27,47,88,.07),inset 0 0 0 4px rgba(221,231,249,.32);overflow:hidden;-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px)}
+aside main{background:transparent;border-radius:17px;padding:4px;scrollbar-width:thin;scrollbar-color:#c5d1e5 transparent}
+.inspector-tabs{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:3px;padding:8px 10px 9px;background:rgba(245,248,254,.96);border-bottom:1px solid var(--ep-line)}
+.panel-wordmark{display:flex;align-items:center;gap:7px;margin-right:auto;font-size:12px;font-weight:700;letter-spacing:-.3px;color:var(--ep-ink)}
+.panel-mark{display:grid;place-items:center;width:25px;height:25px;border-radius:8px;color:white;background:linear-gradient(145deg,#427cf8,#2454d8);box-shadow:0 2px 6px #3269ee26}
+.panel-mark svg{width:15px;height:15px}
+.inspector-tabs button{position:relative;display:grid;place-items:center;flex:none;width:33px;height:32px;padding:0;border:1px solid transparent;border-radius:9px;background:transparent;color:#74839c;cursor:pointer;transition:background .15s,color .15s,box-shadow .15s}
+.inspector-tabs button svg{width:17px;height:17px}
 .inspector-tabs button:hover{background:#e6edf9;color:#244a98}
 .inspector-tabs button.active{background:#fff;color:var(--ep-blue);border-color:#dce5f6;box-shadow:0 2px 5px #244a9810}
 .inspector-tabs button.active:after{content:'';position:absolute;bottom:3px;width:3px;height:3px;border-radius:50%;background:currentColor}
 .inspector-tabs button:disabled{opacity:.35;cursor:not-allowed}
-aside .section{padding:18px 16px;border-color:var(--ep-line);background:transparent}
-aside .content-heading{align-items:center;gap:10px;margin-bottom:14px}
-aside .content-heading strong{display:block;margin-top:5px;font-size:18px;font-weight:650;letter-spacing:-.55px;color:var(--ep-ink);line-height:1.3}
+aside .section{gap:6px;padding:12px 12px;border-color:var(--ep-line);background:transparent}
+aside .content-heading{align-items:center;gap:8px;margin-bottom:9px}
+aside .content-heading strong{display:block;margin-top:3px;font-size:16px;font-weight:650;letter-spacing:-.45px;color:var(--ep-ink);line-height:1.25}
 aside .eyebrow{font-size:9px;font-weight:700;letter-spacing:1.65px;text-transform:uppercase;color:#7a89a2}
-aside label{grid-template-columns:104px minmax(0,1fr);gap:12px;margin:0;padding:7px 0;font-size:12px;color:#596981;align-items:center}
-aside input,aside select{min-width:0;min-height:36px;border:1px solid #dbe3f0;border-radius:9px;padding:8px 10px;background:rgba(255,255,255,.86);color:var(--ep-ink);font:12px/1.4 ui-sans-serif,system-ui,sans-serif;box-shadow:0 1px 2px #20386004}
+aside label{grid-template-columns:88px minmax(0,1fr);gap:8px;margin:0;padding:5px 0;font-size:11px;color:#596981;align-items:center}
+aside input,aside select{min-width:0;min-height:32px;border:1px solid #dbe3f0;border-radius:8px;padding:6px 8px;background:rgba(255,255,255,.86);color:var(--ep-ink);font:11px/1.4 ui-sans-serif,system-ui,sans-serif;box-shadow:0 1px 2px #20386004}
 aside input:hover,aside select:hover{border-color:#b4c6e6}
-aside input[type=color]{width:100%;height:36px;padding:5px;cursor:pointer}
+aside input[type=color]{width:100%;height:32px;padding:4px;cursor:pointer}
 aside input[type=color]::-webkit-color-swatch-wrapper{padding:0}
 aside input[type=color]::-webkit-color-swatch{border:0;border-radius:5px}
-aside .secondary-button{min-height:32px;padding:7px 11px;border:1px solid #d8e2f1;border-radius:9px;background:rgba(255,255,255,.75);color:#50627e;font-size:11px;box-shadow:0 1px 2px #263a5c05}
+aside .secondary-button{min-height:29px;padding:5px 9px;border:1px solid #d8e2f1;border-radius:8px;background:rgba(255,255,255,.75);color:#50627e;font-size:10px;box-shadow:0 1px 2px #263a5c05}
 aside .secondary-button:hover{border-color:#abc0e6;background:#fff;color:#245bd0}
 aside .secondary-button:disabled{opacity:.4;cursor:not-allowed}
-aside .muted,aside .hint{font-size:11px;line-height:1.6;color:var(--ep-muted)}
-aside .hint{padding:10px 16px;margin:0}
+aside .muted,aside .hint{font-size:10px;line-height:1.5;color:var(--ep-muted)}
+aside .hint{padding:8px 12px;margin:0}
 aside .history-row{gap:6px;flex-wrap:wrap}
 aside .number{gap:7px}
-.theme-group-title{margin:20px 0 7px;padding-top:16px;border-top:1px solid var(--ep-line);font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#7a89a2}
-aside .theme-panel .content-heading{margin-bottom:18px}
+.theme-group-title{margin:14px 0 6px;padding-top:12px;border-top:1px solid var(--ep-line);font-size:9px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;color:#7a89a2}
+aside .theme-panel .content-heading{margin-bottom:12px}
 aside .live summary{font-size:11px;color:#71809a}
 main.ai-mode{display:flex;flex-direction:column;height:min(760px,calc(100dvh - 40px));overflow:hidden}
 main.ai-mode .inspector-tabs{flex:none}
@@ -48,14 +49,17 @@ aside .ai-panel{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:
 .ai-panel .content-heading{margin:0 4px 10px}
 .ai-panel .content-heading strong{font-size:21px}
 .ai-panel [data-ai-context]{flex:none;max-width:100%;margin:0 4px 10px;padding:7px 10px;border:1px solid #dce5f2;border-radius:8px;background:#ffffff70;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ai-chat-history{display:flex;flex-direction:column;gap:21px;min-height:80px;padding:12px 5px 22px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#c4d1e6 transparent}
-.ai-chat-history:empty:before{content:'A little direction. A better design.';display:block;margin-top:35px;font-size:20px;line-height:1.4;letter-spacing:-.6px;color:#415675;max-width:230px}
-.ai-chat-history:empty:after{content:'Describe what you’d like to change. Refine the details, or explore a whole new look.';display:block;max-width:265px;font-size:13px;line-height:1.8;color:#7a89a1}
-.ai-chat-message{display:block;flex:none;max-width:100%;padding:0 5px;border:0;border-radius:0;background:transparent;color:var(--ep-ink)}
-.ai-chat-message--user{align-self:stretch;max-width:100%;padding:13px 14px;border:1px solid #ffffffc9;border-radius:13px;background:linear-gradient(135deg,#fff9,#e4ebf6c9);color:#26384f;box-shadow:0 2px 5px #253f7105}
-.ai-chat-message__role{display:block;margin-bottom:8px;font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#7a89a1}
+.ai-chat-history{display:flex;flex-direction:column;gap:14px;min-height:80px;padding:12px 5px 22px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#c4d1e6 transparent}
+.ai-empty-state{display:grid;place-items:center;gap:13px;flex:none;margin:188px auto 0;text-align:center}
+.ai-empty-state__icon{display:grid;place-items:center;width:54px;height:54px;border:1px solid #d6e2fb;border-radius:18px;background:radial-gradient(circle at 32% 25%,#fff,#e5edff 70%);color:#3269ee;box-shadow:0 10px 24px #3269ee1c,inset 0 1px 0 #fff}
+.ai-empty-state__icon svg{width:29px;height:29px;stroke-width:2}
+.ai-empty-state p{max-width:220px;margin:0;font-size:12px;line-height:1.6;color:#7a89a1}
+.ai-chat-history:has([data-ai-message-id]) .ai-empty-state{display:none}
+.ai-chat-message{display:block;flex:none;max-width:100%;padding:0 2px;border:0;border-radius:0;background:transparent;color:var(--ep-ink)}
+.ai-chat-message--user{align-self:stretch;max-width:100%;padding:0;border:0;border-radius:0;background:transparent;color:#26384f;box-shadow:none}
+.ai-chat-message__role{display:block;margin-bottom:5px;font-size:9px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;color:#7a89a1}
 .ai-chat-message--user .ai-chat-message__role{color:#76849b}
-.ai-chat-message p{font-size:13px;line-height:1.85;white-space:pre-wrap;overflow-wrap:anywhere;letter-spacing:-.1px}
+.ai-chat-message p{font-size:12px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;letter-spacing:-.1px}
 .ai-composer{position:relative;flex:none;display:flex;flex-direction:column;align-items:stretch;gap:0;padding:11px;border:1px solid #ffffffd9;border-radius:15px;background:linear-gradient(140deg,#fff9,#e8edf8d9);box-shadow:0 3px 12px #3c5b8d0a,inset 0 1px 0 #fff}
 .ai-composer:focus-within{border-color:#a8bff3;box-shadow:0 0 0 3px #3269ee0d}
 .ai-panel textarea{display:block;flex:none;min-height:65px;max-height:160px;margin:0;width:100%;padding:3px 2px 10px;resize:vertical;border:0;border-radius:0;background:transparent;box-shadow:none;font:13px/1.7 ui-sans-serif,system-ui,sans-serif;color:#26384f}
@@ -64,25 +68,27 @@ aside .ai-panel{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:
 .ai-composer-footer{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .ai-composer-note{display:flex;align-items:center;gap:6px;color:#7b89a1;font-size:10px}
 .ai-composer-note svg{width:13px;height:13px}
+.ai-proposal-actions{display:flex;flex-wrap:wrap;gap:6px;padding:9px 0 2px;border-top:1px solid #dbe5f5}
+.ai-proposal-actions .secondary-button{min-height:29px;padding:5px 9px;border-radius:8px;background:#fff;color:#5c6f8d;font-size:10px;box-shadow:none}
+.ai-proposal-actions [data-ai-apply]{border-color:#3269ee;background:#3269ee;color:#fff}
+.ai-proposal-actions [data-ai-apply]:hover{background:#245bd0;color:#fff}
 .ai-composer [data-ai-send]{display:grid;place-items:center;min-width:35px;min-height:34px;width:35px;height:34px;padding:0;border:1px solid #2d5fdd;border-radius:10px;background:linear-gradient(150deg,#4d7dfa,#2f63e6);color:#fff;box-shadow:0 3px 7px #3269ee24}
 .ai-composer [data-ai-send]:hover{background:#2658d7;color:#fff}
 .ai-composer [data-ai-send] svg{width:20px;height:20px}
 .ai-composer [data-ai-send]:disabled{opacity:.4}
 .ai-status{flex:none;min-height:0;margin:0;padding:0 4px;font-size:11px;line-height:1.5;color:#647690}
 .ai-status:not(:empty){padding:8px 4px}
-.ai-proposal{flex:none;max-height:190px;overflow:auto;margin-top:10px;padding:13px;border:1px solid #cbdaf4;border-radius:12px;background:#f8fbffd9;box-shadow:0 2px 8px #3269ee08}
-.ai-proposal strong{font-size:12px;line-height:1.6}
-.ai-proposal ul{font-size:10px;line-height:1.7}
-.ai-proposal [data-ai-apply]{background:#3269ee;border-color:#3269ee;color:white}
-.ai-chat-message .ai-progress[data-ai-progress]{position:relative;margin-top:12px;padding:14px 13px 14px 39px;border:1px solid #dce6f7;border-radius:12px;background:linear-gradient(125deg,#eef4ff,#f8faff);box-shadow:0 2px 8px #3269ee05;gap:4px 8px}
-.ai-progress:before{content:'';position:absolute;left:15px;top:17px;width:11px;height:11px;border:2px solid #c7d8fa;border-top-color:#3269ee;border-radius:50%;animation:ep-working 1.2s linear infinite}
-.ai-progress[data-status=complete]:before{animation:none;border:0;width:8px;height:8px;left:18px;top:19px;background:#409b7a}
-.ai-progress[data-status=error]:before,.ai-progress[data-status=cancelled]:before{animation:none;border-color:#b27b7b;background:#fff}
-.ai-progress [data-ai-progress-detail]{margin:6px 0 0;font-size:11px;line-height:1.7;color:#7384a0}
-@keyframes ep-working{to{transform:rotate(360deg)}}
-.ai-progress-current{font-size:12px;line-height:1.65;color:#526b98}
-.ai-progress-elapsed{display:inline-block;margin-top:4px;font-size:10px;color:#8a97ad;font-variant-numeric:tabular-nums}
-.ai-progress details{margin-top:9px;color:#6b7e9d;font-size:11px;line-height:1.7}
+.ai-proposal{display:grid;gap:6px;flex:none;max-height:190px;overflow:auto;margin:2px 2px 0;padding:0 0 1px;border:0;background:transparent;box-shadow:none}
+.ai-proposal .ai-chat-message__role{margin:0}
+.ai-proposal strong{font-size:12px;line-height:1.55;color:#314562}
+.ai-proposal ul{display:grid;gap:3px;margin:0;padding-left:16px;font-size:10px;line-height:1.55;color:#617493}
+.ai-proposal .muted{margin:0;font-size:10px;line-height:1.5}
+.ai-chat-message .ai-progress[data-ai-progress]{display:flex;align-items:center;gap:8px;margin-top:8px;padding:0;border:0;background:transparent;box-shadow:none}
+.ai-progress-current{min-width:0;font-size:11px;line-height:1.45;color:#526b98}
+.ai-progress[data-status=active] .ai-progress-current{background:linear-gradient(105deg,#526b98 0%,#526b98 35%,#d8e5ff 50%,#526b98 65%,#526b98 100%);background-size:240% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:ep-status-shine 3s ease-in-out infinite}
+.ai-progress-elapsed{margin-left:auto;font-size:10px;color:#8a97ad;font-variant-numeric:tabular-nums}
+.ai-progress details{display:none}
+@keyframes ep-status-shine{to{background-position:-240% 0}}
 .editor-toolbar{border-radius:15px;background:rgba(249,251,255,.95);border-color:#fff;box-shadow:0 8px 30px #243d701c;-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
 .editor-toolbar .modebar{gap:3px;padding:6px;background:#edf2fa75}
 .editor-toolbar .modebar button{border-radius:8px;border-color:transparent;background:transparent;color:#697a95}
@@ -90,7 +96,7 @@ aside .ai-panel{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:
 aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;outline-offset:3px}
 @supports not (backdrop-filter:blur(1px)){aside{background:#f2f6fd}}
 @media(max-width:600px){aside{width:min(360px,calc(100vw - 16px));border-radius:18px}aside .section{padding:14px 12px}main.ai-mode{height:min(660px,calc(100dvh - 115px))}.ai-panel .content-heading strong{font-size:19px}}
-@media(prefers-reduced-motion:reduce){.inspector-tabs button{transition:none}.ai-progress:before{animation:none}}
+@media(prefers-reduced-motion:reduce){.inspector-tabs button{transition:none}.ai-progress-current{animation:none!important}}
 `;
 class EditorHistory {
   constructor(keyOf = JSON.stringify) {
@@ -381,7 +387,14 @@ let CssSyntaxError$3 = class CssSyntaxError extends Error {
 };
 var cssSyntaxError = CssSyntaxError$3;
 CssSyntaxError$3.default = CssSyntaxError$3;
+const STYLE_TAG = /(<)(\/?style\b)/gi;
+const COMMENT_OPEN = /(<)(!--)/g;
 const AT_NAME_END = /[\t\n\f\r "#'()/;[\\\]{}]/;
+function escapeHTMLInCSS(str) {
+  if (typeof str !== "string") return str;
+  if (!str.includes("<")) return str;
+  return str.replace(STYLE_TAG, "\\3c $2").replace(COMMENT_OPEN, "\\3c $2");
+}
 const DEFAULT_RAW = {
   after: "\n",
   beforeClose: "\n",
@@ -410,11 +423,6 @@ function atruleStart(str, node2) {
   }
   return name + afterName + params;
 }
-function isCustomProperty(node2) {
-  if (!node2.prop.startsWith("--")) return false;
-  let before = node2.raws.before;
-  return typeof before === "undefined" || !/[^\s;]$/.test(before);
-}
 function pushBody(str, stack, node2) {
   let nodes = node2.nodes;
   let last = nodes.length - 1;
@@ -427,7 +435,7 @@ function pushBody(str, stack, node2) {
   for (let i = nodes.length - 1; i >= 0; i--) {
     let child = nodes[i];
     let childSemicolon = last !== i || semicolon;
-    if (!childSemicolon && i < nodes.length - 1 && (child.type === "atrule" && !child.nodes || child.type === "decl" && isCustomProperty(child))) {
+    if (!childSemicolon && i < nodes.length - 1 && (child.type === "atrule" && !child.nodes || child.type === "decl" && child.prop.startsWith("--"))) {
       childSemicolon = true;
     }
     stack.push({
@@ -439,14 +447,14 @@ function pushBody(str, stack, node2) {
 }
 function pushBlock(str, stack, node2, start) {
   let between = str.raw(node2, "between", "beforeOpen");
-  str.builder(start + between + "{", node2, "start");
+  str.builder(escapeHTMLInCSS(start + between) + "{", node2, "start");
   let hasNodes = node2.nodes && node2.nodes.length;
   let close = () => {
     let after = hasNodes ? str.raw(node2, "after") : str.raw(node2, "after", "emptyBody");
-    if (after) str.builder(after);
+    if (after) str.builder(escapeHTMLInCSS(after));
     str.builder("}", node2, "end");
     if (node2.type === "rule" && node2.raws.ownSemicolon) {
-      str.builder(node2.raws.ownSemicolon, node2, "end");
+      str.builder(escapeHTMLInCSS(node2.raws.ownSemicolon), node2, "end");
     }
   };
   if (hasNodes) {
@@ -466,7 +474,7 @@ let Stringifier$2 = class Stringifier {
       this.block(node2, start);
     } else {
       let end = (node2.raws.between || "") + (semicolon ? ";" : "");
-      this.builder(start + end, node2);
+      this.builder(escapeHTMLInCSS(start + end), node2);
     }
   }
   beforeAfter(node2, detect) {
@@ -496,7 +504,7 @@ let Stringifier$2 = class Stringifier {
   }
   block(node2, start) {
     let between = this.raw(node2, "between", "beforeOpen");
-    this.builder(start + between + "{", node2, "start");
+    this.builder(escapeHTMLInCSS(start + between) + "{", node2, "start");
     let after;
     if (node2.nodes && node2.nodes.length) {
       this.body(node2);
@@ -504,7 +512,7 @@ let Stringifier$2 = class Stringifier {
     } else {
       after = this.raw(node2, "after", "emptyBody");
     }
-    if (after) this.builder(after);
+    if (after) this.builder(escapeHTMLInCSS(after));
     this.builder("}", node2, "end");
   }
   body(node2) {
@@ -523,7 +531,7 @@ let Stringifier$2 = class Stringifier {
       let child = entry.node;
       let before = this.raw(child, "before");
       if (before) {
-        this.builder(before);
+        this.builder(entry.document ? before : escapeHTMLInCSS(before));
       }
       if (expandable && child.type === "rule") {
         pushBlock(this, stack, child, this.rawValue(child, "selector"));
@@ -537,7 +545,7 @@ let Stringifier$2 = class Stringifier {
   comment(node2) {
     let left = this.raw(node2, "left", "commentLeft");
     let right = this.raw(node2, "right", "commentRight");
-    this.builder("/*" + left + node2.text + right + "*/", node2);
+    this.builder(escapeHTMLInCSS("/*" + left + node2.text + right + "*/"), node2);
   }
   decl(node2, semicolon) {
     let raws = node2.raws;
@@ -547,7 +555,7 @@ let Stringifier$2 = class Stringifier {
       string += raws.important || " !important";
     }
     if (semicolon) string += ";";
-    this.builder(string, node2);
+    this.builder(escapeHTMLInCSS(string), node2);
   }
   document(node2) {
     this.body(node2);
@@ -724,19 +732,20 @@ let Stringifier$2 = class Stringifier {
     return value;
   }
   root(node2) {
-    let inDocument = node2.parent && node2.parent.type === "document";
-    if (!inDocument && node2.source && node2.source.input.hasBOM) {
+    if (node2.source && node2.source.input.hasBOM) {
       this.builder("\uFEFF", node2, "start");
     }
     this.body(node2);
     if (node2.raws.after) {
-      this.builder(node2.raws.after);
+      let after = node2.raws.after;
+      let isDocument = node2.parent && node2.parent.type === "document";
+      this.builder(isDocument ? after : escapeHTMLInCSS(after));
     }
   }
   rule(node2) {
     this.block(node2, this.rawValue(node2, "selector"));
     if (node2.raws.ownSemicolon) {
-      this.builder(node2.raws.ownSemicolon, node2, "end");
+      this.builder(escapeHTMLInCSS(node2.raws.ownSemicolon), node2, "end");
     }
   }
   stringify(node2, semicolon) {
@@ -751,78 +760,9 @@ let Stringifier$2 = class Stringifier {
 var stringifier = Stringifier$2;
 Stringifier$2.default = Stringifier$2;
 let Stringifier$1 = stringifier;
-const STYLE_TAG = /(<)(\/?style\b)/gi;
-const COMMENT_OPEN = /(<)(!--)/g;
-function escapeHTMLInCSS(str) {
-  if (!str.includes("<")) return str;
-  return str.replace(STYLE_TAG, "\\3c $2").replace(COMMENT_OPEN, "\\3c $2");
-}
-function cutEscaped(chunks, css, escaped) {
-  let parts = [];
-  let at = 0;
-  let into = 0;
-  for (let i = 0; i < chunks.length; i += 3) {
-    let from = into;
-    let end = at + chunks[i].length;
-    while (at < end) {
-      if (css[at] === escaped[into]) {
-        at += 1;
-        into += 1;
-      } else {
-        at += 1;
-        into += 4;
-      }
-    }
-    parts.push(escaped.slice(from, into));
-  }
-  return parts;
-}
-class SafeStringifier extends Stringifier$1 {
-  escapeHTML(print) {
-    let builder = this.builder;
-    let chunks, css;
-    this.builder = (str, child, type) => {
-      if (chunks) {
-        css += str;
-        chunks.push(str, child, type);
-      } else if (str.includes("<")) {
-        css = str;
-        chunks = [str, child, type];
-      } else {
-        builder(str, child, type);
-      }
-    };
-    print();
-    this.builder = builder;
-    if (!chunks) return;
-    let escaped = escapeHTMLInCSS(css);
-    if (escaped === css) {
-      for (let i = 0; i < chunks.length; i += 3) {
-        builder(chunks[i], chunks[i + 1], chunks[i + 2]);
-      }
-    } else {
-      let parts = cutEscaped(chunks, css, escaped);
-      for (let i = 0; i < chunks.length; i += 3) {
-        builder(parts[i / 3], chunks[i + 1], chunks[i + 2]);
-      }
-    }
-  }
-  root(node2) {
-    if (node2.parent && node2.parent.type === "document") {
-      this.escapeHTML(() => this.body(node2));
-      if (node2.raws.after) this.builder(node2.raws.after);
-    } else {
-      this.escapeHTML(() => super.root(node2));
-    }
-  }
-}
 function stringify$4(node2, builder) {
-  let str = new SafeStringifier(builder);
-  if (node2.type === "root" || node2.type === "document") {
-    str.stringify(node2);
-  } else {
-    str.escapeHTML(() => str.stringify(node2));
-  }
+  let str = new Stringifier$1(builder);
+  str.stringify(node2);
 }
 var stringify_1 = stringify$4;
 stringify$4.default = stringify$4;
@@ -1025,7 +965,7 @@ let Node$5 = class Node2 {
     } else if (opts.word) {
       let stringRepresentation = inputString.slice(
         sourceOffset(inputString, this.source.start),
-        this.rangeBy().end.offset
+        sourceOffset(inputString, this.source.end)
       );
       let index = stringRepresentation.indexOf(opts.word);
       if (index !== -1) pos = this.positionInside(index);
@@ -1080,7 +1020,7 @@ let Node$5 = class Node2 {
     if (opts.word) {
       let stringRepresentation = inputString.slice(
         sourceOffset(inputString, this.source.start),
-        end.offset
+        sourceOffset(inputString, this.source.end)
       );
       let index = stringRepresentation.indexOf(opts.word);
       if (index !== -1) {
@@ -1723,16 +1663,9 @@ let nanoid$1 = (size = 21) => {
   return id;
 };
 var nonSecure = { nanoid: nanoid$1 };
-let { existsSync, readFileSync, realpathSync } = require$$2;
+let { existsSync, readFileSync } = require$$2;
 let { dirname: dirname$1, isAbsolute: isAbsolute$1, join, relative: relative$1, sep: sep$1 } = require$$2;
 let { SourceMapConsumer: SourceMapConsumer$2, SourceMapGenerator: SourceMapGenerator$2 } = require$$2;
-function realPath(path) {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
-  }
-}
 function fromBase64(str) {
   if (Buffer) {
     return Buffer.from(str, "base64").toString();
@@ -1797,7 +1730,7 @@ let PreviousMap$2 = class PreviousMap {
     if (!trusted && !this.unsafeMap) {
       if (!/\.map$/i.test(path)) return void 0;
       if (!cssFile) return void 0;
-      let rel = relative$1(realPath(dirname$1(cssFile)), realPath(path));
+      let rel = relative$1(dirname$1(cssFile), path);
       if (rel === ".." || rel.startsWith(".." + sep$1) || isAbsolute$1(rel)) {
         return void 0;
       }
@@ -2046,7 +1979,7 @@ let Input$4 = class Input {
     } else {
       fromUrl = new URL(
         from.source,
-        pathToFileURL$1(this.map.mapFile || resolve$1(".") + "/")
+        this.map.consumer().sourceRoot || pathToFileURL$1(this.map.mapFile)
       );
     }
     let result2 = {
@@ -2151,7 +2084,7 @@ let list$2 = {
     return list$2.split(string, spaces);
   },
   split(string, separators, last) {
-    if (typeof string !== "string") return [];
+    if (!string) return [];
     let array = [];
     let current = "";
     let split = false;
@@ -2159,18 +2092,7 @@ let list$2 = {
     let inQuote = false;
     let prevQuote = "";
     let escape2 = false;
-    let inComment = false;
-    for (let i = 0; i < string.length; i++) {
-      let letter = string[i];
-      if (inComment) {
-        current += letter;
-        if (letter === "*" && string[i + 1] === "/") {
-          current += "/";
-          i += 1;
-          inComment = false;
-        }
-        continue;
-      }
+    for (let letter of string) {
       if (escape2) {
         escape2 = false;
       } else if (letter === "\\") {
@@ -2182,11 +2104,6 @@ let list$2 = {
       } else if (letter === '"' || letter === "'") {
         inQuote = true;
         prevQuote = letter;
-      } else if (letter === "/" && string[i + 1] === "*") {
-        current += "/*";
-        i += 1;
-        inComment = true;
-        continue;
       } else if (letter === "(") {
         func += 1;
       } else if (letter === ")") {
@@ -2195,16 +2112,14 @@ let list$2 = {
         if (separators.includes(letter)) split = true;
       }
       if (split) {
-        let value2 = current.trim();
-        if (last || value2 !== "") array.push(value2);
+        if (current !== "") array.push(current.trim());
         current = "";
         split = false;
       } else {
         current += letter;
       }
     }
-    let value = current.trim();
-    if (last || value !== "") array.push(value);
+    if (last || current !== "") array.push(current.trim());
     return array;
   }
 };
@@ -2379,20 +2294,15 @@ let MapGenerator$2 = class MapGenerator {
         }
       }
     } else if (this.css) {
-      let annotation = "/*# sourceMappingURL=";
-      let css = "";
-      let cursor = 0;
       let startIndex;
-      while ((startIndex = this.css.indexOf(annotation, cursor)) !== -1) {
-        let endIndex = this.css.indexOf("*/", startIndex + annotation.length);
+      while ((startIndex = this.css.lastIndexOf("/*#")) !== -1) {
+        let endIndex = this.css.indexOf("*/", startIndex + 3);
         if (endIndex === -1) break;
-        while (startIndex > cursor && this.css[startIndex - 1] === "\n") {
+        while (startIndex > 0 && this.css[startIndex - 1] === "\n") {
           startIndex--;
         }
-        css += this.css.slice(cursor, startIndex);
-        cursor = endIndex + 2;
+        this.css = this.css.slice(0, startIndex) + this.css.slice(endIndex + 2);
       }
-      if (cursor > 0) this.css = css + this.css.slice(cursor);
     }
   }
   generate() {
@@ -3159,7 +3069,7 @@ let Parser$1 = class Parser {
         prev.raws.ownSemicolon = this.spaces;
         this.spaces = "";
         prev.source.end = this.getPosition(token[2]);
-        prev.source.end.offset++;
+        prev.source.end.offset += prev.raws.ownSemicolon.length;
       }
     }
   }
@@ -3275,7 +3185,6 @@ let Parser$1 = class Parser {
     let token, type;
     let length = tokens.length;
     let value = "";
-    let last = "";
     let clean = true;
     let next, prev;
     for (let i = 0; i < length; i += 1) {
@@ -3287,18 +3196,16 @@ let Parser$1 = class Parser {
         prev = tokens[i - 1] ? tokens[i - 1][0] : "empty";
         next = tokens[i + 1] ? tokens[i + 1][0] : "empty";
         if (!SAFE_COMMENT_NEIGHBOR[prev] && !SAFE_COMMENT_NEIGHBOR[next]) {
-          if (last === ",") {
+          if (value.slice(-1) === ",") {
             clean = false;
           } else {
             value += token[1];
-            last = token[1].slice(-1);
           }
         } else {
           clean = false;
         }
       } else {
         value += token[1];
-        last = token[1].slice(-1);
       }
     }
     if (!clean) {
@@ -3438,7 +3345,6 @@ let Warning$2 = class Warning {
       return this.node.error(this.text, {
         index: this.index,
         plugin: this.plugin,
-        start: this.start,
         word: this.word
       }).message;
     }
@@ -3663,7 +3569,7 @@ let LazyResult$2 = class LazyResult {
     return this.async().catch(onRejected);
   }
   finally(onFinally) {
-    return this.async().finally(onFinally);
+    return this.async().then(onFinally, onFinally);
   }
   getAsyncError() {
     throw new Error("Use process(css).then(cb) to work with async plugins");
@@ -4093,7 +3999,7 @@ let NoWorkResult$1 = class NoWorkResult {
     return this.async().catch(onRejected);
   }
   finally(onFinally) {
-    return this.async().finally(onFinally);
+    return this.async().then(onFinally, onFinally);
   }
   sync() {
     if (this.error) throw this.error;
@@ -4124,7 +4030,7 @@ let NoWorkResult2 = noWorkResult;
 let Root$1 = root;
 let Processor$1 = class Processor {
   constructor(plugins = []) {
-    this.version = "8.5.32";
+    this.version = "8.5.25";
     this.plugins = this.normalize(plugins);
   }
   normalize(plugins) {
@@ -4201,7 +4107,7 @@ postcss.plugin = function plugin(name, initializer) {
       console.warn(
         name + ": postcss.plugin was deprecated. Migration guide:\nhttps://evilmartians.com/chronicles/postcss-8-plugin-migration"
       );
-      if (process.env.LANG && process.env.LANG.startsWith("zh")) {
+      if (process.env.LANG && process.env.LANG.startsWith("cn")) {
         console.warn(
           name + ": 里面 postcss.plugin 被弃用. 迁移指南:\nhttps://www.w3ctech.com/topic/2226"
         );
@@ -7388,7 +7294,7 @@ function moveCandidate(document2, sourceId, targetId, before = false) {
   }
 }
 function applyEditorAiProposal(document2, proposal) {
-  if (document2.schemaVersion !== 2 && document2.schemaVersion !== 3) throw new Error("AI editing requires an on-site document.");
+  if (document2.schemaVersion !== 2 && document2.schemaVersion !== 3 && document2.schemaVersion !== 4) throw new Error("AI editing requires an on-site document.");
   if (!proposal.operations.length || proposal.operations.length > 30) throw new Error("AI proposal has an invalid operation count.");
   const candidate = cloneOnsite(document2);
   for (const operation of proposal.operations) {
@@ -9893,12 +9799,10 @@ class EditorModeController {
       <aside aria-label="Contextual inspector"><main>
         <nav class="inspector-tabs" aria-label="Inspector mode"><span class="panel-wordmark"><span class="panel-mark">${panelIcon("ai")}</span>movcues</span>${[["properties", "Properties"], ["theme", "Theme"], ["ai", "AI assistant"]].map(([tab, label]) => `<button type="button" class="${tab === "properties" ? "active" : ""}" data-inspector-tab="${tab}" aria-label="${label}" title="${label}" aria-pressed="${tab === "properties"}"${tab === "ai" && !aiEligible ? " disabled" : ""}>${panelIcon(tab)}</button>`).join("")}</nav>
         <section class="section ai-panel" data-ai-panel hidden>
-          <div class="content-heading"><div><div class="eyebrow">Your creative partner</div><strong>Make it yours.</strong></div><button type="button" class="secondary-button compact" data-ai-cancel hidden>Stop</button></div>
           <p class="muted" data-ai-context>Choose an element or ask about the whole widget.</p>
-          <div class="ai-chat-history" data-ai-history aria-label="AI chat history" aria-live="polite"></div>
-          <form class="ai-composer" data-ai-form><textarea data-ai-prompt aria-label="Describe your design change" maxlength="4000" rows="3" placeholder="What would you like to create?"></textarea><div class="ai-composer-footer"><span class="ai-composer-note">${panelIcon("ai")} Design with Movcues</span><button type="submit" class="secondary-button" data-ai-send aria-label="Send message" title="Send message">${panelIcon("send")}</button></div></form>
+          <div class="ai-chat-history" data-ai-history aria-label="AI chat history" aria-live="polite"><div class="ai-empty-state"><span class="ai-empty-state__icon">${panelIcon("zap")}</span><p>Describe the change you want to make.</p></div><article class="ai-proposal" data-ai-proposal hidden><span class="ai-chat-message__role">Movcues AI</span><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Review the update, then apply it when you’re ready.</p></article></div>
+          <form class="ai-composer" data-ai-form><textarea data-ai-prompt aria-label="Describe your design change" maxlength="4000" rows="3" placeholder="What would you like to create?"></textarea><div class="ai-proposal-actions" data-ai-proposal-actions hidden><button type="button" class="secondary-button" data-ai-target hidden>Select target</button><button type="button" class="secondary-button" data-ai-preview hidden>Preview design</button><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div><div class="ai-composer-footer"><span class="ai-composer-note">${panelIcon("ai")} Design with Movcues</span><button type="button" class="secondary-button compact" data-ai-cancel hidden>Stop</button><button type="submit" class="secondary-button" data-ai-send aria-label="Send message" title="Send message">${panelIcon("send")}</button></div></form>
           <div class="ai-status" data-ai-status role="status" aria-live="polite"></div>
-          <article class="ai-proposal" data-ai-proposal hidden><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Preview only. Nothing changes until you apply it.</p><div class="history-row"><button type="button" class="secondary-button" data-ai-target hidden>Select target</button><button type="button" class="secondary-button" data-ai-preview hidden>Preview Guide</button><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div></article>
         </section>
         <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : this.survey ? "Preview tests the full Survey. No responses, production events or progress are recorded. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
@@ -10216,6 +10120,10 @@ class EditorModeController {
       var _a2;
       return (_a2 = root2.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => run(event.currentTarget.value));
     };
+    const input2 = (selector, run) => {
+      var _a2;
+      return (_a2 = root2.querySelector(selector)) == null ? void 0 : _a2.addEventListener("input", (event) => run(event.currentTarget.value));
+    };
     const number = (value, fallback) => {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : fallback;
@@ -10306,7 +10214,7 @@ class EditorModeController {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateBlock({ color: value });
     });
-    change("[data-button-padding-x]", (value) => {
+    input2("[data-button-padding-x]", (value) => {
       var _a2;
       return (_a2 = this.compositionEditor) == null ? void 0 : _a2.updateBlock({ paddingX: Math.max(4, Math.min(48, number(value, 16))) });
     });
@@ -10326,10 +10234,10 @@ class EditorModeController {
         });
         const field = (_b2 = this.root) == null ? void 0 : _b2.querySelector(value === "open_url" ? "[data-action-url]" : "[data-action-event]");
         if (field) field.hidden = false;
-        const input2 = (_c2 = this.root) == null ? void 0 : _c2.querySelector(value === "open_url" ? "[data-button-url]" : "[data-button-event]");
-        if (input2) {
-          input2.value = "";
-          input2.focus();
+        const input22 = (_c2 = this.root) == null ? void 0 : _c2.querySelector(value === "open_url" ? "[data-button-url]" : "[data-button-event]");
+        if (input22) {
+          input22.value = "";
+          input22.focus();
         }
         this.setText("[data-action-status]", value === "open_url" ? "Enter a complete HTTP(S) URL to apply this action." : "Enter an event name to apply this action.");
         return;
@@ -10415,11 +10323,11 @@ class EditorModeController {
     }));
     (_c = root2.querySelector("[data-v2-apply-link]")) == null ? void 0 : _c.addEventListener("click", () => {
       var _a2;
-      const input2 = root2.querySelector("[data-v2-link-url]");
-      if (input2 && !((_a2 = this.compositionEditor) == null ? void 0 : _a2.applyLink(input2.value))) {
-        input2.setCustomValidity("Use an HTTP(S), email, phone, relative, or hash URL.");
-        input2.reportValidity();
-      } else input2 == null ? void 0 : input2.setCustomValidity("");
+      const input22 = root2.querySelector("[data-v2-link-url]");
+      if (input22 && !((_a2 = this.compositionEditor) == null ? void 0 : _a2.applyLink(input22.value))) {
+        input22.setCustomValidity("Use an HTTP(S), email, phone, relative, or hash URL.");
+        input22.reportValidity();
+      } else input22 == null ? void 0 : input22.setCustomValidity("");
     });
     (_d = root2.querySelector("[data-v2-undo]")) == null ? void 0 : _d.addEventListener("click", () => {
       var _a2;
@@ -11608,7 +11516,15 @@ class EditorModeController {
       if (following) history2.scrollTop = history2.scrollHeight;
     }
     const proposal = this.root.querySelector("[data-ai-proposal]");
-    if (proposal) proposal.hidden = !this.aiProposal;
+    if (proposal) {
+      proposal.hidden = !this.aiProposal;
+      if (this.aiProposal && history2 && history2.lastElementChild !== proposal) {
+        history2.append(proposal);
+        history2.scrollTop = history2.scrollHeight;
+      }
+    }
+    const proposalActions = this.root.querySelector("[data-ai-proposal-actions]");
+    if (proposalActions) proposalActions.hidden = !this.aiProposal;
     if (!this.aiProposal) return;
     this.setText("[data-ai-summary]", this.aiProposal.value.summary);
     const list2 = this.root.querySelector("[data-ai-operations]");
@@ -12571,4 +12487,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-PtPzyjcp.js.map
+//# sourceMappingURL=EditorModeController-ft41zuwf.js.map

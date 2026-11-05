@@ -1776,7 +1776,8 @@ ${ISOLATION_CSS}`;
       this.host = document.createElement("div");
       this.host.dataset.movcuesChecklist = checklist.id;
       const side = checklist.definition.behavior.position === "bottom-left" ? "left:16px" : "right:16px";
-      this.host.style.cssText = `position:fixed;bottom:16px;${side};z-index:${ALWAYS_ON_TOP_Z_INDEX - 1};pointer-events:auto`;
+      const zIndex = forceLauncher ? ALWAYS_ON_TOP_Z_INDEX - 1 : ALWAYS_ON_TOP_Z_INDEX + 1;
+      this.host.style.cssText = `position:fixed;bottom:16px;${side};z-index:${zIndex};pointer-events:auto`;
       const root = this.host.attachShadow({ mode: "open" });
       const style = document.createElement("style");
       style.textContent = `:host{all:initial}.surface{position:relative;pointer-events:auto}.surface>.movcues-widget{position:relative!important;inset:auto!important}${css}`;
@@ -2150,7 +2151,7 @@ ${ISOLATION_CSS}`;
       return { experiences: Array.isArray(manifest.experiences) ? manifest.experiences : [], checklists: Array.isArray(manifest.checklists) ? manifest.checklists : [], hasChecklists: manifest.hasChecklists === true };
     }
     show(experience, requestedStepId, progress) {
-      var _a, _b;
+      var _a, _b, _c;
       if (((_a = this.queued) == null ? void 0 : _a.id) === experience.id) this.queued = null;
       const definition = isGuideDefinition(experience.definition) ? experience.definition : null;
       const currentStepId = (definition == null ? void 0 : definition.steps.some((step) => step.id === requestedStepId)) ? requestedStepId : (_b = definition == null ? void 0 : definition.steps[0]) == null ? void 0 : _b.id;
@@ -2158,7 +2159,7 @@ ${ISOLATION_CSS}`;
       const ids = (value) => new Set(Array.isArray(value) ? value.filter((id) => typeof id === "string").slice(0, 20) : []);
       const runtime2 = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId || (progress == null ? void 0 : progress.shownRequested)), shownPromise: null, surveyResponseId: null, surveyResponsePromise: null, surveyResume: null, surveyAnswers: {}, stepStartedAt: null, visibleStepId: null, readyStepId: null, seenStepIds: ids(progress == null ? void 0 : progress.seenStepIds), completedStepIds: ids(progress == null ? void 0 : progress.completedStepIds), finished: false, stepEntryRoute: location.href, launchContext: (progress == null ? void 0 : progress.launchContext) ?? experience.launchContext };
       this.active = runtime2;
-      this.checklist.setTransientActive(true);
+      this.checklist.setTransientActive(((_c = runtime2.launchContext) == null ? void 0 : _c.source) === "checklist");
       if (currentStepId) this.persistGuide(runtime2, "active");
       const mounted = currentStepId ? progress && (!progress.routePath || progress.routePath !== currentPagePath()) && this.advanceForRoute(runtime2) ? true : (this.renderActiveGuide(), true) : this.renderer.render(experience, this.callbacks(runtime2), currentStepId);
       if (!mounted && this.active === runtime2) {
@@ -2383,11 +2384,12 @@ ${ISOLATION_CSS}`;
       }
     }
     resumeGuide() {
+      var _a;
       const runtime2 = this.pausedGuide;
       if (!runtime2) return;
       this.pausedGuide = null;
       this.active = runtime2;
-      this.checklist.setTransientActive(true);
+      this.checklist.setTransientActive(((_a = runtime2.launchContext) == null ? void 0 : _a.source) === "checklist");
       this.persistGuide(runtime2, "active");
       this.renderActiveGuide();
     }

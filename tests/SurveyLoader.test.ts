@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ExperienceLoader } from "../src/experiences/runtime/ExperienceLoader";
-import type { DeliveredExperience, WidgetBuilderState } from "../src/experiences/types";
+import type { DeliveredChecklist, DeliveredExperience, WidgetBuilderState } from "../src/experiences/types";
 
 function builder(question: string, action: "next" | "submit"): WidgetBuilderState { return { version: 1, projectData: {}, html: `<section class="movcues-widget">${question}<div class="movcues-survey-validation"></div><button data-movcues-survey-action="back">Back</button><button data-movcues-survey-action="${action}">${action}</button></section>`, css: ".movcues-widget{padding:12px}.movcues-widget .is-selected{color:blue}" }; }
+function checklist(): DeliveredChecklist { return { id: "checklist_1", versionId: "checklist_version", kind: "checklist", priority: 1, definition: { title: "Getting started", items: [{ id: "task_1", title: "First task", action: { type: "none" }, completion: { type: "item_clicked" } }], behavior: { position: "bottom-right", order: "freeform", dismissible: true, initialState: "expanded", showRemainingCount: true }, completionMessage: { title: "Done", acknowledgeLabel: "Close" }, builder: { version: 1, projectData: {}, html: '<section class="movcues-widget" data-movcues-checklist-role="root"><div data-movcues-checklist-view="expanded"><h2 data-movcues-checklist-role="title"></h2><p data-movcues-checklist-role="description"></p><div data-movcues-checklist-role="progress"></div><div data-movcues-checklist-role="items"><button data-movcues-checklist-item-id="task_1"><span data-movcues-checklist-item-role="state"></span><span data-movcues-checklist-item-role="title"></span><span data-movcues-checklist-item-role="description"></span></button></div></div><button data-movcues-checklist-view="launcher"><span data-movcues-checklist-role="launcher-label"></span><span data-movcues-checklist-role="remaining-count"></span></button><div data-movcues-checklist-view="completion"><h2 data-movcues-checklist-role="completion-title"></h2><p data-movcues-checklist-role="completion-description"></p><button data-movcues-checklist-role="completion-acknowledge"></button></div></section>', css: ".movcues-widget{background:#fff}" } }, progress: { stateId: "checklist_state", collapsed: false, dismissed: false, complete: false, completionAcknowledged: false, completedItemIds: [], items: [{ id: "task_1", state: "available" }] } }; }
 
 describe("survey response lifecycle", () => {
   beforeEach(() => { document.documentElement.innerHTML = "<head></head><body></body>"; history.replaceState({}, "", "/task"); });
@@ -19,5 +20,20 @@ describe("survey response lifecycle", () => {
     expect(calls.find(call => call.url.endsWith("/survey-responses"))?.body).toMatchObject({ impressionId: "impression_1", anonymousId: "anon_1", sessionId: "session_1" });
     const patches = calls.filter(call => call.url.includes("/survey-responses/")); expect(patches[0].body).toMatchObject({ currentStepId: "two", answers: { rating: 5 } }); expect(patches.at(-1)?.body).toMatchObject({ currentStepId: "two", answers: { rating: 5 }, submitted: true });
     expect(calls.findIndex(call => call.body?.event === "shown")).toBeLessThan(calls.findIndex(call => call.url.endsWith("/survey-responses"))); expect(calls.findLastIndex(call => call.url.includes("/survey-responses/"))).toBeLessThan(calls.findIndex(call => call.body?.event === "completed")); loader.destroy();
+  });
+
+  it("keeps an independently delivered Checklist expanded and interactive while a widget is active", async () => {
+    const widget: DeliveredExperience = { id: "modal_1", versionId: "modal_version", kind: "widget", widgetType: "modal", priority: 5, definition: { content: { heading: "Welcome", body: "Complete this later" }, design: { width: "md", theme: { background: "#fff", foreground: "#111", primary: "#2563eb", borderRadius: "md" } }, behavior: { dismissible: true } } };
+    const calls: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => { const url = String(input); const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined; calls.push({ url, body }); if (url.includes("/experiences?")) return { ok: true, status: 200, json: async () => ({ experiences: [widget], checklists: [checklist()], hasChecklists: true }) }; return { ok: true, status: 200, json: async () => ({}) }; }));
+    const loader = new ExperienceLoader("https://api.example.com", "site_1", { getAnonymousId: () => "anon_1", getSessionId: () => "session_1", getPageViewId: () => "page_1", getIdentifiedUserId: () => null });
+    await loader.evaluate();
+
+    const checklistRoot = document.querySelector<HTMLElement>("[data-movcues-checklist]")!.shadowRoot!;
+    expect(Number(document.querySelector<HTMLElement>("[data-movcues-checklist]")!.style.zIndex)).toBeGreaterThan(Number(document.querySelector<HTMLElement>("[data-movcues-experience]")!.style.zIndex));
+    expect(checklistRoot.querySelector('[data-movcues-checklist-view="expanded"]')?.classList.contains("is-active")).toBe(true);
+    checklistRoot.querySelector<HTMLButtonElement>('[data-movcues-checklist-item-id="task_1"]')!.click();
+    await vi.waitFor(() => expect(calls.some(call => call.url.endsWith("/actions") && call.body?.action === "item_click")).toBe(true));
+    loader.destroy();
   });
 });

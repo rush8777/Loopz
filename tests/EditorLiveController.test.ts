@@ -248,6 +248,20 @@ describe("live placement editor", () => {
     expect(JSON.parse(String(save[1]?.body))).toMatchObject({ revision: 1, definition: { content: { heading: "Edited in context" }, builder: { html: expect.stringContaining("Edited in context") } } });
   });
 
+  it("applies button horizontal padding from the live inspector while the value changes", async () => {
+    vi.stubGlobal("fetch", editorFetch(onsiteDraft()));
+    controller = new EditorModeController("https://api.example.com");
+    expect(await controller.start("one-time-token")).toBe(true);
+
+    const previewHost = document.querySelector<HTMLElement>('[data-movcues-experience="exp_onsite"]')!;
+    previewHost.shadowRoot!.querySelector<HTMLButtonElement>(".movcues-button")!.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    const horizontalPadding = editorRoot().querySelector<HTMLInputElement>("[data-button-padding-x]")!;
+    horizontalPadding.value = "32";
+    horizontalPadding.dispatchEvent(new InputEvent("input", { bubbles: true }));
+
+    expect(previewHost.shadowRoot!.querySelector<HTMLStyleElement>("style[data-movcues-builder-style]")?.textContent).toContain("padding:9px 32px");
+  });
+
   it("updates an on-site anchored pointer when the root background changes", async () => {
     const draft = onsiteDraft(); draft.experience.widgetType = "anchored_card";
     const definition = draft.version.definition as RuntimeWidgetDefinition;

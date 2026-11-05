@@ -4409,7 +4409,8 @@ class ChecklistRenderer {
     this.host = document.createElement("div");
     this.host.dataset.movcuesChecklist = checklist.id;
     const side = checklist.definition.behavior.position === "bottom-left" ? "left:16px" : "right:16px";
-    this.host.style.cssText = `position:fixed;bottom:16px;${side};z-index:${ALWAYS_ON_TOP_Z_INDEX - 1};pointer-events:auto`;
+    const zIndex = forceLauncher ? ALWAYS_ON_TOP_Z_INDEX - 1 : ALWAYS_ON_TOP_Z_INDEX + 1;
+    this.host.style.cssText = `position:fixed;bottom:16px;${side};z-index:${zIndex};pointer-events:auto`;
     const root = this.host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
     style.textContent = `:host{all:initial}.surface{position:relative;pointer-events:auto}.surface>.movcues-widget{position:relative!important;inset:auto!important}${css}`;
@@ -4783,7 +4784,7 @@ class ExperienceLoader {
     return { experiences: Array.isArray(manifest.experiences) ? manifest.experiences : [], checklists: Array.isArray(manifest.checklists) ? manifest.checklists : [], hasChecklists: manifest.hasChecklists === true };
   }
   show(experience, requestedStepId, progress) {
-    var _a, _b;
+    var _a, _b, _c;
     if (((_a = this.queued) == null ? void 0 : _a.id) === experience.id) this.queued = null;
     const definition = isGuideDefinition(experience.definition) ? experience.definition : null;
     const currentStepId = (definition == null ? void 0 : definition.steps.some((step) => step.id === requestedStepId)) ? requestedStepId : (_b = definition == null ? void 0 : definition.steps[0]) == null ? void 0 : _b.id;
@@ -4791,7 +4792,7 @@ class ExperienceLoader {
     const ids = (value) => new Set(Array.isArray(value) ? value.filter((id) => typeof id === "string").slice(0, 20) : []);
     const runtime = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId || (progress == null ? void 0 : progress.shownRequested)), shownPromise: null, surveyResponseId: null, surveyResponsePromise: null, surveyResume: null, surveyAnswers: {}, stepStartedAt: null, visibleStepId: null, readyStepId: null, seenStepIds: ids(progress == null ? void 0 : progress.seenStepIds), completedStepIds: ids(progress == null ? void 0 : progress.completedStepIds), finished: false, stepEntryRoute: location.href, launchContext: (progress == null ? void 0 : progress.launchContext) ?? experience.launchContext };
     this.active = runtime;
-    this.checklist.setTransientActive(true);
+    this.checklist.setTransientActive(((_c = runtime.launchContext) == null ? void 0 : _c.source) === "checklist");
     if (currentStepId) this.persistGuide(runtime, "active");
     const mounted = currentStepId ? progress && (!progress.routePath || progress.routePath !== currentPagePath()) && this.advanceForRoute(runtime) ? true : (this.renderActiveGuide(), true) : this.renderer.render(experience, this.callbacks(runtime), currentStepId);
     if (!mounted && this.active === runtime) {
@@ -5016,11 +5017,12 @@ class ExperienceLoader {
     }
   }
   resumeGuide() {
+    var _a;
     const runtime = this.pausedGuide;
     if (!runtime) return;
     this.pausedGuide = null;
     this.active = runtime;
-    this.checklist.setTransientActive(true);
+    this.checklist.setTransientActive(((_a = runtime.launchContext) == null ? void 0 : _a.source) === "checklist");
     this.persistGuide(runtime, "active");
     this.renderActiveGuide();
   }
@@ -5105,7 +5107,7 @@ const bundledRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-PtPzyjcp.js");
+    const { EditorModeController } = await import("./EditorModeController-ft41zuwf.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -5159,4 +5161,4 @@ export {
   storeEditorContinuation as v,
   createAnalytics as w
 };
-//# sourceMappingURL=module-4Em55haL.js.map
+//# sourceMappingURL=module-DIkfe9C8.js.map
