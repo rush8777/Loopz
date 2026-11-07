@@ -242,8 +242,7 @@ export class EditorModeController {
         <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : this.survey ? "Preview tests the full Survey. No responses, production events or progress are recorded. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         <section class="section composition-inspector" data-composition-inspector hidden>
-          <div class="content-heading"><div><div class="eyebrow">Inspector</div><strong data-composition-label>Step</strong></div><button type="button" class="secondary-button compact" data-select-step>Step</button></div>
-          <div data-inspector="step"><label>Step label<input data-step-name type="text" maxlength="80" placeholder="Step label"></label><div class="history-row"><button type="button" class="secondary-button compact" data-edge="top">Header</button><button type="button" class="secondary-button compact" data-edge="bottom">Footer</button><button type="button" class="secondary-button compact" data-edge="left">Left area</button><button type="button" class="secondary-button compact" data-edge="right">Right area</button></div></div>
+          <div data-inspector="step"><label>Step label<input data-step-name type="text" maxlength="80" placeholder="Step label"></label></div>
           <div data-inspector="cell" hidden>
             <label>Direction<select data-cell-direction><option value="column">Column</option><option value="row">Row</option></select></label>
             <label>Size<select data-cell-size><option value="flexible">Flexible</option><option value="hug">Hug content</option><option value="fixed">Fixed</option></select></label>
@@ -284,6 +283,10 @@ export class EditorModeController {
           <div class="muted" data-layer-description></div>
           <div data-layer-relative hidden><strong class="truncate" data-layer-target>Not selected</strong><button class="secondary-button" type="button" data-pick-layer>Select element from page</button><label>Relationship<select data-layer-relation><option value="above">Above</option><option value="below">Below</option></select></label></div>
           <label data-layer-custom hidden>Custom z-index<input data-layer-z-index type="number" min="1" max="2147483647"></label>
+        </section>
+        <section class="section" data-step-only data-close-button-section>
+          <div class="eyebrow">Behavior</div>
+          <label class="check"><input data-show-close-button type="checkbox"> Show close button</label>
         </section>
         <section class="section" data-step-only data-placement-section>
           <div class="eyebrow">Placement</div>
@@ -348,8 +351,6 @@ export class EditorModeController {
     root.querySelector<HTMLButtonElement>("[data-global-undo]")?.addEventListener("click", () => this.globalUndo());
     root.querySelector<HTMLButtonElement>("[data-global-redo]")?.addEventListener("click", () => this.globalRedo());
     root.querySelector<HTMLButtonElement>("[data-move-side]")?.addEventListener("click", () => root.querySelector("aside")?.classList.toggle("left-side"));
-    root.querySelector<HTMLButtonElement>("[data-select-step]")?.addEventListener("click", () => this.compositionEditor?.selectStep());
-    root.querySelectorAll<HTMLButtonElement>("[data-edge]").forEach(button => button.addEventListener("click", () => this.compositionEditor?.addEdge(button.dataset.edge as "top" | "right" | "bottom" | "left")));
     root.querySelectorAll<HTMLButtonElement>("[data-add-step]").forEach(button => button.addEventListener("click", () => this.addGuideStep(button.dataset.addStep as "modal" | "anchored_card")));
     root.querySelector<HTMLButtonElement>("[data-add-current-step]")?.addEventListener("click", () => this.addGuideStep(getGuideStepPattern(this.guide!.steps[this.stepIndex])));
     root.querySelector<HTMLButtonElement>("[data-duplicate-step]")?.addEventListener("click", () => this.duplicateGuideStep());
@@ -396,6 +397,7 @@ export class EditorModeController {
     this.onCheck("[data-backdrop]", value => { this.currentBehavior().backdrop = value; });
     this.onInput("[data-backdrop-opacity]", value => { this.currentBehavior().backdropOpacity = numberValue(value, 0.45); });
     this.onCheck("[data-close-backdrop]", value => { this.currentBehavior().closeOnBackdrop = value; });
+    this.onCheck("[data-show-close-button]", value => { this.currentBehavior().showCloseButton = value; });
     this.onSelect("[data-slideout-position]", value => { this.currentBehavior().slideoutPosition = value as NonNullable<ExperienceBehavior["slideoutPosition"]>; });
     this.onSelect("[data-banner-display-mode]", value => { this.currentBehavior().bannerDisplayMode = value as NonNullable<ExperienceBehavior["bannerDisplayMode"]>; });
     this.onSelect("[data-banner-position]", value => { this.currentBehavior().bannerPosition = value as NonNullable<ExperienceBehavior["bannerPosition"]>; });
@@ -893,6 +895,12 @@ export class EditorModeController {
         if (generation !== this.previewGeneration || this.saveState === "expired" || !this.root) return;
         const host = Array.from(document.querySelectorAll<HTMLElement>("[data-movcues-experience]")).find(element => element.dataset.movcuesExperience === this.draft?.experience.id);
         host?.shadowRoot?.addEventListener("click", event => { if ((event.target as Element)?.closest?.("a")) { event.preventDefault(); event.stopImmediatePropagation(); } }, true);
+        // A production hotspot starts collapsed. Authoring needs the existing
+        // expanded card mounted before the composition editor can find its
+        // builder surface, so open it only in Design mode.
+        if (this.mode === "design" && this.draft?.experience.widgetType === "hotspot" && !host?.shadowRoot?.querySelector(".card")) {
+          host?.shadowRoot?.querySelector<HTMLButtonElement>(".hotspot")?.click();
+        }
         this.previewRendered = true; this.applyPreviewDevice(); if (this.mode === "design") this.attachContentEditor(); this.updateDiagnostics(); },
       onDismiss: () => { this.previewRendered = false; this.setText("[data-trigger-status]", "Preview closed. Start or Reset to try again."); this.updateDiagnostics(); },
       onAction: () => void 0,
@@ -991,7 +999,7 @@ export class EditorModeController {
     const globalUndo = this.root.querySelector<HTMLButtonElement>("[data-global-undo]"); const globalRedo = this.root.querySelector<HTMLButtonElement>("[data-global-redo]");
     if (globalUndo) globalUndo.disabled = !this.history.canUndo() && !this.contentEditor?.canUndo();
     if (globalRedo) globalRedo.disabled = !this.history.canRedo() && !this.contentEditor?.canRedo();
-    inspector.hidden = this.mode !== "design" || !editor || !selection; this.root.querySelector<HTMLElement>("[data-content-inspector]")!.hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
+    inspector.hidden = this.mode !== "design" || !editor || !selection || (!this.guide && selection.kind === "step"); this.root.querySelector<HTMLElement>("[data-content-inspector]")!.hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
     if (!editor || !selection) return; if (selection.kind === "step") this.syncGuideBehavior(); this.setText("[data-composition-label]", selection.label);
     this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { if (selection.kind !== "step") group.hidden = true; });
     if (selection.kind === "step") this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { group.hidden = group.hasAttribute("data-for") ? !this.isTargetedType() : group.hasAttribute("data-step-summary") ? !this.guide : group.hasAttribute("data-placement-section") ? Boolean(this.guide && getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal") : false; });
@@ -1294,6 +1302,8 @@ export class EditorModeController {
     this.root.querySelectorAll<HTMLElement>("[data-for]").forEach(group => { group.hidden = !activeGroups.has(group.dataset.for!); });
     if (this.mode !== "design") this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { group.hidden = this.mode !== "target" || group.dataset.for !== "target" || !activeGroups.has("target"); });
     const placementSection = this.root.querySelector<HTMLElement>("[data-placement-section]"); if (placementSection) placementSection.hidden = Boolean(this.guide && guidePattern === "modal");
+    const closeButtonSection = this.root.querySelector<HTMLElement>("[data-close-button-section]");
+    if (closeButtonSection) closeButtonSection.hidden = Boolean(this.guide || !widgetType || !behavior.dismissible || (this.mode !== "design" && this.mode !== "preview"));
     this.root.querySelector<HTMLElement>("[data-step-summary]")!.hidden = !this.guide;
     this.root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.classList.toggle("active", button.dataset.mode === this.mode));
     this.root.querySelectorAll<HTMLButtonElement>("[data-placement]").forEach(button => button.classList.toggle("active", button.dataset.placement === (behavior.placement ?? "auto")));
@@ -1315,6 +1325,7 @@ export class EditorModeController {
     this.setChecked("[data-backdrop]", behavior.backdrop ?? widgetType === "modal");
     this.setValue("[data-backdrop-opacity]", String(behavior.backdropOpacity ?? 0.45));
     this.setChecked("[data-close-backdrop]", behavior.closeOnBackdrop ?? false);
+    this.setChecked("[data-show-close-button]", behavior.showCloseButton !== false);
     this.setValue("[data-slideout-position]", behavior.slideoutPosition ?? "bottom-right");
     this.setValue("[data-banner-display-mode]", behavior.bannerDisplayMode ?? "overlay");
     this.setValue("[data-banner-position]", behavior.bannerPosition ?? "top");

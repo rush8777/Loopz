@@ -72,6 +72,7 @@ export type ExperienceLayer = {
 };
 export interface ExperienceBehavior {
     dismissible: boolean;
+    showCloseButton?: boolean;
     layer?: ExperienceLayer;
     zIndex?: number;
     placement?: "auto" | "top" | "right" | "bottom" | "left";

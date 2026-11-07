@@ -6565,7 +6565,7 @@ ${ISOLATION_CSS}`;
       (_a = card.querySelector("[data-primary]")) == null ? void 0 : _a.addEventListener("click", callbacks.onPrimary);
       (_b = card.querySelector("[data-secondary]")) == null ? void 0 : _b.addEventListener("click", callbacks.onSecondary);
     }
-    if (behavior.dismissible) mountRuntimeDismissControl(card, callbacks.onDismiss);
+    if (behavior.dismissible && behavior.showCloseButton !== false) mountRuntimeDismissControl(card, callbacks.onDismiss);
     root2.appendChild(card);
     if (mountedBuilder && widgetType && widgetType !== "banner") fitBuilderWidthEnvelope(card);
     if (mountedBuilder && widgetType === "anchored_card") fitAnchoredBuilderEnvelope(card);
@@ -6903,9 +6903,34 @@ ${ISOLATION_CSS}`;
       let destroyed = false;
       let lastLeft = null;
       let lastTop = null;
+      let beaconHidden = false;
+      const setBeaconHidden = (hidden) => {
+        if (beaconHidden === hidden) return;
+        beaconHidden = hidden;
+        beacon.style.visibility = hidden ? "hidden" : "";
+        beacon.style.pointerEvents = hidden ? "none" : "";
+      };
+      const closeCard = () => {
+        var _a, _b;
+        (_a = this.cardRenderer) == null ? void 0 : _a.destroy();
+        this.cardRenderer = null;
+        (_b = this.card) == null ? void 0 : _b.remove();
+        this.card = null;
+      };
       const update = () => {
-        if (destroyed || !target.isConnected) return;
+        if (destroyed) return;
+        if (!target.isConnected) {
+          setBeaconHidden(true);
+          closeCard();
+          return;
+        }
         const rect = target.getBoundingClientRect();
+        const outsideViewport = rect.width <= 0 || rect.height <= 0 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth;
+        if (outsideViewport) {
+          setBeaconHidden(true);
+          return;
+        }
+        setBeaconHidden(false);
         const left = Math.max(4, Math.min(rect.right - 7, innerWidth - 18));
         const top = Math.max(4, Math.min(rect.top - 7, innerHeight - 18));
         if (left !== lastLeft) {
@@ -6925,12 +6950,8 @@ ${ISOLATION_CSS}`;
         });
       };
       const toggle = () => {
-        var _a;
         if (this.card) {
-          this.card.remove();
-          this.card = null;
-          (_a = this.cardRenderer) == null ? void 0 : _a.destroy();
-          this.cardRenderer = null;
+          closeCard();
           return;
         }
         this.cardRenderer = new AnchoredCardRenderer();
@@ -6958,6 +6979,13 @@ ${ISOLATION_CSS}`;
         const observer = new ResizeObserver(schedule);
         observer.observe(target);
         this.cleanup.push(() => observer.disconnect());
+      }
+      if (typeof MutationObserver !== "undefined") {
+        for (let ancestor = target.parentElement; ancestor; ancestor = ancestor.parentElement) {
+          const observer = new MutationObserver(schedule);
+          observer.observe(ancestor, { childList: true });
+          this.cleanup.push(() => observer.disconnect());
+        }
       }
       update();
       return beacon;
@@ -11854,8 +11882,7 @@ ${ISOLATION_CSS}`;
         <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : this.survey ? "Preview tests the full Survey. No responses, production events or progress are recorded. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         <section class="section composition-inspector" data-composition-inspector hidden>
-          <div class="content-heading"><div><div class="eyebrow">Inspector</div><strong data-composition-label>Step</strong></div><button type="button" class="secondary-button compact" data-select-step>Step</button></div>
-          <div data-inspector="step"><label>Step label<input data-step-name type="text" maxlength="80" placeholder="Step label"></label><div class="history-row"><button type="button" class="secondary-button compact" data-edge="top">Header</button><button type="button" class="secondary-button compact" data-edge="bottom">Footer</button><button type="button" class="secondary-button compact" data-edge="left">Left area</button><button type="button" class="secondary-button compact" data-edge="right">Right area</button></div></div>
+          <div data-inspector="step"><label>Step label<input data-step-name type="text" maxlength="80" placeholder="Step label"></label></div>
           <div data-inspector="cell" hidden>
             <label>Direction<select data-cell-direction><option value="column">Column</option><option value="row">Row</option></select></label>
             <label>Size<select data-cell-size><option value="flexible">Flexible</option><option value="hug">Hug content</option><option value="fixed">Fixed</option></select></label>
@@ -11897,6 +11924,10 @@ ${ISOLATION_CSS}`;
           <div data-layer-relative hidden><strong class="truncate" data-layer-target>Not selected</strong><button class="secondary-button" type="button" data-pick-layer>Select element from page</button><label>Relationship<select data-layer-relation><option value="above">Above</option><option value="below">Below</option></select></label></div>
           <label data-layer-custom hidden>Custom z-index<input data-layer-z-index type="number" min="1" max="2147483647"></label>
         </section>
+        <section class="section" data-step-only data-close-button-section>
+          <div class="eyebrow">Behavior</div>
+          <label class="check"><input data-show-close-button type="checkbox"> Show close button</label>
+        </section>
         <section class="section" data-step-only data-placement-section>
           <div class="eyebrow">Placement</div>
           <div data-for="anchored"><div class="placement-grid">${placementButton("top", "Top")}${placementButton("left", "Left")}${placementButton("auto", "Auto")}${placementButton("right", "Right")}${placementButton("bottom", "Bottom")}</div><label>Alignment<select data-alignment><option value="start">Start</option><option value="center">Center</option><option value="end">End</option></select></label><label>Offset<div class="number"><input data-offset type="number" min="0" max="100"><span>px</span></div></label></div>
@@ -11932,7 +11963,7 @@ ${ISOLATION_CSS}`;
       return steps.map((step, index) => `<button class="step" type="button" data-step="${index}" aria-label="Open step ${index + 1}"><span>${index + 1}</span><small>${escapeText("label" in step && typeof step.label === "string" && step.label.trim() ? step.label : "content" in step && step.content.heading.trim() ? step.content.heading : `Step ${index + 1}`)}</small><i data-step-icon>○</i></button>`).join("");
     }
     bindPanel() {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E;
       const root2 = this.root;
       root2.querySelectorAll("[data-inspector-tab]").forEach((button) => button.addEventListener("click", () => this.setInspectorTab(button.dataset.inspectorTab)));
       (_a = root2.querySelector("[data-ai-form]")) == null ? void 0 : _a.addEventListener("submit", (event) => {
@@ -11984,27 +12015,19 @@ ${ISOLATION_CSS}`;
         var _a2;
         return (_a2 = root2.querySelector("aside")) == null ? void 0 : _a2.classList.toggle("left-side");
       });
-      (_t = root2.querySelector("[data-select-step]")) == null ? void 0 : _t.addEventListener("click", () => {
-        var _a2;
-        return (_a2 = this.compositionEditor) == null ? void 0 : _a2.selectStep();
-      });
-      root2.querySelectorAll("[data-edge]").forEach((button) => button.addEventListener("click", () => {
-        var _a2;
-        return (_a2 = this.compositionEditor) == null ? void 0 : _a2.addEdge(button.dataset.edge);
-      }));
       root2.querySelectorAll("[data-add-step]").forEach((button) => button.addEventListener("click", () => this.addGuideStep(button.dataset.addStep)));
-      (_u = root2.querySelector("[data-add-current-step]")) == null ? void 0 : _u.addEventListener("click", () => this.addGuideStep(getGuideStepPattern(this.guide.steps[this.stepIndex])));
-      (_v = root2.querySelector("[data-duplicate-step]")) == null ? void 0 : _v.addEventListener("click", () => this.duplicateGuideStep());
-      (_w = root2.querySelector("[data-delete-step]")) == null ? void 0 : _w.addEventListener("click", () => this.deleteGuideStep());
-      (_x = root2.querySelector("[data-step-left]")) == null ? void 0 : _x.addEventListener("click", () => this.moveGuideStep(-1));
-      (_y = root2.querySelector("[data-step-right]")) == null ? void 0 : _y.addEventListener("click", () => this.moveGuideStep(1));
-      (_z = root2.querySelector("[data-step-name]")) == null ? void 0 : _z.addEventListener("change", (event) => {
+      (_t = root2.querySelector("[data-add-current-step]")) == null ? void 0 : _t.addEventListener("click", () => this.addGuideStep(getGuideStepPattern(this.guide.steps[this.stepIndex])));
+      (_u = root2.querySelector("[data-duplicate-step]")) == null ? void 0 : _u.addEventListener("click", () => this.duplicateGuideStep());
+      (_v = root2.querySelector("[data-delete-step]")) == null ? void 0 : _v.addEventListener("click", () => this.deleteGuideStep());
+      (_w = root2.querySelector("[data-step-left]")) == null ? void 0 : _w.addEventListener("click", () => this.moveGuideStep(-1));
+      (_x = root2.querySelector("[data-step-right]")) == null ? void 0 : _x.addEventListener("click", () => this.moveGuideStep(1));
+      (_y = root2.querySelector("[data-step-name]")) == null ? void 0 : _y.addEventListener("change", (event) => {
         if (!this.guide) return;
         this.guide.steps[this.stepIndex].label = event.currentTarget.value.trim().slice(0, 80) || void 0;
         this.changed();
         this.refreshStepBar();
       });
-      (_A = root2.querySelector("[data-edit-component]")) == null ? void 0 : _A.addEventListener("click", () => {
+      (_z = root2.querySelector("[data-edit-component]")) == null ? void 0 : _z.addEventListener("click", () => {
         var _a2, _b2;
         (_a2 = this.compositionEditor) == null ? void 0 : _a2.editSelected();
         (_b2 = this.contentEditor) == null ? void 0 : _b2.editSelected();
@@ -12021,14 +12044,14 @@ ${ISOLATION_CSS}`;
         (_b2 = this.contentEditor) == null ? void 0 : _b2.toggleList(button.dataset.list);
         this.syncContentInspector();
       }));
-      (_B = root2.querySelector("[data-text-align]")) == null ? void 0 : _B.addEventListener("change", (event) => {
+      (_A = root2.querySelector("[data-text-align]")) == null ? void 0 : _A.addEventListener("change", (event) => {
         var _a2, _b2;
         const value = event.currentTarget.value;
         (_a2 = this.compositionEditor) == null ? void 0 : _a2.setAlignment(value);
         (_b2 = this.contentEditor) == null ? void 0 : _b2.setAlignment(value);
         this.syncContentInspector();
       });
-      (_C = root2.querySelector("[data-apply-link]")) == null ? void 0 : _C.addEventListener("click", () => {
+      (_B = root2.querySelector("[data-apply-link]")) == null ? void 0 : _B.addEventListener("click", () => {
         var _a2, _b2;
         const input2 = root2.querySelector("[data-link-url]");
         const applied = input2 ? ((_a2 = this.compositionEditor) == null ? void 0 : _a2.applyLink(input2.value)) ?? ((_b2 = this.contentEditor) == null ? void 0 : _b2.applyLink(input2.value)) : false;
@@ -12038,7 +12061,7 @@ ${ISOLATION_CSS}`;
         } else input2 == null ? void 0 : input2.setCustomValidity("");
         this.syncContentInspector();
       });
-      (_D = root2.querySelector("[data-apply-image]")) == null ? void 0 : _D.addEventListener("click", () => {
+      (_C = root2.querySelector("[data-apply-image]")) == null ? void 0 : _C.addEventListener("click", () => {
         var _a2;
         const source = root2.querySelector("[data-image-src]");
         const alt = root2.querySelector("[data-image-alt]");
@@ -12046,12 +12069,12 @@ ${ISOLATION_CSS}`;
         else source == null ? void 0 : source.setCustomValidity("");
         this.syncContentInspector();
       });
-      (_E = root2.querySelector("[data-undo]")) == null ? void 0 : _E.addEventListener("click", () => {
+      (_D = root2.querySelector("[data-undo]")) == null ? void 0 : _D.addEventListener("click", () => {
         var _a2;
         (_a2 = this.contentEditor) == null ? void 0 : _a2.undo();
         this.syncContentInspector();
       });
-      (_F = root2.querySelector("[data-redo]")) == null ? void 0 : _F.addEventListener("click", () => {
+      (_E = root2.querySelector("[data-redo]")) == null ? void 0 : _E.addEventListener("click", () => {
         var _a2;
         (_a2 = this.contentEditor) == null ? void 0 : _a2.redo();
         this.syncContentInspector();
@@ -12135,6 +12158,9 @@ ${ISOLATION_CSS}`;
       });
       this.onCheck("[data-close-backdrop]", (value) => {
         this.currentBehavior().closeOnBackdrop = value;
+      });
+      this.onCheck("[data-show-close-button]", (value) => {
+        this.currentBehavior().showCloseButton = value;
       });
       this.onSelect("[data-slideout-position]", (value) => {
         this.currentBehavior().slideoutPosition = value;
@@ -13211,19 +13237,22 @@ ${ISOLATION_CSS}`;
         definition: rendered
       }, {
         onVisible: () => {
-          var _a2;
+          var _a2, _b2, _c2, _d2, _e2;
           if (generation !== this.previewGeneration || this.saveState === "expired" || !this.root) return;
           const host = Array.from(document.querySelectorAll("[data-movcues-experience]")).find((element) => {
             var _a3;
             return element.dataset.movcuesExperience === ((_a3 = this.draft) == null ? void 0 : _a3.experience.id);
           });
           (_a2 = host == null ? void 0 : host.shadowRoot) == null ? void 0 : _a2.addEventListener("click", (event) => {
-            var _a3, _b2;
-            if ((_b2 = (_a3 = event.target) == null ? void 0 : _a3.closest) == null ? void 0 : _b2.call(_a3, "a")) {
+            var _a3, _b3;
+            if ((_b3 = (_a3 = event.target) == null ? void 0 : _a3.closest) == null ? void 0 : _b3.call(_a3, "a")) {
               event.preventDefault();
               event.stopImmediatePropagation();
             }
           }, true);
+          if (this.mode === "design" && ((_b2 = this.draft) == null ? void 0 : _b2.experience.widgetType) === "hotspot" && !((_c2 = host == null ? void 0 : host.shadowRoot) == null ? void 0 : _c2.querySelector(".card"))) {
+            (_e2 = (_d2 = host == null ? void 0 : host.shadowRoot) == null ? void 0 : _d2.querySelector(".hotspot")) == null ? void 0 : _e2.click();
+          }
           this.previewRendered = true;
           this.applyPreviewDevice();
           if (this.mode === "design") this.attachContentEditor();
@@ -13418,7 +13447,7 @@ ${ISOLATION_CSS}`;
       const globalRedo = this.root.querySelector("[data-global-redo]");
       if (globalUndo) globalUndo.disabled = !this.history.canUndo() && !((_c = this.contentEditor) == null ? void 0 : _c.canUndo());
       if (globalRedo) globalRedo.disabled = !this.history.canRedo() && !((_d = this.contentEditor) == null ? void 0 : _d.canRedo());
-      inspector.hidden = this.mode !== "design" || !editor || !selection;
+      inspector.hidden = this.mode !== "design" || !editor || !selection || !this.guide && selection.kind === "step";
       this.root.querySelector("[data-content-inspector]").hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
       if (!editor || !selection) return;
       if (selection.kind === "step") this.syncGuideBehavior();
@@ -14164,6 +14193,8 @@ ${ISOLATION_CSS}`;
       });
       const placementSection = this.root.querySelector("[data-placement-section]");
       if (placementSection) placementSection.hidden = Boolean(this.guide && guidePattern === "modal");
+      const closeButtonSection = this.root.querySelector("[data-close-button-section]");
+      if (closeButtonSection) closeButtonSection.hidden = Boolean(this.guide || !widgetType || !behavior.dismissible || this.mode !== "design" && this.mode !== "preview");
       this.root.querySelector("[data-step-summary]").hidden = !this.guide;
       this.root.querySelectorAll("[data-mode]").forEach((button) => button.classList.toggle("active", button.dataset.mode === this.mode));
       this.root.querySelectorAll("[data-placement]").forEach((button) => button.classList.toggle("active", button.dataset.placement === (behavior.placement ?? "auto")));
@@ -14188,6 +14219,7 @@ ${ISOLATION_CSS}`;
       this.setChecked("[data-backdrop]", behavior.backdrop ?? widgetType === "modal");
       this.setValue("[data-backdrop-opacity]", String(behavior.backdropOpacity ?? 0.45));
       this.setChecked("[data-close-backdrop]", behavior.closeOnBackdrop ?? false);
+      this.setChecked("[data-show-close-button]", behavior.showCloseButton !== false);
       this.setValue("[data-slideout-position]", behavior.slideoutPosition ?? "bottom-right");
       this.setValue("[data-banner-display-mode]", behavior.bannerDisplayMode ?? "overlay");
       this.setValue("[data-banner-position]", behavior.bannerPosition ?? "top");

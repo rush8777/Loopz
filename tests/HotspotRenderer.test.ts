@@ -61,15 +61,45 @@ describe("HotspotRenderer performance", () => {
     expect(targetRect).toHaveBeenCalledTimes(1);
     renderer.destroy();
   });
+
+  it("hides an offscreen beacon, restores the same beacon, and removes an expanded card when its target disconnects", () => {
+    let bounds = rect(100, 120, 50, 20);
+    const { renderer, beacon, root, target } = render(() => bounds);
+    expect(beacon.style.visibility).toBe("");
+
+    bounds = rect(100, -40, 50, 20);
+    window.dispatchEvent(new Event("scroll")); flushFrames();
+    expect(beacon.style.visibility).toBe("hidden");
+    expect(beacon.style.pointerEvents).toBe("none");
+
+    bounds = rect(100, 120, 50, 20);
+    window.dispatchEvent(new Event("scroll")); flushFrames();
+    expect(beacon.style.visibility).toBe("");
+    expect(beacon.style.pointerEvents).toBe("");
+    expect(root.querySelectorAll(".hotspot")).toHaveLength(1);
+
+    beacon.click();
+    expect(root.querySelector(".card")).not.toBeNull();
+    target.remove();
+    window.dispatchEvent(new Event("scroll")); flushFrames();
+    expect(beacon.style.visibility).toBe("hidden");
+    expect(root.querySelector(".card")).toBeNull();
+
+    document.body.append(target);
+    window.dispatchEvent(new Event("scroll")); flushFrames();
+    expect(beacon.style.visibility).toBe("");
+    expect(root.querySelectorAll(".hotspot")).toHaveLength(1);
+    renderer.destroy();
+  });
 });
 
-function render(targetBounds: () => DOMRect): { renderer: HotspotRenderer; beacon: HTMLElement } {
+function render(targetBounds: () => DOMRect): { renderer: HotspotRenderer; beacon: HTMLElement; root: ShadowRoot; target: HTMLElement } {
   const host = document.createElement("div"); const root = host.attachShadow({ mode: "open" });
   const target = document.createElement("button"); target.getBoundingClientRect = targetBounds;
   document.body.append(target, host);
   const renderer = new HotspotRenderer();
   const beacon = renderer.render(root, target, content, design, behavior, { onDismiss: vi.fn(), onPrimary: vi.fn(), onSecondary: vi.fn() });
-  return { renderer, beacon };
+  return { renderer, beacon, root, target };
 }
 
 function flushFrames(): void {

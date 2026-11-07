@@ -427,7 +427,7 @@ ${ISOLATION_CSS}`;
       (_a = card.querySelector("[data-primary]")) == null ? void 0 : _a.addEventListener("click", callbacks.onPrimary);
       (_b = card.querySelector("[data-secondary]")) == null ? void 0 : _b.addEventListener("click", callbacks.onSecondary);
     }
-    if (behavior.dismissible) mountRuntimeDismissControl(card, callbacks.onDismiss);
+    if (behavior.dismissible && behavior.showCloseButton !== false) mountRuntimeDismissControl(card, callbacks.onDismiss);
     root.appendChild(card);
     if (mountedBuilder && widgetType && widgetType !== "banner") fitBuilderWidthEnvelope(card);
     if (mountedBuilder && widgetType === "anchored_card") fitAnchoredBuilderEnvelope(card);
@@ -765,9 +765,34 @@ ${ISOLATION_CSS}`;
       let destroyed = false;
       let lastLeft = null;
       let lastTop = null;
+      let beaconHidden = false;
+      const setBeaconHidden = (hidden) => {
+        if (beaconHidden === hidden) return;
+        beaconHidden = hidden;
+        beacon.style.visibility = hidden ? "hidden" : "";
+        beacon.style.pointerEvents = hidden ? "none" : "";
+      };
+      const closeCard = () => {
+        var _a, _b;
+        (_a = this.cardRenderer) == null ? void 0 : _a.destroy();
+        this.cardRenderer = null;
+        (_b = this.card) == null ? void 0 : _b.remove();
+        this.card = null;
+      };
       const update = () => {
-        if (destroyed || !target.isConnected) return;
+        if (destroyed) return;
+        if (!target.isConnected) {
+          setBeaconHidden(true);
+          closeCard();
+          return;
+        }
         const rect = target.getBoundingClientRect();
+        const outsideViewport = rect.width <= 0 || rect.height <= 0 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth;
+        if (outsideViewport) {
+          setBeaconHidden(true);
+          return;
+        }
+        setBeaconHidden(false);
         const left = Math.max(4, Math.min(rect.right - 7, innerWidth - 18));
         const top = Math.max(4, Math.min(rect.top - 7, innerHeight - 18));
         if (left !== lastLeft) {
@@ -787,12 +812,8 @@ ${ISOLATION_CSS}`;
         });
       };
       const toggle = () => {
-        var _a;
         if (this.card) {
-          this.card.remove();
-          this.card = null;
-          (_a = this.cardRenderer) == null ? void 0 : _a.destroy();
-          this.cardRenderer = null;
+          closeCard();
           return;
         }
         this.cardRenderer = new AnchoredCardRenderer();
@@ -820,6 +841,13 @@ ${ISOLATION_CSS}`;
         const observer = new ResizeObserver(schedule);
         observer.observe(target);
         this.cleanup.push(() => observer.disconnect());
+      }
+      if (typeof MutationObserver !== "undefined") {
+        for (let ancestor = target.parentElement; ancestor; ancestor = ancestor.parentElement) {
+          const observer = new MutationObserver(schedule);
+          observer.observe(ancestor, { childList: true });
+          this.cleanup.push(() => observer.disconnect());
+        }
       }
       update();
       return beacon;

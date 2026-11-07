@@ -248,6 +248,37 @@ describe("live placement editor", () => {
     expect(JSON.parse(String(save[1]?.body))).toMatchObject({ revision: 1, definition: { content: { heading: "Edited in context" }, builder: { html: expect.stringContaining("Edited in context") } } });
   });
 
+  it("does not render legacy step inspector controls in the live widget panel", async () => {
+    vi.stubGlobal("fetch", editorFetch(onsiteDraft())); controller = new EditorModeController("https://api.example.com");
+    expect(await controller.start("token")).toBe(true);
+
+    expect(editorRoot().querySelector("[data-composition-label]")).toBeNull();
+    expect(editorRoot().querySelector("[data-select-step]")).toBeNull();
+    expect(editorRoot().querySelector("[data-edge]")).toBeNull();
+    expect(editorRoot().querySelector<HTMLElement>("[data-composition-inspector]")?.hidden).toBe(true);
+  });
+
+  it("opens an on-site hotspot card only for Design mode and keeps Preview visitor-like", async () => {
+    const target = document.createElement("button"); target.id = "hotspot-target"; document.body.appendChild(target);
+    target.getBoundingClientRect = () => ({ x: 100, y: 120, left: 100, top: 120, width: 80, height: 32, right: 180, bottom: 152, toJSON: () => ({}) }) as DOMRect;
+    const draft = onsiteDraft(); draft.experience.widgetType = "hotspot";
+    const definition = draft.version.definition as RuntimeWidgetDefinition;
+    definition.target = { primarySelector: "#hotspot-target", fallbackSelectors: [], reliability: "reliable" };
+    definition.behavior = { dismissible: true, placement: "auto", alignment: "center", offset: 8, hotspotStyle: "pulse", hotspotColor: "#2563eb" };
+    vi.stubGlobal("fetch", editorFetch(draft)); controller = new EditorModeController("https://api.example.com");
+    expect(await controller.start("token")).toBe(true);
+
+    let root = document.querySelector<HTMLElement>("[data-movcues-experience]")!.shadowRoot!;
+    expect(root.querySelector(".hotspot")).not.toBeNull();
+    expect(root.querySelector(".card [data-movcues-builder-surface]")).not.toBeNull();
+    editorRoot().querySelector<HTMLButtonElement>('[data-mode="preview"]')!.click();
+    root = document.querySelector<HTMLElement>("[data-movcues-experience]")!.shadowRoot!;
+    const beacon = root.querySelector<HTMLButtonElement>(".hotspot")!;
+    expect(root.querySelector(".card")).toBeNull();
+    beacon.click(); expect(root.querySelector(".card [data-movcues-builder-surface]")).not.toBeNull();
+    beacon.click(); expect(root.querySelector(".card")).toBeNull();
+  });
+
   it("applies button horizontal padding from the live inspector while the value changes", async () => {
     vi.stubGlobal("fetch", editorFetch(onsiteDraft()));
     controller = new EditorModeController("https://api.example.com");
@@ -422,6 +453,26 @@ describe("live placement editor", () => {
     editorRoot().querySelector<HTMLButtonElement>("[data-reset-preview]")!.click(); expect(document.querySelector("[data-movcues-experience]")).not.toBeNull();
   });
 
+  it("persists the close-button behavior toggle and updates the Preview runtime immediately", async () => {
+    const fetchMock = editorFetch(onsiteDraft()); vi.stubGlobal("fetch", fetchMock);
+    controller = new EditorModeController("https://api.example.com"); await controller.start("token");
+    const toggle = editorRoot().querySelector<HTMLInputElement>("[data-show-close-button]")!;
+    expect(toggle.checked).toBe(true);
+
+    editorRoot().querySelector<HTMLButtonElement>('[data-mode="preview"]')!.click();
+    expect(editorRoot().querySelector<HTMLElement>("[data-close-button-section]")?.hidden).toBe(false);
+    expect(document.querySelector("[data-movcues-experience]")!.shadowRoot?.querySelector(".movcues-runtime-chrome")).not.toBeNull();
+
+    toggle.checked = false; toggle.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(document.querySelector("[data-movcues-experience]")!.shadowRoot?.querySelector(".movcues-runtime-chrome")).toBeNull());
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH" && JSON.parse(String(init.body)).definition.behavior.showCloseButton === false)).toBe(true));
+    const saved = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
+    expect(JSON.parse(String(saved[1]?.body)).definition.builder.html).not.toContain("movcues-runtime-chrome");
+
+    toggle.checked = true; toggle.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(document.querySelector("[data-movcues-experience]")!.shadowRoot?.querySelector(".movcues-runtime-chrome")).not.toBeNull());
+  });
+
   it("flushes each Guide step and mode while a previous PATCH is delayed", async () => {
     const draft = guideDraft(); draft.experience.builderMode = "onsite";
     if (!("steps" in draft.version.definition)) throw new Error("Guide expected");
@@ -464,7 +515,8 @@ describe("live placement editor", () => {
     const fetchMock = editorFetch(onsiteDraft()); vi.stubGlobal("fetch", fetchMock); controller = new EditorModeController("https://api.example.com"); await controller.start("token");
     const surface = document.querySelector("[data-movcues-experience]")!.shadowRoot!; surface.querySelector<HTMLElement>("h2")!.click();
     surface.querySelector<HTMLButtonElement>('[data-command="columns"]')!.click(); surface.querySelector<HTMLButtonElement>('[data-command="add"]')!.click(); surface.querySelector<HTMLButtonElement>('[data-insert-block="image"]')!.click();
-    editorRoot().querySelector<HTMLButtonElement>("[data-select-step]")!.click(); editorRoot().querySelector<HTMLButtonElement>('[data-edge="bottom"]')!.click();
+    const composer = (controller as unknown as { compositionEditor: { selectStep(): void; addEdge(edge: "top" | "right" | "bottom" | "left"): void } }).compositionEditor;
+    composer.selectStep(); composer.addEdge("bottom");
     await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true)); const calls = fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH"); const saved = JSON.parse(String(calls.at(-1)![1]?.body));
     const sourceDocument = saved.definition.builder.projectData.movcues.onsiteDocument; expect(sourceDocument.schemaVersion).toBe(2); expect(sourceDocument.root.children.at(-1).block).toBeUndefined(); const nested = JSON.stringify(sourceDocument); expect(nested).toContain('"direction":"row"'); expect(nested).toContain('"type":"image"');
   });

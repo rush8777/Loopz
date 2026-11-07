@@ -67,7 +67,7 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
     card.querySelector("[data-primary]")?.addEventListener("click", callbacks.onPrimary);
     card.querySelector("[data-secondary]")?.addEventListener("click", callbacks.onSecondary);
   }
-  if (behavior.dismissible) mountRuntimeDismissControl(card, callbacks.onDismiss);
+  if (behavior.dismissible && behavior.showCloseButton !== false) mountRuntimeDismissControl(card, callbacks.onDismiss);
   root.appendChild(card);
   if (mountedBuilder && widgetType && widgetType !== "banner") fitBuilderWidthEnvelope(card);
   if (mountedBuilder && widgetType === "anchored_card") fitAnchoredBuilderEnvelope(card);

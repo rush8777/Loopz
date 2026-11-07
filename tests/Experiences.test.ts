@@ -137,6 +137,29 @@ describe("experience editor and runtime", () => {
     renderer.destroy();
   });
 
+  it("honors the optional runtime close button across widget renderers", () => {
+    const target = document.createElement("button"); target.id = "close-control-target"; document.body.appendChild(target);
+    const callbacks = { onVisible: vi.fn(), onDismiss: vi.fn(), onAction: vi.fn(), onComplete: vi.fn() };
+    for (const type of ["modal", "slideout", "toast", "banner", "anchored_card", "hotspot", "cursor_follow"] as const) {
+      const experience = withBuilder(base(type), `Close control ${type}`);
+      if (isGuide(experience)) throw new Error("Expected a widget experience");
+      experience.definition.behavior.showCloseButton = false;
+      if (type === "anchored_card" || type === "hotspot") experience.definition.target = { primarySelector: "#close-control-target", fallbackSelectors: [], reliability: "reliable" };
+      const renderer = new ExperienceRenderer();
+      expect(renderer.render(experience, callbacks)).toBe(true);
+      const root = document.querySelector("[data-movcues-experience]")!.shadowRoot!;
+      if (type === "hotspot") root.querySelector<HTMLButtonElement>(".hotspot")!.click();
+      expect(root.querySelector(".movcues-runtime-chrome")).toBeNull();
+      renderer.destroy();
+    }
+
+    const legacy = base("modal");
+    const renderer = new ExperienceRenderer();
+    renderer.render(legacy, callbacks);
+    expect(document.querySelector("[data-movcues-experience]")!.shadowRoot?.querySelector(".movcues-runtime-chrome")).not.toBeNull();
+    renderer.destroy();
+  });
+
   it("mounts canonical builder selectors without runtime visual overrides", () => {
     const host = document.createElement("div"); const root = host.attachShadow({ mode: "open" }); const card = document.createElement("div"); root.appendChild(card); const css = ".movcues-widget{background:#0d132d}.movcues-widget .movcues-widget__heading{color:#fff;font-size:32px}";
     expect(mountBuilderContent(root, card, { version: 1, projectData: {}, html: '<section class="movcues-widget"><h2 class="movcues-widget__heading">Hello<br>again</h2></section>', css }, { onPrimary: vi.fn(), onSecondary: vi.fn(), onDismiss: vi.fn() })).toBe(true); const installed = root.querySelector<HTMLStyleElement>("style[data-movcues-builder-style]")!.textContent; expect(installed).toContain(css); expect(installed).not.toContain("width:100%!important"); expect(installed).toContain("overflow:visible"); expect(installed).not.toContain("contain:layout style paint"); expect(root.querySelector<HTMLElement>(".builder-content")?.style.overflow).not.toBe("hidden"); expect(root.querySelector(".movcues-widget__heading")?.innerHTML).toBe("Hello<br>again");
