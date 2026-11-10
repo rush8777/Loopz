@@ -4,6 +4,7 @@ import { mapToBackendEvent, mapToBackendReplayEvent, groupBySessionId } from "./
 export interface TransportResult {
   ok: boolean;
   retryable: boolean;
+  acknowledgedEventIds?: string[];
 }
 
 /**
@@ -23,15 +24,9 @@ export interface TransportResult {
  * (see SessionReplayEventPayload) and belong on a different endpoint.
  * Both are split and grouped here before anything goes over the wire.
  *
- * Known limitation: Batcher retries a failed flush by requeuing the
- * *entire* original batch (see Batcher.flush). If this batch fanned out
- * into multiple destination requests and only some of them failed, a
- * retry will resend the ones that already succeeded. This is an
- * at-least-once delivery tradeoff, same class of risk every fire-and-
- * forget analytics pipeline accepts - true exactly-once would need
- * per-destination retry bookkeeping in the queue itself, which is a
- * larger change than this pass makes. The backend is the right place to
- * dedupe if this ever matters in practice (e.g. an idempotency key).
+ * Successful destinations are acknowledged separately when a batch has partial
+ * failures. Batcher retries only unacknowledged events, so an unrelated failed
+ * destination cannot suppress a committed identity refresh or replay its trigger.
  */
 export class Transport {
   constructor(
@@ -75,18 +70,23 @@ export class Transport {
 
     const { standardGroups, replayGroups } = partition(events);
     const results: TransportResult[] = [];
+    const acknowledgedEventIds: string[] = [];
 
     for (const [sessionId, group] of standardGroups) {
-      results.push(await this.postJson(this.eventsUrl(), { sessionId, events: group }));
+      const result = await this.postJson(this.eventsUrl(), { sessionId, events: group });
+      results.push(result);
+      if (result.ok) acknowledgedEventIds.push(...events.filter(event => event.sessionId === sessionId && event.type !== "session_replay_event").map(event => event.eventId));
     }
     for (const [sessionId, group] of replayGroups) {
-      results.push(await this.postJson(this.replayUrl(), { sessionId, events: group }));
+      const result = await this.postJson(this.replayUrl(), { sessionId, events: group });
+      results.push(result);
+      if (result.ok) acknowledgedEventIds.push(...events.filter(event => event.sessionId === sessionId && event.type === "session_replay_event").map(event => event.eventId));
     }
 
     if (results.length === 0) return { ok: true, retryable: false }; // everything in this batch was of a type this backend doesn't accept
     const ok = results.every((r) => r.ok);
     const retryable = !ok && results.some((r) => r.retryable);
-    return { ok, retryable };
+    return { ok, retryable, ...(!ok && acknowledgedEventIds.length ? { acknowledgedEventIds } : {}) };
   }
 
   private async postJson(url: string, body: unknown): Promise<TransportResult> {

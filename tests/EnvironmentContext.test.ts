@@ -92,4 +92,9 @@ describe("captureEnvironmentSnapshot", () => {
     expect(snapshot.screenWidth).toBe(1920);
     expect(snapshot.screenHeight).toBe(1080);
   });
+  it("omits an unavailable Linux OS version instead of invalidating the initial ingestion batch",()=>{
+    vi.spyOn(navigator,"userAgent","get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36");
+    const snapshot=captureEnvironmentSnapshot();expect(snapshot.osName).toBe("Linux");expect(snapshot.osVersion).toBeUndefined();
+  });
+
 });

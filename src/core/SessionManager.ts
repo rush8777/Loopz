@@ -96,6 +96,8 @@ export class SessionManager {
 
   /** Allow identify() to bind a known user id to the anonymous id (kept locally only). */
   identify(userId: string): void {
+    const previous = this.getIdentifiedUserId();
+    if (previous && previous !== userId) this.reset();
     localStore.set(ANON_ID_KEY, this.anonymousId); // anonymousId persists regardless
     sessionStore.set("__aa_identified_user__", userId);
   }

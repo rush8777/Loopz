@@ -1,3 +1,4 @@
+import { ExperienceStateStore } from "../src/experiences/runtime/ExperienceStateStore";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorModeController } from "../src/experiences/editor/EditorModeController";
 import { ElementPicker } from "../src/experiences/editor/ElementPicker";
@@ -248,7 +249,7 @@ describe("experience editor and runtime", () => {
       { id: "two", content: { heading: "Second page", body: "Two" }, target: { primarySelector: "#cross-page-next", fallbackSelectors: [], reliability: "reliable", targetContext: { pagePath: "/second" } }, behavior: { dismissible: true } },
     ] } };
     const fetchMock = experienceFetch(() => [guide]); vi.stubGlobal("fetch", fetchMock); const loader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await loader.evaluate(); expect(activeExperienceText()).toContain("First page");
-    first.click(); await Promise.resolve(); expect(document.querySelector("[data-movcues-experience]")).toBeNull(); expect(JSON.parse(sessionStorage.getItem("__movcues_active_guide__")!)).toMatchObject({ currentStepId: "two", status: "active" });
+    first.click(); await Promise.resolve(); expect(document.querySelector("[data-movcues-experience]")).toBeNull(); expect(readGuide()!).toMatchObject({ currentStepId: "two", status: "active" });
     history.pushState({}, "", "/second"); loader.onRouteChange(); expect(activeExperienceText()).toContain("Second page"); loader.destroy();
   });
 
@@ -262,11 +263,11 @@ describe("experience editor and runtime", () => {
     ] } };
     const fetchMock = experienceFetch((_trigger, url) => location.pathname === "/one" || (url.searchParams.get("activeGuideId") === guide.id && url.searchParams.get("activeGuideVersionId") === guide.versionId) ? [guide] : []); vi.stubGlobal("fetch", fetchMock);
 
-    const firstLoader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await firstLoader.evaluate(); await vi.waitFor(() => expect(JSON.parse(sessionStorage.getItem("__movcues_active_guide__")!).impressionId).toBe(`imp_${guide.id}`)); first.click(); await Promise.resolve(); firstLoader.destroy();
+    const firstLoader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await firstLoader.evaluate(); await vi.waitFor(() => expect(readGuide()!.impressionId).toBe(`imp_${guide.id}`)); first.click(); await Promise.resolve(); firstLoader.destroy();
     history.pushState({}, "", "/two"); const secondLoader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await secondLoader.evaluate(); expect(activeExperienceText()).toContain("Reload two"); secondLoader.destroy();
     history.pushState({}, "", "/three"); const thirdLoader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await thirdLoader.evaluate(); expect(activeExperienceText()).toContain("Reload three"); document.querySelector("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLButtonElement>(".primary")!.click(); await vi.waitFor(() => expect(postedEvents(fetchMock).some(event => event.experienceId === guide.id && event.event === "completed")).toBe(true));
 
-    const guideRequests = fetchMock.mock.calls.filter(([input, init]) => !init?.method && String(input).includes("/experiences?")); expect(guideRequests.slice(1, 3).every(([input]) => { const url = new URL(String(input)); return url.searchParams.get("activeGuideId") === guide.id && url.searchParams.get("activeGuideVersionId") === guide.versionId; })).toBe(true); expect(postedEvents(fetchMock).filter(event => event.experienceId === guide.id && event.event === "shown")).toHaveLength(1); expect(sessionStorage.getItem("__movcues_active_guide__")).toBeNull(); thirdLoader.destroy();
+    const guideRequests = fetchMock.mock.calls.filter(([input, init]) => !init?.method && String(input).includes("/experiences?")); expect(guideRequests.slice(1, 3).every(([input]) => { const url = new URL(String(input)); return url.searchParams.get("activeGuideId") === guide.id && url.searchParams.get("activeGuideVersionId") === guide.versionId; })).toBe(true); expect(postedEvents(fetchMock).filter(event => event.experienceId === guide.id && event.event === "shown")).toHaveLength(1); expect(readGuide()).toBeNull(); thirdLoader.destroy();
   });
 
   it("keeps the current Guide step across an SPA route change and records one impression", async () => {
@@ -275,7 +276,7 @@ describe("experience editor and runtime", () => {
       { id: "route", content: { heading: "Route step", body: "One" }, advance: { type: "route", pageRules: [{ id: "next", kind: "include", operator: "equals", value: "/next" }] }, target: { primarySelector: "#route-first", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
       { id: "after", content: { heading: "After route", body: "Two" }, target: { primarySelector: "#route-second", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
     ] } };
-    const fetchMock = experienceFetch(() => [guide]); vi.stubGlobal("fetch", fetchMock); const loader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await loader.evaluate(); history.pushState({}, "", "/next"); loader.onRouteChange(); expect(activeExperienceText()).toContain("After route"); await Promise.resolve(); const shown = postedEvents(fetchMock).filter(event => event.experienceId === guide.id && event.event === "shown"); expect(shown).toHaveLength(1); expect(JSON.parse(sessionStorage.getItem("__movcues_active_guide__")!)).toMatchObject({ currentStepId: "after", status: "active" }); loader.destroy();
+    const fetchMock = experienceFetch(() => [guide]); vi.stubGlobal("fetch", fetchMock); const loader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await loader.evaluate(); history.pushState({}, "", "/next"); loader.onRouteChange(); expect(activeExperienceText()).toContain("After route"); await Promise.resolve(); const shown = postedEvents(fetchMock).filter(event => event.experienceId === guide.id && event.event === "shown"); expect(shown).toHaveLength(1); expect(readGuide()!).toMatchObject({ currentStepId: "after", status: "active" }); loader.destroy();
   });
 
   it("pauses a Guide for a higher-priority interrupt and resumes the same step without another impression", async () => {
@@ -285,7 +286,7 @@ describe("experience editor and runtime", () => {
       { id: "two", content: { heading: "Guide two", body: "Two" }, target: { primarySelector: "#interrupt-second", fallbackSelectors: [], reliability: "reliable" }, behavior: { dismissible: true } },
     ] } };
     const modal = base("modal"); modal.id = "modal_interrupt"; modal.priority = 80; modal.interruptPolicy = "interrupt";
-    const fetchMock = experienceFetch(trigger => trigger === "open_modal" ? [modal] : [guide]); vi.stubGlobal("fetch", fetchMock); const loader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await loader.evaluate(); document.querySelector("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLButtonElement>(".primary")!.click(); expect(activeExperienceText()).toContain("Guide two"); loader.onCustomEvent("open_modal"); await vi.waitFor(() => expect(activeExperienceText()).toContain("Hello")); expect(JSON.parse(sessionStorage.getItem("__movcues_active_guide__")!)).toMatchObject({ currentStepId: "two", status: "paused" }); document.querySelector("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLElement>(".movcues-runtime-chrome")!.shadowRoot!.querySelector<HTMLButtonElement>("[data-dismiss]")!.click(); await vi.waitFor(() => expect(activeExperienceText()).toContain("Guide two")); const guideShown = postedEvents(fetchMock).filter(event => event.experienceId === guide.id && event.event === "shown"); expect(guideShown).toHaveLength(1); loader.destroy();
+    const fetchMock = experienceFetch(trigger => trigger === "open_modal" ? [modal] : [guide]); vi.stubGlobal("fetch", fetchMock); const loader = new ExperienceLoader("https://api.example.com", "site_1", runtimeSession); await loader.evaluate(); document.querySelector("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLButtonElement>(".primary")!.click(); expect(activeExperienceText()).toContain("Guide two"); loader.onCustomEvent("open_modal"); await vi.waitFor(() => expect(activeExperienceText()).toContain("Hello")); expect(readGuide()!).toMatchObject({ currentStepId: "two", status: "paused" }); document.querySelector("[data-movcues-experience]")!.shadowRoot!.querySelector<HTMLElement>(".movcues-runtime-chrome")!.shadowRoot!.querySelector<HTMLButtonElement>("[data-dismiss]")!.click(); await vi.waitFor(() => expect(activeExperienceText()).toContain("Guide two")); const guideShown = postedEvents(fetchMock).filter(event => event.experienceId === guide.id && event.event === "shown"); expect(guideShown).toHaveLength(1); loader.destroy();
   });
 
   it("waits for a delayed SPA target and cleans up on timeout or destroy", async () => {
@@ -313,3 +314,5 @@ function experienceFetch(manifest: (trigger: string | null, url: URL) => Deliver
 }
 function postedEvents(fetchMock: ReturnType<typeof vi.fn>): Array<{ experienceId: string; event: string }> { return fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(String(init?.body))); }
 function activeExperienceText(): string { return document.querySelector("[data-movcues-experience]")?.shadowRoot?.textContent ?? ""; }
+
+function readGuide() { return new ExperienceStateStore(JSON.stringify(["site_1", runtimeSession.getIdentifiedUserId() ?? runtimeSession.getAnonymousId()])).getGuideProgress(); }

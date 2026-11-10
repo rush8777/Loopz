@@ -58,6 +58,10 @@ export class Analytics {
   private activityMonitor: SessionActivityMonitor | null = null;
   private experiences: ExperienceLoaderRuntime | null = null;
   private pendingExperienceLaunches: string[] = [];
+  private deliveryRefreshPending = false;
+  private deliveryRefreshRunning = false;
+  private deliveredTriggers = new Set<string>();
+  private deliveryIdentityGeneration = 0;
   private editor: EditorControllerRuntime | null = null;
   private editorMode = false;
   private editorAttempted = false;
@@ -103,7 +107,7 @@ export class Analytics {
     this.transport = new Transport(this.config.endpoint, this.config.siteId);
     this.queue = new EventQueue({ maxQueueSize: this.config.queue.maxQueueSize });
     this.batcher = new Batcher(this.queue, this.transport, this.config.queue, (msg, ...args) =>
-      this.log(msg, ...args)
+      this.log(msg, ...args), (events) => this.onEventsDelivered(events)
     );
     this.engine = new AutoCaptureEngine(this.config);
     this.activityMonitor = new SessionActivityMonitor(this.session);
@@ -164,6 +168,8 @@ export class Analytics {
     this.experiences?.destroy();
     this.experiences = null;
     this.pendingExperienceLaunches = [];
+    this.deliveryRefreshPending = false;
+    this.deliveredTriggers.clear();
     this.heatmaps = null;
     this.activityMonitor = null;
     this.editor?.destroy();
@@ -180,13 +186,20 @@ export class Analytics {
     this.enqueueEvent("custom", payload);
     this.engine.funnel.onCustomEvent(name);
     this.experiences?.onCustomEvent(name);
-    void this.refreshExperiencesAfterFlush();
+    // Custom events retain normal analytics batching. Acknowledgment refreshes
+    // eligibility when that batch (or its retry) has committed.
     this.log(`event: ${name}`, properties);
   }
 
   identify(userId: string, attributes?: Record<string, unknown>): void {
     if (!this.requireInit()) return;
+    const previous = this.session.getIdentifiedUserId();
     this.session.identify(userId);
+    if (previous !== userId) {
+      this.deliveryIdentityGeneration++;
+      this.deliveredTriggers.clear();
+      this.experiences?.resetContext?.(previous === null);
+    }
     const payload: IdentifyEventPayload = { userId, traits: attributes };
     this.enqueueEvent("identify", payload);
     void this.refreshExperiencesAfterFlush();
@@ -197,7 +210,12 @@ export class Analytics {
   reset(): void {
     if (!this.requireInit()) return;
     this.session.reset();
+    this.deliveryIdentityGeneration++;
+    this.deliveredTriggers.clear();
+    this.pendingExperienceLaunches = [];
+    this.experiences?.resetContext?.();
     this.trackPageView();
+    void this.refreshExperiencesAfterFlush();
     this.log("identity reset");
   }
 
@@ -298,7 +316,7 @@ export class Analytics {
       );
       await this.experiences.evaluate();
       for (const id of this.pendingExperienceLaunches.splice(0)) void this.experiences.launchExperience?.(id);
-      void this.refreshExperiencesAfterFlush();
+      void this.drainDeliveryRefresh();
     } catch {
       // Experience delivery is isolated from analytics and host application code.
     }
@@ -416,9 +434,45 @@ export class Analytics {
   }
 
   private async refreshExperiencesAfterFlush(): Promise<void> {
-    if (!this.experiences || !this.batcher || !this.experiences.hasActiveChecklist?.()) return;
-    await this.batcher.flushAndWait();
-    await this.experiences?.refreshChecklist?.();
+    // Completion alone is not an ingestion acknowledgment. Only onDelivered
+    // schedules membership refreshes, including successful timer-driven retries.
+    if (this.batcher && this.config.experiences.enabled) await this.batcher.flush();
+  }
+
+  private onEventsDelivered(events: readonly AnalyticsEvent[]): void {
+    if (!this.initialized || !this.config.experiences.enabled) return;
+    for (const event of events) {
+      if (event.anonymousId !== this.session.getAnonymousId() || event.sessionId !== this.session.getSessionId()) continue;
+      if (event.type === "custom" && event.page.url === location.href && event.pageViewId === this.session.getPageViewId() && Date.now() - event.timestamp <= 30_000) {
+        this.deliveredTriggers.add((event.payload as CustomEventPayload).name);
+        while (this.deliveredTriggers.size > 20) this.deliveredTriggers.delete(this.deliveredTriggers.values().next().value!);
+      }
+      if (["identify", "custom", "page_view", "session_start"].includes(event.type)) this.deliveryRefreshPending = true;
+    }
+    void this.drainDeliveryRefresh();
+  }
+
+  private async drainDeliveryRefresh(): Promise<void> {
+    if (this.deliveryRefreshRunning || !this.experiences) return;
+    const generation = this.generation;
+    this.deliveryRefreshRunning = true;
+    try {
+      while (this.initialized && generation === this.generation && this.experiences && this.deliveryRefreshPending) {
+        this.deliveryRefreshPending = false;
+        const identityGeneration = this.deliveryIdentityGeneration;
+        const triggers = [...this.deliveredTriggers]; this.deliveredTriggers.clear();
+        await this.experiences.evaluate();
+        for (const trigger of triggers) {
+          if (generation !== this.generation || identityGeneration !== this.deliveryIdentityGeneration || !this.initialized) break;
+          await this.experiences?.evaluate(trigger);
+        }
+      }
+    } catch {
+      // A failed delivery request must never reject into host analytics.
+    } finally {
+      this.deliveryRefreshRunning = false;
+      if (generation !== this.generation && this.deliveryRefreshPending) void this.drainDeliveryRefresh();
+    }
   }
 
   private buildAndEnqueue<T extends AnyPayload>(type: EventType, payload: T): void {

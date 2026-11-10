@@ -16,12 +16,15 @@ export class Batcher {
   private flushing = false;
   private flushPromise: Promise<void> | null = null;
   private stopped = false;
+  private retryAfter = 0;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private queue: EventQueue,
     private transport: Transport,
     private config: QueueConfig,
-    private log: DebugLogger = () => void 0
+    private log: DebugLogger = () => void 0,
+    private onDelivered: (events: readonly AnalyticsEvent[]) => void = () => void 0
   ) {}
 
   start(): void {
@@ -33,6 +36,8 @@ export class Batcher {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
   }
 
   enqueue(event: AnalyticsEvent): void {
@@ -53,6 +58,10 @@ export class Batcher {
   async flush(): Promise<void> {
     if (this.flushPromise) return this.flushPromise;
     if (this.stopped) return;
+    if (Date.now() < this.retryAfter) {
+      if (!this.retryTimer) this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.flush(); }, this.retryAfter - Date.now());
+      return;
+    }
     if (this.queue.isEmpty()) {
       this.scheduleTimer();
       return;
@@ -65,6 +74,7 @@ export class Batcher {
   /** Flush every event queued before/during this call and wait for transport completion. */
   async flushAndWait(): Promise<void> {
     while (!this.stopped) {
+      if (Date.now() < this.retryAfter) await new Promise(resolve => setTimeout(resolve, this.retryAfter - Date.now()));
       if (this.flushPromise) await this.flushPromise;
       else if (!this.queue.isEmpty()) await this.flush();
       else return;
@@ -78,18 +88,25 @@ export class Batcher {
 
     try {
       const result = await this.transport.send(batch);
+      const acknowledged = new Set(result.acknowledgedEventIds ?? []);
+      const delivered = result.ok ? batch : batch.filter(event => acknowledged.has(event.eventId));
+      const pending = batch.filter(event => !acknowledged.has(event.eventId));
+      if (delivered.length) { try { this.onDelivered(delivered); } catch { /* observers cannot affect ingestion */ } }
       if (result.ok) {
         this.retryCount = 0;
+        this.retryAfter = 0;
         this.log(`[Analytics] batch flushed (${batch.length} events)`);
-      } else if (result.retryable && this.retryCount < this.config.maxRetries) {
+      } else if (pending.length && result.retryable && this.retryCount < this.config.maxRetries) {
         this.retryCount += 1;
         const delay = this.config.retryBaseDelayMs * Math.pow(2, this.retryCount - 1);
-        this.queue.requeueFront(batch);
+        this.queue.requeueFront(pending);
         this.log(`[Analytics] flush failed, retrying in ${delay}ms (attempt ${this.retryCount})`);
-        setTimeout(() => void this.flush(), delay);
+        this.retryAfter = Date.now() + delay;
+        this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.flush(); }, delay);
       } else {
         // Not retryable, or retries exhausted - drop the batch. Analytics
         // failures must never cascade or spam the network indefinitely.
+        this.retryCount = 0; this.retryAfter = 0;
         this.log(`[Analytics] batch dropped after failed send (${batch.length} events)`);
       }
     } catch (err) {

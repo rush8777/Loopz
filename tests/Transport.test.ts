@@ -169,4 +169,10 @@ describe("Transport", () => {
       expect(url).not.toContain("/replay");
     });
   });
+  it("acknowledges successful session destinations when another session must retry",async()=>{
+    fetchMock.mockResolvedValueOnce({ok:true,status:200}).mockResolvedValueOnce({ok:false,status:503,text:async()=>"retry"});
+    const result=await new Transport("https://api.test","site").send([pageView("one","accepted"),pageView("two","retry")]);
+    expect(result).toEqual({ok:false,retryable:true,acknowledgedEventIds:["accepted"]});
+  });
+
 });

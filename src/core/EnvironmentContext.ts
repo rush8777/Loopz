@@ -25,7 +25,7 @@ export function captureEnvironmentSnapshot(): SessionStartEventPayload {
     browserName: browser?.name,
     browserVersion: browser?.version,
     osName: os?.name,
-    osVersion: os?.version,
+    osVersion: os?.version || undefined,
     deviceType: parseDeviceType(ua),
     language: safeLanguage(),
     timezone: safeTimezone(),
