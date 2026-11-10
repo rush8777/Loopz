@@ -14,7 +14,7 @@ interface EditorAiErrorBody extends Partial<EditorAiResponse> {
 
 function editorAiErrorMessage(body: EditorAiErrorBody | null): string {
   if (body?.message) return body.message;
-  if (!body?.error) return "Movcues AI could not complete this request.";
+  if (!body?.error) return "Geo could not complete this request.";
   const details = [
     ...(body.details?.formErrors ?? []),
     ...Object.entries(body.details?.fieldErrors ?? {}).flatMap(([field, errors]) => errors.map(error => `${field}: ${error}`)),

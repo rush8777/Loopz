@@ -7746,7 +7746,7 @@ ${ISOLATION_CSS}`;
   function editorAiErrorMessage(body) {
     var _a, _b;
     if (body == null ? void 0 : body.message) return body.message;
-    if (!(body == null ? void 0 : body.error)) return "Movcues AI could not complete this request.";
+    if (!(body == null ? void 0 : body.error)) return "Geo could not complete this request.";
     const details = [
       ...((_a = body.details) == null ? void 0 : _a.formErrors) ?? [],
       ...Object.entries(((_b = body.details) == null ? void 0 : _b.fieldErrors) ?? {}).flatMap(([field, errors]) => errors.map((error) => `${field}: ${error}`))
@@ -11875,7 +11875,7 @@ ${ISOLATION_CSS}`;
         <nav class="inspector-tabs" aria-label="Inspector mode"><span class="panel-wordmark"><span class="panel-mark">${panelIcon("ai")}</span>movcues</span>${[["properties", "Properties"], ["theme", "Theme"], ["ai", "AI assistant"]].map(([tab, label]) => `<button type="button" class="${tab === "properties" ? "active" : ""}" data-inspector-tab="${tab}" aria-label="${label}" title="${label}" aria-pressed="${tab === "properties"}"${tab === "ai" && !aiEligible ? " disabled" : ""}>${panelIcon(tab)}</button>`).join("")}</nav>
         <section class="section ai-panel" data-ai-panel hidden>
           <p class="muted" data-ai-context>Choose an element or ask about the whole widget.</p>
-          <div class="ai-chat-history" data-ai-history aria-label="AI chat history" aria-live="polite"><div class="ai-empty-state"><span class="ai-empty-state__icon">${panelIcon("zap")}</span><p>Describe the change you want to make.</p></div><article class="ai-proposal" data-ai-proposal hidden><span class="ai-chat-message__role">Movcues AI</span><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Review the update, then apply it when you’re ready.</p></article></div>
+          <div class="ai-chat-history" data-ai-history aria-label="AI chat history" aria-live="polite"><div class="ai-empty-state"><span class="ai-empty-state__icon">${panelIcon("zap")}</span><p>Describe the change you want to make.</p></div><article class="ai-proposal" data-ai-proposal hidden><span class="ai-chat-message__role">Geo</span><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Review the update, then apply it when you’re ready.</p></article></div>
           <form class="ai-composer" data-ai-form><textarea data-ai-prompt aria-label="Describe your design change" maxlength="4000" rows="3" placeholder="What would you like to create?"></textarea><div class="ai-proposal-actions" data-ai-proposal-actions hidden><button type="button" class="secondary-button" data-ai-target hidden>Select target</button><button type="button" class="secondary-button" data-ai-preview hidden>Preview design</button><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div><div class="ai-composer-footer"><span class="ai-composer-note">${panelIcon("ai")} Design with Movcues</span><button type="button" class="secondary-button compact" data-ai-cancel hidden>Stop</button><button type="submit" class="secondary-button" data-ai-send aria-label="Send message" title="Send message">${panelIcon("send")}</button></div></form>
           <div class="ai-status" data-ai-status role="status" aria-live="polite"></div>
         </section>
@@ -13576,7 +13576,7 @@ ${ISOLATION_CSS}`;
             item.className = `ai-chat-message ai-chat-message--${message.role}`;
             const label = document.createElement("span");
             label.className = "ai-chat-message__role";
-            label.textContent = message.role === "user" ? "You" : "Movcues AI";
+            label.textContent = message.role === "user" ? "You" : "Geo";
             const text22 = document.createElement("p");
             text22.dataset.aiMessageText = "";
             item.append(label, text22);
@@ -13778,7 +13778,7 @@ ${ISOLATION_CSS}`;
       } catch (error) {
         if (generation === this.aiRequestGeneration && !abort.signal.aborted) {
           const message = this.aiMessages.find((value) => value.id === messageId);
-          const detail = error instanceof Error ? error.message : "Movcues AI could not complete this request.";
+          const detail = error instanceof Error ? error.message : "Geo could not complete this request.";
           if (message) message.text = detail;
           this.finishAiProgress(messageId, "error", detail);
           if (error instanceof DraftConflictError) this.saveState = "conflict";

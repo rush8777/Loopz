@@ -4,7 +4,7 @@
 
 Phase 11 adds a bundled, server-owned template registry; the dashboard template gallery; shared experience themes; site-scoped reusable styles; and widget-only Desktop, Tablet, and Mobile preview controls. Templates are instantiated through the existing validated creation, compilation, review, and publishing paths. The existing on-site cell editors and production renderers remain the authoring and delivery engines.
 
-The implementation started from the requested heads: SDK `946955e`, Frontend `545c337`, and Backend `1d0abfd`. The Frontend and Backend retain the newer Movcues AI integration. Gemini, Vertex AI, and OpenAI provider sources were not changed.
+The implementation started from the requested heads: SDK `946955e`, Frontend `545c337`, and Backend `1d0abfd`. The Frontend and Backend retain the newer Geo integration. Gemini, Vertex AI, and OpenAI provider sources were not changed.
 
 ## Bundled catalog
 
@@ -53,7 +53,7 @@ Changing a base keeps experience overrides. **Reset to theme** clears only level
 | Template regression | All 14 templates instantiated and schema/ID/reference validation passed |
 | Real services | 3/3 workflow projects passed; each used the actual dashboard, backend, temporary database, and SDK services to create and publish Widget, Guide, Survey, and Checklist templates |
 | Builds | SDK, Frontend, and Backend production builds passed |
-| Movcues AI | Existing backend AI/provider tests passed; provider sources unchanged |
+| Geo | Existing backend AI/provider tests passed; provider sources unchanged |
 | Browser suite | The suite was invoked for Chromium, Firefox, and WebKit, but all projects were blocked before test execution because this runner contains no Playwright browser executables. A pinned-browser install was attempted and the network proxy returned empty archives. No browser assertion failed. |
 
 The real-service template workflow is browser-independent and passed under all three Playwright project configurations. The existing interactive cross-browser suite should be rerun in CI or a workstation with Playwright browsers installed.

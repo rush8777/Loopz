@@ -1,4 +1,4 @@
-import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as clearEditorContinuation, p as isChecklistDefinition, q as isGuideDefinition, r as guideInteractionTarget, t as matchesGuideRoute, u as findTarget, v as storeEditorContinuation } from "./module-y6w_7r-p.js";
+import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as clearEditorContinuation, p as isChecklistDefinition, q as isGuideDefinition, r as guideInteractionTarget, t as matchesGuideRoute, u as findTarget, v as storeEditorContinuation } from "./module-X0WXeuqG.js";
 function panelIcon(name) {
   const paths = {
     properties: '<path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
@@ -5759,7 +5759,7 @@ function parseEditorAiStreamEvent(line) {
 function editorAiErrorMessage(body) {
   var _a, _b;
   if (body == null ? void 0 : body.message) return body.message;
-  if (!(body == null ? void 0 : body.error)) return "Movcues AI could not complete this request.";
+  if (!(body == null ? void 0 : body.error)) return "Geo could not complete this request.";
   const details = [
     ...((_a = body.details) == null ? void 0 : _a.formErrors) ?? [],
     ...Object.entries(((_b = body.details) == null ? void 0 : _b.fieldErrors) ?? {}).flatMap(([field, errors]) => errors.map((error) => `${field}: ${error}`))
@@ -9800,7 +9800,7 @@ class EditorModeController {
         <nav class="inspector-tabs" aria-label="Inspector mode"><span class="panel-wordmark"><span class="panel-mark">${panelIcon("ai")}</span>movcues</span>${[["properties", "Properties"], ["theme", "Theme"], ["ai", "AI assistant"]].map(([tab, label]) => `<button type="button" class="${tab === "properties" ? "active" : ""}" data-inspector-tab="${tab}" aria-label="${label}" title="${label}" aria-pressed="${tab === "properties"}"${tab === "ai" && !aiEligible ? " disabled" : ""}>${panelIcon(tab)}</button>`).join("")}</nav>
         <section class="section ai-panel" data-ai-panel hidden>
           <p class="muted" data-ai-context>Choose an element or ask about the whole widget.</p>
-          <div class="ai-chat-history" data-ai-history aria-label="AI chat history" aria-live="polite"><div class="ai-empty-state"><span class="ai-empty-state__icon">${panelIcon("zap")}</span><p>Describe the change you want to make.</p></div><article class="ai-proposal" data-ai-proposal hidden><span class="ai-chat-message__role">Movcues AI</span><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Review the update, then apply it when you’re ready.</p></article></div>
+          <div class="ai-chat-history" data-ai-history aria-label="AI chat history" aria-live="polite"><div class="ai-empty-state"><span class="ai-empty-state__icon">${panelIcon("zap")}</span><p>Describe the change you want to make.</p></div><article class="ai-proposal" data-ai-proposal hidden><span class="ai-chat-message__role">Geo</span><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Review the update, then apply it when you’re ready.</p></article></div>
           <form class="ai-composer" data-ai-form><textarea data-ai-prompt aria-label="Describe your design change" maxlength="4000" rows="3" placeholder="What would you like to create?"></textarea><div class="ai-proposal-actions" data-ai-proposal-actions hidden><button type="button" class="secondary-button" data-ai-target hidden>Select target</button><button type="button" class="secondary-button" data-ai-preview hidden>Preview design</button><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div><div class="ai-composer-footer"><span class="ai-composer-note">${panelIcon("ai")} Design with Movcues</span><button type="button" class="secondary-button compact" data-ai-cancel hidden>Stop</button><button type="submit" class="secondary-button" data-ai-send aria-label="Send message" title="Send message">${panelIcon("send")}</button></div></form>
           <div class="ai-status" data-ai-status role="status" aria-live="polite"></div>
         </section>
@@ -11501,7 +11501,7 @@ class EditorModeController {
           item.className = `ai-chat-message ai-chat-message--${message.role}`;
           const label = document.createElement("span");
           label.className = "ai-chat-message__role";
-          label.textContent = message.role === "user" ? "You" : "Movcues AI";
+          label.textContent = message.role === "user" ? "You" : "Geo";
           const text22 = document.createElement("p");
           text22.dataset.aiMessageText = "";
           item.append(label, text22);
@@ -11703,7 +11703,7 @@ class EditorModeController {
     } catch (error) {
       if (generation === this.aiRequestGeneration && !abort.signal.aborted) {
         const message = this.aiMessages.find((value) => value.id === messageId);
-        const detail = error instanceof Error ? error.message : "Movcues AI could not complete this request.";
+        const detail = error instanceof Error ? error.message : "Geo could not complete this request.";
         if (message) message.text = detail;
         this.finishAiProgress(messageId, "error", detail);
         if (error instanceof DraftConflictError) this.saveState = "conflict";
@@ -12491,4 +12491,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-Bk3yoZHr.js.map
+//# sourceMappingURL=EditorModeController-BqWyDNd4.js.map

@@ -1,4 +1,79 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Lumina | Integrations</title><style>
-:root{--ink:#111827;--muted:#667085;--line:#e7eaf0;--brand:#635bff;--bg:#f7f8fc}*{box-sizing:border-box;margin:0;font-family:Inter,'Segoe UI',system-ui,sans-serif}body{color:var(--ink);background:var(--bg);line-height:1.55}nav{height:70px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 5%}.logo{font-size:1.35rem;font-weight:800;color:var(--ink);text-decoration:none}.logo span,.active{color:var(--brand)}.nav-links{display:flex;gap:1.4rem}.nav-links a{color:var(--muted);text-decoration:none;font-weight:600;font-size:.9rem}.btn{background:var(--brand);color:#fff;padding:.65rem 1rem;border-radius:7px;text-decoration:none;font-weight:700}.hero{text-align:center;padding:5rem 5%;background:#fff}.hero h1{font-size:3.5rem;letter-spacing:-.06em}.hero p{color:var(--muted);max-width:580px;margin:1rem auto}.wrap{max-width:1050px;margin:auto;padding:3rem 5%}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}.card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:1.5rem}.card strong{display:block;font-size:1.1rem;margin-bottom:.3rem}.card p{color:var(--muted);font-size:.9rem}.tag{display:inline-block;color:var(--brand);background:#eeedff;padding:.25rem .5rem;border-radius:5px;font-size:.7rem;font-weight:800;margin-bottom:1.3rem}footer{padding:2rem 5%;text-align:center;color:var(--muted)}@media(max-width:750px){.nav-links{display:none}.hero h1{font-size:2.5rem}.grid{grid-template-columns:1fr 1fr}}@media(max-width:480px){.grid{grid-template-columns:1fr}}
-</style><!-- Current SDK install used by this example. --><script async src="../../dist/sdk.js" data-site-id="site_tlh00zlo4buy61twqjccpmik" data-endpoint="http://localhost:3000"></script></head><body><nav><a class="logo" href="index.html">lumina<span>.</span></a><div class="nav-links"><a href="features.html">Features</a><a href="dashboard.html">Dashboard</a><a class="active" href="integrations.html">Integrations</a><a href="pricing.html">Pricing</a></div><a class="btn" href="index.html">Back home</a></nav><header class="hero"><h1>Fits into your stack.</h1><p>Connect the tools your team already uses and send trustworthy product signals where they belong.</p></header><main class="wrap"><div class="grid"><article class="card"><span class="tag">DATA</span><strong>Segment</strong><p>Route your customer events into Lumina with a few lines of configuration.</p></article><article class="card"><span class="tag">COMMUNICATION</span><strong>Slack</strong><p>Share important insights and receive alerts in the channels your team follows.</p></article><article class="card"><span class="tag">WORKFLOW</span><strong>Zapier</strong><p>Trigger actions in thousands of apps when customers reach key milestones.</p></article><article class="card"><span class="tag">CRM</span><strong>HubSpot</strong><p>Pair product behavior with customer context for a complete picture.</p></article><article class="card"><span class="tag">DEVELOPER</span><strong>Webhooks</strong><p>Build custom workflows with secure, real-time event delivery.</p></article><article class="card"><span class="tag">API</span><strong>REST API</strong><p>Query, enrich, and export your data programmatically whenever you need it.</p></article></div></main><footer>© 2026 Lumina Technologies</footer></body></html>
-<script>window.addEventListener("load", function () { analytics.event("example_page_viewed", { page: "integrations" }); });</script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lumina | Integrations</title>
+<style>
+:root{--ink:#111827;--muted:#667085;--line:#e7eaf0;--brand:#635bff;--bg:#f7f8fc;--success:#157347}
+*{box-sizing:border-box;margin:0;font-family:Inter,'Segoe UI',system-ui,sans-serif}
+body{color:var(--ink);background:var(--bg);line-height:1.55}
+nav{height:70px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 5%}
+.logo{font-size:1.35rem;font-weight:800;color:var(--ink);text-decoration:none}.logo span,.active{color:var(--brand)}
+.nav-links{display:flex;gap:1.4rem}.nav-links a{color:var(--muted);text-decoration:none;font-weight:600;font-size:.9rem}
+.btn,.connect-btn{border:0;background:var(--brand);color:#fff;padding:.65rem 1rem;border-radius:7px;text-decoration:none;font-weight:700;cursor:pointer;font-size:.9rem}
+.hero{text-align:center;padding:5rem 5%;background:#fff}.hero h1{font-size:3.5rem;letter-spacing:-.06em}.hero p{color:var(--muted);max-width:580px;margin:1rem auto}
+.wrap{max-width:1050px;margin:auto;padding:3rem 5%}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}
+.card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:1.5rem;display:flex;flex-direction:column;min-height:205px}.card strong{display:block;font-size:1.1rem;margin-bottom:.3rem}.card p{color:var(--muted);font-size:.9rem;flex:1}
+.tag{display:inline-block;color:var(--brand);background:#eeedff;padding:.25rem .5rem;border-radius:5px;font-size:.7rem;font-weight:800;margin-bottom:1.3rem;align-self:flex-start}
+.integration-mark{font-size:1.8rem;margin-bottom:.5rem}.connect-btn{align-self:flex-start;margin-top:1.3rem;background:#f0efff;color:var(--brand)}.connect-btn:hover{background:var(--brand);color:#fff}.connect-btn.connected{background:#e8f6ee;color:var(--success)}
+footer{padding:2rem 5%;text-align:center;color:var(--muted)}
+.modal-backdrop{position:fixed;inset:0;background:rgba(17,24,39,.48);display:grid;place-items:center;padding:1.25rem;z-index:10}.modal-backdrop[hidden]{display:none}
+.modal{width:min(440px,100%);background:#fff;border-radius:14px;padding:2rem;box-shadow:0 24px 80px rgba(17,24,39,.25);text-align:center}.modal h2{margin:.6rem 0 .45rem}.modal p{color:var(--muted);font-size:.95rem}.modal-icon{font-size:2.4rem}.modal-close{margin-top:1.4rem;width:100%}
+@media(max-width:750px){.nav-links{display:none}.hero h1{font-size:2.5rem}.grid{grid-template-columns:1fr 1fr}}@media(max-width:480px){.grid{grid-template-columns:1fr}}
+</style>
+<script async src="../../dist/sdk.js" data-site-id="site_tlh00zlo4buy61twqjccpmik" data-endpoint="http://localhost:3000"></script>
+</head>
+<body>
+<nav><a class="logo" href="index.html">lumina<span>.</span></a><div class="nav-links"><a href="features.html">Features</a><a href="dashboard.html">Dashboard</a><a class="active" href="integrations.html">Integrations</a><a href="pricing.html">Pricing</a></div><a class="btn" href="index.html">Back home</a></nav>
+<header class="hero"><h1>Fits into your stack.</h1><p>Connect the tools your team already uses and send trustworthy product signals where they belong.</p></header>
+<main class="wrap"><div class="grid">
+<article class="card"><span class="tag">COMMUNICATION</span><div class="integration-mark">💬</div><strong>Slack</strong><p>Share important insights and receive alerts in the channels your team follows.</p><button class="connect-btn" type="button" data-integration="slack">Connect Slack</button></article>
+<article class="card"><span class="tag">WORKSPACE</span><div class="integration-mark">📝</div><strong>Notion</strong><p>Keep product insights and customer context together in the workspace your team already knows.</p><button class="connect-btn" type="button" data-integration="notion">Connect Notion</button></article>
+<article class="card"><span class="tag">DATA</span><strong>Segment</strong><p>Route your customer events into Lumina with a few lines of configuration.</p></article>
+<article class="card"><span class="tag">WORKFLOW</span><strong>Zapier</strong><p>Trigger actions in thousands of apps when customers reach key milestones.</p></article>
+<article class="card"><span class="tag">CRM</span><strong>HubSpot</strong><p>Pair product behavior with customer context for a complete picture.</p></article>
+<article class="card"><span class="tag">DEVELOPER</span><strong>Webhooks</strong><p>Build custom workflows with secure, real-time event delivery.</p></article>
+</div></main>
+<div class="modal-backdrop" id="integration-modal" role="presentation" hidden><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div class="modal-icon" id="modal-icon">✅</div><h2 id="modal-title">Integration connected</h2><p id="modal-message">This is a simulated connection. No credentials were requested or sent.</p><button class="btn modal-close" id="modal-close" type="button">Done</button></section></div>
+<footer>© 2026 Lumina Technologies</footer>
+<script>
+window.addEventListener("load", function () {
+  analytics.event("example_page_viewed", { page: "integrations" });
+
+  var modal = document.getElementById("integration-modal");
+  var modalTitle = document.getElementById("modal-title");
+  var modalMessage = document.getElementById("modal-message");
+  var modalClose = document.getElementById("modal-close");
+  var activeIntegration = "";
+
+  function closeModal() {
+    modal.hidden = true;
+    if (activeIntegration) {
+      analytics.event("integration_connection_dismissed", { integration: activeIntegration, simulated: true });
+    }
+    activeIntegration = "";
+  }
+
+  document.querySelectorAll("[data-integration]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var integration = button.getAttribute("data-integration");
+      var label = integration.charAt(0).toUpperCase() + integration.slice(1);
+      activeIntegration = integration;
+      analytics.event("integration_connection_started", { integration: integration, simulated: true });
+      button.textContent = "Connected";
+      button.classList.add("connected");
+      modalTitle.textContent = label + " connected";
+      modalMessage.textContent = "This is a simulated connection. No " + label + " credentials were requested or sent.";
+      modal.hidden = false;
+      analytics.event("integration_connection_completed", { integration: integration, simulated: true });
+    });
+  });
+
+  modalClose.addEventListener("click", closeModal);
+  modal.addEventListener("click", function (event) { if (event.target === modal) closeModal(); });
+  document.addEventListener("keydown", function (event) { if (event.key === "Escape" && !modal.hidden) closeModal(); });
+});
+</script>
+</body>
+</html>
