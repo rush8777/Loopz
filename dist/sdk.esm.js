@@ -1,4 +1,4 @@
-import { A, w } from "./module-X0WXeuqG.js";
+import { A, w } from "./module-DhRMqJBO.js";
 export {
   A as Analytics,
   w as createAnalytics

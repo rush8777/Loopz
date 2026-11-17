@@ -13,12 +13,15 @@ export declare class Batcher {
     private transport;
     private config;
     private log;
+    private onDelivered;
     private timer;
     private retryCount;
     private flushing;
     private flushPromise;
     private stopped;
-    constructor(queue: EventQueue, transport: Transport, config: QueueConfig, log?: DebugLogger);
+    private retryAfter;
+    private retryTimer;
+    constructor(queue: EventQueue, transport: Transport, config: QueueConfig, log?: DebugLogger, onDelivered?: (events: readonly AnalyticsEvent[]) => void);
     start(): void;
     stop(): void;
     enqueue(event: AnalyticsEvent): void;

@@ -1184,6 +1184,8 @@ class SessionManager {
   }
   /** Allow identify() to bind a known user id to the anonymous id (kept locally only). */
   identify(userId) {
+    const previous = this.getIdentifiedUserId();
+    if (previous && previous !== userId) this.reset();
     localStore.set(ANON_ID_KEY, this.anonymousId);
     sessionStore.set("__aa_identified_user__", userId);
   }
@@ -1484,16 +1486,21 @@ class Transport {
     if (!this.apiBase || events.length === 0) return { ok: true, retryable: false };
     const { standardGroups, replayGroups } = partition(events);
     const results = [];
+    const acknowledgedEventIds = [];
     for (const [sessionId, group] of standardGroups) {
-      results.push(await this.postJson(this.eventsUrl(), { sessionId, events: group }));
+      const result = await this.postJson(this.eventsUrl(), { sessionId, events: group });
+      results.push(result);
+      if (result.ok) acknowledgedEventIds.push(...events.filter((event) => event.sessionId === sessionId && event.type !== "session_replay_event").map((event) => event.eventId));
     }
     for (const [sessionId, group] of replayGroups) {
-      results.push(await this.postJson(this.replayUrl(), { sessionId, events: group }));
+      const result = await this.postJson(this.replayUrl(), { sessionId, events: group });
+      results.push(result);
+      if (result.ok) acknowledgedEventIds.push(...events.filter((event) => event.sessionId === sessionId && event.type === "session_replay_event").map((event) => event.eventId));
     }
     if (results.length === 0) return { ok: true, retryable: false };
     const ok = results.every((r) => r.ok);
     const retryable = !ok && results.some((r) => r.retryable);
-    return { ok, retryable };
+    return { ok, retryable, ...!ok && acknowledgedEventIds.length ? { acknowledgedEventIds } : {} };
   }
   async postJson(url, body) {
     const payload = JSON.stringify(body);
@@ -1572,16 +1579,19 @@ function partition(events) {
   return { standardGroups, replayGroups };
 }
 class Batcher {
-  constructor(queue, transport, config, log = () => void 0) {
+  constructor(queue, transport, config, log = () => void 0, onDelivered = () => void 0) {
     this.queue = queue;
     this.transport = transport;
     this.config = config;
     this.log = log;
+    this.onDelivered = onDelivered;
     this.timer = null;
     this.retryCount = 0;
     this.flushing = false;
     this.flushPromise = null;
     this.stopped = false;
+    this.retryAfter = 0;
+    this.retryTimer = null;
   }
   start() {
     this.stopped = false;
@@ -1591,6 +1601,8 @@ class Batcher {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
   }
   enqueue(event) {
     this.queue.push(event);
@@ -1608,6 +1620,13 @@ class Batcher {
   async flush() {
     if (this.flushPromise) return this.flushPromise;
     if (this.stopped) return;
+    if (Date.now() < this.retryAfter) {
+      if (!this.retryTimer) this.retryTimer = setTimeout(() => {
+        this.retryTimer = null;
+        void this.flush();
+      }, this.retryAfter - Date.now());
+      return;
+    }
     if (this.queue.isEmpty()) {
       this.scheduleTimer();
       return;
@@ -1620,6 +1639,7 @@ class Batcher {
   /** Flush every event queued before/during this call and wait for transport completion. */
   async flushAndWait() {
     while (!this.stopped) {
+      if (Date.now() < this.retryAfter) await new Promise((resolve) => setTimeout(resolve, this.retryAfter - Date.now()));
       if (this.flushPromise) await this.flushPromise;
       else if (!this.queue.isEmpty()) await this.flush();
       else return;
@@ -1630,16 +1650,32 @@ class Batcher {
     const batch = this.queue.takeBatch(this.config.maxBatchSize);
     try {
       const result = await this.transport.send(batch);
+      const acknowledged = new Set(result.acknowledgedEventIds ?? []);
+      const delivered = result.ok ? batch : batch.filter((event) => acknowledged.has(event.eventId));
+      const pending = batch.filter((event) => !acknowledged.has(event.eventId));
+      if (delivered.length) {
+        try {
+          this.onDelivered(delivered);
+        } catch {
+        }
+      }
       if (result.ok) {
         this.retryCount = 0;
+        this.retryAfter = 0;
         this.log(`[Analytics] batch flushed (${batch.length} events)`);
-      } else if (result.retryable && this.retryCount < this.config.maxRetries) {
+      } else if (pending.length && result.retryable && this.retryCount < this.config.maxRetries) {
         this.retryCount += 1;
         const delay = this.config.retryBaseDelayMs * Math.pow(2, this.retryCount - 1);
-        this.queue.requeueFront(batch);
+        this.queue.requeueFront(pending);
         this.log(`[Analytics] flush failed, retrying in ${delay}ms (attempt ${this.retryCount})`);
-        setTimeout(() => void this.flush(), delay);
+        this.retryAfter = Date.now() + delay;
+        this.retryTimer = setTimeout(() => {
+          this.retryTimer = null;
+          void this.flush();
+        }, delay);
       } else {
+        this.retryCount = 0;
+        this.retryAfter = 0;
         this.log(`[Analytics] batch dropped after failed send (${batch.length} events)`);
       }
     } catch (err) {
@@ -1679,7 +1715,7 @@ function captureEnvironmentSnapshot() {
     browserName: browser == null ? void 0 : browser.name,
     browserVersion: browser == null ? void 0 : browser.version,
     osName: os == null ? void 0 : os.name,
-    osVersion: os == null ? void 0 : os.version,
+    osVersion: (os == null ? void 0 : os.version) || void 0,
     deviceType: parseDeviceType(ua),
     language: safeLanguage(),
     timezone: safeTimezone(),
@@ -2245,6 +2281,10 @@ let Analytics$1 = class Analytics {
     this.activityMonitor = null;
     this.experiences = null;
     this.pendingExperienceLaunches = [];
+    this.deliveryRefreshPending = false;
+    this.deliveryRefreshRunning = false;
+    this.deliveredTriggers = /* @__PURE__ */ new Set();
+    this.deliveryIdentityGeneration = 0;
     this.editor = null;
     this.editorMode = false;
     this.editorAttempted = false;
@@ -2283,7 +2323,8 @@ let Analytics$1 = class Analytics {
       this.queue,
       this.transport,
       this.config.queue,
-      (msg, ...args) => this.log(msg, ...args)
+      (msg, ...args) => this.log(msg, ...args),
+      (events) => this.onEventsDelivered(events)
     );
     this.engine = new AutoCaptureEngine(this.config);
     this.activityMonitor = new SessionActivityMonitor(this.session);
@@ -2333,6 +2374,8 @@ let Analytics$1 = class Analytics {
     (_c = this.experiences) == null ? void 0 : _c.destroy();
     this.experiences = null;
     this.pendingExperienceLaunches = [];
+    this.deliveryRefreshPending = false;
+    this.deliveredTriggers.clear();
     this.heatmaps = null;
     this.activityMonitor = null;
     (_d = this.editor) == null ? void 0 : _d.destroy();
@@ -2349,12 +2392,18 @@ let Analytics$1 = class Analytics {
     this.enqueueEvent("custom", payload);
     this.engine.funnel.onCustomEvent(name);
     (_a = this.experiences) == null ? void 0 : _a.onCustomEvent(name);
-    void this.refreshExperiencesAfterFlush();
     this.log(`event: ${name}`, properties);
   }
   identify(userId, attributes) {
+    var _a, _b;
     if (!this.requireInit()) return;
+    const previous = this.session.getIdentifiedUserId();
     this.session.identify(userId);
+    if (previous !== userId) {
+      this.deliveryIdentityGeneration++;
+      this.deliveredTriggers.clear();
+      (_b = (_a = this.experiences) == null ? void 0 : _a.resetContext) == null ? void 0 : _b.call(_a, previous === null);
+    }
     const payload = { userId, traits: attributes };
     this.enqueueEvent("identify", payload);
     void this.refreshExperiencesAfterFlush();
@@ -2362,9 +2411,15 @@ let Analytics$1 = class Analytics {
   }
   /** Clear the active identity and begin future activity as a new visitor. */
   reset() {
+    var _a, _b;
     if (!this.requireInit()) return;
     this.session.reset();
+    this.deliveryIdentityGeneration++;
+    this.deliveredTriggers.clear();
+    this.pendingExperienceLaunches = [];
+    (_b = (_a = this.experiences) == null ? void 0 : _a.resetContext) == null ? void 0 : _b.call(_a);
     this.trackPageView();
+    void this.refreshExperiencesAfterFlush();
     this.log("identity reset");
   }
   page() {
@@ -2447,7 +2502,7 @@ let Analytics$1 = class Analytics {
       );
       await this.experiences.evaluate();
       for (const id of this.pendingExperienceLaunches.splice(0)) void ((_b = (_a = this.experiences).launchExperience) == null ? void 0 : _b.call(_a, id));
-      void this.refreshExperiencesAfterFlush();
+      void this.drainDeliveryRefresh();
     } catch {
     }
   }
@@ -2538,10 +2593,42 @@ let Analytics$1 = class Analytics {
     this.buildAndEnqueue(type, payload);
   }
   async refreshExperiencesAfterFlush() {
-    var _a, _b, _c, _d;
-    if (!this.experiences || !this.batcher || !((_b = (_a = this.experiences).hasActiveChecklist) == null ? void 0 : _b.call(_a))) return;
-    await this.batcher.flushAndWait();
-    await ((_d = (_c = this.experiences) == null ? void 0 : _c.refreshChecklist) == null ? void 0 : _d.call(_c));
+    if (this.batcher && this.config.experiences.enabled) await this.batcher.flush();
+  }
+  onEventsDelivered(events) {
+    if (!this.initialized || !this.config.experiences.enabled) return;
+    for (const event of events) {
+      if (event.anonymousId !== this.session.getAnonymousId() || event.sessionId !== this.session.getSessionId()) continue;
+      if (event.type === "custom" && event.page.url === location.href && event.pageViewId === this.session.getPageViewId() && Date.now() - event.timestamp <= 3e4) {
+        this.deliveredTriggers.add(event.payload.name);
+        while (this.deliveredTriggers.size > 20) this.deliveredTriggers.delete(this.deliveredTriggers.values().next().value);
+      }
+      if (["identify", "custom", "page_view", "session_start"].includes(event.type)) this.deliveryRefreshPending = true;
+    }
+    void this.drainDeliveryRefresh();
+  }
+  async drainDeliveryRefresh() {
+    var _a;
+    if (this.deliveryRefreshRunning || !this.experiences) return;
+    const generation = this.generation;
+    this.deliveryRefreshRunning = true;
+    try {
+      while (this.initialized && generation === this.generation && this.experiences && this.deliveryRefreshPending) {
+        this.deliveryRefreshPending = false;
+        const identityGeneration = this.deliveryIdentityGeneration;
+        const triggers = [...this.deliveredTriggers];
+        this.deliveredTriggers.clear();
+        await this.experiences.evaluate();
+        for (const trigger of triggers) {
+          if (generation !== this.generation || identityGeneration !== this.deliveryIdentityGeneration || !this.initialized) break;
+          await ((_a = this.experiences) == null ? void 0 : _a.evaluate(trigger));
+        }
+      }
+    } catch {
+    } finally {
+      this.deliveryRefreshRunning = false;
+      if (generation !== this.generation && this.deliveryRefreshPending) void this.drainDeliveryRefresh();
+    }
   }
   buildAndEnqueue(type, payload) {
     const event = {
@@ -4387,40 +4474,46 @@ function read(storage, key) {
   }
 }
 class ExperienceStateStore {
+  constructor(scope = "") {
+    this.scope = scope;
+  }
+  key(base) {
+    return this.scope ? `${base}:${this.scope}` : base;
+  }
   hasEver(id) {
-    return read(localStorage, ONCE_KEY).has(id);
+    return read(localStorage, this.key(ONCE_KEY)).has(id);
   }
   hasInSession(id) {
-    return read(sessionStorage, SESSION_KEY).has(id);
+    return read(sessionStorage, this.key(SESSION_KEY)).has(id);
   }
   markSeen(id) {
     for (const [storage, key] of [[localStorage, ONCE_KEY], [sessionStorage, SESSION_KEY]]) {
-      const values = read(storage, key);
+      const values = read(storage, this.key(key));
       values.add(id);
       try {
-        storage.setItem(key, JSON.stringify([...values]));
+        storage.setItem(this.key(key), JSON.stringify([...values]));
       } catch {
       }
     }
   }
   getGuideProgress() {
     try {
-      const value = JSON.parse(sessionStorage.getItem(GUIDE_KEY) ?? "null");
-      return value && typeof value.experienceId === "string" && typeof value.versionId === "string" && typeof value.currentStepId === "string" && (value.status === "active" || value.status === "paused") && (value.impressionId === void 0 || typeof value.impressionId === "string") ? value : null;
+      const value = JSON.parse(sessionStorage.getItem(this.key(GUIDE_KEY)) ?? "null");
+      return value && (value.ownerScope ?? "") === this.scope && typeof value.experienceId === "string" && typeof value.versionId === "string" && typeof value.currentStepId === "string" && (value.status === "active" || value.status === "paused") && (value.impressionId === void 0 || typeof value.impressionId === "string") ? value : null;
     } catch {
       return null;
     }
   }
   setGuideProgress(progress) {
     try {
-      sessionStorage.setItem(GUIDE_KEY, JSON.stringify(progress));
+      sessionStorage.setItem(this.key(GUIDE_KEY), JSON.stringify({ ...progress, ownerScope: this.scope }));
     } catch {
     }
   }
   clearGuideProgress(experienceId) {
     var _a;
     try {
-      if (!experienceId || ((_a = this.getGuideProgress()) == null ? void 0 : _a.experienceId) === experienceId) sessionStorage.removeItem(GUIDE_KEY);
+      if (!experienceId || ((_a = this.getGuideProgress()) == null ? void 0 : _a.experienceId) === experienceId) sessionStorage.removeItem(this.key(GUIDE_KEY));
     } catch {
     }
   }
@@ -4702,19 +4795,50 @@ class ExperienceLoader {
     this.lastRoute = location.href;
     this.deliveryEpoch = 0;
     this.finishing = /* @__PURE__ */ new Set();
+    this.requestGeneration = 0;
+    this.manifestAbort = null;
+    this.owner = "";
+    this.context = "";
+    this.triggerLeases = /* @__PURE__ */ new Map();
     this.checklist = new ChecklistManager(apiBase, siteId, session, (id, context) => this.launch(id, context));
+    this.owner = this.ownerKey();
+    this.context = this.contextKey();
+    this.state = new ExperienceStateStore(this.stateScope());
   }
   async evaluate(trigger) {
-    var _a, _b;
+    var _a, _b, _c;
     if (this.destroyed) return;
+    this.syncContext();
     const epoch = this.deliveryEpoch;
+    const request = ++this.requestGeneration;
+    const context = this.contextKey();
+    (_a = this.manifestAbort) == null ? void 0 : _a.abort();
+    const abort = this.manifestAbort = new AbortController();
     try {
-      const manifest = await this.fetchExperiences(trigger);
-      if (this.destroyed || epoch !== this.deliveryEpoch) return;
+      for (const [name, lease] of this.triggerLeases) if (lease.expiresAt <= Date.now()) this.triggerLeases.delete(name);
+      const manifest = await this.fetchExperiences(trigger, abort.signal);
+      if (!trigger) {
+        for (const [name, lease] of this.triggerLeases) {
+          const eventManifest = await this.fetchExperiences(name, abort.signal);
+          manifest.experiences.push(...eventManifest.experiences.filter((item) => lease.ids.has(item.id)));
+        }
+      }
+      if (this.destroyed || epoch !== this.deliveryEpoch || request !== this.requestGeneration || context !== this.contextKey()) return;
+      if (trigger) {
+        const ids = new Set(manifest.experiences.filter((item) => {
+          var _a2;
+          return item.id !== ((_a2 = this.active) == null ? void 0 : _a2.experience.id);
+        }).map((item) => item.id));
+        if (ids.size) {
+          this.triggerLeases.delete(trigger);
+          this.triggerLeases.set(trigger, { ids, expiresAt: Date.now() + 3e4 });
+        } else this.triggerLeases.delete(trigger);
+        while (this.triggerLeases.size > 20) this.triggerLeases.delete(this.triggerLeases.keys().next().value);
+      }
       this.hasChecklistCandidates = manifest.hasChecklists;
       this.checklist.setChecklist(manifest.checklists[0] ?? null);
       const experiences = manifest.experiences;
-      const candidates = [...experiences, ...this.queued ? [this.queued] : []].filter((item, index, all) => {
+      const candidates = experiences.filter((item, index, all) => {
         var _a2;
         return item.id !== ((_a2 = this.active) == null ? void 0 : _a2.experience.id) && item.id !== this.justFinishedId && !this.finishing.has(item.id) && all.findIndex((candidate) => candidate.id === item.id) === index;
       });
@@ -4738,7 +4862,7 @@ class ExperienceLoader {
       const stepId = isGuideDefinition(chosen.definition) && (stored == null ? void 0 : stored.experienceId) === chosen.id && stored.versionId === chosen.versionId ? stored.currentStepId : void 0;
       if (stepId && (stored == null ? void 0 : stored.launchContext) && stored.navigationAttempted && isGuideDefinition(chosen.definition)) {
         const step = chosen.definition.steps.find((item) => item.id === stepId);
-        const path = step && guideStepRequiresTarget(step) ? (_b = (_a = step.target) == null ? void 0 : _a.targetContext) == null ? void 0 : _b.pagePath : void 0;
+        const path = step && guideStepRequiresTarget(step) ? (_c = (_b = step.target) == null ? void 0 : _b.targetContext) == null ? void 0 : _c.pagePath : void 0;
         if (path && path !== currentPagePath()) {
           this.state.clearGuideProgress(chosen.id);
           this.checklist.setTransientActive(false);
@@ -4780,15 +4904,66 @@ class ExperienceLoader {
     void this.evaluate(name);
   }
   refreshChecklist() {
-    return this.hasChecklistCandidates ? this.evaluate() : Promise.resolve();
+    return this.evaluate();
   }
   hasActiveChecklist() {
     return this.hasChecklistCandidates || this.checklist.hasChecklist();
+  }
+  ownerKey() {
+    return JSON.stringify([this.siteId, this.session.getAnonymousId(), this.session.getIdentifiedUserId()]);
+  }
+  contextKey() {
+    return JSON.stringify([this.ownerKey(), this.session.getSessionId(), location.href]);
+  }
+  stateScope() {
+    return JSON.stringify([this.siteId, this.session.getIdentifiedUserId() ?? this.session.getAnonymousId()]);
+  }
+  /** First identification promotes anonymous guide continuation. Different
+   * accounts/logout never inherit active UI; persisted server progress is kept. */
+  resetContext(preserveAnonymousProgress = false) {
+    var _a;
+    const progress = preserveAnonymousProgress ? this.state.getGuideProgress() : null;
+    (_a = this.manifestAbort) == null ? void 0 : _a.abort();
+    this.requestGeneration++;
+    this.deliveryEpoch++;
+    for (const runtime of [this.active, this.pausedGuide]) if (runtime) runtime.invalidated = true;
+    this.renderer.destroy();
+    this.active = null;
+    this.pausedGuide = null;
+    this.queued = null;
+    this.triggerLeases.clear();
+    this.finishing.clear();
+    this.justFinishedId = null;
+    this.checklist.destroy();
+    this.checklist = new ChecklistManager(this.apiBase, this.siteId, this.session, (id, context) => this.launch(id, context));
+    this.hasChecklistCandidates = false;
+    this.owner = this.ownerKey();
+    this.context = this.contextKey();
+    this.state = new ExperienceStateStore(this.stateScope());
+    if (progress) this.state.setGuideProgress(progress);
+  }
+  syncContext() {
+    var _a;
+    if (this.owner !== this.ownerKey()) this.resetContext();
+    else if (this.context !== this.contextKey()) {
+      (_a = this.manifestAbort) == null ? void 0 : _a.abort();
+      this.requestGeneration++;
+      this.deliveryEpoch++;
+      this.triggerLeases.clear();
+      this.queued = null;
+      this.context = this.contextKey();
+    }
+  }
+  owns(runtime) {
+    return !this.destroyed && !runtime.invalidated && runtime.owner === this.ownerKey();
   }
   launchExperience(experienceId) {
     return this.launch(experienceId, { source: "api" });
   }
   destroy() {
+    var _a;
+    (_a = this.manifestAbort) == null ? void 0 : _a.abort();
+    this.requestGeneration++;
     this.destroyed = true;
     this.renderer.destroy();
     this.checklist.destroy();
@@ -4796,7 +4971,7 @@ class ExperienceLoader {
     this.pausedGuide = null;
     this.queued = null;
   }
-  async fetchExperiences(trigger) {
+  async fetchExperiences(trigger, signal) {
     const query = new URLSearchParams({ url: location.href, anonymousId: this.session.getAnonymousId(), sessionId: this.session.getSessionId() });
     const userId = this.session.getIdentifiedUserId();
     if (userId) query.set("trackedUserId", userId);
@@ -4806,7 +4981,7 @@ class ExperienceLoader {
       query.set("activeGuideId", stored.experienceId);
       query.set("activeGuideVersionId", stored.versionId);
     }
-    const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experiences?${query}`, { credentials: "omit" });
+    const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experiences?${query}`, { credentials: "omit", signal });
     if (!response.ok) return { experiences: [], checklists: [], hasChecklists: this.hasChecklistCandidates };
     const manifest = await response.json();
     return { experiences: Array.isArray(manifest.experiences) ? manifest.experiences : [], checklists: Array.isArray(manifest.checklists) ? manifest.checklists : [], hasChecklists: manifest.hasChecklists === true };
@@ -4814,11 +4989,15 @@ class ExperienceLoader {
   show(experience, requestedStepId, progress) {
     var _a, _b, _c;
     if (((_a = this.queued) == null ? void 0 : _a.id) === experience.id) this.queued = null;
+    for (const [name, lease] of this.triggerLeases) {
+      lease.ids.delete(experience.id);
+      if (!lease.ids.size) this.triggerLeases.delete(name);
+    }
     const definition = isGuideDefinition(experience.definition) ? experience.definition : null;
     const currentStepId = (definition == null ? void 0 : definition.steps.some((step) => step.id === requestedStepId)) ? requestedStepId : (_b = definition == null ? void 0 : definition.steps[0]) == null ? void 0 : _b.id;
     const impressionId = (progress == null ? void 0 : progress.impressionId) ?? experience.impressionId ?? null;
     const ids = (value) => new Set(Array.isArray(value) ? value.filter((id) => typeof id === "string").slice(0, 20) : []);
-    const runtime = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId || (progress == null ? void 0 : progress.shownRequested)), shownPromise: null, surveyResponseId: null, surveyResponsePromise: null, surveyResume: null, surveyAnswers: {}, stepStartedAt: null, visibleStepId: null, readyStepId: null, seenStepIds: ids(progress == null ? void 0 : progress.seenStepIds), completedStepIds: ids(progress == null ? void 0 : progress.completedStepIds), finished: false, stepEntryRoute: location.href, launchContext: (progress == null ? void 0 : progress.launchContext) ?? experience.launchContext };
+    const runtime = { identity: { anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId() }, owner: this.ownerKey(), invalidated: false, experience, currentStepId, impressionId, shownRequested: Boolean(impressionId || (progress == null ? void 0 : progress.shownRequested)), shownPromise: null, surveyResponseId: null, surveyResponsePromise: null, surveyResume: null, surveyAnswers: {}, stepStartedAt: null, visibleStepId: null, readyStepId: null, seenStepIds: ids(progress == null ? void 0 : progress.seenStepIds), completedStepIds: ids(progress == null ? void 0 : progress.completedStepIds), finished: false, stepEntryRoute: location.href, launchContext: (progress == null ? void 0 : progress.launchContext) ?? experience.launchContext };
     this.active = runtime;
     this.checklist.setTransientActive(((_c = runtime.launchContext) == null ? void 0 : _c.source) === "checklist");
     if (currentStepId) this.persistGuide(runtime, "active");
@@ -4831,7 +5010,10 @@ class ExperienceLoader {
   }
   callbacks(runtime) {
     const stepId = runtime.currentStepId;
-    const valid = () => this.active === runtime && !runtime.finished && runtime.currentStepId === stepId;
+    const valid = () => {
+      if (runtime.owner !== this.ownerKey()) this.syncContext();
+      return this.owns(runtime) && this.active === runtime && !runtime.finished && runtime.currentStepId === stepId;
+    };
     return {
       onVisible: () => {
         if (!valid()) return;
@@ -4873,23 +5055,26 @@ class ExperienceLoader {
         return saved;
       },
       onSurveyAnswersChange: (answers) => {
-        runtime.surveyAnswers = answers;
+        if (valid()) runtime.surveyAnswers = answers;
       },
       onSurveyProgress: async (answers, stepId2, direction, destinationStepId) => {
+        if (!valid()) return;
         await this.persistSurvey(runtime, answers, destinationStepId ?? stepId2);
+        if (!valid()) return;
         if (direction === "next" && !runtime.completedStepIds.has(stepId2)) {
           runtime.completedStepIds.add(stepId2);
           await this.post(runtime, "interaction", void 0, "survey_step_completed", { stepId: stepId2, stepIndex: this.surveyStepIndex(runtime, stepId2) });
         }
       },
       onSurveySubmit: async (answers, stepId2) => {
+        if (!valid()) return;
         await this.persistSurvey(runtime, answers, stepId2, "submitted");
         await this.finish(runtime, "completed", true);
       }
     };
   }
   shown(runtime) {
-    if (runtime.shownRequested) return;
+    if (!this.owns(runtime) || runtime.shownRequested) return;
     runtime.shownRequested = true;
     this.persistGuide(runtime, "active");
     this.state.markSeen(runtime.experience.id);
@@ -4911,9 +5096,9 @@ class ExperienceLoader {
     await this.post(runtime, "action", action, "widget_interacted");
   }
   async finish(runtime, event, surveyAlreadyPersisted = false) {
-    if (runtime.finished) return;
+    if (!this.owns(runtime) || runtime.finished) return;
     if (runtime.experience.widgetType === "survey" && event === "dismissed" && !surveyAlreadyPersisted) await this.persistSurvey(runtime, runtime.surveyAnswers, null, "abandoned");
-    if (runtime.finished) return;
+    if (!this.owns(runtime) || runtime.finished) return;
     runtime.finished = true;
     this.deliveryEpoch++;
     this.finishing.add(runtime.experience.id);
@@ -4924,9 +5109,11 @@ class ExperienceLoader {
     }
     if (runtime.currentStepId) this.state.clearGuideProgress(runtime.experience.id);
     await runtime.shownPromise;
+    if (!this.owns(runtime)) return;
     const guide = isGuideDefinition(runtime.experience.definition);
     const eventType = guide ? event === "completed" ? "guide_completed" : "guide_dismissed" : runtime.experience.widgetType === "survey" ? event === "completed" ? "survey_submitted" : "survey_abandoned" : event === "dismissed" ? "widget_dismissed" : "widget_interacted";
     await this.post(runtime, event, void 0, eventType, guide ? this.currentStepPayload(runtime, event === "dismissed") : void 0);
+    if (!this.owns(runtime)) return;
     this.justFinishedId = runtime.experience.id;
     this.finishing.delete(runtime.experience.id);
     this.checklist.setTransientActive(false);
@@ -5013,6 +5200,9 @@ class ExperienceLoader {
   async launch(experienceId, context) {
     var _a, _b;
     if (this.destroyed) return;
+    this.syncContext();
+    const contextKey = this.contextKey();
+    const epoch = this.deliveryEpoch;
     try {
       const userId = this.session.getIdentifiedUserId();
       const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experiences/${encodeURIComponent(experienceId)}/launch`, { method: "POST", credentials: "omit", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: location.href, anonymousId: this.session.getAnonymousId(), ...userId ? { trackedUserId: userId } : {}, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), timestamp: Date.now(), source: context.source, ...context.source === "checklist" ? { checklistExperienceId: context.checklistExperienceId, itemId: context.itemId } : {} }) });
@@ -5021,7 +5211,7 @@ class ExperienceLoader {
         return;
       }
       const experience = await response.json();
-      if (!isGuideDefinition(experience.definition)) return;
+      if (this.destroyed || epoch !== this.deliveryEpoch || contextKey !== this.contextKey() || !isGuideDefinition(experience.definition)) return;
       const first = experience.definition.steps[0];
       const targetPath = first && guideStepRequiresTarget(first) ? (_b = (_a = first.target) == null ? void 0 : _a.targetContext) == null ? void 0 : _b.pagePath : void 0;
       if (targetPath && targetPath !== currentPagePath()) {
@@ -5085,25 +5275,30 @@ class ExperienceLoader {
   }
   async post(runtime, event, action, eventType = "widget_interacted", detail) {
     const experience = runtime.experience;
+    if (!this.owns(runtime)) return null;
     try {
       if (event !== "shown" && runtime.shownPromise) await runtime.shownPromise;
+      if (!this.owns(runtime)) return null;
       const launchContext = runtime.launchContext ? runtime.launchContext.source === "checklist" ? { launchSource: "checklist", sourceExperienceId: runtime.launchContext.sourceExperienceId, sourceItemId: runtime.launchContext.sourceItemId } : { launchSource: "api" } : void 0;
-      const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: runtime.impressionId ?? void 0, event, eventType, timestamp: Date.now(), action, ...event === "shown" && launchContext ? { launchContext } : {}, ...detail }) });
+      const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, ...runtime.identity, impressionId: runtime.impressionId ?? void 0, event, eventType, timestamp: Date.now(), action, ...event === "shown" && launchContext ? { launchContext } : {}, ...detail }) });
       return response.ok && response.status !== 204 ? await response.json() : null;
     } catch {
       return null;
     }
   }
   async ensureSurveyResponse(runtime) {
+    if (!this.owns(runtime)) throw new Error("Experience context changed.");
     if (runtime.surveyResponseId && runtime.surveyResume) return runtime.surveyResume;
     if (runtime.surveyResponsePromise) return runtime.surveyResponsePromise;
     runtime.surveyResponsePromise = (async () => {
       if (!runtime.shownRequested) this.shown(runtime);
       await runtime.shownPromise;
+      if (!this.owns(runtime)) throw new Error("Experience context changed.");
       if (!runtime.impressionId) throw new Error("Survey could not be started. Please retry.");
       const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/survey-responses`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify(this.surveyIdentity(runtime)) });
       if (!response.ok) throw new Error("Survey could not be started. Please retry.");
       const body = await response.json();
+      if (!this.owns(runtime)) throw new Error("Experience context changed.");
       if (!body.responseId) throw new Error("Survey response was not created. Please retry.");
       runtime.surveyResponseId = body.responseId;
       runtime.surveyAnswers = body.answers ?? {};
@@ -5120,11 +5315,13 @@ class ExperienceLoader {
   async persistSurvey(runtime, answers, currentStepId, state) {
     runtime.surveyAnswers = { ...answers };
     await this.ensureSurveyResponse(runtime);
+    if (!this.owns(runtime)) return;
     const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/survey-responses/${encodeURIComponent(runtime.surveyResponseId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ ...this.surveyIdentity(runtime), currentStepId, answers, ...state === "submitted" ? { submitted: true } : {}, ...state === "abandoned" ? { abandoned: true } : {} }) });
     if (!response.ok) throw new Error("Couldn't save your answers. Please retry.");
   }
   surveyIdentity(runtime) {
-    return { experienceId: runtime.experience.id, versionId: runtime.experience.versionId, impressionId: runtime.impressionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId() };
+    const { pageViewId: _pageViewId, ...identity } = runtime.identity;
+    return { experienceId: runtime.experience.id, versionId: runtime.experience.versionId, impressionId: runtime.impressionId, ...identity };
   }
 }
 function currentPagePath() {
@@ -5135,7 +5332,7 @@ const bundledRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-BqWyDNd4.js");
+    const { EditorModeController } = await import("./EditorModeController-BMakg3JQ.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -5189,4 +5386,4 @@ export {
   storeEditorContinuation as v,
   createAnalytics as w
 };
-//# sourceMappingURL=module-X0WXeuqG.js.map
+//# sourceMappingURL=module-DhRMqJBO.js.map

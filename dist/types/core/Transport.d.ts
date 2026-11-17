@@ -2,6 +2,7 @@ import type { AnalyticsEvent, AnyPayload, CrawledElement } from "../types/events
 export interface TransportResult {
     ok: boolean;
     retryable: boolean;
+    acknowledgedEventIds?: string[];
 }
 /**
  * Sole owner of network I/O. Collectors and the queue never call fetch()
@@ -20,15 +21,9 @@ export interface TransportResult {
  * (see SessionReplayEventPayload) and belong on a different endpoint.
  * Both are split and grouped here before anything goes over the wire.
  *
- * Known limitation: Batcher retries a failed flush by requeuing the
- * *entire* original batch (see Batcher.flush). If this batch fanned out
- * into multiple destination requests and only some of them failed, a
- * retry will resend the ones that already succeeded. This is an
- * at-least-once delivery tradeoff, same class of risk every fire-and-
- * forget analytics pipeline accepts - true exactly-once would need
- * per-destination retry bookkeeping in the queue itself, which is a
- * larger change than this pass makes. The backend is the right place to
- * dedupe if this ever matters in practice (e.g. an idempotency key).
+ * Successful destinations are acknowledged separately when a batch has partial
+ * failures. Batcher retries only unacknowledged events, so an unrelated failed
+ * destination cannot suppress a committed identity refresh or replay its trigger.
  */
 export declare class Transport {
     private apiBase;

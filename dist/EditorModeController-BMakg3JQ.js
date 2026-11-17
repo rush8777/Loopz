@@ -1,4 +1,4 @@
-import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as clearEditorContinuation, p as isChecklistDefinition, q as isGuideDefinition, r as guideInteractionTarget, t as matchesGuideRoute, u as findTarget, v as storeEditorContinuation } from "./module-X0WXeuqG.js";
+import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as clearEditorContinuation, p as isChecklistDefinition, q as isGuideDefinition, r as guideInteractionTarget, t as matchesGuideRoute, u as findTarget, v as storeEditorContinuation } from "./module-DhRMqJBO.js";
 function panelIcon(name) {
   const paths = {
     properties: '<path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
@@ -12491,4 +12491,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-BqWyDNd4.js.map
+//# sourceMappingURL=EditorModeController-BMakg3JQ.js.map

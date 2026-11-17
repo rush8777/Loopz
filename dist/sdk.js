@@ -1186,6 +1186,8 @@
     }
     /** Allow identify() to bind a known user id to the anonymous id (kept locally only). */
     identify(userId) {
+      const previous = this.getIdentifiedUserId();
+      if (previous && previous !== userId) this.reset();
       localStore.set(ANON_ID_KEY, this.anonymousId);
       sessionStore.set("__aa_identified_user__", userId);
     }
@@ -1486,16 +1488,21 @@
       if (!this.apiBase || events.length === 0) return { ok: true, retryable: false };
       const { standardGroups, replayGroups } = partition(events);
       const results = [];
+      const acknowledgedEventIds = [];
       for (const [sessionId, group] of standardGroups) {
-        results.push(await this.postJson(this.eventsUrl(), { sessionId, events: group }));
+        const result = await this.postJson(this.eventsUrl(), { sessionId, events: group });
+        results.push(result);
+        if (result.ok) acknowledgedEventIds.push(...events.filter((event) => event.sessionId === sessionId && event.type !== "session_replay_event").map((event) => event.eventId));
       }
       for (const [sessionId, group] of replayGroups) {
-        results.push(await this.postJson(this.replayUrl(), { sessionId, events: group }));
+        const result = await this.postJson(this.replayUrl(), { sessionId, events: group });
+        results.push(result);
+        if (result.ok) acknowledgedEventIds.push(...events.filter((event) => event.sessionId === sessionId && event.type === "session_replay_event").map((event) => event.eventId));
       }
       if (results.length === 0) return { ok: true, retryable: false };
       const ok = results.every((r) => r.ok);
       const retryable = !ok && results.some((r) => r.retryable);
-      return { ok, retryable };
+      return { ok, retryable, ...!ok && acknowledgedEventIds.length ? { acknowledgedEventIds } : {} };
     }
     async postJson(url, body) {
       const payload = JSON.stringify(body);
@@ -1574,16 +1581,19 @@
     return { standardGroups, replayGroups };
   }
   class Batcher {
-    constructor(queue, transport, config, log = () => void 0) {
+    constructor(queue, transport, config, log = () => void 0, onDelivered = () => void 0) {
       this.queue = queue;
       this.transport = transport;
       this.config = config;
       this.log = log;
+      this.onDelivered = onDelivered;
       this.timer = null;
       this.retryCount = 0;
       this.flushing = false;
       this.flushPromise = null;
       this.stopped = false;
+      this.retryAfter = 0;
+      this.retryTimer = null;
     }
     start() {
       this.stopped = false;
@@ -1593,6 +1603,8 @@
       this.stopped = true;
       if (this.timer) clearTimeout(this.timer);
       this.timer = null;
+      if (this.retryTimer) clearTimeout(this.retryTimer);
+      this.retryTimer = null;
     }
     enqueue(event) {
       this.queue.push(event);
@@ -1610,6 +1622,13 @@
     async flush() {
       if (this.flushPromise) return this.flushPromise;
       if (this.stopped) return;
+      if (Date.now() < this.retryAfter) {
+        if (!this.retryTimer) this.retryTimer = setTimeout(() => {
+          this.retryTimer = null;
+          void this.flush();
+        }, this.retryAfter - Date.now());
+        return;
+      }
       if (this.queue.isEmpty()) {
         this.scheduleTimer();
         return;
@@ -1622,6 +1641,7 @@
     /** Flush every event queued before/during this call and wait for transport completion. */
     async flushAndWait() {
       while (!this.stopped) {
+        if (Date.now() < this.retryAfter) await new Promise((resolve) => setTimeout(resolve, this.retryAfter - Date.now()));
         if (this.flushPromise) await this.flushPromise;
         else if (!this.queue.isEmpty()) await this.flush();
         else return;
@@ -1632,16 +1652,32 @@
       const batch = this.queue.takeBatch(this.config.maxBatchSize);
       try {
         const result = await this.transport.send(batch);
+        const acknowledged = new Set(result.acknowledgedEventIds ?? []);
+        const delivered = result.ok ? batch : batch.filter((event) => acknowledged.has(event.eventId));
+        const pending = batch.filter((event) => !acknowledged.has(event.eventId));
+        if (delivered.length) {
+          try {
+            this.onDelivered(delivered);
+          } catch {
+          }
+        }
         if (result.ok) {
           this.retryCount = 0;
+          this.retryAfter = 0;
           this.log(`[Analytics] batch flushed (${batch.length} events)`);
-        } else if (result.retryable && this.retryCount < this.config.maxRetries) {
+        } else if (pending.length && result.retryable && this.retryCount < this.config.maxRetries) {
           this.retryCount += 1;
           const delay = this.config.retryBaseDelayMs * Math.pow(2, this.retryCount - 1);
-          this.queue.requeueFront(batch);
+          this.queue.requeueFront(pending);
           this.log(`[Analytics] flush failed, retrying in ${delay}ms (attempt ${this.retryCount})`);
-          setTimeout(() => void this.flush(), delay);
+          this.retryAfter = Date.now() + delay;
+          this.retryTimer = setTimeout(() => {
+            this.retryTimer = null;
+            void this.flush();
+          }, delay);
         } else {
+          this.retryCount = 0;
+          this.retryAfter = 0;
           this.log(`[Analytics] batch dropped after failed send (${batch.length} events)`);
         }
       } catch (err) {
@@ -1681,7 +1717,7 @@
       browserName: browser == null ? void 0 : browser.name,
       browserVersion: browser == null ? void 0 : browser.version,
       osName: os == null ? void 0 : os.name,
-      osVersion: os == null ? void 0 : os.version,
+      osVersion: (os == null ? void 0 : os.version) || void 0,
       deviceType: parseDeviceType(ua),
       language: safeLanguage(),
       timezone: safeTimezone(),
@@ -2241,6 +2277,10 @@
       this.activityMonitor = null;
       this.experiences = null;
       this.pendingExperienceLaunches = [];
+      this.deliveryRefreshPending = false;
+      this.deliveryRefreshRunning = false;
+      this.deliveredTriggers = /* @__PURE__ */ new Set();
+      this.deliveryIdentityGeneration = 0;
       this.editor = null;
       this.editorMode = false;
       this.editorAttempted = false;
@@ -2279,7 +2319,8 @@
         this.queue,
         this.transport,
         this.config.queue,
-        (msg, ...args) => this.log(msg, ...args)
+        (msg, ...args) => this.log(msg, ...args),
+        (events) => this.onEventsDelivered(events)
       );
       this.engine = new AutoCaptureEngine(this.config);
       this.activityMonitor = new SessionActivityMonitor(this.session);
@@ -2329,6 +2370,8 @@
       (_c = this.experiences) == null ? void 0 : _c.destroy();
       this.experiences = null;
       this.pendingExperienceLaunches = [];
+      this.deliveryRefreshPending = false;
+      this.deliveredTriggers.clear();
       this.heatmaps = null;
       this.activityMonitor = null;
       (_d = this.editor) == null ? void 0 : _d.destroy();
@@ -2345,12 +2388,18 @@
       this.enqueueEvent("custom", payload);
       this.engine.funnel.onCustomEvent(name);
       (_a = this.experiences) == null ? void 0 : _a.onCustomEvent(name);
-      void this.refreshExperiencesAfterFlush();
       this.log(`event: ${name}`, properties);
     }
     identify(userId, attributes) {
+      var _a, _b;
       if (!this.requireInit()) return;
+      const previous = this.session.getIdentifiedUserId();
       this.session.identify(userId);
+      if (previous !== userId) {
+        this.deliveryIdentityGeneration++;
+        this.deliveredTriggers.clear();
+        (_b = (_a = this.experiences) == null ? void 0 : _a.resetContext) == null ? void 0 : _b.call(_a, previous === null);
+      }
       const payload = { userId, traits: attributes };
       this.enqueueEvent("identify", payload);
       void this.refreshExperiencesAfterFlush();
@@ -2358,9 +2407,15 @@
     }
     /** Clear the active identity and begin future activity as a new visitor. */
     reset() {
+      var _a, _b;
       if (!this.requireInit()) return;
       this.session.reset();
+      this.deliveryIdentityGeneration++;
+      this.deliveredTriggers.clear();
+      this.pendingExperienceLaunches = [];
+      (_b = (_a = this.experiences) == null ? void 0 : _a.resetContext) == null ? void 0 : _b.call(_a);
       this.trackPageView();
+      void this.refreshExperiencesAfterFlush();
       this.log("identity reset");
     }
     page() {
@@ -2443,7 +2498,7 @@
         );
         await this.experiences.evaluate();
         for (const id of this.pendingExperienceLaunches.splice(0)) void ((_b = (_a = this.experiences).launchExperience) == null ? void 0 : _b.call(_a, id));
-        void this.refreshExperiencesAfterFlush();
+        void this.drainDeliveryRefresh();
       } catch {
       }
     }
@@ -2534,10 +2589,42 @@
       this.buildAndEnqueue(type, payload);
     }
     async refreshExperiencesAfterFlush() {
-      var _a, _b, _c, _d;
-      if (!this.experiences || !this.batcher || !((_b = (_a = this.experiences).hasActiveChecklist) == null ? void 0 : _b.call(_a))) return;
-      await this.batcher.flushAndWait();
-      await ((_d = (_c = this.experiences) == null ? void 0 : _c.refreshChecklist) == null ? void 0 : _d.call(_c));
+      if (this.batcher && this.config.experiences.enabled) await this.batcher.flush();
+    }
+    onEventsDelivered(events) {
+      if (!this.initialized || !this.config.experiences.enabled) return;
+      for (const event of events) {
+        if (event.anonymousId !== this.session.getAnonymousId() || event.sessionId !== this.session.getSessionId()) continue;
+        if (event.type === "custom" && event.page.url === location.href && event.pageViewId === this.session.getPageViewId() && Date.now() - event.timestamp <= 3e4) {
+          this.deliveredTriggers.add(event.payload.name);
+          while (this.deliveredTriggers.size > 20) this.deliveredTriggers.delete(this.deliveredTriggers.values().next().value);
+        }
+        if (["identify", "custom", "page_view", "session_start"].includes(event.type)) this.deliveryRefreshPending = true;
+      }
+      void this.drainDeliveryRefresh();
+    }
+    async drainDeliveryRefresh() {
+      var _a;
+      if (this.deliveryRefreshRunning || !this.experiences) return;
+      const generation = this.generation;
+      this.deliveryRefreshRunning = true;
+      try {
+        while (this.initialized && generation === this.generation && this.experiences && this.deliveryRefreshPending) {
+          this.deliveryRefreshPending = false;
+          const identityGeneration = this.deliveryIdentityGeneration;
+          const triggers = [...this.deliveredTriggers];
+          this.deliveredTriggers.clear();
+          await this.experiences.evaluate();
+          for (const trigger of triggers) {
+            if (generation !== this.generation || identityGeneration !== this.deliveryIdentityGeneration || !this.initialized) break;
+            await ((_a = this.experiences) == null ? void 0 : _a.evaluate(trigger));
+          }
+        }
+      } catch {
+      } finally {
+        this.deliveryRefreshRunning = false;
+        if (generation !== this.generation && this.deliveryRefreshPending) void this.drainDeliveryRefresh();
+      }
     }
     buildAndEnqueue(type, payload) {
       const event = {

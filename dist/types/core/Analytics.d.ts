@@ -20,6 +20,10 @@ export declare class Analytics {
     private activityMonitor;
     private experiences;
     private pendingExperienceLaunches;
+    private deliveryRefreshPending;
+    private deliveryRefreshRunning;
+    private deliveredTriggers;
+    private deliveryIdentityGeneration;
     private editor;
     private editorMode;
     private editorAttempted;
@@ -52,6 +56,8 @@ export declare class Analytics {
     private onRouteChange;
     private enqueueEvent;
     private refreshExperiencesAfterFlush;
+    private onEventsDelivered;
+    private drainDeliveryRefresh;
     private buildAndEnqueue;
     /** Called by bootstrap on visibilitychange/pagehide for unload-safe delivery. */
     flushOnUnload(): void;

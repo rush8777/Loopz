@@ -17,12 +17,25 @@ export declare class ExperienceLoader {
     private lastRoute;
     private deliveryEpoch;
     private finishing;
+    private requestGeneration;
+    private manifestAbort;
+    private owner;
+    private context;
+    private triggerLeases;
     constructor(apiBase: string, siteId: string, session: ExperienceSession, trackEvent?: ((name: string) => void) | undefined);
     evaluate(trigger?: string): Promise<void>;
     onRouteChange(): void;
     onCustomEvent(name: string): void;
     refreshChecklist(): Promise<void>;
     hasActiveChecklist(): boolean;
+    private ownerKey;
+    private contextKey;
+    private stateScope;
+    /** First identification promotes anonymous guide continuation. Different
+     * accounts/logout never inherit active UI; persisted server progress is kept. */
+    resetContext(preserveAnonymousProgress?: boolean): void;
+    private syncContext;
+    private owns;
     launchExperience(experienceId: string): Promise<void>;
     destroy(): void;
     private fetchExperiences;

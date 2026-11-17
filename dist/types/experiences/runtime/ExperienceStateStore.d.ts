@@ -18,6 +18,9 @@ export interface GuideProgress {
     routePath?: string;
 }
 export declare class ExperienceStateStore {
+    private scope;
+    constructor(scope?: string);
+    private key;
     hasEver(id: string): boolean;
     hasInSession(id: string): boolean;
     markSeen(id: string): void;

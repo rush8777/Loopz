@@ -1754,40 +1754,46 @@ ${ISOLATION_CSS}`;
     }
   }
   class ExperienceStateStore {
+    constructor(scope = "") {
+      this.scope = scope;
+    }
+    key(base) {
+      return this.scope ? `${base}:${this.scope}` : base;
+    }
     hasEver(id) {
-      return read(localStorage, ONCE_KEY).has(id);
+      return read(localStorage, this.key(ONCE_KEY)).has(id);
     }
     hasInSession(id) {
-      return read(sessionStorage, SESSION_KEY).has(id);
+      return read(sessionStorage, this.key(SESSION_KEY)).has(id);
     }
     markSeen(id) {
       for (const [storage, key] of [[localStorage, ONCE_KEY], [sessionStorage, SESSION_KEY]]) {
-        const values = read(storage, key);
+        const values = read(storage, this.key(key));
         values.add(id);
         try {
-          storage.setItem(key, JSON.stringify([...values]));
+          storage.setItem(this.key(key), JSON.stringify([...values]));
         } catch {
         }
       }
     }
     getGuideProgress() {
       try {
-        const value = JSON.parse(sessionStorage.getItem(GUIDE_KEY) ?? "null");
-        return value && typeof value.experienceId === "string" && typeof value.versionId === "string" && typeof value.currentStepId === "string" && (value.status === "active" || value.status === "paused") && (value.impressionId === void 0 || typeof value.impressionId === "string") ? value : null;
+        const value = JSON.parse(sessionStorage.getItem(this.key(GUIDE_KEY)) ?? "null");
+        return value && (value.ownerScope ?? "") === this.scope && typeof value.experienceId === "string" && typeof value.versionId === "string" && typeof value.currentStepId === "string" && (value.status === "active" || value.status === "paused") && (value.impressionId === void 0 || typeof value.impressionId === "string") ? value : null;
       } catch {
         return null;
       }
     }
     setGuideProgress(progress) {
       try {
-        sessionStorage.setItem(GUIDE_KEY, JSON.stringify(progress));
+        sessionStorage.setItem(this.key(GUIDE_KEY), JSON.stringify({ ...progress, ownerScope: this.scope }));
       } catch {
       }
     }
     clearGuideProgress(experienceId) {
       var _a;
       try {
-        if (!experienceId || ((_a = this.getGuideProgress()) == null ? void 0 : _a.experienceId) === experienceId) sessionStorage.removeItem(GUIDE_KEY);
+        if (!experienceId || ((_a = this.getGuideProgress()) == null ? void 0 : _a.experienceId) === experienceId) sessionStorage.removeItem(this.key(GUIDE_KEY));
       } catch {
       }
     }
@@ -2069,19 +2075,50 @@ ${ISOLATION_CSS}`;
       this.lastRoute = location.href;
       this.deliveryEpoch = 0;
       this.finishing = /* @__PURE__ */ new Set();
+      this.requestGeneration = 0;
+      this.manifestAbort = null;
+      this.owner = "";
+      this.context = "";
+      this.triggerLeases = /* @__PURE__ */ new Map();
       this.checklist = new ChecklistManager(apiBase, siteId, session, (id, context) => this.launch(id, context));
+      this.owner = this.ownerKey();
+      this.context = this.contextKey();
+      this.state = new ExperienceStateStore(this.stateScope());
     }
     async evaluate(trigger) {
-      var _a, _b;
+      var _a, _b, _c;
       if (this.destroyed) return;
+      this.syncContext();
       const epoch = this.deliveryEpoch;
+      const request = ++this.requestGeneration;
+      const context = this.contextKey();
+      (_a = this.manifestAbort) == null ? void 0 : _a.abort();
+      const abort = this.manifestAbort = new AbortController();
       try {
-        const manifest = await this.fetchExperiences(trigger);
-        if (this.destroyed || epoch !== this.deliveryEpoch) return;
+        for (const [name, lease] of this.triggerLeases) if (lease.expiresAt <= Date.now()) this.triggerLeases.delete(name);
+        const manifest = await this.fetchExperiences(trigger, abort.signal);
+        if (!trigger) {
+          for (const [name, lease] of this.triggerLeases) {
+            const eventManifest = await this.fetchExperiences(name, abort.signal);
+            manifest.experiences.push(...eventManifest.experiences.filter((item) => lease.ids.has(item.id)));
+          }
+        }
+        if (this.destroyed || epoch !== this.deliveryEpoch || request !== this.requestGeneration || context !== this.contextKey()) return;
+        if (trigger) {
+          const ids = new Set(manifest.experiences.filter((item) => {
+            var _a2;
+            return item.id !== ((_a2 = this.active) == null ? void 0 : _a2.experience.id);
+          }).map((item) => item.id));
+          if (ids.size) {
+            this.triggerLeases.delete(trigger);
+            this.triggerLeases.set(trigger, { ids, expiresAt: Date.now() + 3e4 });
+          } else this.triggerLeases.delete(trigger);
+          while (this.triggerLeases.size > 20) this.triggerLeases.delete(this.triggerLeases.keys().next().value);
+        }
         this.hasChecklistCandidates = manifest.hasChecklists;
         this.checklist.setChecklist(manifest.checklists[0] ?? null);
         const experiences = manifest.experiences;
-        const candidates = [...experiences, ...this.queued ? [this.queued] : []].filter((item, index, all) => {
+        const candidates = experiences.filter((item, index, all) => {
           var _a2;
           return item.id !== ((_a2 = this.active) == null ? void 0 : _a2.experience.id) && item.id !== this.justFinishedId && !this.finishing.has(item.id) && all.findIndex((candidate) => candidate.id === item.id) === index;
         });
@@ -2105,7 +2142,7 @@ ${ISOLATION_CSS}`;
         const stepId = isGuideDefinition(chosen.definition) && (stored == null ? void 0 : stored.experienceId) === chosen.id && stored.versionId === chosen.versionId ? stored.currentStepId : void 0;
         if (stepId && (stored == null ? void 0 : stored.launchContext) && stored.navigationAttempted && isGuideDefinition(chosen.definition)) {
           const step = chosen.definition.steps.find((item) => item.id === stepId);
-          const path = step && guideStepRequiresTarget(step) ? (_b = (_a = step.target) == null ? void 0 : _a.targetContext) == null ? void 0 : _b.pagePath : void 0;
+          const path = step && guideStepRequiresTarget(step) ? (_c = (_b = step.target) == null ? void 0 : _b.targetContext) == null ? void 0 : _c.pagePath : void 0;
           if (path && path !== currentPagePath()) {
             this.state.clearGuideProgress(chosen.id);
             this.checklist.setTransientActive(false);
@@ -2147,15 +2184,66 @@ ${ISOLATION_CSS}`;
       void this.evaluate(name);
     }
     refreshChecklist() {
-      return this.hasChecklistCandidates ? this.evaluate() : Promise.resolve();
+      return this.evaluate();
     }
     hasActiveChecklist() {
       return this.hasChecklistCandidates || this.checklist.hasChecklist();
+    }
+    ownerKey() {
+      return JSON.stringify([this.siteId, this.session.getAnonymousId(), this.session.getIdentifiedUserId()]);
+    }
+    contextKey() {
+      return JSON.stringify([this.ownerKey(), this.session.getSessionId(), location.href]);
+    }
+    stateScope() {
+      return JSON.stringify([this.siteId, this.session.getIdentifiedUserId() ?? this.session.getAnonymousId()]);
+    }
+    /** First identification promotes anonymous guide continuation. Different
+     * accounts/logout never inherit active UI; persisted server progress is kept. */
+    resetContext(preserveAnonymousProgress = false) {
+      var _a;
+      const progress = preserveAnonymousProgress ? this.state.getGuideProgress() : null;
+      (_a = this.manifestAbort) == null ? void 0 : _a.abort();
+      this.requestGeneration++;
+      this.deliveryEpoch++;
+      for (const runtime2 of [this.active, this.pausedGuide]) if (runtime2) runtime2.invalidated = true;
+      this.renderer.destroy();
+      this.active = null;
+      this.pausedGuide = null;
+      this.queued = null;
+      this.triggerLeases.clear();
+      this.finishing.clear();
+      this.justFinishedId = null;
+      this.checklist.destroy();
+      this.checklist = new ChecklistManager(this.apiBase, this.siteId, this.session, (id, context) => this.launch(id, context));
+      this.hasChecklistCandidates = false;
+      this.owner = this.ownerKey();
+      this.context = this.contextKey();
+      this.state = new ExperienceStateStore(this.stateScope());
+      if (progress) this.state.setGuideProgress(progress);
+    }
+    syncContext() {
+      var _a;
+      if (this.owner !== this.ownerKey()) this.resetContext();
+      else if (this.context !== this.contextKey()) {
+        (_a = this.manifestAbort) == null ? void 0 : _a.abort();
+        this.requestGeneration++;
+        this.deliveryEpoch++;
+        this.triggerLeases.clear();
+        this.queued = null;
+        this.context = this.contextKey();
+      }
+    }
+    owns(runtime2) {
+      return !this.destroyed && !runtime2.invalidated && runtime2.owner === this.ownerKey();
     }
     launchExperience(experienceId) {
       return this.launch(experienceId, { source: "api" });
     }
     destroy() {
+      var _a;
+      (_a = this.manifestAbort) == null ? void 0 : _a.abort();
+      this.requestGeneration++;
       this.destroyed = true;
       this.renderer.destroy();
       this.checklist.destroy();
@@ -2163,7 +2251,7 @@ ${ISOLATION_CSS}`;
       this.pausedGuide = null;
       this.queued = null;
     }
-    async fetchExperiences(trigger) {
+    async fetchExperiences(trigger, signal) {
       const query = new URLSearchParams({ url: location.href, anonymousId: this.session.getAnonymousId(), sessionId: this.session.getSessionId() });
       const userId = this.session.getIdentifiedUserId();
       if (userId) query.set("trackedUserId", userId);
@@ -2173,7 +2261,7 @@ ${ISOLATION_CSS}`;
         query.set("activeGuideId", stored.experienceId);
         query.set("activeGuideVersionId", stored.versionId);
       }
-      const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experiences?${query}`, { credentials: "omit" });
+      const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experiences?${query}`, { credentials: "omit", signal });
       if (!response.ok) return { experiences: [], checklists: [], hasChecklists: this.hasChecklistCandidates };
       const manifest = await response.json();
       return { experiences: Array.isArray(manifest.experiences) ? manifest.experiences : [], checklists: Array.isArray(manifest.checklists) ? manifest.checklists : [], hasChecklists: manifest.hasChecklists === true };
@@ -2181,11 +2269,15 @@ ${ISOLATION_CSS}`;
     show(experience, requestedStepId, progress) {
       var _a, _b, _c;
       if (((_a = this.queued) == null ? void 0 : _a.id) === experience.id) this.queued = null;
+      for (const [name, lease] of this.triggerLeases) {
+        lease.ids.delete(experience.id);
+        if (!lease.ids.size) this.triggerLeases.delete(name);
+      }
       const definition = isGuideDefinition(experience.definition) ? experience.definition : null;
       const currentStepId = (definition == null ? void 0 : definition.steps.some((step) => step.id === requestedStepId)) ? requestedStepId : (_b = definition == null ? void 0 : definition.steps[0]) == null ? void 0 : _b.id;
       const impressionId = (progress == null ? void 0 : progress.impressionId) ?? experience.impressionId ?? null;
       const ids = (value) => new Set(Array.isArray(value) ? value.filter((id) => typeof id === "string").slice(0, 20) : []);
-      const runtime2 = { experience, currentStepId, impressionId, shownRequested: Boolean(impressionId || (progress == null ? void 0 : progress.shownRequested)), shownPromise: null, surveyResponseId: null, surveyResponsePromise: null, surveyResume: null, surveyAnswers: {}, stepStartedAt: null, visibleStepId: null, readyStepId: null, seenStepIds: ids(progress == null ? void 0 : progress.seenStepIds), completedStepIds: ids(progress == null ? void 0 : progress.completedStepIds), finished: false, stepEntryRoute: location.href, launchContext: (progress == null ? void 0 : progress.launchContext) ?? experience.launchContext };
+      const runtime2 = { identity: { anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId() }, owner: this.ownerKey(), invalidated: false, experience, currentStepId, impressionId, shownRequested: Boolean(impressionId || (progress == null ? void 0 : progress.shownRequested)), shownPromise: null, surveyResponseId: null, surveyResponsePromise: null, surveyResume: null, surveyAnswers: {}, stepStartedAt: null, visibleStepId: null, readyStepId: null, seenStepIds: ids(progress == null ? void 0 : progress.seenStepIds), completedStepIds: ids(progress == null ? void 0 : progress.completedStepIds), finished: false, stepEntryRoute: location.href, launchContext: (progress == null ? void 0 : progress.launchContext) ?? experience.launchContext };
       this.active = runtime2;
       this.checklist.setTransientActive(((_c = runtime2.launchContext) == null ? void 0 : _c.source) === "checklist");
       if (currentStepId) this.persistGuide(runtime2, "active");
@@ -2198,7 +2290,10 @@ ${ISOLATION_CSS}`;
     }
     callbacks(runtime2) {
       const stepId = runtime2.currentStepId;
-      const valid = () => this.active === runtime2 && !runtime2.finished && runtime2.currentStepId === stepId;
+      const valid = () => {
+        if (runtime2.owner !== this.ownerKey()) this.syncContext();
+        return this.owns(runtime2) && this.active === runtime2 && !runtime2.finished && runtime2.currentStepId === stepId;
+      };
       return {
         onVisible: () => {
           if (!valid()) return;
@@ -2240,23 +2335,26 @@ ${ISOLATION_CSS}`;
           return saved;
         },
         onSurveyAnswersChange: (answers) => {
-          runtime2.surveyAnswers = answers;
+          if (valid()) runtime2.surveyAnswers = answers;
         },
         onSurveyProgress: async (answers, stepId2, direction, destinationStepId) => {
+          if (!valid()) return;
           await this.persistSurvey(runtime2, answers, destinationStepId ?? stepId2);
+          if (!valid()) return;
           if (direction === "next" && !runtime2.completedStepIds.has(stepId2)) {
             runtime2.completedStepIds.add(stepId2);
             await this.post(runtime2, "interaction", void 0, "survey_step_completed", { stepId: stepId2, stepIndex: this.surveyStepIndex(runtime2, stepId2) });
           }
         },
         onSurveySubmit: async (answers, stepId2) => {
+          if (!valid()) return;
           await this.persistSurvey(runtime2, answers, stepId2, "submitted");
           await this.finish(runtime2, "completed", true);
         }
       };
     }
     shown(runtime2) {
-      if (runtime2.shownRequested) return;
+      if (!this.owns(runtime2) || runtime2.shownRequested) return;
       runtime2.shownRequested = true;
       this.persistGuide(runtime2, "active");
       this.state.markSeen(runtime2.experience.id);
@@ -2278,9 +2376,9 @@ ${ISOLATION_CSS}`;
       await this.post(runtime2, "action", action, "widget_interacted");
     }
     async finish(runtime2, event, surveyAlreadyPersisted = false) {
-      if (runtime2.finished) return;
+      if (!this.owns(runtime2) || runtime2.finished) return;
       if (runtime2.experience.widgetType === "survey" && event === "dismissed" && !surveyAlreadyPersisted) await this.persistSurvey(runtime2, runtime2.surveyAnswers, null, "abandoned");
-      if (runtime2.finished) return;
+      if (!this.owns(runtime2) || runtime2.finished) return;
       runtime2.finished = true;
       this.deliveryEpoch++;
       this.finishing.add(runtime2.experience.id);
@@ -2291,9 +2389,11 @@ ${ISOLATION_CSS}`;
       }
       if (runtime2.currentStepId) this.state.clearGuideProgress(runtime2.experience.id);
       await runtime2.shownPromise;
+      if (!this.owns(runtime2)) return;
       const guide = isGuideDefinition(runtime2.experience.definition);
       const eventType = guide ? event === "completed" ? "guide_completed" : "guide_dismissed" : runtime2.experience.widgetType === "survey" ? event === "completed" ? "survey_submitted" : "survey_abandoned" : event === "dismissed" ? "widget_dismissed" : "widget_interacted";
       await this.post(runtime2, event, void 0, eventType, guide ? this.currentStepPayload(runtime2, event === "dismissed") : void 0);
+      if (!this.owns(runtime2)) return;
       this.justFinishedId = runtime2.experience.id;
       this.finishing.delete(runtime2.experience.id);
       this.checklist.setTransientActive(false);
@@ -2380,6 +2480,9 @@ ${ISOLATION_CSS}`;
     async launch(experienceId, context) {
       var _a, _b;
       if (this.destroyed) return;
+      this.syncContext();
+      const contextKey = this.contextKey();
+      const epoch = this.deliveryEpoch;
       try {
         const userId = this.session.getIdentifiedUserId();
         const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experiences/${encodeURIComponent(experienceId)}/launch`, { method: "POST", credentials: "omit", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: location.href, anonymousId: this.session.getAnonymousId(), ...userId ? { trackedUserId: userId } : {}, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), timestamp: Date.now(), source: context.source, ...context.source === "checklist" ? { checklistExperienceId: context.checklistExperienceId, itemId: context.itemId } : {} }) });
@@ -2388,7 +2491,7 @@ ${ISOLATION_CSS}`;
           return;
         }
         const experience = await response.json();
-        if (!isGuideDefinition(experience.definition)) return;
+        if (this.destroyed || epoch !== this.deliveryEpoch || contextKey !== this.contextKey() || !isGuideDefinition(experience.definition)) return;
         const first = experience.definition.steps[0];
         const targetPath = first && guideStepRequiresTarget(first) ? (_b = (_a = first.target) == null ? void 0 : _a.targetContext) == null ? void 0 : _b.pagePath : void 0;
         if (targetPath && targetPath !== currentPagePath()) {
@@ -2452,25 +2555,30 @@ ${ISOLATION_CSS}`;
     }
     async post(runtime2, event, action, eventType = "widget_interacted", detail) {
       const experience = runtime2.experience;
+      if (!this.owns(runtime2)) return null;
       try {
         if (event !== "shown" && runtime2.shownPromise) await runtime2.shownPromise;
+        if (!this.owns(runtime2)) return null;
         const launchContext = runtime2.launchContext ? runtime2.launchContext.source === "checklist" ? { launchSource: "checklist", sourceExperienceId: runtime2.launchContext.sourceExperienceId, sourceItemId: runtime2.launchContext.sourceItemId } : { launchSource: "api" } : void 0;
-        const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId(), pageViewId: this.session.getPageViewId(), impressionId: runtime2.impressionId ?? void 0, event, eventType, timestamp: Date.now(), action, ...event === "shown" && launchContext ? { launchContext } : {}, ...detail }) });
+        const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experience-events`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ experienceId: experience.id, versionId: experience.versionId, ...runtime2.identity, impressionId: runtime2.impressionId ?? void 0, event, eventType, timestamp: Date.now(), action, ...event === "shown" && launchContext ? { launchContext } : {}, ...detail }) });
         return response.ok && response.status !== 204 ? await response.json() : null;
       } catch {
         return null;
       }
     }
     async ensureSurveyResponse(runtime2) {
+      if (!this.owns(runtime2)) throw new Error("Experience context changed.");
       if (runtime2.surveyResponseId && runtime2.surveyResume) return runtime2.surveyResume;
       if (runtime2.surveyResponsePromise) return runtime2.surveyResponsePromise;
       runtime2.surveyResponsePromise = (async () => {
         if (!runtime2.shownRequested) this.shown(runtime2);
         await runtime2.shownPromise;
+        if (!this.owns(runtime2)) throw new Error("Experience context changed.");
         if (!runtime2.impressionId) throw new Error("Survey could not be started. Please retry.");
         const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/survey-responses`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify(this.surveyIdentity(runtime2)) });
         if (!response.ok) throw new Error("Survey could not be started. Please retry.");
         const body = await response.json();
+        if (!this.owns(runtime2)) throw new Error("Experience context changed.");
         if (!body.responseId) throw new Error("Survey response was not created. Please retry.");
         runtime2.surveyResponseId = body.responseId;
         runtime2.surveyAnswers = body.answers ?? {};
@@ -2487,11 +2595,13 @@ ${ISOLATION_CSS}`;
     async persistSurvey(runtime2, answers, currentStepId, state) {
       runtime2.surveyAnswers = { ...answers };
       await this.ensureSurveyResponse(runtime2);
+      if (!this.owns(runtime2)) return;
       const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/survey-responses/${encodeURIComponent(runtime2.surveyResponseId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "omit", keepalive: true, body: JSON.stringify({ ...this.surveyIdentity(runtime2), currentStepId, answers, ...state === "submitted" ? { submitted: true } : {}, ...state === "abandoned" ? { abandoned: true } : {} }) });
       if (!response.ok) throw new Error("Couldn't save your answers. Please retry.");
     }
     surveyIdentity(runtime2) {
-      return { experienceId: runtime2.experience.id, versionId: runtime2.experience.versionId, impressionId: runtime2.impressionId, anonymousId: this.session.getAnonymousId(), trackedUserId: this.session.getIdentifiedUserId() ?? void 0, sessionId: this.session.getSessionId() };
+      const { pageViewId: _pageViewId, ...identity } = runtime2.identity;
+      return { experienceId: runtime2.experience.id, versionId: runtime2.experience.versionId, impressionId: runtime2.impressionId, ...identity };
     }
   }
   function currentPagePath() {
