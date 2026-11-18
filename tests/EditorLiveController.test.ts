@@ -31,6 +31,37 @@ describe("live placement editor", () => {
     vi.unstubAllGlobals();
   });
 
+  it("mounts a prefetched editor without another network request and stays mounted on SPA navigation", async () => {
+    const draft = widgetDraft("toast");
+    const fetchMock = vi.fn().mockRejectedValue(new Error("Unexpected editor request"));
+    vi.stubGlobal("fetch", fetchMock);
+    controller = new EditorModeController("https://api.example.com");
+    const session = { sessionId: "editor-fast", accessToken: "test-access", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+    expect(await controller.startAuthenticatedSession(session, draft)).toBe(true);
+    const editorHost = document.querySelector("[data-movcues-editor]");
+    expect(editorHost).not.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    history.pushState({}, "", "/settings");
+    await vi.waitFor(() => expect(editorRoot().querySelector("[data-route-change]")?.textContent).toContain("/settings"));
+    expect(document.querySelector("[data-movcues-editor]")).toBe(editorHost);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("restores the selected guide step from a prefetched draft without reloading it", async () => {
+    const draft = guideDraft();
+    const fetchMock = vi.fn().mockRejectedValue(new Error("Unexpected editor request"));
+    vi.stubGlobal("fetch", fetchMock);
+    controller = new EditorModeController("https://api.example.com");
+    const session = { sessionId: "editor-resume", accessToken: "test-access", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+    const selectedStepId = "step_2";
+    const guide = draft.version.definition;
+    if ("steps" in guide) guide.steps[0].id = selectedStepId;
+    expect(await controller.resumeWithDraft({ session, editorState: { experienceId: draft.experience.id, selectedStepId, mode: "navigate" } }, draft)).toBe(true);
+    expect(document.querySelector("[data-movcues-editor]")).not.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("keeps theme controls in their own inspector tab and removes viewport controls", async () => {
     vi.stubGlobal("fetch", editorFetch(widgetDraft("toast")));
     controller = new EditorModeController("https://api.example.com");
