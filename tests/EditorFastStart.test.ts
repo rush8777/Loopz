@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { exchangeEditorSession, prefetchEditorDraft } from "../src/experiences/editorFastStart";
-import { EditorModeController } from "../src/experiences/editor/EditorModeController";
+import { EditorBridge, EditorSessionExpiredError } from "../src/experiences/editor/EditorBridge";
 import type { EditorDraft } from "../src/experiences/types";
 
 const session = () => ({
@@ -62,6 +62,29 @@ describe("fast editor startup", () => {
     expect(fetchMock).toHaveBeenCalledWith("https://api.example.com/public/experience-editor/session-123/draft", expect.objectContaining({
       cache: "no-store", credentials: "omit", headers: { Authorization: "Bearer test-access" },
     }));
+  });
+
+  it("uses the small status endpoint for periodic verification", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", fetchMock);
+    await new EditorBridge("https://api.example.com", "session-123", "test-access").checkSession();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.example.com/public/experience-editor/session-123/status");
+  });
+
+  it("falls back to the draft endpoint if the new status route is not deployed yet", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 404 })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => draft() });
+    vi.stubGlobal("fetch", fetchMock);
+    await new EditorBridge("https://api.example.com", "session-123", "test-access").checkSession();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe("https://api.example.com/public/experience-editor/session-123/draft");
+  });
+
+  it("expires the editor immediately when the status endpoint rejects access", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+    await expect(new EditorBridge("https://api.example.com", "session-123", "test-access").checkSession())
+      .rejects.toBeInstanceOf(EditorSessionExpiredError);
   });
 
   it("fails closed when session exchange or draft prefetch is unauthorized", async () => {
