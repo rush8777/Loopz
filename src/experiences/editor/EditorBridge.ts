@@ -30,6 +30,18 @@ export class EditorBridge {
     if ([401, 403, 404, 410].includes(response.status)) throw new EditorSessionExpiredError();
     if (!response.ok) throw new Error("Draft could not be loaded"); return response.json() as Promise<EditorDraft>;
   }
+  /** Validate session liveness without downloading a full guide every 15 seconds.
+   * A 404 falls back to the old draft endpoint during a staggered deployment. */
+  async checkSession(): Promise<void> {
+    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/status`, {
+      headers: this.headers(),
+      credentials: "omit",
+      cache: "no-store",
+    });
+    if (response.status === 404) { await this.load(); return; }
+    if ([401, 403, 410].includes(response.status)) throw new EditorSessionExpiredError();
+    if (!response.ok) throw new Error("Editor session could not be checked");
+  }
   async save(definition: unknown, revision: number): Promise<EditorDraft["version"]> {
     const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { method: "PATCH", headers: this.headers(), credentials: "omit", body: JSON.stringify({ definition, revision }) });
     if (!response.ok) {
