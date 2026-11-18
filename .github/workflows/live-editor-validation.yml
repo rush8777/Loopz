@@ -7,16 +7,33 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out SDK
+        uses: actions/checkout@v4
+        with:
+          path: sdk
+      - name: Check out backend integration fixtures
+        uses: actions/checkout@v4
+        with:
+          repository: rush8777/Loopz-Backend
+          path: Loopz-Backend
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-      - name: Install dependencies
+          cache-dependency-path: |
+            sdk/package-lock.json
+            Loopz-Backend/package-lock.json
+      - name: Install SDK dependencies
+        working-directory: sdk
         run: npm ci
-      - name: Run tests
-        run: npm run test -- --reporter=verbose
-      - name: Build
+      - name: Install backend integration dependencies
+        working-directory: Loopz-Backend
+        run: npm ci
+      - name: Run SDK tests with real backend fixture
+        working-directory: sdk
+        run: npm test
+      - name: Build SDK bundles and type declarations
+        working-directory: sdk
         run: npm run build
