@@ -1,4 +1,4 @@
-import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as clearEditorContinuation, p as isChecklistDefinition, q as isGuideDefinition, r as guideInteractionTarget, t as matchesGuideRoute, u as findTarget, v as storeEditorContinuation } from "./module-DhRMqJBO.js";
+import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as clearEditorContinuation, p as isChecklistDefinition, q as isGuideDefinition, r as guideInteractionTarget, t as matchesGuideRoute, u as findTarget, v as storeEditorContinuation } from "./module-BJ1Noqfv.js";
 function panelIcon(name) {
   const paths = {
     properties: '<path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
@@ -9785,7 +9785,7 @@ class EditorModeController {
     var _a, _b, _c;
     const selectableSteps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
     const aiEligible = draft.experience.builderMode === "onsite" && ["guide", "widget", "checklist"].includes(draft.experience.kind);
-    const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><span class="step-drag-handle" data-step-drag-handle title="Drag step bar" aria-hidden="true">⠿</span><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div>${this.guide ? '<div class="history-row"><button type="button" class="secondary-button compact" data-add-step="modal">＋ Modal</button><button type="button" class="secondary-button compact" data-add-step="anchored_card">＋ Anchored</button></div>' : ""}</div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? `<div class="history-row" data-step-bar-actions><button type="button" class="secondary-button compact step-bar-action" data-add-current-step aria-label="Add step" title="Add a ${getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal" ? "Modal" : "Anchored"} step">＋</button><button type="button" class="secondary-button compact step-bar-action step-bar-delete" data-delete-step aria-label="Delete selected step" title="Delete selected step"${this.guide.steps.length <= 1 ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13"/></svg></button></div><div class="history-row"><button type="button" class="secondary-button compact" data-duplicate-step>Duplicate</button><button type="button" class="secondary-button compact" data-step-left>←</button><button type="button" class="secondary-button compact" data-step-right>→</button></div>` : ""}</section>` : "";
+    const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><span class="step-drag-handle" data-step-drag-handle title="Drag step bar" aria-hidden="true">⠿</span><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div></div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? `<div class="step-bar-actions" data-step-bar-actions><button type="button" class="secondary-button compact step-bar-action" data-add-step="modal" aria-label="Add modal step" title="Add modal step"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M12 8v8M8 12h8"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-add-step="anchored_card" aria-label="Add anchored step" title="Add anchored step"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M15 15l4 4"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-duplicate-step aria-label="Duplicate selected step" title="Duplicate selected step"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="11" height="11" rx="1"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-step-left aria-label="Move step earlier" title="Move step earlier"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6M8 12h10"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-step-right aria-label="Move step later" title="Move step later"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6M16 12H6"/></svg></button><button type="button" class="secondary-button compact step-bar-action step-bar-delete" data-delete-step aria-label="Delete selected step" title="Delete selected step"${this.guide.steps.length <= 1 ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13"/></svg></button></div>` : ""}</section>` : "";
     const designDisabled = draft.experience.builderMode !== "onsite" ? ' disabled title="Content is edited in the GrapesJS Dashboard Builder"' : "";
     return `<div class="editor-toolbar" data-editor-toolbar role="region" aria-label="Movcues editing controls">
       <header data-drag-handle>
@@ -9888,7 +9888,7 @@ class EditorModeController {
     return steps.map((step, index) => `<button class="step" type="button" data-step="${index}" aria-label="Open step ${index + 1}"><span>${index + 1}</span><small>${escapeText("label" in step && typeof step.label === "string" && step.label.trim() ? step.label : "content" in step && step.content.heading.trim() ? step.content.heading : `Step ${index + 1}`)}</small><i data-step-icon>○</i></button>`).join("");
   }
   bindPanel() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D;
     const root2 = this.root;
     root2.querySelectorAll("[data-inspector-tab]").forEach((button) => button.addEventListener("click", () => this.setInspectorTab(button.dataset.inspectorTab)));
     (_a = root2.querySelector("[data-ai-form]")) == null ? void 0 : _a.addEventListener("submit", (event) => {
@@ -9941,18 +9941,17 @@ class EditorModeController {
       return (_a2 = root2.querySelector("aside")) == null ? void 0 : _a2.classList.toggle("left-side");
     });
     root2.querySelectorAll("[data-add-step]").forEach((button) => button.addEventListener("click", () => this.addGuideStep(button.dataset.addStep)));
-    (_t = root2.querySelector("[data-add-current-step]")) == null ? void 0 : _t.addEventListener("click", () => this.addGuideStep(getGuideStepPattern(this.guide.steps[this.stepIndex])));
-    (_u = root2.querySelector("[data-duplicate-step]")) == null ? void 0 : _u.addEventListener("click", () => this.duplicateGuideStep());
-    (_v = root2.querySelector("[data-delete-step]")) == null ? void 0 : _v.addEventListener("click", () => this.deleteGuideStep());
-    (_w = root2.querySelector("[data-step-left]")) == null ? void 0 : _w.addEventListener("click", () => this.moveGuideStep(-1));
-    (_x = root2.querySelector("[data-step-right]")) == null ? void 0 : _x.addEventListener("click", () => this.moveGuideStep(1));
-    (_y = root2.querySelector("[data-step-name]")) == null ? void 0 : _y.addEventListener("change", (event) => {
+    (_t = root2.querySelector("[data-duplicate-step]")) == null ? void 0 : _t.addEventListener("click", () => this.duplicateGuideStep());
+    (_u = root2.querySelector("[data-delete-step]")) == null ? void 0 : _u.addEventListener("click", () => this.deleteGuideStep());
+    (_v = root2.querySelector("[data-step-left]")) == null ? void 0 : _v.addEventListener("click", () => this.moveGuideStep(-1));
+    (_w = root2.querySelector("[data-step-right]")) == null ? void 0 : _w.addEventListener("click", () => this.moveGuideStep(1));
+    (_x = root2.querySelector("[data-step-name]")) == null ? void 0 : _x.addEventListener("change", (event) => {
       if (!this.guide) return;
       this.guide.steps[this.stepIndex].label = event.currentTarget.value.trim().slice(0, 80) || void 0;
       this.changed();
       this.refreshStepBar();
     });
-    (_z = root2.querySelector("[data-edit-component]")) == null ? void 0 : _z.addEventListener("click", () => {
+    (_y = root2.querySelector("[data-edit-component]")) == null ? void 0 : _y.addEventListener("click", () => {
       var _a2, _b2;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.editSelected();
       (_b2 = this.contentEditor) == null ? void 0 : _b2.editSelected();
@@ -9969,14 +9968,14 @@ class EditorModeController {
       (_b2 = this.contentEditor) == null ? void 0 : _b2.toggleList(button.dataset.list);
       this.syncContentInspector();
     }));
-    (_A = root2.querySelector("[data-text-align]")) == null ? void 0 : _A.addEventListener("change", (event) => {
+    (_z = root2.querySelector("[data-text-align]")) == null ? void 0 : _z.addEventListener("change", (event) => {
       var _a2, _b2;
       const value = event.currentTarget.value;
       (_a2 = this.compositionEditor) == null ? void 0 : _a2.setAlignment(value);
       (_b2 = this.contentEditor) == null ? void 0 : _b2.setAlignment(value);
       this.syncContentInspector();
     });
-    (_B = root2.querySelector("[data-apply-link]")) == null ? void 0 : _B.addEventListener("click", () => {
+    (_A = root2.querySelector("[data-apply-link]")) == null ? void 0 : _A.addEventListener("click", () => {
       var _a2, _b2;
       const input2 = root2.querySelector("[data-link-url]");
       const applied = input2 ? ((_a2 = this.compositionEditor) == null ? void 0 : _a2.applyLink(input2.value)) ?? ((_b2 = this.contentEditor) == null ? void 0 : _b2.applyLink(input2.value)) : false;
@@ -9986,7 +9985,7 @@ class EditorModeController {
       } else input2 == null ? void 0 : input2.setCustomValidity("");
       this.syncContentInspector();
     });
-    (_C = root2.querySelector("[data-apply-image]")) == null ? void 0 : _C.addEventListener("click", () => {
+    (_B = root2.querySelector("[data-apply-image]")) == null ? void 0 : _B.addEventListener("click", () => {
       var _a2;
       const source = root2.querySelector("[data-image-src]");
       const alt = root2.querySelector("[data-image-alt]");
@@ -9994,12 +9993,12 @@ class EditorModeController {
       else source == null ? void 0 : source.setCustomValidity("");
       this.syncContentInspector();
     });
-    (_D = root2.querySelector("[data-undo]")) == null ? void 0 : _D.addEventListener("click", () => {
+    (_C = root2.querySelector("[data-undo]")) == null ? void 0 : _C.addEventListener("click", () => {
       var _a2;
       (_a2 = this.contentEditor) == null ? void 0 : _a2.undo();
       this.syncContentInspector();
     });
-    (_E = root2.querySelector("[data-redo]")) == null ? void 0 : _E.addEventListener("click", () => {
+    (_D = root2.querySelector("[data-redo]")) == null ? void 0 : _D.addEventListener("click", () => {
       var _a2;
       (_a2 = this.contentEditor) == null ? void 0 : _a2.redo();
       this.syncContentInspector();
@@ -10756,15 +10755,13 @@ class EditorModeController {
     this.refreshStepBar();
   }
   refreshStepBar() {
-    var _a, _b, _c;
+    var _a, _b;
     const flow = (_a = this.root) == null ? void 0 : _a.querySelector("[data-step-flow]");
     if (!flow) return;
     flow.innerHTML = this.stepButtons();
     flow.querySelectorAll("[data-step]").forEach((button) => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
     const remove = (_b = this.root) == null ? void 0 : _b.querySelector("[data-step-bar-actions] [data-delete-step]");
     if (remove) remove.disabled = !this.guide || this.guide.steps.length <= 1;
-    const add = (_c = this.root) == null ? void 0 : _c.querySelector("[data-add-current-step]");
-    if (add && this.guide) add.title = `Add a ${getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal" ? "Modal" : "Anchored"} step`;
     this.syncPanel();
   }
   bindDrag() {
@@ -12476,10 +12473,11 @@ const BASE_STYLE = `
 const STYLE = `${BASE_STYLE}
 .editor-toolbar{position:fixed;left:50%;transform:translateX(-50%);top:12px;width:min(410px,calc(100vw - 8px));z-index:2147483647;border:1px solid #d7dce3;border-radius:10px;background:#fff;color:#111827;box-shadow:0 8px 24px rgba(15,23,42,.16);font:12px/1.3 ui-sans-serif,system-ui,sans-serif;overflow:hidden}
 .editor-toolbar header{padding:7px 8px;gap:4px;align-items:center}.header-copy>span{display:none}.header-copy strong{font-size:11px}.header-copy small{margin-top:1px;font-size:10px}.header-actions{flex-wrap:wrap;justify-content:flex-end;gap:1px}.header-actions button{width:25px;height:28px;font-size:14px}.header-actions [data-save]{width:38px;font-size:11px}.header-actions button:disabled{opacity:.4;cursor:default}
-.editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-drag-handle{flex:none;padding:2px 1px;color:#94a3b8;font-size:16px;line-height:1;cursor:move;touch-action:none;user-select:none}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .history-row{gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .step-bar-action{width:24px;height:24px;padding:0;font-size:16px;line-height:1}.step-navigator .step-bar-action svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.step-navigator .step-bar-delete{border-color:#fecaca;background:#fff1f2;color:#dc2626}.step-navigator .step-bar-delete:hover{border-color:#fca5a5;background:#fee2e2;color:#b91c1c}.step-navigator .step-bar-action:disabled{cursor:not-allowed;opacity:.4}.step-navigator .content-heading>.history-row{display:none}
+.editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-drag-handle{flex:none;padding:2px 1px;color:#94a3b8;font-size:16px;line-height:1;cursor:move;touch-action:none;user-select:none}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .step-bar-actions{display:flex;flex:none;align-items:center;gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .step-bar-action{width:24px;height:24px;padding:0;font-size:15px;line-height:1}.step-navigator .step-bar-action svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.step-navigator .step-bar-delete{border-color:#fecaca;background:#fff1f2;color:#dc2626}.step-navigator .step-bar-delete:hover{border-color:#fca5a5;background:#fee2e2;color:#b91c1c}.step-navigator .step-bar-action:disabled{cursor:not-allowed;opacity:.4}
 .inspector-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.inspector-tabs button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#475569;padding:6px;font:600 11px inherit;cursor:pointer}.inspector-tabs button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.inspector-tabs button:disabled{opacity:.4;cursor:not-allowed}main.ai-mode>:not(.inspector-tabs):not(.ai-panel),main.theme-mode>:not(.inspector-tabs):not(.theme-panel){display:none!important}.ai-panel{min-height:min(580px,calc(100dvh - 130px));display:flex;flex-direction:column;gap:10px;background:#fcfcfd}.ai-panel .content-heading{flex:none}.ai-panel .muted{margin:0}.ai-chat-history{display:grid;align-content:start;gap:8px;flex:1;min-height:260px;overflow:auto;padding:2px}.ai-chat-message{display:grid;gap:3px;max-width:92%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#334155}.ai-chat-message--user{justify-self:end;border-color:#dbeafe;background:#eff6ff;color:#1e3a8a}.ai-chat-message__role{font-size:10px;font-weight:700;color:#64748b}.ai-chat-message--user .ai-chat-message__role{color:#2563eb}.ai-chat-message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45}.ai-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:7px;padding-top:8px;border-top:1px solid #eef0f3}.ai-panel textarea{min-height:72px;width:100%;resize:vertical;padding:8px;border:1px solid #d7dce3;border-radius:8px;font:12px/1.4 inherit}.ai-composer button{padding:8px 10px}.ai-status{min-height:16px;margin:0;white-space:pre-wrap;color:#64748b;font-size:11px}.ai-proposal{display:grid;gap:6px;padding:8px;border:1px solid #bfdbfe;border-radius:8px;background:#f8fbff}.ai-proposal ul{margin:0;padding-left:18px;color:#475569;font-size:11px}
 .ai-composer{grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:7px;border:1px solid #d9e1ec;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgb(15 23 42 / .04);transition:border-color .16s ease,box-shadow .16s ease}.ai-composer:focus-within{border-color:#93c5fd;box-shadow:0 0 0 3px rgb(59 130 246 / .12)}.ai-composer textarea{min-height:54px;padding:5px 3px;border:0;border-radius:0;background:transparent;outline:0;box-shadow:none;line-height:1.45}.ai-composer textarea:focus{outline:0}.ai-composer textarea::placeholder{color:#94a3b8}.ai-composer button{min-width:58px;min-height:34px;margin-bottom:2px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;box-shadow:0 1px 2px rgb(37 99 235 / .25);transition:background .16s ease,transform .16s ease,box-shadow .16s ease}.ai-composer button:hover:not(:disabled){background:#1d4ed8;box-shadow:0 4px 10px rgb(37 99 235 / .24);transform:translateY(-1px)}.ai-composer button:active:not(:disabled){transform:translateY(0);box-shadow:none}.ai-composer button:disabled{opacity:.5;cursor:not-allowed}
 .ai-chat-message [data-ai-progress]{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;padding-top:5px;border-top:1px solid #eef2f7;color:#64748b;font-size:10px}.ai-progress-current{font-weight:700;color:#475569}.ai-progress-elapsed{font-variant-numeric:tabular-nums}.ai-chat-message [data-ai-progress] details{grid-column:1/-1}.ai-chat-message [data-ai-progress] summary{cursor:pointer;color:#2563eb;font-weight:600}.ai-chat-message [data-ai-progress] ol{display:grid;gap:5px;margin:6px 0 0;padding-left:18px}.ai-chat-message [data-ai-progress] li{color:#94a3b8}.ai-chat-message [data-ai-progress] li[data-status=active]{color:#1d4ed8}.ai-chat-message [data-ai-progress] li[data-status=error],.ai-chat-message [data-ai-progress] li[data-status=cancelled]{color:#b91c1c}.ai-chat-message [data-ai-progress] li strong,.ai-chat-message [data-ai-progress] li span{display:block}.ai-chat-message [data-ai-progress] li span{margin-top:1px;font-weight:400;color:#64748b}@media(prefers-reduced-motion:reduce){.ai-composer,.ai-composer button{transition:none!important}}
+.step-navigator .step-bar-action{transition:border-color .16s ease,background .16s ease,color .16s ease,transform .16s ease}.step-navigator .step-bar-action:hover:not(:disabled){border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8;transform:translateY(-1px)}.step-navigator .step-bar-delete:hover:not(:disabled){color:#b91c1c}
 [data-composition-inspector]>.history-row{display:none}
 @media(max-width:800px){.editor-toolbar{width:min(350px,calc(100vw - 8px))}aside{width:min(300px,calc(100vw - 8px))}}
 @media(max-width:480px){.editor-toolbar{left:4px;top:4px;transform:none}.header-copy strong{font-size:10px}.header-copy small{font-size:9px}.header-actions [data-return-dashboard],.header-actions [data-move-side]{display:none}aside{width:calc(100vw - 8px)}.step-navigator{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:calc(100vw - 8px);box-shadow:0 4px 14px rgba(15,23,42,.12)}.step-navigator>.history-row:not([data-step-bar-actions]){display:none}.step-navigator .content-heading{display:none}}
@@ -12491,4 +12489,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-BMakg3JQ.js.map
+//# sourceMappingURL=EditorModeController-BwWF98M6.js.map
