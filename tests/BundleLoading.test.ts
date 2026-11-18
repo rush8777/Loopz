@@ -114,7 +114,10 @@ describe("SDK bundle loading boundaries", () => {
   it("loads editor first and a valid editor never creates a normal analytics session", async () => {
     history.replaceState({}, "", "/?movcues_editor_token=valid-token");
     const start = vi.fn().mockResolvedValue(true);
+    const authenticatedStart = vi.fn().mockResolvedValue(true);
     const destroy = vi.fn();
+    const authorizedSession = { sessionId: "valid-session", accessToken: "access", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => authorizedSession }));
     const analytics = new Analytics();
     analytics.init({
       siteId: "site_1",
@@ -129,10 +132,15 @@ describe("SDK bundle loading boundaries", () => {
     const script = document.querySelector<HTMLScriptElement>('script[src*="valid-test"]')!;
     expect(script).toBeTruthy();
 
-    window.__movcuesEditorRuntime__ = fakeEditorRuntime(start, destroy);
+    window.__movcuesEditorRuntime__ = {
+      createController: vi.fn(() => ({
+        start, startAuthenticatedSession: authenticatedStart,
+        resume: vi.fn().mockResolvedValue(false), destroy,
+      })),
+    };
     script.dispatchEvent(new Event("load"));
-    await settle();
-    expect(start).toHaveBeenCalledWith("valid-token");
+    await vi.waitFor(() => expect(authenticatedStart).toHaveBeenCalledWith(authorizedSession, undefined));
+    expect(start).not.toHaveBeenCalled();
     expect(internals.editor).toBeTruthy();
     expect(internals.session).toBeUndefined();
     expect(internals.engine).toBeUndefined();
