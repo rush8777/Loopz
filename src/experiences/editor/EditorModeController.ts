@@ -23,6 +23,7 @@ import type {
 import { getGuideStepPattern, guideStepRequiresTarget, isGuideDefinition } from "../types";
 import type { EditorAuthoringState, EditorContinuation, EditorSession } from "../runtimeInterfaces";
 import { clearEditorContinuation, storeEditorContinuation } from "../editorContinuation";
+import { exchangeEditorSession } from "../editorFastStart";
 import { RouteObserver } from "../../dom/RouteObserver";
 import { ExperienceRenderer } from "../runtime/ExperienceRenderer";
 import { findTarget } from "../runtime/AnchoredCardRenderer";
@@ -115,23 +116,21 @@ export class EditorModeController {
   constructor(private apiBase: string) {}
 
   async start(rawToken: string): Promise<boolean> {
-    try {
-      const response = await fetch(`${this.apiBase}/public/experience-editor/exchange`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "omit",
-        body: JSON.stringify({ token: rawToken }),
-      });
-      if (!response.ok) return false;
-      const session = await response.json() as EditorSession;
-      if (!validSession(session)) return false;
+    const exchanged = await exchangeEditorSession(this.apiBase, rawToken);
+    if (!exchanged) return false;
+    return this.startAuthenticatedSession(exchanged.session, exchanged.draft);
+  }
 
+  /** The core SDK exchanges the one-time token while the editor bundle downloads. */
+  async startAuthenticatedSession(session: EditorSession, draft?: EditorDraft): Promise<boolean> {
+    if (!validSession(session)) return false;
+    try {
       const clean = new URL(location.href);
       const requestedStep = Number(clean.searchParams.get("movcues_editor_step") ?? "0");
       clean.searchParams.delete("movcues_editor_token");
       clean.searchParams.delete("movcues_editor_step");
       history.replaceState(history.state, "", clean.toString());
-      return await this.activate(session, { requestedStep });
+      return await this.activate(session, { requestedStep }, draft);
     } catch {
       this.destroy();
       return false;
@@ -139,23 +138,28 @@ export class EditorModeController {
   }
 
   async resume(continuation: EditorContinuation): Promise<boolean> {
+    return this.resumeWithDraft(continuation);
+  }
+
+  /** Use a fresh server draft already fetched in parallel with the editor bundle. */
+  async resumeWithDraft(continuation: EditorContinuation, draft?: EditorDraft): Promise<boolean> {
     if (!validSession(continuation.session)) {
       clearEditorContinuation();
       return false;
     }
     try {
-      return await this.activate(continuation.session, { restoredState: continuation.editorState });
+      return await this.activate(continuation.session, { restoredState: continuation.editorState }, draft);
     } catch {
       this.destroy();
       return false;
     }
   }
 
-  private async activate(session: EditorSession, options: { requestedStep?: number; restoredState?: EditorAuthoringState }): Promise<boolean> {
+  private async activate(session: EditorSession, options: { requestedStep?: number; restoredState?: EditorAuthoringState }, prefetchedDraft?: EditorDraft): Promise<boolean> {
     this.teardown(false);
     const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
     let draft: EditorDraft;
-    try { draft = await bridge.load(); }
+    try { draft = prefetchedDraft ?? await bridge.load(); }
     catch { clearEditorContinuation(); return false; }
     if (draft.experience.kind === "checklist" && draft.experience.builderMode !== "onsite") { clearEditorContinuation(); return false; }
 
@@ -177,7 +181,7 @@ export class EditorModeController {
     this.updateContinuation();
     this.mount();
     this.expiryTimer = window.setTimeout(() => this.expireSession(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
-    this.validationTimer = window.setInterval(() => { void bridge.load().catch(error => { if (this.bridge === bridge && error instanceof EditorSessionExpiredError) this.expireSession(); }); }, 15_000);
+    this.validationTimer = window.setInterval(() => { void bridge.checkSession().catch(error => { if (this.bridge === bridge && error instanceof EditorSessionExpiredError) this.expireSession(); }); }, 15_000);
     return true;
   }
 
