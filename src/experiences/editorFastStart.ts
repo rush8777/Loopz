@@ -32,7 +32,7 @@ export async function exchangeEditorSession(apiBase: string, token: string): Pro
       headers: { "Content-Type": "application/json" },
       credentials: "omit",
       cache: "no-store",
-      body: JSON.stringify({ token }),
+      body: JSON.stringify({ token, includeDraft: true }),
     });
     if (!response.ok) return null;
     const data = await response.json() as Partial<EditorSession> & { draft?: unknown };
