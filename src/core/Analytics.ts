@@ -32,6 +32,7 @@ import { MVP1_POLICY } from "./mvpPolicy";
 import { SessionActivityMonitor } from "./SessionActivityMonitor";
 import { loadEditorRuntime, loadExperienceRuntime } from "../experiences/loadRuntimes";
 import { clearEditorContinuation, readEditorContinuation } from "../experiences/editorContinuation";
+import { exchangeEditorSession, prefetchEditorDraft } from "../experiences/editorFastStart";
 import type {
   AnalyticsRuntimeProviders,
   EditorContinuation,
@@ -264,10 +265,26 @@ export class Analytics {
 
   private async initializeEditor(editorToken: string | null, continuation: EditorContinuation | null, userConfig: AnalyticsConfig, generation: number): Promise<void> {
     try {
-      const runtime = this.runtimeProviders.editor ??
-        (this.runtimeProviders.loadEditor
-          ? await this.runtimeProviders.loadEditor()
-          : await loadEditorRuntime(this.config.editorRuntimeBundleUrl));
+      performance.mark?.("movcues:editor:start");
+    } catch { /* Performance marks are diagnostic-only. */ }
+    try {
+      // Only the shipped editor runtime supports prefetched credentials. Custom
+      // runtime providers retain their original start/resume contract.
+      const useFastStart = !this.runtimeProviders.editor && !this.runtimeProviders.loadEditor;
+      const exchangePromise = editorToken && useFastStart ? exchangeEditorSession(this.config.endpoint, editorToken) : null;
+      const draftPromise = !editorToken && continuation && useFastStart
+        ? prefetchEditorDraft(this.config.endpoint, continuation.session)
+        : null;
+      const runtimePromise = this.runtimeProviders.editor
+        ? Promise.resolve(this.runtimeProviders.editor)
+        : this.runtimeProviders.loadEditor
+          ? this.runtimeProviders.loadEditor()
+          : loadEditorRuntime(this.config.editorRuntimeBundleUrl);
+      const [runtime, exchange, prefetchedDraft] = await Promise.all([
+        runtimePromise,
+        exchangePromise ?? Promise.resolve(null),
+        draftPromise ?? Promise.resolve(null),
+      ]);
       if (!this.initialized || generation !== this.generation) return;
       if (!runtime) {
         this.fallbackFromEditor(userConfig, generation);
@@ -275,7 +292,17 @@ export class Analytics {
       }
 
       const editor = runtime.createController(this.config.endpoint);
-      const started = editorToken ? await editor.start(editorToken) : continuation ? await editor.resume(continuation) : false;
+      let started = false;
+      if (editorToken) {
+        // Do not retry a consumed, single-use token through the old start() path.
+        started = exchangePromise
+          ? Boolean(exchange && editor.startAuthenticatedSession && await editor.startAuthenticatedSession(exchange.session, exchange.draft))
+          : await editor.start(editorToken);
+      } else if (continuation) {
+        started = prefetchedDraft && editor.resumeWithDraft
+          ? await editor.resumeWithDraft(continuation, prefetchedDraft)
+          : await editor.resume(continuation);
+      }
       if (!this.initialized || generation !== this.generation) {
         editor.destroy();
         return;
@@ -284,6 +311,10 @@ export class Analytics {
       if (started) {
         this.editor = editor;
         this.editorMode = true;
+        try {
+          performance.mark?.("movcues:editor:ready");
+          performance.measure?.("movcues:editor:startup", "movcues:editor:start", "movcues:editor:ready");
+        } catch { /* Performance marks are diagnostic-only. */ }
         this.log("experience editor mode initialized");
         return;
       }
