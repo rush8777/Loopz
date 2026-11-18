@@ -37,7 +37,8 @@ export async function exchangeEditorSession(apiBase: string, token: string): Pro
     if (!response.ok) return null;
     const data = await response.json() as Partial<EditorSession> & { draft?: unknown };
     if (!isEditorSession(data)) return null;
-    return { session: data, ...(isEditorDraft(data.draft) ? { draft: data.draft } : {}) };
+    const initialDraft = (data as EditorSession & { draft?: unknown }).draft;
+    return { session: data, ...(isEditorDraft(initialDraft) ? { draft: initialDraft } : {}) };
   } catch {
     return null;
   }
