@@ -44,7 +44,7 @@ describe("fast editor startup", () => {
     expect(result?.session.sessionId).toBe("session-123");
     expect(result?.draft?.version.id).toBe("draft-1");
     expect(fetchMock).toHaveBeenCalledWith("https://api.example.com/public/experience-editor/exchange", expect.objectContaining({
-      method: "POST", credentials: "omit", cache: "no-store", body: JSON.stringify({ token: "one-time-token" }),
+      method: "POST", credentials: "omit", cache: "no-store", body: JSON.stringify({ token: "one-time-token", includeDraft: true }),
     }));
   });
 
