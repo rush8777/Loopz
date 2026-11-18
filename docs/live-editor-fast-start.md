@@ -6,7 +6,7 @@
 - A full-document navigation still reloads the customer's JavaScript context, but the new SDK fetches a **fresh** authenticated draft while the editor asset downloads. No stale draft is trusted from local storage.
 - SPA route changes reuse the existing editor instance, editor session and guide draft. The RouteObserver updates the current path and targets; no new editor bundle or draft request is needed.
 - Every 15 seconds, the editor now checks a small /public/experience-editor/:sessionId/status endpoint rather than downloading the complete draft. A 404 from an older backend safely falls back to the old authenticated draft endpoint.
-- The dashboard overlaps saving pending changes with editor-session creation (the session is linked to the experience, not a particular revision).
+- The dashboard deliberately preserves the save-before-editor-session ordering. An attempted concurrent session launch was reverted after regression tests showed it could create sessions for unsaved drafts.
 - Core SDK telemetry behavior for ordinary visitors is unchanged; editor functionality remains lazy-loaded.
 
 ## Release coordination (important)
