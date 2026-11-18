@@ -35,7 +35,10 @@ export interface EditorContinuation {
 
 export interface EditorControllerRuntime {
   start(rawToken: string): Promise<boolean>;
+  /** New bundled editor supports the already-authenticated fast-start path. */
+  startAuthenticatedSession?(session: EditorSession, draft?: import("./types").EditorDraft): Promise<boolean>;
   resume(continuation: EditorContinuation): Promise<boolean>;
+  resumeWithDraft?(continuation: EditorContinuation, draft: import("./types").EditorDraft): Promise<boolean>;
   destroy(): void;
 }
 
