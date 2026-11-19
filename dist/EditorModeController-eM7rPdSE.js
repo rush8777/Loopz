@@ -1,4 +1,4 @@
-import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as clearEditorContinuation, p as isChecklistDefinition, q as isGuideDefinition, r as guideInteractionTarget, t as matchesGuideRoute, u as findTarget, v as storeEditorContinuation } from "./module-BJ1Noqfv.js";
+import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as exchangeEditorSession, p as clearEditorContinuation, q as isChecklistDefinition, r as isGuideDefinition, t as guideInteractionTarget, u as matchesGuideRoute, v as findTarget, w as storeEditorContinuation } from "./module-1osWkcj0.js";
 function panelIcon(name) {
   const paths = {
     properties: '<path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
@@ -5781,6 +5781,21 @@ class EditorBridge {
     if (!response.ok) throw new Error("Draft could not be loaded");
     return response.json();
   }
+  /** Validate session liveness without downloading a full guide every 15 seconds.
+   * A 404 falls back to the old draft endpoint during a staggered deployment. */
+  async checkSession() {
+    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/status`, {
+      headers: this.headers(),
+      credentials: "omit",
+      cache: "no-store"
+    });
+    if (response.status === 404) {
+      await this.load();
+      return;
+    }
+    if ([401, 403, 410].includes(response.status)) throw new EditorSessionExpiredError();
+    if (!response.ok) throw new Error("Editor session could not be checked");
+  }
   async save(definition, revision) {
     const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { method: "PATCH", headers: this.headers(), credentials: "omit", body: JSON.stringify({ definition, revision }) });
     if (!response.ok) {
@@ -9651,46 +9666,48 @@ class EditorModeController {
     };
   }
   async start(rawToken) {
+    const exchanged = await exchangeEditorSession(this.apiBase, rawToken);
+    if (!exchanged) return false;
+    return this.startAuthenticatedSession(exchanged.session, exchanged.draft);
+  }
+  /** The core SDK exchanges the one-time token while the editor bundle downloads. */
+  async startAuthenticatedSession(session, draft) {
+    if (!validSession(session)) return false;
     try {
-      const response = await fetch(`${this.apiBase}/public/experience-editor/exchange`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "omit",
-        body: JSON.stringify({ token: rawToken })
-      });
-      if (!response.ok) return false;
-      const session = await response.json();
-      if (!validSession(session)) return false;
       const clean = new URL(location.href);
       const requestedStep = Number(clean.searchParams.get("movcues_editor_step") ?? "0");
       clean.searchParams.delete("movcues_editor_token");
       clean.searchParams.delete("movcues_editor_step");
       history.replaceState(history.state, "", clean.toString());
-      return await this.activate(session, { requestedStep });
+      return await this.activate(session, { requestedStep }, draft);
     } catch {
       this.destroy();
       return false;
     }
   }
   async resume(continuation) {
+    return this.resumeWithDraft(continuation);
+  }
+  /** Use a fresh server draft already fetched in parallel with the editor bundle. */
+  async resumeWithDraft(continuation, draft) {
     if (!validSession(continuation.session)) {
       clearEditorContinuation();
       return false;
     }
     try {
-      return await this.activate(continuation.session, { restoredState: continuation.editorState });
+      return await this.activate(continuation.session, { restoredState: continuation.editorState }, draft);
     } catch {
       this.destroy();
       return false;
     }
   }
-  async activate(session, options) {
+  async activate(session, options, prefetchedDraft) {
     var _a, _b, _c;
     this.teardown(false);
     const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
     let draft;
     try {
-      draft = await bridge.load();
+      draft = prefetchedDraft ?? await bridge.load();
     } catch {
       clearEditorContinuation();
       return false;
@@ -9718,7 +9735,7 @@ class EditorModeController {
     this.mount();
     this.expiryTimer = window.setTimeout(() => this.expireSession(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
     this.validationTimer = window.setInterval(() => {
-      void bridge.load().catch((error) => {
+      void bridge.checkSession().catch((error) => {
         if (this.bridge === bridge && error instanceof EditorSessionExpiredError) this.expireSession();
       });
     }, 15e3);
@@ -12489,4 +12506,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-BwWF98M6.js.map
+//# sourceMappingURL=EditorModeController-eM7rPdSE.js.map

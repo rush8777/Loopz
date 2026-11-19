@@ -2118,6 +2118,50 @@
     const state = value;
     return typeof state.experienceId === "string" && !!state.experienceId && (state.selectedStepId === void 0 || typeof state.selectedStepId === "string") && (state.mode === "select" || state.mode === "design" || state.mode === "target" || state.mode === "navigate" || state.mode === "preview");
   }
+  function isEditorSession(value) {
+    if (!value || typeof value !== "object") return false;
+    const session = value;
+    return typeof session.sessionId === "string" && !!session.sessionId && typeof session.accessToken === "string" && !!session.accessToken && typeof session.expiresAt === "string" && Number.isFinite(Date.parse(session.expiresAt)) && Date.parse(session.expiresAt) > Date.now();
+  }
+  function isEditorDraft(value) {
+    var _a, _b;
+    if (!value || typeof value !== "object") return false;
+    const draft = value;
+    return typeof ((_a = draft.experience) == null ? void 0 : _a.id) === "string" && typeof ((_b = draft.version) == null ? void 0 : _b.revision) === "number" && !!draft.version.definition;
+  }
+  async function exchangeEditorSession(apiBase, token) {
+    try {
+      const response = await fetch(`${apiBase}/public/experience-editor/exchange`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "omit",
+        cache: "no-store",
+        body: JSON.stringify({ token, includeDraft: true })
+      });
+      if (!response.ok) return null;
+      const data = await response.json();
+      if (!isEditorSession(data)) return null;
+      const initialDraft = data.draft;
+      return { session: data, ...isEditorDraft(initialDraft) ? { draft: initialDraft } : {} };
+    } catch {
+      return null;
+    }
+  }
+  async function prefetchEditorDraft(apiBase, session) {
+    try {
+      if (!isEditorSession(session)) return null;
+      const response = await fetch(`${apiBase}/public/experience-editor/${encodeURIComponent(session.sessionId)}/draft`, {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+        credentials: "omit",
+        cache: "no-store"
+      });
+      if (!response.ok) return null;
+      const draft = await response.json();
+      return isEditorDraft(draft) ? draft : null;
+    } catch {
+      return null;
+    }
+  }
   const TRANSPARENT = /* @__PURE__ */ new Set(["transparent", "rgba(0, 0, 0, 0)", "rgba(0,0,0,0)"]);
   function visible(element) {
     if (!(element instanceof HTMLElement)) return false;
@@ -2454,15 +2498,33 @@
       return true;
     }
     async initializeEditor(editorToken, continuation, userConfig, generation) {
+      var _a, _b, _c;
       try {
-        const runtime = this.runtimeProviders.editor ?? (this.runtimeProviders.loadEditor ? await this.runtimeProviders.loadEditor() : await loadEditorRuntime(this.config.editorRuntimeBundleUrl));
+        (_a = performance.mark) == null ? void 0 : _a.call(performance, "movcues:editor:start");
+      } catch {
+      }
+      try {
+        const useFastStart = !this.runtimeProviders.editor && !this.runtimeProviders.loadEditor;
+        const exchangePromise = editorToken && useFastStart ? exchangeEditorSession(this.config.endpoint, editorToken) : null;
+        const draftPromise = !editorToken && continuation && useFastStart ? prefetchEditorDraft(this.config.endpoint, continuation.session) : null;
+        const runtimePromise = this.runtimeProviders.editor ? Promise.resolve(this.runtimeProviders.editor) : this.runtimeProviders.loadEditor ? this.runtimeProviders.loadEditor() : loadEditorRuntime(this.config.editorRuntimeBundleUrl);
+        const [runtime, exchange, prefetchedDraft] = await Promise.all([
+          runtimePromise,
+          exchangePromise ?? Promise.resolve(null),
+          draftPromise ?? Promise.resolve(null)
+        ]);
         if (!this.initialized || generation !== this.generation) return;
         if (!runtime) {
           this.fallbackFromEditor(userConfig, generation);
           return;
         }
         const editor = runtime.createController(this.config.endpoint);
-        const started = editorToken ? await editor.start(editorToken) : continuation ? await editor.resume(continuation) : false;
+        let started = false;
+        if (editorToken) {
+          started = exchangePromise ? Boolean(exchange && editor.startAuthenticatedSession && await editor.startAuthenticatedSession(exchange.session, exchange.draft)) : await editor.start(editorToken);
+        } else if (continuation) {
+          started = prefetchedDraft && editor.resumeWithDraft ? await editor.resumeWithDraft(continuation, prefetchedDraft) : await editor.resume(continuation);
+        }
         if (!this.initialized || generation !== this.generation) {
           editor.destroy();
           return;
@@ -2470,6 +2532,11 @@
         if (started) {
           this.editor = editor;
           this.editorMode = true;
+          try {
+            (_b = performance.mark) == null ? void 0 : _b.call(performance, "movcues:editor:ready");
+            (_c = performance.measure) == null ? void 0 : _c.call(performance, "movcues:editor:startup", "movcues:editor:start", "movcues:editor:ready");
+          } catch {
+          }
           this.log("experience editor mode initialized");
           return;
         }

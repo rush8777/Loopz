@@ -6241,6 +6241,35 @@ ${ISOLATION_CSS}`;
     } catch {
     }
   }
+  function isEditorSession(value) {
+    if (!value || typeof value !== "object") return false;
+    const session = value;
+    return typeof session.sessionId === "string" && !!session.sessionId && typeof session.accessToken === "string" && !!session.accessToken && typeof session.expiresAt === "string" && Number.isFinite(Date.parse(session.expiresAt)) && Date.parse(session.expiresAt) > Date.now();
+  }
+  function isEditorDraft(value) {
+    var _a, _b;
+    if (!value || typeof value !== "object") return false;
+    const draft = value;
+    return typeof ((_a = draft.experience) == null ? void 0 : _a.id) === "string" && typeof ((_b = draft.version) == null ? void 0 : _b.revision) === "number" && !!draft.version.definition;
+  }
+  async function exchangeEditorSession(apiBase, token) {
+    try {
+      const response = await fetch(`${apiBase}/public/experience-editor/exchange`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "omit",
+        cache: "no-store",
+        body: JSON.stringify({ token, includeDraft: true })
+      });
+      if (!response.ok) return null;
+      const data = await response.json();
+      if (!isEditorSession(data)) return null;
+      const initialDraft = data.draft;
+      return { session: data, ...isEditorDraft(initialDraft) ? { draft: initialDraft } : {} };
+    } catch {
+      return null;
+    }
+  }
   class RouteObserver {
     constructor() {
       this.listeners = /* @__PURE__ */ new Set();
@@ -7767,6 +7796,21 @@ ${ISOLATION_CSS}`;
       if ([401, 403, 404, 410].includes(response.status)) throw new EditorSessionExpiredError();
       if (!response.ok) throw new Error("Draft could not be loaded");
       return response.json();
+    }
+    /** Validate session liveness without downloading a full guide every 15 seconds.
+     * A 404 falls back to the old draft endpoint during a staggered deployment. */
+    async checkSession() {
+      const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/status`, {
+        headers: this.headers(),
+        credentials: "omit",
+        cache: "no-store"
+      });
+      if (response.status === 404) {
+        await this.load();
+        return;
+      }
+      if ([401, 403, 410].includes(response.status)) throw new EditorSessionExpiredError();
+      if (!response.ok) throw new Error("Editor session could not be checked");
     }
     async save(definition, revision) {
       const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { method: "PATCH", headers: this.headers(), credentials: "omit", body: JSON.stringify({ definition, revision }) });
@@ -11726,46 +11770,48 @@ ${ISOLATION_CSS}`;
       };
     }
     async start(rawToken) {
+      const exchanged = await exchangeEditorSession(this.apiBase, rawToken);
+      if (!exchanged) return false;
+      return this.startAuthenticatedSession(exchanged.session, exchanged.draft);
+    }
+    /** The core SDK exchanges the one-time token while the editor bundle downloads. */
+    async startAuthenticatedSession(session, draft) {
+      if (!validSession(session)) return false;
       try {
-        const response = await fetch(`${this.apiBase}/public/experience-editor/exchange`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "omit",
-          body: JSON.stringify({ token: rawToken })
-        });
-        if (!response.ok) return false;
-        const session = await response.json();
-        if (!validSession(session)) return false;
         const clean2 = new URL(location.href);
         const requestedStep = Number(clean2.searchParams.get("movcues_editor_step") ?? "0");
         clean2.searchParams.delete("movcues_editor_token");
         clean2.searchParams.delete("movcues_editor_step");
         history.replaceState(history.state, "", clean2.toString());
-        return await this.activate(session, { requestedStep });
+        return await this.activate(session, { requestedStep }, draft);
       } catch {
         this.destroy();
         return false;
       }
     }
     async resume(continuation) {
+      return this.resumeWithDraft(continuation);
+    }
+    /** Use a fresh server draft already fetched in parallel with the editor bundle. */
+    async resumeWithDraft(continuation, draft) {
       if (!validSession(continuation.session)) {
         clearEditorContinuation();
         return false;
       }
       try {
-        return await this.activate(continuation.session, { restoredState: continuation.editorState });
+        return await this.activate(continuation.session, { restoredState: continuation.editorState }, draft);
       } catch {
         this.destroy();
         return false;
       }
     }
-    async activate(session, options) {
+    async activate(session, options, prefetchedDraft) {
       var _a, _b, _c;
       this.teardown(false);
       const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
       let draft;
       try {
-        draft = await bridge.load();
+        draft = prefetchedDraft ?? await bridge.load();
       } catch {
         clearEditorContinuation();
         return false;
@@ -11793,7 +11839,7 @@ ${ISOLATION_CSS}`;
       this.mount();
       this.expiryTimer = window.setTimeout(() => this.expireSession(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
       this.validationTimer = window.setInterval(() => {
-        void bridge.load().catch((error) => {
+        void bridge.checkSession().catch((error) => {
           if (this.bridge === bridge && error instanceof EditorSessionExpiredError) this.expireSession();
         });
       }, 15e3);

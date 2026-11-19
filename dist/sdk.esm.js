@@ -1,6 +1,6 @@
-import { A, w } from "./module-BJ1Noqfv.js";
+import { A, x } from "./module-1osWkcj0.js";
 export {
   A as Analytics,
-  w as createAnalytics
+  x as createAnalytics
 };
 //# sourceMappingURL=sdk.esm.js.map

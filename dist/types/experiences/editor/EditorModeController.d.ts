@@ -1,4 +1,5 @@
-import type { EditorContinuation } from "../runtimeInterfaces";
+import type { EditorDraft } from "../types";
+import type { EditorContinuation, EditorSession } from "../runtimeInterfaces";
 export declare class EditorModeController {
     private apiBase;
     private host;
@@ -67,7 +68,11 @@ export declare class EditorModeController {
     private protectUnsavedChanges;
     constructor(apiBase: string);
     start(rawToken: string): Promise<boolean>;
+    /** The core SDK exchanges the one-time token while the editor bundle downloads. */
+    startAuthenticatedSession(session: EditorSession, draft?: EditorDraft): Promise<boolean>;
     resume(continuation: EditorContinuation): Promise<boolean>;
+    /** Use a fresh server draft already fetched in parallel with the editor bundle. */
+    resumeWithDraft(continuation: EditorContinuation, draft?: EditorDraft): Promise<boolean>;
     private activate;
     private mount;
     private panelMarkup;

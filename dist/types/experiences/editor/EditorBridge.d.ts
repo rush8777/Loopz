@@ -15,6 +15,9 @@ export declare class EditorBridge {
     constructor(apiBase: string, sessionId: string, accessToken: string);
     private headers;
     load(): Promise<EditorDraft>;
+    /** Validate session liveness without downloading a full guide every 15 seconds.
+     * A 404 falls back to the old draft endpoint during a staggered deployment. */
+    checkSession(): Promise<void>;
     save(definition: unknown, revision: number): Promise<EditorDraft["version"]>;
     chat(input: {
         conversationId?: string;
