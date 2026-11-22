@@ -1,6 +1,6 @@
 import { currentScriptUrl } from "./scriptOrigin";
 
-export type SdkBundle = "experiences" | "editor" | "replay" | "heatmap";
+export type SdkBundle = "experiences" | "editor";
 
 const pendingLoads = new Map<string, Promise<unknown | null>>();
 

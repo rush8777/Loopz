@@ -26,32 +26,6 @@ function pageView(sessionId: string, eventId: string, timestamp = 1000): Analyti
   };
 }
 
-function replayEvent(sessionId: string, eventId: string, seq: number): AnalyticsEvent<AnyPayload> {
-  return {
-    eventId,
-    type: "session_replay_event",
-    timestamp: 1000 + seq,
-    anonymousId: "anon_1",
-    sessionId,
-    pageViewId: "pv_1",
-    page: basePage,
-    payload: { replaySessionId: "replay_1", seq, rrwebEvent: { type: 2, timestamp: 1000 + seq, data: {} } },
-  };
-}
-
-function moveEvent(sessionId: string): AnalyticsEvent<AnyPayload> {
-  return {
-    eventId: "evt_move",
-    type: "move",
-    timestamp: 1000,
-    anonymousId: "anon_1",
-    sessionId,
-    pageViewId: "pv_1",
-    page: basePage,
-    payload: { points: [] },
-  };
-}
-
 describe("Transport", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -74,20 +48,6 @@ describe("Transport", () => {
     });
   });
 
-  it("posts replay events to the /replay route, separately from standard events", async () => {
-    const transport = new Transport("https://api.test", "site_abc");
-    await transport.send([pageView("sess_1", "e1"), replayEvent("sess_1", "e2", 0)]);
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const urls = fetchMock.mock.calls.map((c) => c[0]);
-    expect(urls).toContain("https://api.test/public/sites/site_abc/events");
-    expect(urls).toContain("https://api.test/public/sites/site_abc/replay");
-
-    const replayCall = fetchMock.mock.calls.find((c) => c[0] === "https://api.test/public/sites/site_abc/replay")!;
-    const replayBody = JSON.parse((replayCall[1] as RequestInit).body as string);
-    expect(replayBody).toEqual({ sessionId: "sess_1", events: [{ type: 2, timestamp: 1000, data: {} }] });
-  });
-
   it("fans out into one request per sessionId when a batch spans multiple sessions", async () => {
     const transport = new Transport("https://api.test", "site_abc");
     await transport.send([pageView("sess_1", "e1"), pageView("sess_2", "e2")]);
@@ -99,7 +59,7 @@ describe("Transport", () => {
 
   it("makes no network call at all for a batch containing only unsupported event types", async () => {
     const transport = new Transport("https://api.test", "site_abc");
-    const result = await transport.send([moveEvent("sess_1")]);
+    const result = await transport.send([{ ...pageView("sess_1", "f1"), type: "funnel", payload: { funnelName: "Checkout", stepIndex: 0, stepLabel: "Start", status: "step_completed" } }]);
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result).toEqual({ ok: true, retryable: false });
@@ -135,40 +95,6 @@ describe("Transport", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("https://new.test/public/sites/site_abc/events");
   });
 
-  describe("sendElements", () => {
-    it("posts crawled elements to {apiBase}/public/sites/{siteId}/elements with { elements }", async () => {
-      const transport = new Transport("https://api.test", "site_abc");
-      await transport.sendElements("/settings", [{ selector: "#cta", tagName: "button", label: "Save", role: "button" }]);
-
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      const [url, init] = fetchMock.mock.calls[0];
-      expect(url).toBe("https://api.test/public/sites/site_abc/elements");
-      const body = JSON.parse((init as RequestInit).body as string);
-      expect(body).toEqual({ pagePath: "/settings", elements: [{ selector: "#cta", tagName: "button", label: "Save", role: "button" }] });
-    });
-
-    it("is a no-op for an empty element list", async () => {
-      const transport = new Transport("https://api.test", "site_abc");
-      const result = await transport.sendElements("/settings", []);
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(result).toEqual({ ok: true, retryable: false });
-    });
-
-    it("is a no-op when apiBase is empty", async () => {
-      const transport = new Transport("", "site_abc");
-      const result = await transport.sendElements("/settings", [{ selector: "#cta", tagName: "button" }]);
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(result).toEqual({ ok: true, retryable: false });
-    });
-
-    it("never touches the events or replay endpoints", async () => {
-      const transport = new Transport("https://api.test", "site_abc");
-      await transport.sendElements("/settings", [{ selector: "#cta", tagName: "button" }]);
-      const [url] = fetchMock.mock.calls[0];
-      expect(url).not.toContain("/events");
-      expect(url).not.toContain("/replay");
-    });
-  });
   it("acknowledges successful session destinations when another session must retry",async()=>{
     fetchMock.mockResolvedValueOnce({ok:true,status:200}).mockResolvedValueOnce({ok:false,status:503,text:async()=>"retry"});
     const result=await new Transport("https://api.test","site").send([pageView("one","accepted"),pageView("two","retry")]);

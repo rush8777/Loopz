@@ -1,9 +1,7 @@
 # Autocapture Analytics SDK (MVP)
 
-A Hotjar-style behavioral analytics SDK. Install one script tag, get
-**Click Maps (interactive + raw), Scroll Maps, Move Maps, Hover Duration,
-Cursor Path Sampling, Rage Click detection, and Funnels** — with zero
-manual instrumentation.
+The Movcues SDK records page views, interactive clicks, scroll milestones,
+rage clicks, and custom events. It also delivers published in-app experiences.
 
 ```html
 <head>
@@ -13,8 +11,7 @@ manual instrumentation.
 
 That's the entire installation. No other code, no imports, no tracking
 attributes on your buttons or links. The core reads `data-site-id` and
-initializes itself. Experience delivery, visual editor, replay, and heatmap
-capture code remain separate CDN resources and are fetched only when needed.
+initializes itself. The experience delivery and visual editor bundles are fetched only when needed.
 
 Existing manual and queued integrations remain supported. Loading `sdk.js`
 without `data-site-id` and calling `analytics.init({...})` still works, and a
@@ -55,12 +52,9 @@ CDN/`<Script>` method for anyone who'd rather not add an npm dependency).
 
 | Automatic (zero code) | Manual (a few lines) |
 |---|---|
-| Click Maps (interactive + raw, one event, one flag) | `analytics.event(name)` for custom business events |
-| Scroll Maps | `analytics.identify(userId, traits)` |
-| Move Maps | `analytics.defineFunnel(name, steps)` — defined once |
-| Hover duration (interactive elements only) | |
-| Cursor path sampling (sparse, with pause detection) | |
-| Rage click detection | |
+| Interactive clicks | `analytics.event(name)` for custom business events |
+| Scroll milestones | `analytics.identify(userId, traits)` |
+| Rage click detection | `analytics.defineFunnel(name, steps)` |
 | SPA route change / page views | |
 
 ## Project structure
@@ -69,7 +63,7 @@ CDN/`<Script>` method for anyone who'd rather not add an npm dependency).
 src/
   bootstrap/    reference implementation of the tiny inline snippet
   core/         Analytics orchestrator, session, queue, batcher, transport
-  autocapture/  AutoCaptureEngine + 5 independent collectors
+  autocapture/  AutoCaptureEngine and individual collectors
   privacy/      centralized PrivacyFilter + sensitive-element detection
   dom/          selector generation, SPA route observation, DOM helpers
   api/          public window.analytics API + command-queue draining
@@ -88,8 +82,6 @@ dist/
   sdk.min.js / v1.js        minified core IIFE builds
   sdk-experiences(.min).js  lazy experience-delivery runtime
   sdk-editor(.min).js       lazy visual-editor runtime
-  sdk-replay(.min).js       lazy rrweb runtime
-  sdk-heatmap(.min).js      lazy snapshot runtime
   sdk.esm.js                single-file ES module build (npm import)
   types/                    .d.ts declarations for the ESM build
 docs/
@@ -104,7 +96,7 @@ npm run build
 ```
 
 `npm run build` cleans `dist` once, then runs Vite for each target (core,
-experiences, editor, replay, and heatmap IIFEs in readable/minified forms,
+experience and editor IIFEs in readable/minified forms,
 the `v1.js` CDN alias, and the ES module build) and then `tsc` to emit
 `.d.ts` declarations. The IIFE bundles are dependency-free — no React, no
 runtime dependencies — safe to serve from any static CDN. The ES module has
@@ -151,14 +143,10 @@ analytics.disableDebug()
   endpoint?: string;               // ingestion API URL
   debug?: boolean;
   autocapture?: {                  // all default true
-    click?: boolean; scroll?: boolean; move?: boolean; rageClick?: boolean; hover?: boolean; cursor?: boolean;
+    click?: boolean; scroll?: boolean; rageClick?: boolean;
   };
   rageClick?: { minClicks?: number; timeWindowMs?: number; radiusPx?: number };
-  move?: { samplesPerSecond?: number; minMovementPx?: number };
   scroll?: { milestones?: number[] };
-  hover?: { minHoverMs?: number };  // default 150 - shorter hovers are dropped, not sent
-  cursor?: { sampleInterval?: number; minimumDistance?: number; pauseThreshold?: number };
-  // sampleInterval default 50ms, minimumDistance default 12px, pauseThreshold default 300ms
   queue?: { maxBatchSize?: number; maxWaitMs?: number; maxQueueSize?: number; maxRetries?: number };
   sessionInactivityMs?: number;    // default 30 min
   respectDoNotTrack?: boolean;     // default false
@@ -184,20 +172,4 @@ analytics.defineFunnel("signup", [
 Further documentation: see `docs/ARCHITECTURE.md`, `docs/EVENT_SCHEMA.md`,
 `docs/PRIVACY.md`, and `docs/PERFORMANCE.md`.
 
-> **`move` vs `cursor`:** `move` (from `MoveCollector`) batches
-> velocity/direction-annotated points for Move Maps. `cursor` (from
-> `CursorCollector`) emits individual, minimal `{timestamp, x, y,
-> viewportWidth, viewportHeight}` samples, gated by a time-or-distance
-> threshold with pause detection, intended for lighter-weight cursor path
-> reconstruction. They're independent collectors and can be toggled
-> separately via `autocapture.move` / `autocapture.cursor`.
-
-## Explicitly out of scope for this MVP
-
-Session replay, surveys, feedback widgets, AI features, user interviews,
-error monitoring, dashboard UI, heatmap *visualization* UI, auth, billing.
-The SDK captures raw behavioral data only; visualization is a backend/
-dashboard concern layered on top later. The architecture (independent
-collectors registered with `AutoCaptureEngine`, a single `EventBus`, a
-privacy-filtered pipeline) is designed so those features can be added
-without reworking the core.
+Retired capture options in existing configurations are ignored. See the [release availability](https://www.movcues.com/docs/reference/availability/) reference for the supported SDK surface.

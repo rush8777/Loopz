@@ -1,4 +1,4 @@
-import type { AnalyticsEvent, AnyPayload, SessionReplayEventPayload } from "../types/events";
+import type { AnalyticsEvent, AnyPayload } from "../types/events";
 /**
  * The backend's ingestion contract (analytics-platform-backend,
  * POST /public/sites/:siteId/events) - deliberately narrower than the
@@ -31,7 +31,7 @@ import type { AnalyticsEvent, AnyPayload, SessionReplayEventPayload } from "../t
  * are.
  */
 export interface BackendIncomingEvent {
-    type: "page_view" | "hover" | "click" | "scroll" | "cursor" | "rage_click" | "identify" | "session_start" | "custom";
+    type: "page_view" | "click" | "scroll" | "rage_click" | "identify" | "session_start" | "custom";
     timestamp: number;
     anonymousId: string;
     eventId: string;
@@ -41,7 +41,6 @@ export interface BackendIncomingEvent {
         label?: string;
         role?: string;
     };
-    durationMs?: number;
     scrollPercent?: number;
     x?: number;
     y?: number;
@@ -51,9 +50,8 @@ export interface BackendIncomingEvent {
     documentY?: number;
     documentWidth?: number;
     documentHeight?: number;
-    deviceClass?: "desktop" | "tablet" | "mobile";
-    heatmapStateId?: string;
     rageClickCount?: number;
+    durationMs?: number;
     /** Raw PageContext.path for every event. */
     path?: string;
     /** identify only. */
@@ -75,13 +73,7 @@ export interface BackendIncomingEvent {
     /** custom only - whatever JSON-serializable properties the caller passed to analytics.event(). */
     properties?: Record<string, unknown>;
 }
-export interface BackendReplayEvent {
-    type: number;
-    timestamp: number;
-    data: unknown;
-}
 export declare function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendIncomingEvent | null;
-export declare function mapToBackendReplayEvent(event: AnalyticsEvent<SessionReplayEventPayload>): BackendReplayEvent;
 /** Groups events by sessionId, preserving relative order within each group. */
 export declare function groupBySessionId<T extends {
     sessionId: string;

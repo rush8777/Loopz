@@ -1,10 +1,4 @@
-/**
- * Walk up from a target to find the nearest "interactive" element. Shared by
- * ClickCollector (interactive vs. raw click discrimination) and
- * HoverCollector (which elements are worth timing). Returns null - not a
- * fallback to `el` - when nothing interactive is found, so callers can tell
- * "this really is a non-interactive area" from "this is a real widget".
- */
+/** Finds the nearest interactive control within a bounded ancestor walk. */
 const INTERACTIVE_TAGS = new Set(["BUTTON", "A", "INPUT", "SELECT", "TEXTAREA", "SUMMARY", "LABEL"]);
 
 export function closestInteractive(el: Element | null, maxDepth = 8): Element | null {

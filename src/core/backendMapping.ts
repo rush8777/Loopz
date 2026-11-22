@@ -2,13 +2,10 @@ import type {
   AnalyticsEvent,
   AnyPayload,
   ClickEventPayload,
-  HoverEventPayload,
   ScrollEventPayload,
-  CursorEventPayload,
   CustomEventPayload,
   IdentifyEventPayload,
   SessionStartEventPayload,
-  SessionReplayEventPayload,
   RageClickEventPayload,
 } from "../types/events";
 
@@ -44,13 +41,12 @@ import type {
  * are.
  */
 export interface BackendIncomingEvent {
-  type: "page_view" | "hover" | "click" | "scroll" | "cursor" | "rage_click" | "identify" | "session_start" | "custom";
+  type: "page_view" | "click" | "scroll" | "rage_click" | "identify" | "session_start" | "custom";
   timestamp: number;
   anonymousId: string;
   eventId: string;
   pageViewId: string;
   element?: { selector: string; label?: string; role?: string };
-  durationMs?: number;
   scrollPercent?: number;
   x?: number;
   y?: number;
@@ -60,9 +56,8 @@ export interface BackendIncomingEvent {
   documentY?: number;
   documentWidth?: number;
   documentHeight?: number;
-  deviceClass?: "desktop" | "tablet" | "mobile";
-  heatmapStateId?: string;
   rageClickCount?: number;
+  durationMs?: number;
   /** Raw PageContext.path for every event. */
   path?: string;
   /** identify only. */
@@ -85,42 +80,6 @@ export interface BackendIncomingEvent {
   properties?: Record<string, unknown>;
 }
 
-export interface BackendReplayEvent {
-  type: number;
-  timestamp: number;
-  data: unknown;
-}
-
-/**
- * Event types the SDK captures that this backend has no ingestion path
- * for yet (no matching column/concept in session_events, no consumer
- * for them). Rather than silently mis-sending them as some best-effort
- * guess, they're dropped at the transport boundary - they still flow
- * through the local EventBus/queue like everything else, so any other
- * consumer wired to the bus directly still sees them; they just never
- * reach this particular backend's HTTP API.
- *
- * `identify` is deliberately NOT in this set (anymore) - the backend's
- * tracked-user identity layer consumes it directly, see
- * resolveIdentity() there and the "identify" case below.
- *
- * `custom` is deliberately NOT in this set (anymore) either - developer-
- * defined events (`analytics.event(name, properties?)`) are now a
- * first-class ingested event type, see the "custom" case below and
- * BackendIncomingEvent's doc comment.
- */
-const UNSUPPORTED_BY_BACKEND = new Set(["move", "funnel"]);
-
-/**
- * Maps one SDK event to the backend's flattened shape, or null if this
- * backend has nowhere to put it (see UNSUPPORTED_BY_BACKEND) or it's a
- * replay event (handled separately by mapToBackendReplayEvent).
- *
- * Coordinate frame note: x/y remain viewport-relative for backward
- * compatibility. documentX/documentY are the primary full-page heatmap
- * coordinates, paired with document and viewport dimensions so the Page
- * heatmap can align them to a reference snapshot after scrolling.
- */
 /**
  * Builds the backend's `element` field, including `label`/`role` only
  * when the SDK actually computed one (older/custom-built ElementDescriptor
@@ -136,16 +95,12 @@ function toBackendElement(descriptor: { selector: string; label?: string; role?:
 }
 
 export function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendIncomingEvent | null {
-  if (UNSUPPORTED_BY_BACKEND.has(event.type) || event.type === "session_replay_event") return null;
-
   const viewportWidth = event.page.viewportWidth > 0 ? event.page.viewportWidth : undefined;
   const viewportHeight = event.page.viewportHeight > 0 ? event.page.viewportHeight : undefined;
-  const heatmapContext = {
+  const pageContext = {
     path: event.page.path,
     ...(event.page.documentWidth > 0 && { documentWidth: event.page.documentWidth }),
     ...(event.page.documentHeight > 0 && { documentHeight: event.page.documentHeight }),
-    ...(event.heatmap?.deviceClass && { deviceClass: event.heatmap.deviceClass }),
-    ...(event.heatmap?.stateId && { heatmapStateId: event.heatmap.stateId }),
   };
 
   switch (event.type) {
@@ -156,7 +111,7 @@ export function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendInc
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
-        ...heatmapContext,
+        ...pageContext,
       };
 
     case "click": {
@@ -169,34 +124,12 @@ export function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendInc
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
-        ...heatmapContext,
+        ...pageContext,
         element: toBackendElement(p.element),
         x,
         y,
         documentX: Math.max(0, Math.min(20000, Math.floor(p.coordinates.documentX ?? p.coordinates.pageX))),
         documentY: Math.max(0, Math.min(200000, Math.floor(p.coordinates.documentY ?? p.coordinates.pageY))),
-        ...(viewportWidth !== undefined && { viewportWidth }),
-        ...(viewportHeight !== undefined && { viewportHeight }),
-      };
-    }
-
-    case "hover": {
-      const p = event.payload as HoverEventPayload;
-      const x = p.x !== undefined ? Math.max(0, Math.min(20000, Math.floor(p.x))) : undefined;
-      const y = p.y !== undefined ? Math.max(0, Math.min(200000, Math.floor(p.y))) : undefined;
-      return {
-        type: "hover",
-        timestamp: event.timestamp,
-        anonymousId: event.anonymousId,
-        eventId: event.eventId,
-        pageViewId: event.pageViewId,
-        ...heatmapContext,
-        element: toBackendElement(p.element),
-        durationMs: p.durationMs,
-        ...(x !== undefined && { x }),
-        ...(y !== undefined && { y }),
-        ...(p.documentX !== undefined && { documentX: Math.max(0, Math.min(20000, Math.floor(p.documentX))) }),
-        ...(p.documentY !== undefined && { documentY: Math.max(0, Math.min(200000, Math.floor(p.documentY))) }),
         ...(viewportWidth !== undefined && { viewportWidth }),
         ...(viewportHeight !== undefined && { viewportHeight }),
       };
@@ -211,34 +144,10 @@ export function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendInc
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
-        ...heatmapContext,
+        ...pageContext,
         scrollPercent,
         ...(viewportWidth !== undefined && { viewportWidth }),
         ...(viewportHeight !== undefined && { viewportHeight }),
-      };
-    }
-
-    case "cursor": {
-      const p = event.payload as CursorEventPayload;
-      const cursorViewportWidth = p.viewportWidth > 0 ? p.viewportWidth : undefined;
-      const cursorViewportHeight = p.viewportHeight > 0 ? p.viewportHeight : undefined;
-      const x = Math.max(0, Math.min(20000, Math.floor(p.x)));
-      const y = Math.max(0, Math.min(200000, Math.floor(p.y)));
-      return {
-        type: "cursor",
-        timestamp: event.timestamp,
-        anonymousId: event.anonymousId,
-        eventId: event.eventId,
-        pageViewId: event.pageViewId,
-        ...heatmapContext,
-        x,
-        y,
-        documentX: Math.max(0, Math.min(20000, Math.floor(p.documentX ?? p.x))),
-        documentY: Math.max(0, Math.min(200000, Math.floor(p.documentY ?? p.y))),
-        ...(p.documentWidth !== undefined && { documentWidth: p.documentWidth }),
-        ...(p.documentHeight !== undefined && { documentHeight: p.documentHeight }),
-        ...(cursorViewportWidth !== undefined && { viewportWidth: cursorViewportWidth }),
-        ...(cursorViewportHeight !== undefined && { viewportHeight: cursorViewportHeight }),
       };
     }
 
@@ -252,7 +161,7 @@ export function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendInc
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
-        ...heatmapContext,
+        ...pageContext,
         ...(p.targetSelector && { element: { selector: p.targetSelector } }),
         x,
         y,
@@ -315,15 +224,6 @@ export function mapToBackendEvent(event: AnalyticsEvent<AnyPayload>): BackendInc
     default:
       return null;
   }
-}
-
-export function mapToBackendReplayEvent(event: AnalyticsEvent<SessionReplayEventPayload>): BackendReplayEvent {
-  const rrwebEvent = event.payload.rrwebEvent as { type: number; timestamp: number; data: unknown };
-  return {
-    type: rrwebEvent.type,
-    timestamp: rrwebEvent.timestamp,
-    data: rrwebEvent.data,
-  };
 }
 
 /** Groups events by sessionId, preserving relative order within each group. */

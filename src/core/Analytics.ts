@@ -13,22 +13,15 @@ import type {
   AnyPayload,
   ClickEventPayload,
   ScrollEventPayload,
-  MoveEventPayload,
   RageClickEventPayload,
-  HoverEventPayload,
-  CursorEventPayload,
   FunnelEventPayload,
   CustomEventPayload,
   IdentifyEventPayload,
-  SessionReplayEventPayload,
   SessionStartEventPayload,
-  ElementsSeenPayload,
   EventType,
 } from "../types/events";
 import type { FunnelStep } from "../types/funnel";
 import { RouteObserver } from "../dom/RouteObserver";
-import { HeatmapManager } from "../heatmaps/HeatmapManager";
-import { MVP1_POLICY } from "./mvpPolicy";
 import { SessionActivityMonitor } from "./SessionActivityMonitor";
 import { loadEditorRuntime, loadExperienceRuntime } from "../experiences/loadRuntimes";
 import { clearEditorContinuation, readEditorContinuation } from "../experiences/editorContinuation";
@@ -55,7 +48,6 @@ export class Analytics {
   private transport!: Transport;
   private batcher!: Batcher;
   private routeObserver = new RouteObserver();
-  private heatmaps: HeatmapManager | null = null;
   private activityMonitor: SessionActivityMonitor | null = null;
   private experiences: ExperienceLoaderRuntime | null = null;
   private pendingExperienceLaunches: string[] = [];
@@ -112,24 +104,14 @@ export class Analytics {
     );
     this.engine = new AutoCaptureEngine(this.config);
     this.activityMonitor = new SessionActivityMonitor(this.session);
-    if (MVP1_POLICY.heatmaps) {
-      this.heatmaps = new HeatmapManager(this.config.endpoint, this.config.siteId, this.config.heatmapSnapshotBundleUrl);
-      this.heatmaps.initialize();
-    }
-
     this.wireCollectorsToPipeline();
 
     this.initialized = true;
     this.log("initialized", { siteId: this.config.siteId });
-    this.engine.initializeElementDiscovery();
 
-    // Route observation belongs to the initialized SDK lifecycle and remains
-    // active for page views and Experiences independently of dormant discovery.
     this.unsubscribers.push(this.routeObserver.onChange(() => this.onRouteChange()));
     this.routeObserver.start();
 
-    // Preserve the SDK's established auto-start behavior for behavioral
-    // collectors, without making discovery depend on start().
     this.start();
 
     // Fire the initial page view + funnel evaluation.
@@ -162,7 +144,6 @@ export class Analytics {
     this.generation++;
     this.stop();
     this.routeObserver.stop();
-    this.engine?.destroyElementDiscovery();
     for (const unsub of this.unsubscribers) unsub();
     this.unsubscribers = [];
     this.queue?.clear();
@@ -171,7 +152,6 @@ export class Analytics {
     this.pendingExperienceLaunches = [];
     this.deliveryRefreshPending = false;
     this.deliveredTriggers.clear();
-    this.heatmaps = null;
     this.activityMonitor = null;
     this.editor?.destroy();
     this.editor = null;
@@ -358,14 +338,8 @@ export class Analytics {
 
     this.unsubscribers.push(
       bus.on<ClickEventPayload>("click", (p) => {
-        // MVP1 retains interactive click analytics while avoiding a stored
-        // event for whitespace/background/dead-area clicks. This filter is
-        // intentionally downstream of ClickCollector: it must not affect
-        // click:raw, which RageClickDetector consumes locally.
-        if (MVP1_POLICY.interactiveClicksOnly && !p.interactive) {
-          this.log("non-interactive click ignored by MVP1 policy", p.element.selector);
-          return;
-        }
+        // Raw clicks still reach RageClickDetector through the click:raw topic.
+        if (!p.interactive) return;
         this.enqueueEvent("click", p);
         this.log("click captured", p.element.selector);
       })
@@ -379,13 +353,6 @@ export class Analytics {
     );
 
     this.unsubscribers.push(
-      bus.on<MoveEventPayload>("move", (p) => {
-        this.enqueueEvent("move", p);
-        this.log(`move batch: ${p.points.length} points`);
-      })
-    );
-
-    this.unsubscribers.push(
       bus.on<RageClickEventPayload>("rage_click", (p) => {
         this.enqueueEvent("rage_click", p);
         this.log("rage click detected", p);
@@ -393,42 +360,9 @@ export class Analytics {
     );
 
     this.unsubscribers.push(
-      bus.on<HoverEventPayload>("hover", (p) => {
-        this.enqueueEvent("hover", p);
-        this.log(`hover: ${p.element.selector} (${p.durationMs}ms)`);
-      })
-    );
-
-    this.unsubscribers.push(
-      bus.on<CursorEventPayload>("cursor", (p) => {
-        this.enqueueEvent("cursor", p);
-        this.log(`cursor sample: (${p.x}, ${p.y})`);
-      })
-    );
-
-    this.unsubscribers.push(
       bus.on<FunnelEventPayload>("funnel", (p) => {
         this.enqueueEvent("funnel", p);
         this.log(`funnel step completed: ${p.funnelName} [${p.stepIndex}] (${p.status})`);
-      })
-    );
-
-    this.unsubscribers.push(
-      bus.on<SessionReplayEventPayload>("session_replay_event", (p) => {
-        this.enqueueEvent("session_replay_event", p);
-        this.log(`session replay event: seq ${p.seq}`);
-      })
-    );
-
-    this.unsubscribers.push(
-      bus.on<ElementsSeenPayload>("elements_seen", (p) => {
-        if (!MVP1_POLICY.elementCrawler) return;
-        // Deliberately not enqueueEvent()/the batched queue - see
-        // Transport.sendElements's doc comment. Best-effort, fire-and-
-        // forget; a failed crawl upload just means the catalog is
-        // slightly stale until the next route change re-crawls.
-        void this.transport.sendElements(p.pagePath, p.elements);
-        this.log(`elements crawled: ${p.elements.length}`);
       })
     );
   }
@@ -441,12 +375,10 @@ export class Analytics {
   private onRouteChange(): void {
     if (this.running) {
       this.session.newPageView();
-      this.engine.onRouteChange(location.pathname, true);
+      this.engine.onRouteChange(location.pathname);
       this.trackPageView();
       this.experiences?.onRouteChange();
       void this.refreshExperiencesAfterFlush();
-    } else {
-      this.engine.onRouteChange(location.pathname, false);
     }
     this.log("route changed", location.pathname);
   }
@@ -515,7 +447,6 @@ export class Analytics {
       sessionId: this.session.getSessionId(),
       pageViewId: this.session.getPageViewId(),
       page: getPageContext(),
-      ...(this.heatmaps ? { heatmap: this.heatmaps.context() } : {}),
       payload,
     };
     this.batcher.enqueue(event as AnalyticsEvent<AnyPayload>);

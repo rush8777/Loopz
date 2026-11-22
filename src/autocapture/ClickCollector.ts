@@ -42,7 +42,7 @@ export class ClickCollector {
     // a real interactive ancestor (button/link/role="button"/etc.) exists.
     // When it's null this is a raw/background click (whitespace, image,
     // dead zone) - we still describe whatever element was actually under
-    // the cursor so the raw click map retains useful metadata.
+    // the cursor for local rage-click detection.
     const interactiveEl = closestInteractive(rawTarget);
     const target = interactiveEl || rawTarget;
 

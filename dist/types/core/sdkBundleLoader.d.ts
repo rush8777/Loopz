@@ -1,4 +1,4 @@
-export type SdkBundle = "experiences" | "editor" | "replay" | "heatmap";
+export type SdkBundle = "experiences" | "editor";
 /**
  * Derives a stable sibling artifact from the core script URL. Readable
  * sdk.js loads readable siblings; sdk.min.js and the public v1.js alias

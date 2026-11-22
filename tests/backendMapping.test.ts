@@ -1,19 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { mapToBackendEvent, mapToBackendReplayEvent, groupBySessionId } from "../src/core/backendMapping";
+import { mapToBackendEvent, groupBySessionId } from "../src/core/backendMapping";
 import type {
   AnalyticsEvent,
   AnyPayload,
   ClickEventPayload,
-  HoverEventPayload,
   ScrollEventPayload,
-  CursorEventPayload,
-  MoveEventPayload,
   RageClickEventPayload,
   FunnelEventPayload,
   CustomEventPayload,
   IdentifyEventPayload,
   SessionStartEventPayload,
-  SessionReplayEventPayload,
   PageContext,
 } from "../src/types/events";
 
@@ -28,7 +24,7 @@ const basePage: PageContext = {
   devicePixelRatio: 2,
 };
 
-const heatmapPageContext = {
+const documentDimensions = {
   path: "/pricing",
   documentWidth: 1440,
   documentHeight: 3200,
@@ -61,7 +57,7 @@ describe("mapToBackendEvent", () => {
       anonymousId: "anon_1",
       eventId: "evt_1",
       pageViewId: "pv_1",
-      ...heatmapPageContext,
+      ...documentDimensions,
     });
   });
 
@@ -81,7 +77,7 @@ describe("mapToBackendEvent", () => {
       anonymousId: "anon_1",
       eventId: "evt_1",
       pageViewId: "pv_1",
-      ...heatmapPageContext,
+      ...documentDimensions,
       element: { selector: "#cta" },
       x: 120,
       y: 340,
@@ -108,7 +104,7 @@ describe("mapToBackendEvent", () => {
       anonymousId: "anon_1",
       eventId: "evt_1",
       pageViewId: "pv_1",
-      ...heatmapPageContext,
+      ...documentDimensions,
       element: { selector: "#cta", label: "Save changes", role: "button" },
       x: 120,
       y: 340,
@@ -117,73 +113,6 @@ describe("mapToBackendEvent", () => {
       viewportWidth: 1440,
       viewportHeight: 900,
     });
-  });
-
-  it("maps hover using its captured element-center position", () => {
-    const payload: HoverEventPayload = {
-      element: { tagName: "div", selector: "#hero" },
-      hoverStart: 1000,
-      hoverEnd: 61000,
-      durationMs: 60000,
-      x: 700,
-      y: 220,
-    };
-    const event = makeEvent("hover", payload);
-
-    expect(mapToBackendEvent(event)).toEqual({
-      type: "hover",
-      timestamp: event.timestamp,
-      anonymousId: "anon_1",
-      eventId: "evt_1",
-      pageViewId: "pv_1",
-      ...heatmapPageContext,
-      element: { selector: "#hero" },
-      durationMs: 60000,
-      x: 700,
-      y: 220,
-      viewportWidth: 1440,
-      viewportHeight: 900,
-    });
-  });
-
-  it("includes element label/role in the hover mapping when the SDK computed them", () => {
-    const payload: HoverEventPayload = {
-      element: { tagName: "a", selector: 'a[href="/dashboard/incidents/:id"]', label: "View", role: "link" },
-      hoverStart: 1000,
-      hoverEnd: 1500,
-      durationMs: 500,
-      x: 700,
-      y: 220,
-    };
-    const event = makeEvent("hover", payload);
-
-    expect(mapToBackendEvent(event)).toEqual({
-      type: "hover",
-      timestamp: event.timestamp,
-      anonymousId: "anon_1",
-      eventId: "evt_1",
-      pageViewId: "pv_1",
-      ...heatmapPageContext,
-      element: { selector: 'a[href="/dashboard/incidents/:id"]', label: "View", role: "link" },
-      durationMs: 500,
-      x: 700,
-      y: 220,
-      viewportWidth: 1440,
-      viewportHeight: 900,
-    });
-  });
-
-  it("maps hover with no captured position (older payload shape) without crashing", () => {
-    const payload = {
-      element: { tagName: "div", selector: "#hero" },
-      hoverStart: 1000,
-      hoverEnd: 61000,
-      durationMs: 60000,
-    } as HoverEventPayload;
-    const event = makeEvent("hover", payload);
-    const mapped = mapToBackendEvent(event);
-    expect(mapped?.x).toBeUndefined();
-    expect(mapped?.y).toBeUndefined();
   });
 
   it("maps scroll to scrollPercent with no coordinates (1-D signal)", () => {
@@ -204,35 +133,14 @@ describe("mapToBackendEvent", () => {
       anonymousId: "anon_1",
       eventId: "evt_1",
       pageViewId: "pv_1",
-      ...heatmapPageContext,
+      ...documentDimensions,
       scrollPercent: 55,
       viewportWidth: 1440,
       viewportHeight: 900,
     });
   });
 
-  it("maps cursor using its own payload-level viewport size, not the page envelope's", () => {
-    const payload: CursorEventPayload = { timestamp: 1000, x: 300, y: 400, viewportWidth: 375, viewportHeight: 812 };
-    const event = makeEvent("cursor", payload);
-
-    expect(mapToBackendEvent(event)).toEqual({
-      type: "cursor",
-      timestamp: event.timestamp,
-      anonymousId: "anon_1",
-      eventId: "evt_1",
-      pageViewId: "pv_1",
-      ...heatmapPageContext,
-      x: 300,
-      y: 400,
-      documentX: 300,
-      documentY: 400,
-      viewportWidth: 375,
-      viewportHeight: 812,
-    });
-  });
-
   it("returns null for event types this backend has no ingestion path for and maps existing rage-click data", () => {
-    const move = makeEvent<MoveEventPayload>("move", { points: [] });
     const rageClick = makeEvent<RageClickEventPayload>("rage_click", {
       coordinates: { x: 1, y: 1 },
       clickCount: 5,
@@ -245,9 +153,7 @@ describe("mapToBackendEvent", () => {
       status: "step_completed",
     });
 
-    for (const event of [move, funnel]) {
-      expect(mapToBackendEvent(event)).toBeNull();
-    }
+    expect(mapToBackendEvent(funnel)).toBeNull();
     expect(mapToBackendEvent(rageClick)).toMatchObject({ type: "rage_click", x: 1, y: 1, documentX: 1, documentY: 1, rageClickCount: 5, durationMs: 800 });
   });
 
@@ -281,14 +187,7 @@ describe("mapToBackendEvent", () => {
     });
   });
 
-  it("returns null for session_replay_event (handled by mapToBackendReplayEvent instead)", () => {
-    const event = makeEvent<SessionReplayEventPayload>("session_replay_event", {
-      replaySessionId: "replay_1",
-      seq: 0,
-      rrwebEvent: { type: 2, timestamp: 1000, data: {} },
-    });
-    expect(mapToBackendEvent(event)).toBeNull();
-  });
+
 });
 
 describe("mapToBackendEvent - session_start", () => {
@@ -399,19 +298,6 @@ describe("mapToBackendEvent - custom", () => {
     expect(mapped).not.toHaveProperty("y");
     expect(mapped).not.toHaveProperty("durationMs");
     expect(mapped).not.toHaveProperty("scrollPercent");
-  });
-});
-
-describe("mapToBackendReplayEvent", () => {
-  it("extracts type/timestamp/data unmodified from the wrapped rrweb event", () => {
-    const rrwebEvent = { type: 3, timestamp: 5000, data: { source: 0, texts: [] } };
-    const event = makeEvent<SessionReplayEventPayload>("session_replay_event", {
-      replaySessionId: "replay_1",
-      seq: 4,
-      rrwebEvent,
-    });
-
-    expect(mapToBackendReplayEvent(event)).toEqual({ type: 3, timestamp: 5000, data: { source: 0, texts: [] } });
   });
 });
 

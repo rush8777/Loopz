@@ -2,15 +2,9 @@ import { EventBus } from "../core/EventBus";
 import { PrivacyFilter } from "../privacy/PrivacyFilter";
 import { ClickCollector } from "./ClickCollector";
 import { ScrollCollector } from "./ScrollCollector";
-import { MoveCollector } from "./MoveCollector";
 import { RageClickDetector } from "./RageClickDetector";
-import { HoverCollector } from "./HoverCollector";
-import { CursorCollector } from "./CursorCollector";
 import { FunnelTracker } from "./FunnelTracker";
-import { ElementCrawler } from "./ElementCrawler";
-import { RRWebRecorder } from "../session/RRWebRecorder";
 import type { ResolvedAnalyticsConfig } from "../types/config";
-import { MVP1_POLICY } from "../core/mvpPolicy";
 
 /**
  * Owns registration, startup, and teardown of every autocapture collector.
@@ -24,39 +18,15 @@ export class AutoCaptureEngine {
 
   readonly click: ClickCollector;
   readonly scroll: ScrollCollector;
-  readonly move: MoveCollector;
   readonly rageClick: RageClickDetector;
-  readonly hover: HoverCollector;
-  readonly cursor: CursorCollector;
   readonly funnel: FunnelTracker;
-  /**
-   * Dormant in MVP1. When release-enabled, this is a one-shot `.crawl()`
-   * triggered from SDK initialization and `onRouteChange()` rather than a
-   * behavioral start/stop collector. See ElementCrawler.ts.
-   */
-  readonly elementCrawler: ElementCrawler;
-  /**
-   * Session replay is opt-in and separate from the rest of autocapture:
-   * it is instantiated eagerly (cheap - does nothing until start()) but
-   * only ever started when sessionReplay.enabled is true, both here and
-   * defensively inside RRWebRecorder itself.
-   */
-  readonly sessionReplay: RRWebRecorder;
-
   private started = false;
-  private discoveryInitialized = false;
-  private pendingInitialCrawl: (() => void) | null = null;
 
   constructor(private config: ResolvedAnalyticsConfig) {
     this.click = new ClickCollector(this.bus, this.privacy);
     this.scroll = new ScrollCollector(this.bus, config.scroll);
-    this.move = new MoveCollector(this.bus, config.move);
     this.rageClick = new RageClickDetector(this.bus, config.rageClick);
-    this.hover = new HoverCollector(this.bus, this.privacy, config.hover);
-    this.cursor = new CursorCollector(this.bus, config.cursor);
     this.funnel = new FunnelTracker(this.bus);
-    this.elementCrawler = new ElementCrawler(this.bus, this.privacy);
-    this.sessionReplay = new RRWebRecorder(this.bus, config.sessionReplay);
   }
 
   start(): void {
@@ -66,52 +36,9 @@ export class AutoCaptureEngine {
     const ac = this.config.autocapture;
     if (ac.click) this.click.start();
     if (ac.scroll) this.scroll.start();
-    if (MVP1_POLICY.move && ac.move) this.move.start();
     // Rage click detection depends on raw click data, so it must run
     // whenever click capture is active.
     if (ac.rageClick && ac.click) this.rageClick.start();
-    if (MVP1_POLICY.hover && ac.hover) this.hover.start();
-    if (MVP1_POLICY.cursor && ac.cursor) this.cursor.start();
-    // Fire-and-forget: replay may need to fetch its bundle first, and must
-    // never block or delay the rest of autocapture from starting.
-    if (MVP1_POLICY.sessionReplay && this.config.sessionReplay.enabled) void this.sessionReplay.start();
-  }
-
-  /**
-   * Starts structural Page/Element discovery for the initialized SDK.
-   * This lifecycle is intentionally independent of behavioral start/stop.
-   */
-  initializeElementDiscovery(): void {
-    if (
-      !MVP1_POLICY.elementCrawler ||
-      this.discoveryInitialized ||
-      !this.config.autocapture.elementCrawler
-    ) return;
-    this.discoveryInitialized = true;
-    this.scheduleInitialCrawl();
-  }
-
-  /** Runs the first crawl once the DOM actually has content - a crawl fired before parsing finishes would just find nothing. */
-  private scheduleInitialCrawl(): void {
-    if (typeof document === "undefined") return;
-    if (document.readyState === "loading") {
-      this.pendingInitialCrawl = () => {
-        this.pendingInitialCrawl = null;
-        if (MVP1_POLICY.elementCrawler && this.discoveryInitialized) this.elementCrawler.crawl();
-      };
-      document.addEventListener("DOMContentLoaded", this.pendingInitialCrawl, { once: true });
-    } else {
-      if (MVP1_POLICY.elementCrawler && this.discoveryInitialized) this.elementCrawler.crawl();
-    }
-  }
-
-  /** Completely tears down discovery scheduling during Analytics.destroy(). */
-  destroyElementDiscovery(): void {
-    this.discoveryInitialized = false;
-    if (this.pendingInitialCrawl && typeof document !== "undefined") {
-      document.removeEventListener("DOMContentLoaded", this.pendingInitialCrawl);
-      this.pendingInitialCrawl = null;
-    }
   }
 
   stop(): void {
@@ -119,20 +46,12 @@ export class AutoCaptureEngine {
     this.started = false;
     this.click.stop();
     this.scroll.stop();
-    this.move.stop();
     this.rageClick.stop();
-    this.hover.stop();
-    this.cursor.stop();
-    this.sessionReplay.stop();
   }
 
-  /** Handles SPA routes; dormant discovery can only run when the release policy enables it. */
-  onRouteChange(path: string, behavioralCaptureActive = true): void {
-    if (behavioralCaptureActive) {
-      this.scroll.reset();
-      this.funnel.onPageView(path);
-    }
-    if (MVP1_POLICY.elementCrawler && this.discoveryInitialized) this.elementCrawler.crawl();
+  onRouteChange(path: string): void {
+    this.scroll.reset();
+    this.funnel.onPageView(path);
   }
 
   isRunning(): boolean {

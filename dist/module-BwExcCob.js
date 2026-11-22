@@ -380,85 +380,6 @@ class ScrollCollector {
     }
   }
 }
-class MoveCollector {
-  constructor(bus, config) {
-    this.bus = bus;
-    this.config = config;
-    this.lastX = 0;
-    this.lastY = 0;
-    this.lastSampleTime = 0;
-    this.buffer = [];
-    this.ticking = false;
-    this.pendingEvent = null;
-    this.flushHandle = null;
-    this.running = false;
-    this.handler = (e) => this.onMove(e);
-  }
-  start() {
-    if (this.running) return;
-    this.running = true;
-    const opts = { passive: true };
-    if (window.PointerEvent) {
-      window.addEventListener("pointermove", this.handler, opts);
-    } else {
-      window.addEventListener("mousemove", this.handler, opts);
-    }
-    this.scheduleFlush();
-  }
-  stop() {
-    if (!this.running) return;
-    this.running = false;
-    window.removeEventListener("pointermove", this.handler);
-    window.removeEventListener("mousemove", this.handler);
-    if (this.flushHandle) clearTimeout(this.flushHandle);
-    this.buffer = [];
-  }
-  onMove(e) {
-    this.pendingEvent = e;
-    if (this.ticking) return;
-    this.ticking = true;
-    requestAnimationFrame(() => this.sample());
-  }
-  sample() {
-    this.ticking = false;
-    const e = this.pendingEvent;
-    if (!e) return;
-    const minIntervalMs = 1e3 / this.config.samplesPerSecond;
-    const t = performance.now();
-    if (t - this.lastSampleTime < minIntervalMs) return;
-    const moved = distance(this.lastX, this.lastY, e.clientX, e.clientY);
-    if (moved < this.config.minMovementPx && this.lastSampleTime !== 0) return;
-    const dt = this.lastSampleTime === 0 ? minIntervalMs : t - this.lastSampleTime;
-    const velocity = moved / (dt / 1e3);
-    const direction = moved > 0 ? Math.atan2(e.clientY - this.lastY, e.clientX - this.lastX) * 180 / Math.PI : void 0;
-    this.buffer.push({
-      x: e.clientX,
-      y: e.clientY,
-      scrollX: window.scrollX,
-      scrollY: window.scrollY,
-      velocity: Math.round(velocity),
-      direction: direction !== void 0 ? Math.round(direction) : void 0,
-      t: Date.now()
-    });
-    this.lastX = e.clientX;
-    this.lastY = e.clientY;
-    this.lastSampleTime = t;
-    if (this.buffer.length >= 50) this.flush();
-  }
-  scheduleFlush() {
-    if (!this.running) return;
-    this.flushHandle = setTimeout(() => {
-      this.flush();
-      this.scheduleFlush();
-    }, 1e3);
-  }
-  flush() {
-    if (this.buffer.length === 0) return;
-    const points = this.buffer;
-    this.buffer = [];
-    this.bus.emit("move", { points });
-  }
-}
 class RageClickDetector {
   constructor(bus, config) {
     this.bus = bus;
@@ -509,185 +430,6 @@ class RageClickDetector {
   }
   evaluateAndReset() {
     this.cluster = [];
-  }
-}
-class HoverCollector {
-  constructor(bus, privacy, config) {
-    this.bus = bus;
-    this.privacy = privacy;
-    this.config = config;
-    this.selectorGenerator = new SelectorGenerator();
-    this.active = /* @__PURE__ */ new Map();
-    this.onEnter = (e) => this.handleEnter(e);
-    this.onLeave = (e) => this.handleLeave(e);
-    this.running = false;
-  }
-  start() {
-    if (this.running) return;
-    this.running = true;
-    document.addEventListener("pointerenter", this.onEnter, {
-      capture: true,
-      passive: true
-    });
-    document.addEventListener("pointerleave", this.onLeave, {
-      capture: true,
-      passive: true
-    });
-  }
-  stop() {
-    if (!this.running) return;
-    this.running = false;
-    document.removeEventListener("pointerenter", this.onEnter, { capture: true });
-    document.removeEventListener("pointerleave", this.onLeave, { capture: true });
-    this.active.clear();
-  }
-  handleEnter(e) {
-    const target = e.target;
-    if (!target || target.nodeType !== 1) return;
-    const interactiveEl = closestInteractive(target);
-    if (!interactiveEl) return;
-    if (this.active.has(interactiveEl)) return;
-    if (!this.privacy.shouldCapture(interactiveEl)) return;
-    const rect = interactiveEl.getBoundingClientRect();
-    this.active.set(interactiveEl, {
-      startedAt: Date.now(),
-      x: Math.round(rect.left + rect.width / 2),
-      y: Math.round(rect.top + rect.height / 2),
-      documentX: Math.round(rect.left + rect.width / 2 + window.scrollX),
-      documentY: Math.round(rect.top + rect.height / 2 + window.scrollY)
-    });
-  }
-  handleLeave(e) {
-    const target = e.target;
-    if (!target || target.nodeType !== 1) return;
-    const interactiveEl = closestInteractive(target);
-    if (!interactiveEl) return;
-    const active = this.active.get(interactiveEl);
-    if (active === void 0) return;
-    const related = e.relatedTarget;
-    if (related && interactiveEl.contains(related)) return;
-    const hoverEnd = Date.now();
-    const durationMs = hoverEnd - active.startedAt;
-    this.active.delete(interactiveEl);
-    if (durationMs < this.config.minHoverMs) return;
-    const payload = {
-      element: this.selectorGenerator.describe(interactiveEl),
-      hoverStart: active.startedAt,
-      hoverEnd,
-      durationMs,
-      x: active.x,
-      y: active.y,
-      documentX: active.documentX,
-      documentY: active.documentY
-    };
-    this.bus.emit("hover", payload);
-  }
-}
-class CursorCollector {
-  constructor(bus, config) {
-    this.bus = bus;
-    this.config = config;
-    this.lastEmittedX = 0;
-    this.lastEmittedY = 0;
-    this.lastEmittedTime = 0;
-    this.hasSample = false;
-    this.rawX = 0;
-    this.rawY = 0;
-    this.pauseTimer = null;
-    this.suspended = false;
-    this.running = false;
-    this.handleMove = (e) => this.onMove(e);
-    this.handlePauseTimeout = () => this.onPauseTimeout();
-    this.handleVisibilityChange = () => this.syncSuspendedState();
-    this.handleBlur = () => this.suspend();
-    this.handleFocus = () => this.syncSuspendedState();
-  }
-  start() {
-    if (this.running) return;
-    this.running = true;
-    this.hasSample = false;
-    this.suspended = document.visibilityState !== "visible";
-    window.addEventListener("pointermove", this.handleMove, { passive: true });
-    document.addEventListener("visibilitychange", this.handleVisibilityChange);
-    window.addEventListener("blur", this.handleBlur);
-    window.addEventListener("focus", this.handleFocus);
-  }
-  stop() {
-    if (!this.running) return;
-    this.running = false;
-    window.removeEventListener("pointermove", this.handleMove);
-    document.removeEventListener("visibilitychange", this.handleVisibilityChange);
-    window.removeEventListener("blur", this.handleBlur);
-    window.removeEventListener("focus", this.handleFocus);
-    this.clearPauseTimer();
-    this.hasSample = false;
-  }
-  onMove(e) {
-    if (this.suspended) return;
-    const x = e.clientX;
-    const y = e.clientY;
-    this.rawX = x;
-    this.rawY = y;
-    if (!this.hasSample) {
-      this.emitSample(x, y, Date.now());
-      this.schedulePauseTimer();
-    } else {
-      const t = Date.now();
-      const dt = t - this.lastEmittedTime;
-      if (dt >= this.config.sampleInterval) {
-        this.emitSample(x, y, t);
-        this.schedulePauseTimer();
-      } else if (distance(this.lastEmittedX, this.lastEmittedY, x, y) >= this.config.minimumDistance) {
-        this.emitSample(x, y, t);
-        this.schedulePauseTimer();
-      }
-    }
-  }
-  onPauseTimeout() {
-    this.pauseTimer = null;
-    if (this.suspended || !this.hasSample) return;
-    this.emitSample(this.rawX, this.rawY, Date.now());
-  }
-  schedulePauseTimer() {
-    this.clearPauseTimer();
-    this.pauseTimer = setTimeout(this.handlePauseTimeout, this.config.pauseThreshold);
-  }
-  clearPauseTimer() {
-    if (this.pauseTimer !== null) {
-      clearTimeout(this.pauseTimer);
-      this.pauseTimer = null;
-    }
-  }
-  emitSample(x, y, timestamp) {
-    this.lastEmittedX = x;
-    this.lastEmittedY = y;
-    this.lastEmittedTime = timestamp;
-    this.hasSample = true;
-    const payload = {
-      timestamp,
-      x,
-      y,
-      documentX: x + window.scrollX,
-      documentY: y + window.scrollY,
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-      documentWidth: Math.max(document.documentElement.scrollWidth, document.documentElement.clientWidth),
-      documentHeight: Math.max(document.documentElement.scrollHeight, document.documentElement.clientHeight)
-    };
-    this.bus.emit("cursor", payload);
-  }
-  syncSuspendedState() {
-    const shouldSuspend = document.visibilityState !== "visible" || !document.hasFocus();
-    if (shouldSuspend) this.suspend();
-    else this.resume();
-  }
-  suspend() {
-    this.suspended = true;
-    this.clearPauseTimer();
-    this.hasSample = false;
-  }
-  resume() {
-    this.suspended = false;
   }
 }
 function normalizeStep(step) {
@@ -751,34 +493,38 @@ class FunnelTracker {
     return [...this.progress.values()];
   }
 }
-const INTERACTIVE_SELECTOR = 'a[href], button, input, select, textarea, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [onclick], [tabindex]:not([tabindex="-1"])';
-const MAX_ELEMENTS_PER_CRAWL = 500;
-class ElementCrawler {
-  constructor(bus, privacy) {
-    this.bus = bus;
-    this.privacy = privacy;
-    this.selectorGenerator = new SelectorGenerator();
+class AutoCaptureEngine {
+  constructor(config) {
+    this.config = config;
+    this.bus = new EventBus();
+    this.privacy = new PrivacyFilter();
+    this.started = false;
+    this.click = new ClickCollector(this.bus, this.privacy);
+    this.scroll = new ScrollCollector(this.bus, config.scroll);
+    this.rageClick = new RageClickDetector(this.bus, config.rageClick);
+    this.funnel = new FunnelTracker(this.bus);
   }
-  crawl() {
-    if (typeof document === "undefined") return;
-    const candidates = document.querySelectorAll(INTERACTIVE_SELECTOR);
-    const seenSelectors = /* @__PURE__ */ new Set();
-    const elements = [];
-    for (const el of Array.from(candidates)) {
-      if (elements.length >= MAX_ELEMENTS_PER_CRAWL) break;
-      if (!this.privacy.shouldCapture(el)) continue;
-      const descriptor = this.selectorGenerator.describe(el);
-      if (seenSelectors.has(descriptor.selector)) continue;
-      seenSelectors.add(descriptor.selector);
-      elements.push({
-        selector: descriptor.selector,
-        tagName: descriptor.tagName,
-        ...descriptor.label && { label: descriptor.label },
-        ...descriptor.role && { role: descriptor.role }
-      });
-    }
-    if (elements.length === 0) return;
-    this.bus.emit("elements_seen", { pagePath: location.pathname, elements });
+  start() {
+    if (this.started) return;
+    this.started = true;
+    const ac = this.config.autocapture;
+    if (ac.click) this.click.start();
+    if (ac.scroll) this.scroll.start();
+    if (ac.rageClick && ac.click) this.rageClick.start();
+  }
+  stop() {
+    if (!this.started) return;
+    this.started = false;
+    this.click.stop();
+    this.scroll.stop();
+    this.rageClick.stop();
+  }
+  onRouteChange(path) {
+    this.scroll.reset();
+    this.funnel.onPageView(path);
+  }
+  isRunning() {
+    return this.started;
   }
 }
 function generateId(prefix) {
@@ -801,277 +547,6 @@ function randomHex(length) {
 }
 function now() {
   return Date.now();
-}
-const currentScriptElement = typeof document !== "undefined" && document.currentScript instanceof HTMLScriptElement ? document.currentScript : null;
-const currentScriptUrl = (currentScriptElement == null ? void 0 : currentScriptElement.src) ?? null;
-const pendingLoads = /* @__PURE__ */ new Map();
-function deriveSiblingBundleUrl(scriptUrl, bundle) {
-  if (!scriptUrl) return null;
-  try {
-    const url = new URL(scriptUrl, typeof location === "undefined" ? void 0 : location.href);
-    const parts = url.pathname.split("/");
-    const file = parts[parts.length - 1] ?? "";
-    const readable = file === "sdk.js";
-    if (file !== "sdk.js" && file !== "sdk.min.js" && file !== "v1.js" && file !== "v1.min.js") {
-      return null;
-    }
-    parts[parts.length - 1] = `sdk-${bundle}${readable ? "" : ".min"}.js`;
-    url.pathname = parts.join("/");
-    return url.href;
-  } catch {
-    return null;
-  }
-}
-function sdkBundleUrl(bundle, overrideUrl) {
-  return overrideUrl || deriveSiblingBundleUrl(currentScriptUrl, bundle);
-}
-function loadSdkBundle(url, globalCheck, label) {
-  const available = globalCheck();
-  if (available) return Promise.resolve(available);
-  if (!url || typeof document === "undefined") return Promise.resolve(null);
-  const existingPromise = pendingLoads.get(url);
-  if (existingPromise) return existingPromise;
-  const promise = new Promise((resolve) => {
-    const selector = `script[data-movcues-bundle-url="${escapeAttribute(url)}"]`;
-    const existing = document.querySelector(selector);
-    const script = existing ?? document.createElement("script");
-    let settled = false;
-    const finish = (value) => {
-      if (settled) return;
-      settled = true;
-      resolve(value);
-    };
-    script.addEventListener("load", () => finish(globalCheck() ?? null), { once: true });
-    script.addEventListener("error", () => {
-      console.warn(`[Analytics] failed to load ${label} bundle from ${url}`);
-      finish(null);
-    }, { once: true });
-    if (!existing) {
-      script.src = url;
-      script.async = true;
-      script.dataset.movcuesBundleUrl = url;
-      (document.head ?? document.documentElement).appendChild(script);
-    }
-  });
-  pendingLoads.set(url, promise);
-  return promise;
-}
-function escapeAttribute(value) {
-  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") return CSS.escape(value);
-  return value.replace(/["\\]/g, "\\$&");
-}
-const MVP1_POLICY = Object.freeze({
-  // Keep normal click analytics focused on intentional UI interactions.
-  // Raw, privacy-approved clicks still flow locally for rage detection.
-  interactiveClicksOnly: true,
-  elementCrawler: false,
-  cursor: false,
-  hover: false,
-  move: false,
-  sessionReplay: false,
-  heatmaps: false
-});
-class RRWebRecorder {
-  constructor(bus, config) {
-    this.bus = bus;
-    this.config = config;
-    this.replaySessionId = null;
-    this.seq = 0;
-    this.running = false;
-    this.paused = false;
-    this.generation = 0;
-    this.loadPromise = null;
-  }
-  /**
-   * Starts rrweb recording. No-op if already running. Callers (Analytics)
-   * are expected to check `config.enabled` before calling this, but we
-   * double-check here as a defensive guard against direct/misuse calls -
-   * recording must never start unless explicitly enabled.
-   *
-   * Async because it may need to fetch the replay bundle first; the rest
-   * of the SDK never awaits this, so a slow/failed load only affects
-   * replay, never autocapture.
-   */
-  async start() {
-    if (this.running) return;
-    if (!MVP1_POLICY.sessionReplay || !this.config.enabled) return;
-    if (typeof document === "undefined") return;
-    const generation = ++this.generation;
-    const record = this.recordFn ?? await this.loadRecordFn();
-    if (!record) return;
-    if (generation !== this.generation) return;
-    this.recordFn = record;
-    this.replaySessionId = generateId("replay");
-    this.seq = 0;
-    this.paused = false;
-    this.stopFn = record(this.buildRecordOptions());
-    this.running = true;
-  }
-  stop() {
-    var _a;
-    this.generation++;
-    if (!this.running) return;
-    (_a = this.stopFn) == null ? void 0 : _a.call(this);
-    this.stopFn = void 0;
-    this.running = false;
-    this.paused = false;
-    this.replaySessionId = null;
-  }
-  /**
-   * rrweb's record() does not expose pause/resume in this version, so
-   * pausing is implemented by tearing down the underlying recorder while
-   * keeping the same replay session id and sequence counter. Resuming
-   * starts a fresh rrweb recorder (which begins with a full snapshot) so
-   * the backend can always reconstruct a valid frame after a gap.
-   */
-  pause() {
-    var _a;
-    if (!this.running || this.paused) return;
-    (_a = this.stopFn) == null ? void 0 : _a.call(this);
-    this.stopFn = void 0;
-    this.paused = true;
-  }
-  resume() {
-    if (!this.running || !this.paused || !this.recordFn) return;
-    this.paused = false;
-    this.stopFn = this.recordFn(this.buildRecordOptions());
-  }
-  isRunning() {
-    return this.running && !this.paused;
-  }
-  /** Injects and awaits the separate replay bundle, caching the in-flight promise so concurrent start() calls share one load. */
-  loadRecordFn() {
-    const w = window;
-    if (w.__aaRRWebRecord__) return Promise.resolve(w.__aaRRWebRecord__);
-    if (this.loadPromise) return this.loadPromise;
-    const url = sdkBundleUrl("replay", this.config.bundleUrl);
-    if (!url) {
-      console.warn(
-        "[Analytics] sessionReplay.enabled is true but the replay bundle URL could not be determined automatically. Set sessionReplay.bundleUrl explicitly."
-      );
-      return Promise.resolve(null);
-    }
-    this.loadPromise = loadSdkBundle(url, () => w.__aaRRWebRecord__, "session replay");
-    return this.loadPromise;
-  }
-  buildRecordOptions() {
-    const maskTextSelector = this.config.maskTextSelector ? `${this.config.maskTextSelector}, input, textarea` : void 0;
-    return {
-      emit: (event) => this.handleEvent(event),
-      // --- Privacy: safe defaults; masking is never opt-out ---
-      maskAllInputs: this.config.maskAllInputs,
-      maskTextSelector,
-      blockSelector: this.config.blockSelector,
-      // Password fields are always masked regardless of maskAllInputs, so a
-      // future config change elsewhere can't accidentally weaken this.
-      maskInputOptions: { password: true },
-      // --- Performance ---
-      recordCanvas: this.config.recordCanvas,
-      collectFonts: this.config.collectFonts,
-      checkoutEveryNms: this.config.checkoutEveryNms,
-      sampling: {
-        // Throttle mouse move sampling instead of recording every pixel -
-        // CursorCollector already handles high-fidelity cursor data for
-        // analytics; rrweb only needs enough to reconstruct a visually
-        // smooth replay.
-        mousemove: this.config.sampleMouseMovement ? 50 : false,
-        scroll: 150,
-        input: "last"
-      }
-    };
-  }
-  handleEvent(event) {
-    if (!this.replaySessionId) return;
-    const payload = {
-      replaySessionId: this.replaySessionId,
-      seq: this.seq++,
-      rrwebEvent: event
-    };
-    this.bus.emit("session_replay_event", payload);
-  }
-}
-class AutoCaptureEngine {
-  constructor(config) {
-    this.config = config;
-    this.bus = new EventBus();
-    this.privacy = new PrivacyFilter();
-    this.started = false;
-    this.discoveryInitialized = false;
-    this.pendingInitialCrawl = null;
-    this.click = new ClickCollector(this.bus, this.privacy);
-    this.scroll = new ScrollCollector(this.bus, config.scroll);
-    this.move = new MoveCollector(this.bus, config.move);
-    this.rageClick = new RageClickDetector(this.bus, config.rageClick);
-    this.hover = new HoverCollector(this.bus, this.privacy, config.hover);
-    this.cursor = new CursorCollector(this.bus, config.cursor);
-    this.funnel = new FunnelTracker(this.bus);
-    this.elementCrawler = new ElementCrawler(this.bus, this.privacy);
-    this.sessionReplay = new RRWebRecorder(this.bus, config.sessionReplay);
-  }
-  start() {
-    if (this.started) return;
-    this.started = true;
-    const ac = this.config.autocapture;
-    if (ac.click) this.click.start();
-    if (ac.scroll) this.scroll.start();
-    if (MVP1_POLICY.move && ac.move) this.move.start();
-    if (ac.rageClick && ac.click) this.rageClick.start();
-    if (MVP1_POLICY.hover && ac.hover) this.hover.start();
-    if (MVP1_POLICY.cursor && ac.cursor) this.cursor.start();
-    if (MVP1_POLICY.sessionReplay && this.config.sessionReplay.enabled) void this.sessionReplay.start();
-  }
-  /**
-   * Starts structural Page/Element discovery for the initialized SDK.
-   * This lifecycle is intentionally independent of behavioral start/stop.
-   */
-  initializeElementDiscovery() {
-    if (!MVP1_POLICY.elementCrawler || this.discoveryInitialized || !this.config.autocapture.elementCrawler) return;
-    this.discoveryInitialized = true;
-    this.scheduleInitialCrawl();
-  }
-  /** Runs the first crawl once the DOM actually has content - a crawl fired before parsing finishes would just find nothing. */
-  scheduleInitialCrawl() {
-    if (typeof document === "undefined") return;
-    if (document.readyState === "loading") {
-      this.pendingInitialCrawl = () => {
-        this.pendingInitialCrawl = null;
-        if (MVP1_POLICY.elementCrawler && this.discoveryInitialized) this.elementCrawler.crawl();
-      };
-      document.addEventListener("DOMContentLoaded", this.pendingInitialCrawl, { once: true });
-    } else {
-      if (MVP1_POLICY.elementCrawler && this.discoveryInitialized) this.elementCrawler.crawl();
-    }
-  }
-  /** Completely tears down discovery scheduling during Analytics.destroy(). */
-  destroyElementDiscovery() {
-    this.discoveryInitialized = false;
-    if (this.pendingInitialCrawl && typeof document !== "undefined") {
-      document.removeEventListener("DOMContentLoaded", this.pendingInitialCrawl);
-      this.pendingInitialCrawl = null;
-    }
-  }
-  stop() {
-    if (!this.started) return;
-    this.started = false;
-    this.click.stop();
-    this.scroll.stop();
-    this.move.stop();
-    this.rageClick.stop();
-    this.hover.stop();
-    this.cursor.stop();
-    this.sessionReplay.stop();
-  }
-  /** Handles SPA routes; dormant discovery can only run when the release policy enables it. */
-  onRouteChange(path, behavioralCaptureActive = true) {
-    if (behavioralCaptureActive) {
-      this.scroll.reset();
-      this.funnel.onPageView(path);
-    }
-    if (MVP1_POLICY.elementCrawler && this.discoveryInitialized) this.elementCrawler.crawl();
-  }
-  isRunning() {
-    return this.started;
-  }
 }
 class SafeStorage {
   constructor(area) {
@@ -1205,7 +680,7 @@ class SessionManager {
     return sessionStore.get("__aa_identified_user__");
   }
 }
-const _EventQueue = class _EventQueue {
+class EventQueue {
   constructor(options) {
     this.events = [];
     this.maxQueueSize = options.maxQueueSize;
@@ -1217,9 +692,7 @@ const _EventQueue = class _EventQueue {
     this.events.push(event);
   }
   dropToMakeRoom() {
-    const lowPriorityIndex = this.events.findIndex(
-      (e) => _EventQueue.LOW_PRIORITY_TYPES.has(e.type)
-    );
+    const lowPriorityIndex = this.events.findIndex((event) => event.type === "scroll");
     if (lowPriorityIndex !== -1) {
       this.events.splice(lowPriorityIndex, 1);
     } else {
@@ -1252,10 +725,7 @@ const _EventQueue = class _EventQueue {
   clear() {
     this.events = [];
   }
-};
-_EventQueue.LOW_PRIORITY_TYPES = /* @__PURE__ */ new Set(["move", "scroll", "cursor"]);
-let EventQueue = _EventQueue;
-const UNSUPPORTED_BY_BACKEND = /* @__PURE__ */ new Set(["move", "funnel"]);
+}
 function toBackendElement(descriptor) {
   return {
     selector: descriptor.selector,
@@ -1264,16 +734,12 @@ function toBackendElement(descriptor) {
   };
 }
 function mapToBackendEvent(event) {
-  var _a, _b;
-  if (UNSUPPORTED_BY_BACKEND.has(event.type) || event.type === "session_replay_event") return null;
   const viewportWidth = event.page.viewportWidth > 0 ? event.page.viewportWidth : void 0;
   const viewportHeight = event.page.viewportHeight > 0 ? event.page.viewportHeight : void 0;
-  const heatmapContext = {
+  const pageContext = {
     path: event.page.path,
     ...event.page.documentWidth > 0 && { documentWidth: event.page.documentWidth },
-    ...event.page.documentHeight > 0 && { documentHeight: event.page.documentHeight },
-    ...((_a = event.heatmap) == null ? void 0 : _a.deviceClass) && { deviceClass: event.heatmap.deviceClass },
-    ...((_b = event.heatmap) == null ? void 0 : _b.stateId) && { heatmapStateId: event.heatmap.stateId }
+    ...event.page.documentHeight > 0 && { documentHeight: event.page.documentHeight }
   };
   switch (event.type) {
     case "page_view":
@@ -1283,7 +749,7 @@ function mapToBackendEvent(event) {
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
-        ...heatmapContext
+        ...pageContext
       };
     case "click": {
       const p = event.payload;
@@ -1295,33 +761,12 @@ function mapToBackendEvent(event) {
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
-        ...heatmapContext,
+        ...pageContext,
         element: toBackendElement(p.element),
         x,
         y,
         documentX: Math.max(0, Math.min(2e4, Math.floor(p.coordinates.documentX ?? p.coordinates.pageX))),
         documentY: Math.max(0, Math.min(2e5, Math.floor(p.coordinates.documentY ?? p.coordinates.pageY))),
-        ...viewportWidth !== void 0 && { viewportWidth },
-        ...viewportHeight !== void 0 && { viewportHeight }
-      };
-    }
-    case "hover": {
-      const p = event.payload;
-      const x = p.x !== void 0 ? Math.max(0, Math.min(2e4, Math.floor(p.x))) : void 0;
-      const y = p.y !== void 0 ? Math.max(0, Math.min(2e5, Math.floor(p.y))) : void 0;
-      return {
-        type: "hover",
-        timestamp: event.timestamp,
-        anonymousId: event.anonymousId,
-        eventId: event.eventId,
-        pageViewId: event.pageViewId,
-        ...heatmapContext,
-        element: toBackendElement(p.element),
-        durationMs: p.durationMs,
-        ...x !== void 0 && { x },
-        ...y !== void 0 && { y },
-        ...p.documentX !== void 0 && { documentX: Math.max(0, Math.min(2e4, Math.floor(p.documentX))) },
-        ...p.documentY !== void 0 && { documentY: Math.max(0, Math.min(2e5, Math.floor(p.documentY))) },
         ...viewportWidth !== void 0 && { viewportWidth },
         ...viewportHeight !== void 0 && { viewportHeight }
       };
@@ -1335,33 +780,10 @@ function mapToBackendEvent(event) {
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
-        ...heatmapContext,
+        ...pageContext,
         scrollPercent,
         ...viewportWidth !== void 0 && { viewportWidth },
         ...viewportHeight !== void 0 && { viewportHeight }
-      };
-    }
-    case "cursor": {
-      const p = event.payload;
-      const cursorViewportWidth = p.viewportWidth > 0 ? p.viewportWidth : void 0;
-      const cursorViewportHeight = p.viewportHeight > 0 ? p.viewportHeight : void 0;
-      const x = Math.max(0, Math.min(2e4, Math.floor(p.x)));
-      const y = Math.max(0, Math.min(2e5, Math.floor(p.y)));
-      return {
-        type: "cursor",
-        timestamp: event.timestamp,
-        anonymousId: event.anonymousId,
-        eventId: event.eventId,
-        pageViewId: event.pageViewId,
-        ...heatmapContext,
-        x,
-        y,
-        documentX: Math.max(0, Math.min(2e4, Math.floor(p.documentX ?? p.x))),
-        documentY: Math.max(0, Math.min(2e5, Math.floor(p.documentY ?? p.y))),
-        ...p.documentWidth !== void 0 && { documentWidth: p.documentWidth },
-        ...p.documentHeight !== void 0 && { documentHeight: p.documentHeight },
-        ...cursorViewportWidth !== void 0 && { viewportWidth: cursorViewportWidth },
-        ...cursorViewportHeight !== void 0 && { viewportHeight: cursorViewportHeight }
       };
     }
     case "rage_click": {
@@ -1374,7 +796,7 @@ function mapToBackendEvent(event) {
         anonymousId: event.anonymousId,
         eventId: event.eventId,
         pageViewId: event.pageViewId,
-        ...heatmapContext,
+        ...pageContext,
         ...p.targetSelector && { element: { selector: p.targetSelector } },
         x,
         y,
@@ -1434,14 +856,6 @@ function mapToBackendEvent(event) {
       return null;
   }
 }
-function mapToBackendReplayEvent(event) {
-  const rrwebEvent = event.payload.rrwebEvent;
-  return {
-    type: rrwebEvent.type,
-    timestamp: rrwebEvent.timestamp,
-    data: rrwebEvent.data
-  };
-}
 function groupBySessionId(events) {
   const groups = /* @__PURE__ */ new Map();
   for (const event of events) {
@@ -1462,44 +876,18 @@ class Transport {
   eventsUrl() {
     return `${this.apiBase}/public/sites/${this.siteId}/events`;
   }
-  replayUrl() {
-    return `${this.apiBase}/public/sites/${this.siteId}/replay`;
-  }
-  elementsUrl() {
-    return `${this.apiBase}/public/sites/${this.siteId}/elements`;
-  }
-  /**
-   * Sends a batch of crawled elements (see ElementCrawler.ts) to their
-   * own endpoint - a page-level catalog snapshot, not a per-session
-   * interaction stream, so it deliberately bypasses the batched
-   * event queue/retry machinery `send`/`sendBeacon` use: crawls are
-   * infrequent (page load + route change), so a simple best-effort
-   * POST per crawl is the right amount of machinery, not the queue
-   * built for continuous click/hover/scroll/cursor telemetry.
-   */
-  async sendElements(pagePath, elements) {
-    if (!this.apiBase || elements.length === 0) return { ok: true, retryable: false };
-    return this.postJson(this.elementsUrl(), { pagePath, elements });
-  }
   /** Best-effort async send used during normal operation. */
   async send(events) {
     if (!this.apiBase || events.length === 0) return { ok: true, retryable: false };
-    const { standardGroups, replayGroups } = partition(events);
-    const results = [];
     const acknowledgedEventIds = [];
-    for (const [sessionId, group] of standardGroups) {
+    let ok = true;
+    let retryable = false;
+    for (const [sessionId, group] of mapEventsBySession(events)) {
       const result = await this.postJson(this.eventsUrl(), { sessionId, events: group });
-      results.push(result);
-      if (result.ok) acknowledgedEventIds.push(...events.filter((event) => event.sessionId === sessionId && event.type !== "session_replay_event").map((event) => event.eventId));
+      ok = result.ok && ok;
+      retryable = result.retryable || retryable;
+      if (result.ok) acknowledgedEventIds.push(...group.map((event) => event.eventId));
     }
-    for (const [sessionId, group] of replayGroups) {
-      const result = await this.postJson(this.replayUrl(), { sessionId, events: group });
-      results.push(result);
-      if (result.ok) acknowledgedEventIds.push(...events.filter((event) => event.sessionId === sessionId && event.type === "session_replay_event").map((event) => event.eventId));
-    }
-    if (results.length === 0) return { ok: true, retryable: false };
-    const ok = results.every((r) => r.ok);
-    const retryable = !ok && results.some((r) => r.retryable);
     return { ok, retryable, ...!ok && acknowledgedEventIds.length ? { acknowledgedEventIds } : {} };
   }
   async postJson(url, body) {
@@ -1529,13 +917,9 @@ class Transport {
   /** Unload-safe fire-and-forget send. No retry possible after this. */
   sendBeacon(events) {
     if (!this.apiBase || events.length === 0) return true;
-    const { standardGroups, replayGroups } = partition(events);
     let allOk = true;
-    for (const [sessionId, group] of standardGroups) {
+    for (const [sessionId, group] of mapEventsBySession(events)) {
       allOk = this.beaconOrFallback(this.eventsUrl(), { sessionId, events: group }) && allOk;
-    }
-    for (const [sessionId, group] of replayGroups) {
-      allOk = this.beaconOrFallback(this.replayUrl(), { sessionId, events: group }) && allOk;
     }
     return allOk;
   }
@@ -1562,21 +946,13 @@ class Transport {
     }
   }
 }
-function partition(events) {
-  const standardEvents = events.filter((e) => e.type !== "session_replay_event");
-  const replayEvents = events.filter(
-    (e) => e.type === "session_replay_event"
-  );
-  const standardGroups = /* @__PURE__ */ new Map();
-  for (const [sessionId, group] of groupBySessionId(standardEvents)) {
-    const mapped = group.map(mapToBackendEvent).filter((e) => e !== null);
-    if (mapped.length > 0) standardGroups.set(sessionId, mapped);
+function mapEventsBySession(events) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const [sessionId, eventsInSession] of groupBySessionId(events)) {
+    const mapped = eventsInSession.map(mapToBackendEvent).filter((event) => event !== null);
+    if (mapped.length) groups.set(sessionId, mapped);
   }
-  const replayGroups = /* @__PURE__ */ new Map();
-  for (const [sessionId, group] of groupBySessionId(replayEvents)) {
-    replayGroups.set(sessionId, group.map(mapToBackendReplayEvent));
-  }
-  return { standardGroups, replayGroups };
+  return groups;
 }
 class Batcher {
   constructor(queue, transport, config, log = () => void 0, onDelivered = () => void 0) {
@@ -1789,7 +1165,7 @@ function safeScreenDimension(dim) {
   }
 }
 function resolveConfig(input) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G, _H, _I, _J, _K, _L;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o;
   if (!input || !input.siteId) {
     throw new Error("[Analytics] init() requires a `siteId`");
   }
@@ -1798,67 +1174,32 @@ function resolveConfig(input) {
     endpoint: input.endpoint || "https://api.movcues.com",
     experienceRuntimeBundleUrl: input.experienceRuntimeBundleUrl ?? "",
     editorRuntimeBundleUrl: input.editorRuntimeBundleUrl ?? "",
-    heatmapSnapshotBundleUrl: input.heatmapSnapshotBundleUrl ?? "",
     debug: input.debug ?? true,
     sessionInactivityMs: input.sessionInactivityMs ?? 30 * 60 * 1e3,
     respectDoNotTrack: input.respectDoNotTrack ?? false,
     autocapture: {
       click: ((_a = input.autocapture) == null ? void 0 : _a.click) ?? true,
       scroll: ((_b = input.autocapture) == null ? void 0 : _b.scroll) ?? true,
-      move: MVP1_POLICY.move && (((_c = input.autocapture) == null ? void 0 : _c.move) ?? false),
-      rageClick: ((_d = input.autocapture) == null ? void 0 : _d.rageClick) ?? true,
-      hover: MVP1_POLICY.hover && (((_e = input.autocapture) == null ? void 0 : _e.hover) ?? false),
-      cursor: MVP1_POLICY.cursor && (((_f = input.autocapture) == null ? void 0 : _f.cursor) ?? false),
-      elementCrawler: MVP1_POLICY.elementCrawler && (((_g = input.autocapture) == null ? void 0 : _g.elementCrawler) ?? false)
+      rageClick: ((_c = input.autocapture) == null ? void 0 : _c.rageClick) ?? true
     },
     rageClick: {
-      minClicks: ((_h = input.rageClick) == null ? void 0 : _h.minClicks) ?? 4,
-      timeWindowMs: ((_i = input.rageClick) == null ? void 0 : _i.timeWindowMs) ?? 1e3,
-      radiusPx: ((_j = input.rageClick) == null ? void 0 : _j.radiusPx) ?? 40,
-      ignoreDoubleClickMs: ((_k = input.rageClick) == null ? void 0 : _k.ignoreDoubleClickMs) ?? 250
-    },
-    move: {
-      samplesPerSecond: ((_l = input.move) == null ? void 0 : _l.samplesPerSecond) ?? 12,
-      minMovementPx: ((_m = input.move) == null ? void 0 : _m.minMovementPx) ?? 2
+      minClicks: ((_d = input.rageClick) == null ? void 0 : _d.minClicks) ?? 4,
+      timeWindowMs: ((_e = input.rageClick) == null ? void 0 : _e.timeWindowMs) ?? 1e3,
+      radiusPx: ((_f = input.rageClick) == null ? void 0 : _f.radiusPx) ?? 40,
+      ignoreDoubleClickMs: ((_g = input.rageClick) == null ? void 0 : _g.ignoreDoubleClickMs) ?? 250
     },
     scroll: {
-      throttleMs: ((_n = input.scroll) == null ? void 0 : _n.throttleMs) ?? 100,
-      milestones: ((_o = input.scroll) == null ? void 0 : _o.milestones) ?? [25, 50, 75, 90, 100]
-    },
-    hover: {
-      minHoverMs: ((_p = input.hover) == null ? void 0 : _p.minHoverMs) ?? 150
-    },
-    cursor: {
-      sampleInterval: ((_q = input.cursor) == null ? void 0 : _q.sampleInterval) ?? 50,
-      minimumDistance: ((_r = input.cursor) == null ? void 0 : _r.minimumDistance) ?? 12,
-      pauseThreshold: ((_s = input.cursor) == null ? void 0 : _s.pauseThreshold) ?? 300
+      throttleMs: ((_h = input.scroll) == null ? void 0 : _h.throttleMs) ?? 100,
+      milestones: ((_i = input.scroll) == null ? void 0 : _i.milestones) ?? [25, 50, 75, 90, 100]
     },
     queue: {
-      maxBatchSize: ((_t = input.queue) == null ? void 0 : _t.maxBatchSize) ?? 50,
-      maxWaitMs: ((_u = input.queue) == null ? void 0 : _u.maxWaitMs) ?? 5e3,
-      maxQueueSize: ((_v = input.queue) == null ? void 0 : _v.maxQueueSize) ?? 2e3,
-      maxRetries: ((_w = input.queue) == null ? void 0 : _w.maxRetries) ?? 3,
-      retryBaseDelayMs: ((_x = input.queue) == null ? void 0 : _x.retryBaseDelayMs) ?? 1e3
+      maxBatchSize: ((_j = input.queue) == null ? void 0 : _j.maxBatchSize) ?? 50,
+      maxWaitMs: ((_k = input.queue) == null ? void 0 : _k.maxWaitMs) ?? 5e3,
+      maxQueueSize: ((_l = input.queue) == null ? void 0 : _l.maxQueueSize) ?? 2e3,
+      maxRetries: ((_m = input.queue) == null ? void 0 : _m.maxRetries) ?? 3,
+      retryBaseDelayMs: ((_n = input.queue) == null ? void 0 : _n.retryBaseDelayMs) ?? 1e3
     },
-    sessionReplay: {
-      // MVP1 is release-locked off even when stale configuration opts in.
-      enabled: MVP1_POLICY.sessionReplay && (((_y = input.sessionReplay) == null ? void 0 : _y.enabled) ?? false),
-      sampleMouseMovement: ((_z = input.sessionReplay) == null ? void 0 : _z.sampleMouseMovement) ?? true,
-      maskAllInputs: ((_A = input.sessionReplay) == null ? void 0 : _A.maskAllInputs) ?? true,
-      maskTextSelector: (_B = input.sessionReplay) == null ? void 0 : _B.maskTextSelector,
-      blockSelector: (_C = input.sessionReplay) == null ? void 0 : _C.blockSelector,
-      recordCanvas: ((_D = input.sessionReplay) == null ? void 0 : _D.recordCanvas) ?? false,
-      collectFonts: ((_E = input.sessionReplay) == null ? void 0 : _E.collectFonts) ?? false,
-      checkoutEveryNms: ((_F = input.sessionReplay) == null ? void 0 : _F.checkoutEveryNms) ?? 2 * 60 * 1e3,
-      bundleUrl: (_G = input.sessionReplay) == null ? void 0 : _G.bundleUrl
-    },
-    feedback: {
-      enabled: ((_H = input.feedback) == null ? void 0 : _H.enabled) ?? false,
-      apiBase: ((_I = input.feedback) == null ? void 0 : _I.apiBase) ?? "https://platform.example.com",
-      flushIntervalMs: ((_J = input.feedback) == null ? void 0 : _J.flushIntervalMs) ?? 3e3,
-      autoDismissMs: ((_K = input.feedback) == null ? void 0 : _K.autoDismissMs) ?? 12e3
-    },
-    experiences: { enabled: ((_L = input.experiences) == null ? void 0 : _L.enabled) ?? true }
+    experiences: { enabled: ((_o = input.experiences) == null ? void 0 : _o.enabled) ?? true }
   };
 }
 class RouteObserver {
@@ -1915,132 +1256,6 @@ class RouteObserver {
     }, 0);
   }
 }
-function classifyHeatmapDevice(viewportWidth) {
-  if (viewportWidth < 768) return "mobile";
-  if (viewportWidth < 1024) return "tablet";
-  return "desktop";
-}
-class HeatmapManager {
-  constructor(apiBase, siteId, bundleUrl) {
-    this.apiBase = apiBase;
-    this.siteId = siteId;
-    this.bundleUrl = bundleUrl;
-    this.states = [];
-    this.lastResolvedAt = 0;
-    this.loadPromise = null;
-  }
-  initialize() {
-    if (!this.apiBase || typeof fetch === "undefined") return;
-    const liveToken = new URL(location.href).searchParams.get("__movcues_heatmap_capture");
-    if (liveToken) {
-      void this.enterLiveCapture(liveToken);
-      return;
-    }
-    void fetch(`${this.apiBase}/public/config/${this.siteId}`, { credentials: "omit" }).then((r) => r.ok ? r.json() : null).then((body) => {
-      this.states = Array.isArray(body == null ? void 0 : body.heatmapStates) ? body.heatmapStates : [];
-      return this.requestAutomaticReference();
-    }).catch(() => void 0);
-  }
-  context() {
-    return { stateId: this.resolveVisibleState(), deviceClass: classifyHeatmapDevice(window.innerWidth) };
-  }
-  async captureReference(captureToken) {
-    try {
-      const capture = await this.loadCaptureFunction();
-      if (!capture) return { ok: false, error: "snapshot_library_unavailable" };
-      const imageDataUrl = await capture();
-      const doc = document.documentElement;
-      const response = await fetch(`${this.apiBase}/public/sites/${this.siteId}/heatmap-snapshots/${encodeURIComponent(captureToken)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "omit",
-        body: JSON.stringify({ pagePath: location.pathname, deviceClass: classifyHeatmapDevice(window.innerWidth), viewportWidth: window.innerWidth, viewportHeight: window.innerHeight, documentWidth: Math.max(doc.scrollWidth, doc.clientWidth), documentHeight: Math.max(doc.scrollHeight, doc.clientHeight), imageDataUrl })
-      });
-      return response.ok ? { ok: true } : { ok: false, error: "snapshot_upload_failed" };
-    } catch {
-      return { ok: false, error: "snapshot_capture_failed" };
-    }
-  }
-  async requestAutomaticReference() {
-    var _a;
-    try {
-      const device = classifyHeatmapDevice(window.innerWidth);
-      const response = await fetch(`${this.apiBase}/public/sites/${this.siteId}/heatmap-reference?path=${encodeURIComponent(location.pathname)}&device=${device}`, { credentials: "omit" });
-      if (!response.ok) return;
-      const body = await response.json();
-      if (typeof ((_a = body == null ? void 0 : body.capture) == null ? void 0 : _a.token) === "string") await this.captureReference(body.capture.token);
-    } catch {
-    }
-  }
-  async enterLiveCapture(token) {
-    try {
-      const response = await fetch(`${this.apiBase}/public/sites/${this.siteId}/heatmap-captures/${encodeURIComponent(token)}`, { credentials: "omit" });
-      if (!response.ok) return;
-      const capture = await response.json();
-      const cleanUrl = new URL(location.href);
-      cleanUrl.searchParams.delete("__movcues_heatmap_capture");
-      history.replaceState(history.state, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
-      this.mountToolbar(token, capture);
-    } catch {
-    }
-  }
-  mountToolbar(token, capture) {
-    const host = document.createElement("div");
-    host.setAttribute("data-movcues-heatmap-toolbar", "");
-    const root = host.attachShadow({ mode: "closed" });
-    const wrap = document.createElement("div");
-    wrap.innerHTML = `<style>:host{all:initial}.bar{position:fixed;z-index:2147483647;left:50%;bottom:24px;transform:translateX(-50%);display:flex;align-items:center;gap:18px;min-width:560px;padding:14px 16px;border-radius:12px;background:#111827;color:#fff;box-shadow:0 16px 50px #0007;font:13px/1.4 system-ui,sans-serif}.copy{flex:1}.title{font-weight:700}.sub{color:#cbd5e1;margin-top:2px}.actions{display:flex;gap:8px}button{border:0;border-radius:7px;padding:9px 14px;font:600 13px system-ui;cursor:pointer}.cancel{background:#374151;color:#fff}.capture{background:#7c3aed;color:#fff}.status{color:#d1fae5;font-weight:600}</style><div class="bar"><div class="copy"><div class="title">movcues · Heatmap capture</div><div class="sub"></div></div><div class="actions"><button class="cancel">Cancel</button><button class="capture">Capture</button></div></div>`;
-    const sub = wrap.querySelector(".sub");
-    sub.textContent = `${capture.pageName ?? "Page"} · ${capture.stateName ?? "Default"} · ${capitalize(capture.device ?? "desktop")} — Arrange this page exactly as you want it shown.`;
-    wrap.querySelector(".cancel").addEventListener("click", () => host.remove());
-    wrap.querySelector(".capture").addEventListener("click", async () => {
-      const button = wrap.querySelector(".capture");
-      button.disabled = true;
-      button.textContent = "Capturing…";
-      host.style.display = "none";
-      const result = await this.captureReference(token);
-      host.style.display = "";
-      if (result.ok) {
-        wrap.querySelector(".actions").innerHTML = `<span class="status">Captured successfully. You can close this tab.</span>`;
-      } else {
-        button.disabled = false;
-        button.textContent = "Try again";
-      }
-    });
-    root.appendChild(wrap);
-    document.documentElement.appendChild(host);
-  }
-  resolveVisibleState() {
-    const now2 = Date.now();
-    if (now2 - this.lastResolvedAt < 200) return this.cachedStateId;
-    this.lastResolvedAt = now2;
-    this.cachedStateId = void 0;
-    for (const state of this.states) {
-      try {
-        const el = document.querySelector(state.selector);
-        if (!el) continue;
-        const style = getComputedStyle(el);
-        if (style.display !== "none" && style.visibility !== "hidden" && el.getClientRects().length > 0) {
-          this.cachedStateId = state.id;
-          break;
-        }
-      } catch {
-      }
-    }
-    return this.cachedStateId;
-  }
-  loadCaptureFunction() {
-    if (window.__movcuesHeatmapCapture__) return Promise.resolve(window.__movcuesHeatmapCapture__);
-    if (this.loadPromise) return this.loadPromise;
-    const url = sdkBundleUrl("heatmap", this.bundleUrl);
-    if (!url) return Promise.resolve(null);
-    this.loadPromise = loadSdkBundle(url, () => window.__movcuesHeatmapCapture__, "heatmap snapshot");
-    return this.loadPromise;
-  }
-}
-function capitalize(value) {
-  return value ? value[0].toUpperCase() + value.slice(1) : value;
-}
 class SessionActivityMonitor {
   constructor(session, throttleMs = 6e4) {
     this.session = session;
@@ -2070,6 +1285,64 @@ class SessionActivityMonitor {
     window.removeEventListener("scroll", this.onActivity);
     window.removeEventListener("keydown", this.onActivity);
   }
+}
+const currentScriptElement = typeof document !== "undefined" && document.currentScript instanceof HTMLScriptElement ? document.currentScript : null;
+const currentScriptUrl = (currentScriptElement == null ? void 0 : currentScriptElement.src) ?? null;
+const pendingLoads = /* @__PURE__ */ new Map();
+function deriveSiblingBundleUrl(scriptUrl, bundle) {
+  if (!scriptUrl) return null;
+  try {
+    const url = new URL(scriptUrl, typeof location === "undefined" ? void 0 : location.href);
+    const parts = url.pathname.split("/");
+    const file = parts[parts.length - 1] ?? "";
+    const readable = file === "sdk.js";
+    if (file !== "sdk.js" && file !== "sdk.min.js" && file !== "v1.js" && file !== "v1.min.js") {
+      return null;
+    }
+    parts[parts.length - 1] = `sdk-${bundle}${readable ? "" : ".min"}.js`;
+    url.pathname = parts.join("/");
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+function sdkBundleUrl(bundle, overrideUrl) {
+  return overrideUrl || deriveSiblingBundleUrl(currentScriptUrl, bundle);
+}
+function loadSdkBundle(url, globalCheck, label) {
+  const available = globalCheck();
+  if (available) return Promise.resolve(available);
+  if (!url || typeof document === "undefined") return Promise.resolve(null);
+  const existingPromise = pendingLoads.get(url);
+  if (existingPromise) return existingPromise;
+  const promise = new Promise((resolve) => {
+    const selector = `script[data-movcues-bundle-url="${escapeAttribute(url)}"]`;
+    const existing = document.querySelector(selector);
+    const script = existing ?? document.createElement("script");
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    script.addEventListener("load", () => finish(globalCheck() ?? null), { once: true });
+    script.addEventListener("error", () => {
+      console.warn(`[Analytics] failed to load ${label} bundle from ${url}`);
+      finish(null);
+    }, { once: true });
+    if (!existing) {
+      script.src = url;
+      script.async = true;
+      script.dataset.movcuesBundleUrl = url;
+      (document.head ?? document.documentElement).appendChild(script);
+    }
+  });
+  pendingLoads.set(url, promise);
+  return promise;
+}
+function escapeAttribute(value) {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") return CSS.escape(value);
+  return value.replace(/["\\]/g, "\\$&");
 }
 function loadExperienceRuntime(overrideUrl) {
   return loadSdkBundle(
@@ -2321,7 +1594,6 @@ let Analytics$1 = class Analytics {
   constructor(runtimeProviders = {}) {
     this.runtimeProviders = runtimeProviders;
     this.routeObserver = new RouteObserver();
-    this.heatmaps = null;
     this.activityMonitor = null;
     this.experiences = null;
     this.pendingExperienceLaunches = [];
@@ -2372,14 +1644,9 @@ let Analytics$1 = class Analytics {
     );
     this.engine = new AutoCaptureEngine(this.config);
     this.activityMonitor = new SessionActivityMonitor(this.session);
-    if (MVP1_POLICY.heatmaps) {
-      this.heatmaps = new HeatmapManager(this.config.endpoint, this.config.siteId, this.config.heatmapSnapshotBundleUrl);
-      this.heatmaps.initialize();
-    }
     this.wireCollectorsToPipeline();
     this.initialized = true;
     this.log("initialized", { siteId: this.config.siteId });
-    this.engine.initializeElementDiscovery();
     this.unsubscribers.push(this.routeObserver.onChange(() => this.onRouteChange()));
     this.routeObserver.start();
     this.start();
@@ -2407,22 +1674,20 @@ let Analytics$1 = class Analytics {
     this.log("autocapture stopped");
   }
   destroy() {
-    var _a, _b, _c, _d;
+    var _a, _b, _c;
     this.generation++;
     this.stop();
     this.routeObserver.stop();
-    (_a = this.engine) == null ? void 0 : _a.destroyElementDiscovery();
     for (const unsub of this.unsubscribers) unsub();
     this.unsubscribers = [];
-    (_b = this.queue) == null ? void 0 : _b.clear();
-    (_c = this.experiences) == null ? void 0 : _c.destroy();
+    (_a = this.queue) == null ? void 0 : _a.clear();
+    (_b = this.experiences) == null ? void 0 : _b.destroy();
     this.experiences = null;
     this.pendingExperienceLaunches = [];
     this.deliveryRefreshPending = false;
     this.deliveredTriggers.clear();
-    this.heatmaps = null;
     this.activityMonitor = null;
-    (_d = this.editor) == null ? void 0 : _d.destroy();
+    (_c = this.editor) == null ? void 0 : _c.destroy();
     this.editor = null;
     this.editorMode = false;
     this.editorAttempted = false;
@@ -2577,10 +1842,7 @@ let Analytics$1 = class Analytics {
     const bus = this.engine.bus;
     this.unsubscribers.push(
       bus.on("click", (p) => {
-        if (MVP1_POLICY.interactiveClicksOnly && !p.interactive) {
-          this.log("non-interactive click ignored by MVP1 policy", p.element.selector);
-          return;
-        }
+        if (!p.interactive) return;
         this.enqueueEvent("click", p);
         this.log("click captured", p.element.selector);
       })
@@ -2592,46 +1854,15 @@ let Analytics$1 = class Analytics {
       })
     );
     this.unsubscribers.push(
-      bus.on("move", (p) => {
-        this.enqueueEvent("move", p);
-        this.log(`move batch: ${p.points.length} points`);
-      })
-    );
-    this.unsubscribers.push(
       bus.on("rage_click", (p) => {
         this.enqueueEvent("rage_click", p);
         this.log("rage click detected", p);
       })
     );
     this.unsubscribers.push(
-      bus.on("hover", (p) => {
-        this.enqueueEvent("hover", p);
-        this.log(`hover: ${p.element.selector} (${p.durationMs}ms)`);
-      })
-    );
-    this.unsubscribers.push(
-      bus.on("cursor", (p) => {
-        this.enqueueEvent("cursor", p);
-        this.log(`cursor sample: (${p.x}, ${p.y})`);
-      })
-    );
-    this.unsubscribers.push(
       bus.on("funnel", (p) => {
         this.enqueueEvent("funnel", p);
         this.log(`funnel step completed: ${p.funnelName} [${p.stepIndex}] (${p.status})`);
-      })
-    );
-    this.unsubscribers.push(
-      bus.on("session_replay_event", (p) => {
-        this.enqueueEvent("session_replay_event", p);
-        this.log(`session replay event: seq ${p.seq}`);
-      })
-    );
-    this.unsubscribers.push(
-      bus.on("elements_seen", (p) => {
-        if (!MVP1_POLICY.elementCrawler) return;
-        void this.transport.sendElements(p.pagePath, p.elements);
-        this.log(`elements crawled: ${p.elements.length}`);
       })
     );
   }
@@ -2643,12 +1874,10 @@ let Analytics$1 = class Analytics {
     var _a;
     if (this.running) {
       this.session.newPageView();
-      this.engine.onRouteChange(location.pathname, true);
+      this.engine.onRouteChange(location.pathname);
       this.trackPageView();
       (_a = this.experiences) == null ? void 0 : _a.onRouteChange();
       void this.refreshExperiencesAfterFlush();
-    } else {
-      this.engine.onRouteChange(location.pathname, false);
     }
     this.log("route changed", location.pathname);
   }
@@ -2706,7 +1935,6 @@ let Analytics$1 = class Analytics {
       sessionId: this.session.getSessionId(),
       pageViewId: this.session.getPageViewId(),
       page: getPageContext(),
-      ...this.heatmaps ? { heatmap: this.heatmaps.context() } : {},
       payload
     };
     this.batcher.enqueue(event);
@@ -5399,7 +4627,7 @@ const bundledRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-eM7rPdSE.js");
+    const { EditorModeController } = await import("./EditorModeController-DmlHyQCX.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -5454,4 +4682,4 @@ export {
   storeEditorContinuation as w,
   createAnalytics as x
 };
-//# sourceMappingURL=module-1osWkcj0.js.map
+//# sourceMappingURL=module-BwExcCob.js.map

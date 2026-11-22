@@ -1,21 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Analytics } from "../src/core/Analytics";
-import { resolveConfig } from "../src/core/defaultConfig";
 import { SessionActivityMonitor } from "../src/core/SessionActivityMonitor";
 import type { SessionManager } from "../src/core/SessionManager";
-import { CursorCollector } from "../src/autocapture/CursorCollector";
-import { HoverCollector } from "../src/autocapture/HoverCollector";
-import { MoveCollector } from "../src/autocapture/MoveCollector";
 import { ClickCollector } from "../src/autocapture/ClickCollector";
 import { ScrollCollector } from "../src/autocapture/ScrollCollector";
 import { RageClickDetector } from "../src/autocapture/RageClickDetector";
-import { ElementCrawler } from "../src/autocapture/ElementCrawler";
-import { RRWebRecorder } from "../src/session/RRWebRecorder";
-import { HeatmapManager } from "../src/heatmaps/HeatmapManager";
 import { EventBus } from "../src/core/EventBus";
-import { MVP1_POLICY } from "../src/core/mvpPolicy";
 
-describe("MVP1 SDK policy", () => {
+describe("SDK analytics compatibility", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     localStorage.clear();
@@ -31,36 +23,12 @@ describe("MVP1 SDK policy", () => {
     document.body.innerHTML = "";
   });
 
-  it("forces high-volume collectors and replay off while retaining MVP1 defaults", () => {
-    const defaults = resolveConfig({ siteId: "site_1" });
-    expect(defaults.autocapture).toMatchObject({ cursor: false, hover: false, move: false, click: true, scroll: true, rageClick: true, elementCrawler: false });
-    expect(defaults.sessionReplay.enabled).toBe(false);
-
-    const staleOverride = resolveConfig({
-      siteId: "site_1",
-      autocapture: { cursor: true, hover: true, move: true, elementCrawler: true },
-      sessionReplay: { enabled: true },
-    });
-    expect(staleOverride.autocapture).toMatchObject({ cursor: false, hover: false, move: false, elementCrawler: false });
-    expect(staleOverride.sessionReplay.enabled).toBe(false);
-    // Interactive-only click persistence is release-locked alongside the
-    // existing disabled high-volume capture modes.
-    expect(MVP1_POLICY.interactiveClicksOnly).toBe(true);
-    expect(MVP1_POLICY.elementCrawler).toBe(false);
-  });
-
-  it("does not initialize release-disabled capabilities while keeping core analytics operational", async () => {
+  it("ignores retired options and sends supported analytics on initial and SPA page views", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
     vi.stubGlobal("fetch", fetchMock);
-    const cursor = vi.spyOn(CursorCollector.prototype, "start");
-    const hover = vi.spyOn(HoverCollector.prototype, "start");
-    const move = vi.spyOn(MoveCollector.prototype, "start");
     const click = vi.spyOn(ClickCollector.prototype, "start");
     const scroll = vi.spyOn(ScrollCollector.prototype, "start");
     const rage = vi.spyOn(RageClickDetector.prototype, "start");
-    const crawl = vi.spyOn(ElementCrawler.prototype, "crawl");
-    const replay = vi.spyOn(RRWebRecorder.prototype, "start");
-    const heatmaps = vi.spyOn(HeatmapManager.prototype, "initialize");
 
     const analytics = new Analytics();
     analytics.init({
@@ -71,27 +39,25 @@ describe("MVP1 SDK policy", () => {
       heatmapSnapshotBundleUrl: "https://cdn.example.com/sdk-heatmap.js",
       experiences: { enabled: false },
     });
+    window.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 40, clientY: 50 }));
+    document.querySelector("#save")!.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    history.pushState({}, "", "/settings/profile");
     analytics.identify("user_1", { plan: "pro" });
     analytics.event("saved", { source: "settings" });
     await vi.advanceTimersByTimeAsync(5_000);
 
-    expect(cursor).not.toHaveBeenCalled();
-    expect(hover).not.toHaveBeenCalled();
-    expect(move).not.toHaveBeenCalled();
-    expect(replay).not.toHaveBeenCalled();
-    expect(heatmaps).not.toHaveBeenCalled();
     expect(click).toHaveBeenCalledOnce();
     expect(scroll).toHaveBeenCalledOnce();
     expect(rage).toHaveBeenCalledOnce();
-    expect(crawl).not.toHaveBeenCalled();
     expect(document.querySelector('script[src*="sdk-replay"],script[src*="sdk-heatmap"]')).toBeNull();
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("heatmap"))).toBe(false);
-    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/elements"))).toBe(false);
+    expect(new Set(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname))).toEqual(new Set(["/public/config/site_1", "/public/sites/site_1/events"]));
 
     const events = fetchMock.mock.calls
       .filter(([url]) => String(url).endsWith("/events"))
-      .flatMap(([, init]) => JSON.parse((init as RequestInit).body as string).events as Array<{ type: string; name?: string }>);
+      .flatMap(([, init]) => JSON.parse((init as RequestInit).body as string).events as Array<{ type: string; name?: string; path?: string }>);
     expect(events.map((event) => event.type)).toEqual(expect.arrayContaining(["session_start", "page_view", "identify", "custom"]));
+    expect(events.filter(event => event.type === "page_view").map(event => event.path)).toEqual(["/settings", "/settings/profile"]);
+    expect(events.every(event => ["session_start", "page_view", "identify", "custom"].includes(event.type))).toBe(true);
     expect(events.find((event) => event.type === "custom")?.name).toBe("saved");
     analytics.destroy();
   });

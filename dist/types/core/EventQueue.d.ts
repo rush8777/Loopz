@@ -5,13 +5,11 @@ export interface EventQueueOptions {
 /**
  * Bounded in-memory FIFO queue. Analytics must never be allowed to consume
  * unlimited browser memory, so once `maxQueueSize` is reached we drop the
- * oldest low-priority events first (move/scroll/cursor samples are dropped
- * before click/rage/funnel events, which are more valuable for analysis).
+ * oldest scroll milestones before dropping other events.
  */
 export declare class EventQueue {
     private events;
     private maxQueueSize;
-    private static LOW_PRIORITY_TYPES;
     constructor(options: EventQueueOptions);
     push(event: AnalyticsEvent): void;
     private dropToMakeRoom;

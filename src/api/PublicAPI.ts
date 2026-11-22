@@ -42,8 +42,8 @@ const PUBLIC_METHODS = [
  * once on the same page - a duplicated <script> tag, bootstrap() being
  * invoked twice, a dev-mode double-mount re-injecting the script - would
  * silently spin up a second Analytics instance with its own
- * AutoCaptureEngine and DOM listeners, doubling every click, scroll,
- * hover, and page view it captures. See module.ts's createAnalytics()
+ * AutoCaptureEngine and DOM listeners, doubling every click, scroll milestone,
+ * and page view it captures. See module.ts's createAnalytics()
  * for the equivalent guard on the ESM entry point.
  */
 export function installPublicAPI(globalNames: string[]): Analytics {

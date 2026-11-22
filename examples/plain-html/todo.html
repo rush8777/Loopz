@@ -57,15 +57,7 @@
         analytics.init({
             siteId: "site_tlh00zlo4buy61twqjccpmik",
             debug: true,
-            endpoint: "http://localhost:3000",
-
-            sessionReplay: {
-                enabled: false
-            },
-
-            autocapture: {
-                cursor: true
-            }
+            endpoint: "http://localhost:3000"
         });
 
         analytics.identify("test_user_1", { app: "todo_example" });

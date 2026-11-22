@@ -25,19 +25,10 @@ export interface CursorCollectorConfig {
   pauseThreshold: number; // ms - emit one stationary sample after this much inactivity
 }
 
-/**
- * Live pattern-triggered feedback popups. Off by default - same
- * "never live until explicitly enabled" principle as sessionReplay.
- * apiBase points at the analytics platform's own backend (the pattern
- * matcher + config service), NOT the customer's `endpoint` - those are
- * two different destinations for two different purposes.
- */
 export interface FeedbackConfig {
   enabled: boolean;
   apiBase: string;
-  /** How often to flush buffered events to the pattern matcher. Independent of the main QueueConfig - this pipeline is smaller and needs to be timelier for triggers to feel "live". */
   flushIntervalMs: number;
-  /** Auto-dismiss a shown popup after this many ms. 0 = never auto-dismiss. */
   autoDismissMs: number;
 }
 
@@ -49,26 +40,15 @@ export interface QueueConfig {
   retryBaseDelayMs: number;
 }
 
-/**
- * Session replay (rrweb) configuration. Off by default - this is an
- * opt-in capability, never started implicitly by the rest of the SDK.
- */
 export interface SessionReplayConfig {
-  enabled: boolean; // default false - recording never starts unless explicitly enabled
-  sampleMouseMovement: boolean; // use rrweb's mouse move sampling instead of recording every event
-  maskAllInputs: boolean; // mask all form input values, not just sensitive ones
-  maskTextSelector?: string; // CSS selector for additional text nodes to mask, beyond form fields
-  blockSelector?: string; // CSS selector for elements to exclude from recording entirely
-  recordCanvas: boolean; // canvas recording is expensive - opt-in only
-  collectFonts: boolean; // capture @font-face rules for higher-fidelity replay
-  checkoutEveryNms?: number; // periodic full snapshot to bound replay reconstruction cost, ms
-  /**
-   * URL of the separate rrweb replay bundle (dist/sdk-replay.js), lazily
-   * loaded only when recording actually starts. Defaults to sitting
-   * alongside the main SDK script (same directory, "sdk-replay.js" /
-   * "sdk-replay.min.js"). Override this if you host the replay bundle
-   * somewhere else, e.g. a different CDN path.
-   */
+  enabled: boolean;
+  sampleMouseMovement: boolean;
+  maskAllInputs: boolean;
+  maskTextSelector?: string;
+  blockSelector?: string;
+  recordCanvas: boolean;
+  collectFonts: boolean;
+  checkoutEveryNms?: number;
   bundleUrl?: string;
 }
 
@@ -77,35 +57,41 @@ export interface AnalyticsConfig {
   /**
    * Base URL of the analytics platform's backend, e.g.
    * "https://api.yourplatform.com" - NOT a literal collection path.
-   * Transport derives the actual routes itself:
-   *   {endpoint}/public/sites/{siteId}/events   - interaction events
-   *   {endpoint}/public/sites/{siteId}/replay   - rrweb session replay
+   * Analytics batches go to {endpoint}/public/sites/{siteId}/events.
    */
   endpoint?: string;
   /** Optional URL for the separately lazy-loaded experience runtime bundle. */
   experienceRuntimeBundleUrl?: string;
   /** Optional URL for the separately lazy-loaded visual editor bundle. */
   editorRuntimeBundleUrl?: string;
-  /** Optional URL for the separately lazy-loaded sdk-heatmap bundle (useful for ESM/bundled integrations). */
+  /** @deprecated This option is ignored. */
   heatmapSnapshotBundleUrl?: string;
   debug?: boolean;
   autocapture?: {
     click?: boolean;
     scroll?: boolean;
+    /** @deprecated This option is ignored. */
     move?: boolean;
     rageClick?: boolean;
+    /** @deprecated This option is ignored. */
     hover?: boolean;
+    /** @deprecated This option is ignored. */
     cursor?: boolean;
-    /** Element inventory capability retained for compatibility, but release-disabled for MVP1. See ElementCrawler.ts. */
+    /** @deprecated This option is ignored. */
     elementCrawler?: boolean;
   };
   rageClick?: Partial<RageClickConfig>;
+  /** @deprecated This option is ignored. */
   move?: Partial<MoveCollectorConfig>;
   scroll?: Partial<ScrollCollectorConfig>;
+  /** @deprecated This option is ignored. */
   hover?: Partial<HoverCollectorConfig>;
+  /** @deprecated This option is ignored. */
   cursor?: Partial<CursorCollectorConfig>;
   queue?: Partial<QueueConfig>;
+  /** @deprecated This option is ignored. */
   sessionReplay?: Partial<SessionReplayConfig>;
+  /** @deprecated This option is ignored. */
   feedback?: Partial<FeedbackConfig>;
   sessionInactivityMs?: number;
   respectDoNotTrack?: boolean;
@@ -113,15 +99,10 @@ export interface AnalyticsConfig {
   experiences?: { enabled?: boolean };
 }
 
-export interface ResolvedAnalyticsConfig extends Required<Omit<AnalyticsConfig, "autocapture" | "rageClick" | "move" | "scroll" | "hover" | "cursor" | "queue" | "sessionReplay" | "feedback" | "experiences">> {
-  autocapture: Required<NonNullable<AnalyticsConfig["autocapture"]>>;
+export interface ResolvedAnalyticsConfig extends Required<Omit<AnalyticsConfig, "heatmapSnapshotBundleUrl" | "autocapture" | "rageClick" | "move" | "scroll" | "hover" | "cursor" | "queue" | "sessionReplay" | "feedback" | "experiences">> {
+  autocapture: { click: boolean; scroll: boolean; rageClick: boolean };
   rageClick: RageClickConfig;
-  move: MoveCollectorConfig;
   scroll: ScrollCollectorConfig;
-  hover: HoverCollectorConfig;
-  cursor: CursorCollectorConfig;
   queue: QueueConfig;
-  sessionReplay: SessionReplayConfig;
-  feedback: FeedbackConfig;
   experiences: { enabled: boolean };
 }

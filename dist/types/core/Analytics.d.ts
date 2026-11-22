@@ -16,7 +16,6 @@ export declare class Analytics {
     private transport;
     private batcher;
     private routeObserver;
-    private heatmaps;
     private activityMonitor;
     private experiences;
     private pendingExperienceLaunches;

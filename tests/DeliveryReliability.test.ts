@@ -45,7 +45,7 @@ it('invalidates old callbacks and pending requests on reset',async()=>{
 });
 it('refreshes a successful identify destination despite another destination failing, without replaying it',async()=>{
  vi.useFakeTimers();const queue=new EventQueue({maxQueueSize:10});const send=vi.fn().mockResolvedValueOnce({ok:false,retryable:true,acknowledgedEventIds:['identify']}).mockResolvedValue({ok:true,retryable:false});const accepted=vi.fn();
- batcher=new Batcher(queue,{send} as any,{maxBatchSize:10,maxQueueSize:10,maxWaitMs:1000,maxRetries:2,retryBaseDelayMs:100},undefined,accepted);batcher.start();batcher.enqueue({eventId:'identify',type:'identify'} as any);batcher.enqueue({eventId:'other',type:'session_replay_event'} as any);await batcher.flush();
+ batcher=new Batcher(queue,{send} as any,{maxBatchSize:10,maxQueueSize:10,maxWaitMs:1000,maxRetries:2,retryBaseDelayMs:100},undefined,accepted);batcher.start();batcher.enqueue({eventId:'identify',type:'identify'} as any);batcher.enqueue({eventId:'other',type:'page_view'} as any);await batcher.flush();
  expect(accepted.mock.calls[0][0].map((e:any)=>e.eventId)).toEqual(['identify']);await vi.advanceTimersByTimeAsync(100);expect(send.mock.calls[1][0].map((e:any)=>e.eventId)).toEqual(['other']);expect(accepted.mock.calls.flatMap(([items])=>items).filter((e:any)=>e.eventId==='identify')).toHaveLength(1);
 });
 it('resumes pending retries after stop/start without bypassing their deadline',async()=>{

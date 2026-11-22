@@ -1,4 +1,4 @@
-import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as exchangeEditorSession, p as clearEditorContinuation, q as isChecklistDefinition, r as isGuideDefinition, t as guideInteractionTarget, u as matchesGuideRoute, v as findTarget, w as storeEditorContinuation } from "./module-1osWkcj0.js";
+import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as exchangeEditorSession, p as clearEditorContinuation, q as isChecklistDefinition, r as isGuideDefinition, t as guideInteractionTarget, u as matchesGuideRoute, v as findTarget, w as storeEditorContinuation } from "./module-BwExcCob.js";
 function panelIcon(name) {
   const paths = {
     properties: '<path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
@@ -387,14 +387,7 @@ let CssSyntaxError$3 = class CssSyntaxError extends Error {
 };
 var cssSyntaxError = CssSyntaxError$3;
 CssSyntaxError$3.default = CssSyntaxError$3;
-const STYLE_TAG = /(<)(\/?style\b)/gi;
-const COMMENT_OPEN = /(<)(!--)/g;
 const AT_NAME_END = /[\t\n\f\r "#'()/;[\\\]{}]/;
-function escapeHTMLInCSS(str) {
-  if (typeof str !== "string") return str;
-  if (!str.includes("<")) return str;
-  return str.replace(STYLE_TAG, "\\3c $2").replace(COMMENT_OPEN, "\\3c $2");
-}
 const DEFAULT_RAW = {
   after: "\n",
   beforeClose: "\n",
@@ -423,6 +416,11 @@ function atruleStart(str, node2) {
   }
   return name + afterName + params;
 }
+function isCustomProperty(node2) {
+  if (!node2.prop.startsWith("--")) return false;
+  let before = node2.raws.before;
+  return typeof before === "undefined" || !/[^\s;]$/.test(before);
+}
 function pushBody(str, stack, node2) {
   let nodes = node2.nodes;
   let last = nodes.length - 1;
@@ -435,7 +433,7 @@ function pushBody(str, stack, node2) {
   for (let i = nodes.length - 1; i >= 0; i--) {
     let child = nodes[i];
     let childSemicolon = last !== i || semicolon;
-    if (!childSemicolon && i < nodes.length - 1 && (child.type === "atrule" && !child.nodes || child.type === "decl" && child.prop.startsWith("--"))) {
+    if (!childSemicolon && i < nodes.length - 1 && (child.type === "atrule" && !child.nodes || child.type === "decl" && isCustomProperty(child))) {
       childSemicolon = true;
     }
     stack.push({
@@ -447,14 +445,14 @@ function pushBody(str, stack, node2) {
 }
 function pushBlock(str, stack, node2, start) {
   let between = str.raw(node2, "between", "beforeOpen");
-  str.builder(escapeHTMLInCSS(start + between) + "{", node2, "start");
+  str.builder(start + between + "{", node2, "start");
   let hasNodes = node2.nodes && node2.nodes.length;
   let close = () => {
     let after = hasNodes ? str.raw(node2, "after") : str.raw(node2, "after", "emptyBody");
-    if (after) str.builder(escapeHTMLInCSS(after));
+    if (after) str.builder(after);
     str.builder("}", node2, "end");
     if (node2.type === "rule" && node2.raws.ownSemicolon) {
-      str.builder(escapeHTMLInCSS(node2.raws.ownSemicolon), node2, "end");
+      str.builder(node2.raws.ownSemicolon, node2, "end");
     }
   };
   if (hasNodes) {
@@ -474,7 +472,7 @@ let Stringifier$2 = class Stringifier {
       this.block(node2, start);
     } else {
       let end = (node2.raws.between || "") + (semicolon ? ";" : "");
-      this.builder(escapeHTMLInCSS(start + end), node2);
+      this.builder(start + end, node2);
     }
   }
   beforeAfter(node2, detect) {
@@ -504,7 +502,7 @@ let Stringifier$2 = class Stringifier {
   }
   block(node2, start) {
     let between = this.raw(node2, "between", "beforeOpen");
-    this.builder(escapeHTMLInCSS(start + between) + "{", node2, "start");
+    this.builder(start + between + "{", node2, "start");
     let after;
     if (node2.nodes && node2.nodes.length) {
       this.body(node2);
@@ -512,7 +510,7 @@ let Stringifier$2 = class Stringifier {
     } else {
       after = this.raw(node2, "after", "emptyBody");
     }
-    if (after) this.builder(escapeHTMLInCSS(after));
+    if (after) this.builder(after);
     this.builder("}", node2, "end");
   }
   body(node2) {
@@ -531,7 +529,7 @@ let Stringifier$2 = class Stringifier {
       let child = entry.node;
       let before = this.raw(child, "before");
       if (before) {
-        this.builder(entry.document ? before : escapeHTMLInCSS(before));
+        this.builder(before);
       }
       if (expandable && child.type === "rule") {
         pushBlock(this, stack, child, this.rawValue(child, "selector"));
@@ -545,7 +543,7 @@ let Stringifier$2 = class Stringifier {
   comment(node2) {
     let left = this.raw(node2, "left", "commentLeft");
     let right = this.raw(node2, "right", "commentRight");
-    this.builder(escapeHTMLInCSS("/*" + left + node2.text + right + "*/"), node2);
+    this.builder("/*" + left + node2.text + right + "*/", node2);
   }
   decl(node2, semicolon) {
     let raws = node2.raws;
@@ -555,7 +553,7 @@ let Stringifier$2 = class Stringifier {
       string += raws.important || " !important";
     }
     if (semicolon) string += ";";
-    this.builder(escapeHTMLInCSS(string), node2);
+    this.builder(string, node2);
   }
   document(node2) {
     this.body(node2);
@@ -732,20 +730,19 @@ let Stringifier$2 = class Stringifier {
     return value;
   }
   root(node2) {
-    if (node2.source && node2.source.input.hasBOM) {
+    let inDocument = node2.parent && node2.parent.type === "document";
+    if (!inDocument && node2.source && node2.source.input.hasBOM) {
       this.builder("\uFEFF", node2, "start");
     }
     this.body(node2);
     if (node2.raws.after) {
-      let after = node2.raws.after;
-      let isDocument = node2.parent && node2.parent.type === "document";
-      this.builder(isDocument ? after : escapeHTMLInCSS(after));
+      this.builder(node2.raws.after);
     }
   }
   rule(node2) {
     this.block(node2, this.rawValue(node2, "selector"));
     if (node2.raws.ownSemicolon) {
-      this.builder(escapeHTMLInCSS(node2.raws.ownSemicolon), node2, "end");
+      this.builder(node2.raws.ownSemicolon, node2, "end");
     }
   }
   stringify(node2, semicolon) {
@@ -760,9 +757,78 @@ let Stringifier$2 = class Stringifier {
 var stringifier = Stringifier$2;
 Stringifier$2.default = Stringifier$2;
 let Stringifier$1 = stringifier;
+const STYLE_TAG = /(<)(\/?style\b)/gi;
+const COMMENT_OPEN = /(<)(!--)/g;
+function escapeHTMLInCSS(str) {
+  if (!str.includes("<")) return str;
+  return str.replace(STYLE_TAG, "\\3c $2").replace(COMMENT_OPEN, "\\3c $2");
+}
+function cutEscaped(chunks, css, escaped) {
+  let parts = [];
+  let at = 0;
+  let into = 0;
+  for (let i = 0; i < chunks.length; i += 3) {
+    let from = into;
+    let end = at + chunks[i].length;
+    while (at < end) {
+      if (css[at] === escaped[into]) {
+        at += 1;
+        into += 1;
+      } else {
+        at += 1;
+        into += 4;
+      }
+    }
+    parts.push(escaped.slice(from, into));
+  }
+  return parts;
+}
+class SafeStringifier extends Stringifier$1 {
+  escapeHTML(print) {
+    let builder = this.builder;
+    let chunks, css;
+    this.builder = (str, child, type) => {
+      if (chunks) {
+        css += str;
+        chunks.push(str, child, type);
+      } else if (str.includes("<")) {
+        css = str;
+        chunks = [str, child, type];
+      } else {
+        builder(str, child, type);
+      }
+    };
+    print();
+    this.builder = builder;
+    if (!chunks) return;
+    let escaped = escapeHTMLInCSS(css);
+    if (escaped === css) {
+      for (let i = 0; i < chunks.length; i += 3) {
+        builder(chunks[i], chunks[i + 1], chunks[i + 2]);
+      }
+    } else {
+      let parts = cutEscaped(chunks, css, escaped);
+      for (let i = 0; i < chunks.length; i += 3) {
+        builder(parts[i / 3], chunks[i + 1], chunks[i + 2]);
+      }
+    }
+  }
+  root(node2) {
+    if (node2.parent && node2.parent.type === "document") {
+      this.escapeHTML(() => this.body(node2));
+      if (node2.raws.after) this.builder(node2.raws.after);
+    } else {
+      this.escapeHTML(() => super.root(node2));
+    }
+  }
+}
 function stringify$4(node2, builder) {
-  let str = new Stringifier$1(builder);
-  str.stringify(node2);
+  let str = new SafeStringifier(builder);
+  if (node2.type === "root" || node2.type === "document") {
+    str.stringify(node2);
+  } else {
+    str.escapeHTML(() => str.stringify(node2));
+  }
 }
 var stringify_1 = stringify$4;
 stringify$4.default = stringify$4;
@@ -965,7 +1031,7 @@ let Node$5 = class Node2 {
     } else if (opts.word) {
       let stringRepresentation = inputString.slice(
         sourceOffset(inputString, this.source.start),
-        sourceOffset(inputString, this.source.end)
+        this.rangeBy().end.offset
       );
       let index = stringRepresentation.indexOf(opts.word);
       if (index !== -1) pos = this.positionInside(index);
@@ -1020,7 +1086,7 @@ let Node$5 = class Node2 {
     if (opts.word) {
       let stringRepresentation = inputString.slice(
         sourceOffset(inputString, this.source.start),
-        sourceOffset(inputString, this.source.end)
+        end.offset
       );
       let index = stringRepresentation.indexOf(opts.word);
       if (index !== -1) {
@@ -1663,9 +1729,16 @@ let nanoid$1 = (size = 21) => {
   return id;
 };
 var nonSecure = { nanoid: nanoid$1 };
-let { existsSync, readFileSync } = require$$2;
+let { existsSync, readFileSync, realpathSync } = require$$2;
 let { dirname: dirname$1, isAbsolute: isAbsolute$1, join, relative: relative$1, sep: sep$1 } = require$$2;
 let { SourceMapConsumer: SourceMapConsumer$2, SourceMapGenerator: SourceMapGenerator$2 } = require$$2;
+function realPath(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
 function fromBase64(str) {
   if (Buffer) {
     return Buffer.from(str, "base64").toString();
@@ -1730,7 +1803,7 @@ let PreviousMap$2 = class PreviousMap {
     if (!trusted && !this.unsafeMap) {
       if (!/\.map$/i.test(path)) return void 0;
       if (!cssFile) return void 0;
-      let rel = relative$1(dirname$1(cssFile), path);
+      let rel = relative$1(realPath(dirname$1(cssFile)), realPath(path));
       if (rel === ".." || rel.startsWith(".." + sep$1) || isAbsolute$1(rel)) {
         return void 0;
       }
@@ -1979,7 +2052,7 @@ let Input$4 = class Input {
     } else {
       fromUrl = new URL(
         from.source,
-        this.map.consumer().sourceRoot || pathToFileURL$1(this.map.mapFile)
+        pathToFileURL$1(this.map.mapFile || resolve$1(".") + "/")
       );
     }
     let result2 = {
@@ -2084,7 +2157,7 @@ let list$2 = {
     return list$2.split(string, spaces);
   },
   split(string, separators, last) {
-    if (!string) return [];
+    if (typeof string !== "string") return [];
     let array = [];
     let current = "";
     let split = false;
@@ -2092,7 +2165,18 @@ let list$2 = {
     let inQuote = false;
     let prevQuote = "";
     let escape2 = false;
-    for (let letter of string) {
+    let inComment = false;
+    for (let i = 0; i < string.length; i++) {
+      let letter = string[i];
+      if (inComment) {
+        current += letter;
+        if (letter === "*" && string[i + 1] === "/") {
+          current += "/";
+          i += 1;
+          inComment = false;
+        }
+        continue;
+      }
       if (escape2) {
         escape2 = false;
       } else if (letter === "\\") {
@@ -2104,6 +2188,11 @@ let list$2 = {
       } else if (letter === '"' || letter === "'") {
         inQuote = true;
         prevQuote = letter;
+      } else if (letter === "/" && string[i + 1] === "*") {
+        current += "/*";
+        i += 1;
+        inComment = true;
+        continue;
       } else if (letter === "(") {
         func += 1;
       } else if (letter === ")") {
@@ -2112,14 +2201,16 @@ let list$2 = {
         if (separators.includes(letter)) split = true;
       }
       if (split) {
-        if (current !== "") array.push(current.trim());
+        let value2 = current.trim();
+        if (last || value2 !== "") array.push(value2);
         current = "";
         split = false;
       } else {
         current += letter;
       }
     }
-    if (last || current !== "") array.push(current.trim());
+    let value = current.trim();
+    if (last || value !== "") array.push(value);
     return array;
   }
 };
@@ -2294,15 +2385,20 @@ let MapGenerator$2 = class MapGenerator {
         }
       }
     } else if (this.css) {
+      let annotation = "/*# sourceMappingURL=";
+      let css = "";
+      let cursor = 0;
       let startIndex;
-      while ((startIndex = this.css.lastIndexOf("/*#")) !== -1) {
-        let endIndex = this.css.indexOf("*/", startIndex + 3);
+      while ((startIndex = this.css.indexOf(annotation, cursor)) !== -1) {
+        let endIndex = this.css.indexOf("*/", startIndex + annotation.length);
         if (endIndex === -1) break;
-        while (startIndex > 0 && this.css[startIndex - 1] === "\n") {
+        while (startIndex > cursor && this.css[startIndex - 1] === "\n") {
           startIndex--;
         }
-        this.css = this.css.slice(0, startIndex) + this.css.slice(endIndex + 2);
+        css += this.css.slice(cursor, startIndex);
+        cursor = endIndex + 2;
       }
+      if (cursor > 0) this.css = css + this.css.slice(cursor);
     }
   }
   generate() {
@@ -3069,7 +3165,7 @@ let Parser$1 = class Parser {
         prev.raws.ownSemicolon = this.spaces;
         this.spaces = "";
         prev.source.end = this.getPosition(token[2]);
-        prev.source.end.offset += prev.raws.ownSemicolon.length;
+        prev.source.end.offset++;
       }
     }
   }
@@ -3185,6 +3281,7 @@ let Parser$1 = class Parser {
     let token, type;
     let length = tokens.length;
     let value = "";
+    let last = "";
     let clean = true;
     let next, prev;
     for (let i = 0; i < length; i += 1) {
@@ -3196,16 +3293,18 @@ let Parser$1 = class Parser {
         prev = tokens[i - 1] ? tokens[i - 1][0] : "empty";
         next = tokens[i + 1] ? tokens[i + 1][0] : "empty";
         if (!SAFE_COMMENT_NEIGHBOR[prev] && !SAFE_COMMENT_NEIGHBOR[next]) {
-          if (value.slice(-1) === ",") {
+          if (last === ",") {
             clean = false;
           } else {
             value += token[1];
+            last = token[1].slice(-1);
           }
         } else {
           clean = false;
         }
       } else {
         value += token[1];
+        last = token[1].slice(-1);
       }
     }
     if (!clean) {
@@ -3345,6 +3444,7 @@ let Warning$2 = class Warning {
       return this.node.error(this.text, {
         index: this.index,
         plugin: this.plugin,
+        start: this.start,
         word: this.word
       }).message;
     }
@@ -3569,7 +3669,7 @@ let LazyResult$2 = class LazyResult {
     return this.async().catch(onRejected);
   }
   finally(onFinally) {
-    return this.async().then(onFinally, onFinally);
+    return this.async().finally(onFinally);
   }
   getAsyncError() {
     throw new Error("Use process(css).then(cb) to work with async plugins");
@@ -3999,7 +4099,7 @@ let NoWorkResult$1 = class NoWorkResult {
     return this.async().catch(onRejected);
   }
   finally(onFinally) {
-    return this.async().then(onFinally, onFinally);
+    return this.async().finally(onFinally);
   }
   sync() {
     if (this.error) throw this.error;
@@ -4030,7 +4130,7 @@ let NoWorkResult2 = noWorkResult;
 let Root$1 = root;
 let Processor$1 = class Processor {
   constructor(plugins = []) {
-    this.version = "8.5.25";
+    this.version = "8.5.32";
     this.plugins = this.normalize(plugins);
   }
   normalize(plugins) {
@@ -4107,7 +4207,7 @@ postcss.plugin = function plugin(name, initializer) {
       console.warn(
         name + ": postcss.plugin was deprecated. Migration guide:\nhttps://evilmartians.com/chronicles/postcss-8-plugin-migration"
       );
-      if (process.env.LANG && process.env.LANG.startsWith("cn")) {
+      if (process.env.LANG && process.env.LANG.startsWith("zh")) {
         console.warn(
           name + ": 里面 postcss.plugin 被弃用. 迁移指南:\nhttps://www.w3ctech.com/topic/2226"
         );
@@ -12506,4 +12606,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-eM7rPdSE.js.map
+//# sourceMappingURL=EditorModeController-DmlHyQCX.js.map

@@ -1,5 +1,5 @@
-import type { AnalyticsEvent, AnyPayload, SessionReplayEventPayload, CrawledElement } from "../types/events";
-import { mapToBackendEvent, mapToBackendReplayEvent, groupBySessionId } from "./backendMapping";
+import type { AnalyticsEvent } from "../types/events";
+import { mapToBackendEvent, groupBySessionId, type BackendIncomingEvent } from "./backendMapping";
 
 export interface TransportResult {
   ok: boolean;
@@ -7,27 +7,6 @@ export interface TransportResult {
   acknowledgedEventIds?: string[];
 }
 
-/**
- * Sole owner of network I/O. Collectors and the queue never call fetch()
- * directly - this keeps delivery strategy (beacon vs fetch, retries,
- * unload-safety, and now backend-shape translation) in one place.
- *
- * `apiBase` is the analytics platform's base URL - this class derives
- * the two real routes itself:
- *   {apiBase}/public/sites/{siteId}/events   - interaction events
- *   {apiBase}/public/sites/{siteId}/replay   - rrweb session replay
- *   {apiBase}/public/sites/{siteId}/elements - crawled element catalog (see sendElements)
- *
- * A single flush batch can span multiple sessions (rare, but possible
- * right at a session-expiry boundary) and mixes ordinary events with
- * session_replay_event entries, which are a different shape entirely
- * (see SessionReplayEventPayload) and belong on a different endpoint.
- * Both are split and grouped here before anything goes over the wire.
- *
- * Successful destinations are acknowledged separately when a batch has partial
- * failures. Batcher retries only unacknowledged events, so an unrelated failed
- * destination cannot suppress a committed identity refresh or replay its trigger.
- */
 export class Transport {
   constructor(
     private apiBase: string,
@@ -42,50 +21,20 @@ export class Transport {
     return `${this.apiBase}/public/sites/${this.siteId}/events`;
   }
 
-  private replayUrl(): string {
-    return `${this.apiBase}/public/sites/${this.siteId}/replay`;
-  }
-
-  private elementsUrl(): string {
-    return `${this.apiBase}/public/sites/${this.siteId}/elements`;
-  }
-
-  /**
-   * Sends a batch of crawled elements (see ElementCrawler.ts) to their
-   * own endpoint - a page-level catalog snapshot, not a per-session
-   * interaction stream, so it deliberately bypasses the batched
-   * event queue/retry machinery `send`/`sendBeacon` use: crawls are
-   * infrequent (page load + route change), so a simple best-effort
-   * POST per crawl is the right amount of machinery, not the queue
-   * built for continuous click/hover/scroll/cursor telemetry.
-   */
-  async sendElements(pagePath: string, elements: CrawledElement[]): Promise<TransportResult> {
-    if (!this.apiBase || elements.length === 0) return { ok: true, retryable: false };
-    return this.postJson(this.elementsUrl(), { pagePath, elements });
-  }
-
   /** Best-effort async send used during normal operation. */
-  async send(events: AnalyticsEvent<AnyPayload>[]): Promise<TransportResult> {
+  async send(events: AnalyticsEvent[]): Promise<TransportResult> {
     if (!this.apiBase || events.length === 0) return { ok: true, retryable: false };
 
-    const { standardGroups, replayGroups } = partition(events);
-    const results: TransportResult[] = [];
     const acknowledgedEventIds: string[] = [];
-
-    for (const [sessionId, group] of standardGroups) {
+    let ok = true;
+    let retryable = false;
+    for (const [sessionId, group] of mapEventsBySession(events)) {
       const result = await this.postJson(this.eventsUrl(), { sessionId, events: group });
-      results.push(result);
-      if (result.ok) acknowledgedEventIds.push(...events.filter(event => event.sessionId === sessionId && event.type !== "session_replay_event").map(event => event.eventId));
-    }
-    for (const [sessionId, group] of replayGroups) {
-      const result = await this.postJson(this.replayUrl(), { sessionId, events: group });
-      results.push(result);
-      if (result.ok) acknowledgedEventIds.push(...events.filter(event => event.sessionId === sessionId && event.type === "session_replay_event").map(event => event.eventId));
+      ok = result.ok && ok;
+      retryable = result.retryable || retryable;
+      if (result.ok) acknowledgedEventIds.push(...group.map(event => event.eventId));
     }
 
-    if (results.length === 0) return { ok: true, retryable: false }; // everything in this batch was of a type this backend doesn't accept
-    const ok = results.every((r) => r.ok);
-    const retryable = !ok && results.some((r) => r.retryable);
     return { ok, retryable, ...(!ok && acknowledgedEventIds.length ? { acknowledgedEventIds } : {}) };
   }
 
@@ -121,17 +70,13 @@ export class Transport {
   }
 
   /** Unload-safe fire-and-forget send. No retry possible after this. */
-  sendBeacon(events: AnalyticsEvent<AnyPayload>[]): boolean {
+  sendBeacon(events: AnalyticsEvent[]): boolean {
     if (!this.apiBase || events.length === 0) return true;
 
-    const { standardGroups, replayGroups } = partition(events);
     let allOk = true;
 
-    for (const [sessionId, group] of standardGroups) {
+    for (const [sessionId, group] of mapEventsBySession(events)) {
       allOk = this.beaconOrFallback(this.eventsUrl(), { sessionId, events: group }) && allOk;
-    }
-    for (const [sessionId, group] of replayGroups) {
-      allOk = this.beaconOrFallback(this.replayUrl(), { sessionId, events: group }) && allOk;
     }
     return allOk;
   }
@@ -162,25 +107,11 @@ export class Transport {
   }
 }
 
-function partition(events: AnalyticsEvent<AnyPayload>[]): {
-  standardGroups: Map<string, NonNullable<ReturnType<typeof mapToBackendEvent>>[]>;
-  replayGroups: Map<string, ReturnType<typeof mapToBackendReplayEvent>[]>;
-} {
-  const standardEvents = events.filter((e) => e.type !== "session_replay_event");
-  const replayEvents = events.filter(
-    (e): e is AnalyticsEvent<SessionReplayEventPayload> => e.type === "session_replay_event"
-  );
-
-  const standardGroups = new Map<string, NonNullable<ReturnType<typeof mapToBackendEvent>>[]>();
-  for (const [sessionId, group] of groupBySessionId(standardEvents)) {
-    const mapped = group.map(mapToBackendEvent).filter((e): e is NonNullable<typeof e> => e !== null);
-    if (mapped.length > 0) standardGroups.set(sessionId, mapped);
+function mapEventsBySession(events: AnalyticsEvent[]): Map<string, BackendIncomingEvent[]> {
+  const groups = new Map<string, BackendIncomingEvent[]>();
+  for (const [sessionId, eventsInSession] of groupBySessionId(events)) {
+    const mapped = eventsInSession.map(mapToBackendEvent).filter(event => event !== null);
+    if (mapped.length) groups.set(sessionId, mapped);
   }
-
-  const replayGroups = new Map<string, ReturnType<typeof mapToBackendReplayEvent>[]>();
-  for (const [sessionId, group] of groupBySessionId(replayEvents)) {
-    replayGroups.set(sessionId, group.map(mapToBackendReplayEvent));
-  }
-
-  return { standardGroups, replayGroups };
+  return groups;
 }

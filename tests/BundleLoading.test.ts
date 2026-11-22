@@ -37,9 +37,7 @@ describe("SDK bundle loading boundaries", () => {
       .toBe("https://cdn.movcues.com/sdk-experiences.js");
     expect(deriveSiblingBundleUrl("https://cdn.movcues.com/assets/sdk.min.js", "editor"))
       .toBe("https://cdn.movcues.com/assets/sdk-editor.min.js");
-    expect(deriveSiblingBundleUrl("https://cdn.movcues.com/v1.js", "replay"))
-      .toBe("https://cdn.movcues.com/sdk-replay.min.js");
-    expect(deriveSiblingBundleUrl("https://cdn.movcues.com/unknown.js", "heatmap")).toBeNull();
+
   });
 
   it("deduplicates simultaneous requests for the same SDK bundle", async () => {
@@ -239,8 +237,7 @@ function fakeEditorRuntime(start: ReturnType<typeof vi.fn>, destroy: ReturnType<
 function installSuccessfulFetch(): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn().mockImplementation(async (input: string | URL | Request) => {
     const url = String(input);
-    if (url.includes("/public/config/")) return { ok: true, status: 200, json: async () => ({ heatmapStates: [] }) };
-    if (url.includes("/heatmap-reference")) return { ok: false, status: 404, json: async () => ({}) };
+    if (url.includes("/public/config/")) return { ok: true, status: 200, json: async () => ({}) };
     return { ok: true, status: 204, json: async () => ({}) };
   });
   vi.stubGlobal("fetch", fetchMock);

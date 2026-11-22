@@ -1,7 +1,7 @@
 {
   "name": "@movcues/sdk",
   "version": "0.1.0",
-  "description": "Hotjar-style autocapture behavioral analytics SDK (Click Maps, Scroll Maps, Move Maps, Rage Clicks, Funnels)",
+  "description": "Movcues analytics and in-app experiences SDK",
   "type": "module",
   "main": "./dist/sdk.esm.js",
   "module": "./dist/sdk.esm.js",
@@ -19,10 +19,6 @@
     "./cdn/sdk-experiences.min.js": "./dist/sdk-experiences.min.js",
     "./cdn/sdk-editor.js": "./dist/sdk-editor.js",
     "./cdn/sdk-editor.min.js": "./dist/sdk-editor.min.js",
-    "./cdn/sdk-replay.js": "./dist/sdk-replay.js",
-    "./cdn/sdk-replay.min.js": "./dist/sdk-replay.min.js",
-    "./cdn/sdk-heatmap.js": "./dist/sdk-heatmap.js",
-    "./cdn/sdk-heatmap.min.js": "./dist/sdk-heatmap.min.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -36,14 +32,10 @@
     "dist/sdk-experiences.js",
     "dist/sdk-experiences.min.js",
     "dist/sdk-editor.js",
-    "dist/sdk-editor.min.js",
-    "dist/sdk-replay.js",
-    "dist/sdk-replay.min.js",
-    "dist/sdk-heatmap.js",
-    "dist/sdk-heatmap.min.js"
+    "dist/sdk-editor.min.js"
   ],
   "scripts": {
-    "build": "vite build && vite build --mode minify && vite build --mode experiences && vite build --mode experiences-minify && vite build --mode editor && vite build --mode editor-minify && vite build --mode replay && vite build --mode replay-minify && vite build --mode heatmap && vite build --mode heatmap-minify && vite build --mode v1 && vite build --mode module && tsc -p tsconfig.build.json",
+    "build": "vite build && vite build --mode minify && vite build --mode experiences && vite build --mode experiences-minify && vite build --mode editor && vite build --mode editor-minify && vite build --mode v1 && vite build --mode module && tsc -p tsconfig.build.json",
     "test": "vitest run",
     "dev": "vite",
     "test:browser": "playwright test",
@@ -59,9 +51,6 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@movcues/sdk": "^0.1.0",
-    "modern-screenshot": "^4.6.6",
-    "postcss": "^8.5.32",
-    "rrweb": "^2.1.1"
+    "postcss": "^8.5.32"
   }
 }

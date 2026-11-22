@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import { resolve } from "path";
 
-type BundleKind = "core" | "experiences" | "editor" | "replay" | "heatmap" | "module" | "v1";
+type BundleKind = "core" | "experiences" | "editor" | "module" | "v1";
 
 /**
  * Every CDN target is built as its own single-entry IIFE. The first
@@ -14,8 +14,6 @@ export default defineConfig(({ mode }) => {
     mode === "v1" ? "v1" :
     mode.startsWith("experiences") ? "experiences" :
     mode.startsWith("editor") ? "editor" :
-    mode.startsWith("replay") ? "replay" :
-    mode.startsWith("heatmap") ? "heatmap" :
     "core";
 
   const minify = mode.endsWith("minify") || kind === "v1";
@@ -24,8 +22,6 @@ export default defineConfig(({ mode }) => {
     v1: "src/index.ts",
     experiences: "src/experiences/runtimeBundleEntry.ts",
     editor: "src/experiences/editorBundleEntry.ts",
-    replay: "src/session/replayBundleEntry.ts",
-    heatmap: "src/heatmaps/snapshotBundleEntry.ts",
     module: "src/module.ts",
   };
   const globalName: Record<Exclude<BundleKind, "module">, string> = {
@@ -33,15 +29,11 @@ export default defineConfig(({ mode }) => {
     v1: "AutocaptureAnalyticsSDK",
     experiences: "MovcuesExperienceRuntimeBundle",
     editor: "MovcuesEditorRuntimeBundle",
-    replay: "AutocaptureAnalyticsSDKReplay",
-    heatmap: "movcuesHeatmapSnapshot",
   };
   const baseName: Record<Exclude<BundleKind, "module" | "v1">, string> = {
     core: "sdk",
     experiences: "sdk-experiences",
     editor: "sdk-editor",
-    replay: "sdk-replay",
-    heatmap: "sdk-heatmap",
   };
 
   const fileName = kind === "module"

@@ -1,17 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Analytics } from "../src/core/Analytics";
-import { ElementCrawler } from "../src/autocapture/ElementCrawler";
 import { FunnelTracker } from "../src/autocapture/FunnelTracker";
 
-describe("Analytics Page/Element discovery lifecycle", () => {
+describe("SDK route lifecycle", () => {
   let analytics: Analytics | null;
-  let crawlSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     analytics = null;
     document.body.innerHTML = "<button>Save</button>";
     history.replaceState({}, "", "/settings");
-    crawlSpy = vi.spyOn(ElementCrawler.prototype, "crawl");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200 }));
   });
 
@@ -35,34 +32,13 @@ describe("Analytics Page/Element discovery lifecycle", () => {
     return instance;
   }
 
-  it("never crawls on initialization, stop, or restart despite stale opt-in configuration", () => {
-    const instance = init();
-    expect(crawlSpy).not.toHaveBeenCalled();
-
-    instance.stop();
-    instance.start();
-    expect(crawlSpy).not.toHaveBeenCalled();
-  });
-
-  it("does not schedule or perform a crawl when initialized while the document is loading", () => {
-    vi.spyOn(document, "readyState", "get").mockReturnValue("loading");
-    const addSpy = vi.spyOn(document, "addEventListener");
-    init();
-
-    expect(crawlSpy).not.toHaveBeenCalled();
-    expect(addSpy.mock.calls.filter(([type]) => type === "DOMContentLoaded")).toHaveLength(0);
-    document.dispatchEvent(new Event("DOMContentLoaded"));
-    expect(crawlSpy).not.toHaveBeenCalled();
-  });
-
-  it("keeps SPA page views and funnel routing active without crawling or element traffic", async () => {
+  it("records SPA page views and advances funnel routing", async () => {
     const funnelPageViewSpy = vi.spyOn(FunnelTracker.prototype, "onPageView");
     init();
     const pageViewsBeforeRoute = funnelPageViewSpy.mock.calls.length;
     history.pushState({}, "", "/profile?tab=security");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(crawlSpy).not.toHaveBeenCalled();
     expect(funnelPageViewSpy.mock.calls.length).toBeGreaterThan(pageViewsBeforeRoute);
     await vi.waitFor(() => {
       const events = (fetch as ReturnType<typeof vi.fn>).mock.calls
@@ -75,7 +51,7 @@ describe("Analytics Page/Element discovery lifecycle", () => {
     expect(calls.some(([url]) => String(url).endsWith("/elements"))).toBe(false);
   });
 
-  it("keeps route observation active after stop without activating discovery", async () => {
+  it("pauses funnel routing while the SDK is stopped", async () => {
     const funnelPageViewSpy = vi.spyOn(FunnelTracker.prototype, "onPageView");
     const instance = init();
     const behavioralCallsBeforeStop = funnelPageViewSpy.mock.calls.length;
@@ -83,18 +59,19 @@ describe("Analytics Page/Element discovery lifecycle", () => {
     history.pushState({}, "", "/profile");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(crawlSpy).not.toHaveBeenCalled();
     expect(funnelPageViewSpy).toHaveBeenCalledTimes(behavioralCallsBeforeStop);
     expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some(([url]) => String(url).endsWith("/elements"))).toBe(false);
   });
 
-  it("removes route and pending discovery activity on destroy", async () => {
+  it("removes SDK route processing on destroy", async () => {
+    const funnelPageViewSpy = vi.spyOn(FunnelTracker.prototype, "onPageView");
     const instance = init();
+    const callsBeforeDestroy = funnelPageViewSpy.mock.calls.length;
     instance.destroy();
     analytics = null;
     history.pushState({}, "", "/after-destroy");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(crawlSpy).not.toHaveBeenCalled();
+    expect(funnelPageViewSpy).toHaveBeenCalledTimes(callsBeforeDestroy);
   });
 });
