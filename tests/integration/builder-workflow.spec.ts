@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { selectStepProperties } from "../fixtures/selectStepProperties";
 const api = "http://127.0.0.1:4310";
 const host = "http://127.0.0.1:4179";
 const widget = (page: Page) => page.locator("[data-movcues-experience]");
@@ -12,7 +13,7 @@ async function rename(page: Page, text: string) {
   await heading.press("ControlOrMeta+a");
   await heading.pressSequentially(text);
   await expect(heading).toHaveText(text);
-  await page.locator("[data-select-step]").click();
+  await selectStepProperties(page);
 }
 async function saved(page: Page) {
   await expect(page.locator("[data-save-state]")).toHaveText("Draft saved");
@@ -80,7 +81,6 @@ test("real dashboard → SDK editor → database → reviewed publish → visito
   await editor.locator("[data-button-label]").fill("Get Started");
   await editor.locator("[data-button-label]").press("Tab");
   await editor.locator("[data-button-action]").selectOption("next_step");
-  await editor.locator("[data-select-step]").click();
   await editor.locator("[data-add-step=anchored_card]").click();
   // New anchored steps use the existing website picker.
   await editor.locator("[data-mode=target]").click();

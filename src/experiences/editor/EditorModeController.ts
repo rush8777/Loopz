@@ -1002,7 +1002,7 @@ export class EditorModeController {
     const globalUndo = this.root.querySelector<HTMLButtonElement>("[data-global-undo]"); const globalRedo = this.root.querySelector<HTMLButtonElement>("[data-global-redo]");
     if (globalUndo) globalUndo.disabled = !this.history.canUndo() && !this.contentEditor?.canUndo();
     if (globalRedo) globalRedo.disabled = !this.history.canRedo() && !this.contentEditor?.canRedo();
-    inspector.hidden = this.mode !== "design" || !editor || !selection || (!this.guide && selection.kind === "step"); this.root.querySelector<HTMLElement>("[data-content-inspector]")!.hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
+    inspector.hidden = this.mode !== "design" || !editor || !selection || (selection.kind === "step" && !this.guide && !this.checklist && !this.survey); this.root.querySelector<HTMLElement>("[data-content-inspector]")!.hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
     if (!editor || !selection) return; if (selection.kind === "step") this.syncGuideBehavior(); this.setText("[data-composition-label]", selection.label);
     this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { if (selection.kind !== "step") group.hidden = true; });
     if (selection.kind === "step") this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { group.hidden = group.hasAttribute("data-for") ? !this.isTargetedType() : group.hasAttribute("data-step-summary") ? !this.guide : group.hasAttribute("data-placement-section") ? Boolean(this.guide && getGuideStepPattern(this.guide.steps[this.stepIndex]) === "modal") : false; });

@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { selectStepProperties } from "../fixtures/selectStepProperties";
 import { Buffer } from "node:buffer";
 
 test.beforeEach(async ({ page }) => { await page.goto("/tests/browser/fixture.html"); await page.waitForFunction(() => !!(window as any).fixture); });
@@ -120,11 +121,11 @@ test('anchored authoring survives scroll with the production renderer and sticky
   await expect(heading).toHaveAttribute('contenteditable','true');await expect(heading).toHaveText('Anchored edit');
 });
 
-test('contextual inspector follows block, cell and step selection',async({page})=>{
-  await startController(page);const heading=page.locator('[data-movcues-experience] h2');await heading.click();
+test('Guide contextual inspector follows block, cell and step selection',async({page})=>{
+  await startController(page, { guide: true });const heading=page.locator('[data-movcues-experience] h2');await heading.click();
   await expect(page.locator('[data-composition-inspector]')).toBeVisible();await expect(page.locator('[data-inspector=block]')).toBeVisible();await expect(page.locator('[data-block="heading,text"]')).toBeVisible();
   await page.locator('[data-command=parent]').click();await expect(page.locator('[data-inspector=cell]')).toBeVisible();await expect(page.locator('[data-inspector=block]')).toBeHidden();
-  await page.locator('[data-select-step]').click();await expect(page.locator('[data-inspector=step]')).toBeVisible();
+  await selectStepProperties(page);
 });
 
 test('insertion controls cannot intercept double-clicks on overflowing heading text', async ({ page }) => {
@@ -321,7 +322,7 @@ test('empty cells, cross-parent drag movement, keyboard movement and persistence
 
 test('Guide step dock supports add, edit, preview next/back and save/reopen', async ({ page }) => {
   await startController(page, { guide: true });
-  await page.locator('[data-select-step]').click(); await page.locator('[data-add-step=modal]').click();
+  await page.locator('[data-add-step=modal]').click();
   await expect(page.locator('[data-step]')).toHaveCount(3); await expect(page.locator('[data-step="1"]')).toHaveClass(/active/);
   const heading = page.locator('[data-movcues-experience] h2'); await heading.dblclick(); await heading.press('ControlOrMeta+a'); await heading.pressSequentially('Added step');
   await page.locator('[data-movcues-insert-edge=right]').click(); await page.locator('[data-insert-block=button]').click();

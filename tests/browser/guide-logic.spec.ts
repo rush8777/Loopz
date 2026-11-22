@@ -60,7 +60,7 @@ test('full Guide preview tests website clicks and custom events without producti
 });
 
 test('Step Behavior config saves and restores independent trigger settings without replacing the anchor target', async ({ page }) => {
-  const network = await editor(page); await page.locator('[data-step="1"]').click(); await page.locator('[data-select-step]').click();
+  const network = await editor(page); await page.locator('[data-step="1"]').click();
   await expect(page.locator('[data-guide-interaction-label]')).toContainText('#use-feature'); await page.locator('[data-guide-trigger]').selectOption('element_hover');
   await page.locator('[data-guide-hover]').fill('700'); await page.locator('[data-guide-hover]').press('Tab'); await page.locator('[data-guide-delay]').fill('150'); await page.locator('[data-guide-delay]').press('Tab');
   await page.locator('[data-guide-missing-action]').selectOption('skip'); await page.locator('[data-guide-timeout]').fill('900'); await page.locator('[data-guide-timeout]').press('Tab');
@@ -68,12 +68,12 @@ test('Step Behavior config saves and restores independent trigger settings witho
   expect(feature.target.primarySelector).toBe('#feature-card'); expect(feature.advance).toEqual({ type: 'element_hover', durationMs: 700, target: { primarySelector: '#use-feature', fallbackSelectors: [], reliability: 'reliable' } });
   expect(feature.presentation).toEqual({ delayMs: 150, missingTarget: { action: 'skip', timeoutMs: 900 } });
   await page.evaluate(async () => { const j=(window as any).journey; j.editor.destroy(); j.editor=new j.Controller(location.origin); await j.editor.start('reopen'); });
-  await page.locator('[data-step="1"]').click(); await page.locator('[data-select-step]').click(); await expect(page.locator('[data-guide-hover]')).toHaveValue('700'); await expect(page.locator('[data-guide-timeout]')).toHaveValue('900');
-  await page.locator('[data-step="0"]').click(); await page.locator('[data-select-step]').click(); await expect(page.locator('[data-guide-trigger] option[value=element_click]')).toHaveAttribute('disabled', ''); await expect(page.locator('[data-guide-missing]')).toBeHidden();
+  await page.locator('[data-step="1"]').click(); await expect(page.locator('[data-guide-hover]')).toHaveValue('700'); await expect(page.locator('[data-guide-timeout]')).toHaveValue('900');
+  await page.locator('[data-step="0"]').click(); await expect(page.locator('[data-guide-trigger] option[value=element_click]')).toHaveAttribute('disabled', ''); await expect(page.locator('[data-guide-missing]')).toBeHidden();
 });
 
 test('interaction picker changes only the advance target', async ({ page }) => {
-  const network = await editor(page); await page.locator('[data-step="1"]').click(); await page.locator('[data-select-step]').click(); await page.locator('[data-guide-pick-interaction]').click();
+  const network = await editor(page); await page.locator('[data-step="1"]').click(); await page.locator('[data-guide-pick-interaction]').click();
   await page.locator('#hover-feature').click(); await expect(page.locator('[data-save-state]')).toHaveText('Draft saved');
   expect(network.getSaved().steps[1].target.primarySelector).toBe('#feature-card'); expect(network.getSaved().steps[1].advance.target.primarySelector).toContain('hover-feature');
 });
@@ -85,7 +85,7 @@ test('route trigger advances once after real React navigation, while simulation 
 });
 
 for (const width of [320, 360, 390]) test(`Guide behavior and preview controls fit a ${width}px React viewport`, async ({ page }) => {
-  await page.setViewportSize({ width, height: 700 }); await editor(page); await page.locator('[data-select-step]').click(); await page.locator('[data-guide-trigger]').selectOption('custom_event');
+  await page.setViewportSize({ width, height: 700 }); await editor(page); await page.locator('[data-guide-trigger]').selectOption('custom_event');
   await page.locator('[data-guide-event]').fill('ready'); await page.locator('[data-guide-event]').press('Tab'); await page.locator('[data-mode=preview]').click();
   const toolbar = (await page.locator('[data-editor-toolbar]').boundingBox())!; expect(toolbar.x).toBeGreaterThanOrEqual(0); expect(toolbar.x+toolbar.width).toBeLessThanOrEqual(width);
   await expect(page.locator('[data-preview-test]')).toBeInViewport(); await expect(page.locator('[data-close]')).toBeInViewport(); await page.locator('[data-preview-test]').click(); await expect(page.locator('[data-preview-step]')).toHaveText('2/3');
@@ -94,10 +94,13 @@ for (const width of [320, 360, 390]) test(`Guide behavior and preview controls f
  test('preview blocks external anchor navigation without consuming the website click trigger', async ({ page }) => {
   const definition = guide(); definition.steps = [definition.steps[1], definition.steps[2]];
   definition.steps[0].advance.target.primarySelector = '#outside-link';
+  await page.route('https://example.com/outside', route => route.abort());
+  const navigationRequests: string[] = [];
+  page.on('request', request => { if (request.isNavigationRequest() && request.url() === 'https://example.com/outside') navigationRequests.push(request.url()); });
   await editor(page, definition);
-  await page.evaluate(() => { const a=document.createElement('a'); a.id='outside-link'; a.href='https://example.com/outside'; a.textContent='External task'; a.style.cssText='position:fixed;bottom:100px;left:10px;z-index:5'; document.body.append(a); });
+  await page.evaluate(() => { const a=document.createElement('a'); a.id='outside-link'; a.href='https://example.com/outside'; a.textContent='External task'; a.style.cssText='position:fixed;top:120px;left:10px;z-index:101'; document.body.append(a); });
   await page.locator('[data-mode=preview]').click(); await expect(widgetHeading(page)).toHaveText('Feature'); const url=page.url();
-  await page.locator('#outside-link').click(); await expect(widgetHeading(page)).toHaveText('Completion'); expect(page.url()).toBe(url);
+  await page.locator('#outside-link').click(); await expect(widgetHeading(page)).toHaveText('Completion'); expect(page.url()).toBe(url); expect(navigationRequests).toEqual([]);
   await page.locator('[data-preview-test]').click(); await page.locator('[data-reset-preview]').click(); await expect(widgetHeading(page)).toHaveText('Feature'); await expect(page.locator('[data-preview-step]')).toHaveText('1/2');
   const submission = await page.evaluate(() => { const form=document.createElement('form'); form.action='https://example.com/submit'; document.body.append(form); const event=new Event('submit', { bubbles: true, cancelable: true }); form.dispatchEvent(event); form.remove(); return event.defaultPrevented; }); expect(submission).toBe(true);
 

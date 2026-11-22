@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("live editor streams preparation, repair, current-step details, and final proposal controls", async ({ page }, testInfo) => {
+test("live editor streams preparation, repair, and final proposal controls", async ({ page }, testInfo) => {
   await page.goto("/tests/browser/ai-progress.html");
   const editor = page.locator("[data-movcues-editor]");
   await editor.locator('[data-inspector-tab="ai"]').click();
@@ -13,16 +13,11 @@ test("live editor streams preparation, repair, current-step details, and final p
 
   await page.getByRole("button", { name: "Trigger repair" }).click();
   await expect(editor.locator("[data-ai-progress-current]")).toHaveText("Adjusting the change after checks.");
-  const disclosure = editor.locator("[data-ai-progress] details"); await disclosure.locator("summary").click();
-  await expect(disclosure).toHaveAttribute("open", "");
   await expect(editor.locator("[data-ai-progress-current]")).toHaveCount(1);
-  await expect(disclosure).not.toContainText("Checking layout and button actions.");
-  await expect(disclosure).toContainText("Adjusting the proposal so it passes the editor checks.");
   await testInfo.attach("repair", { body: await page.screenshot(), contentType: "image/png" });
 
   await page.getByRole("button", { name: "Finish response" }).click();
   await expect(editor.locator("[data-ai-progress-current]")).toHaveText("Proposal ready.");
-  await expect(disclosure).not.toHaveAttribute("open", "");
   await expect(editor.locator("[data-ai-apply]")).toBeEnabled();
   await expect(editor.locator("[data-ai-discard]")).toBeEnabled();
   await testInfo.attach("ready", { body: await page.screenshot(), contentType: "image/png" });
@@ -56,10 +51,9 @@ test("icon navigation is accessible and the single-step progress card fits a nar
   await editor.getByRole("textbox", { name: "Describe your design change" }).fill("Refine this welcome");
   await editor.getByRole("button", { name: "Send message", exact: true }).click();
   await page.getByRole("button", { name: "Trigger repair" }).dispatchEvent("click");
-  await editor.locator("[data-ai-progress] summary").click();
+  await expect(editor.getByRole("status").filter({ hasText: "Adjusting the change after checks." })).toBeVisible();
   await expect(editor.locator("[data-ai-progress-current]")).toHaveCount(1);
-  await expect(editor.locator("[data-ai-progress-detail]")).toContainText("Adjusting the proposal");
-  await expect(editor.locator("[data-ai-progress]")).not.toContainText("Creating your change.");
+  await expect(editor.locator("[data-ai-progress-current]")).toHaveText("Adjusting the change after checks.");
   const send = await editor.locator("[data-ai-send]").boundingBox();
   expect(send!.y + send!.height).toBeLessThanOrEqual(844);
   const aside = await editor.locator("aside").boundingBox();

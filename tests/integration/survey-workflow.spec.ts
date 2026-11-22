@@ -19,16 +19,16 @@ test('real on-site Survey authoring → branching → safe preview → reviewed 
  // Existing nested cells, with the canonical question outside the layout document.
  await editor.locator('[data-command=columns]').click();await editor.locator('[data-movcues-empty-cell]').click();await editor.locator('[data-insert-question=short_text]').click();await change(editor,'[data-survey-question-label]','Optional note');
  await editor.locator('[data-step="1"]').click();await widget(editor).locator('h2').click();await editor.locator('[data-command=add]').click();await editor.locator('[data-insert-question=short_text]').click();await change(editor,'[data-survey-question-label]','Required on the full path');await editor.locator('[data-survey-question-required]').check();
- await editor.locator('[data-survey-add-step]').click();await editor.locator('[data-select-step]').click();await change(editor,'[data-survey-step-heading]','Final feedback');
+ await editor.locator('[data-survey-add-step]').click();await change(editor,'[data-survey-step-heading]','Final feedback');
  await widget(editor).locator('h2').click();await editor.locator('[data-command=add]').click();await editor.locator('[data-insert-question=short_text]').click();await change(editor,'[data-survey-question-label]','Final answer');await editor.locator('[data-survey-question-required]').check();
- await editor.locator('[data-step="0"]').click();await editor.locator('[data-select-step]').click();await editor.locator('[data-survey-branch-section] summary').click();await editor.locator('[data-survey-add-rule]').click();
+ await editor.locator('[data-step="0"]').click();await editor.locator('[data-survey-branch-section] summary').click();await editor.locator('[data-survey-add-rule]').click();
  const finalId=(await editor.locator('[data-rule-next] option').nth(1).getAttribute('value'))!;
  await editor.locator('[data-rule-next]').selectOption(finalId);await saved(editor);
  const persisted=await(await request.get(`${endpoint}/${id}`,{headers})).json(),definition=persisted.draftVersion.definition,survey=definition.survey;
  expect(survey.steps).toHaveLength(3);expect(survey.steps.every((s:any)=>s.builder.projectData.movcues.onsiteDocument.schemaVersion===3)).toBe(true);
  const choice=survey.steps[0].questions[0],final=survey.steps[2].questions[0];expect(survey.steps[0].branching.rules[0].nextStepId).toBe(finalId);
  const before=await(await request.get(`${api}/__test__/analytics/${id}`)).json();expect(before.responses).toHaveLength(0);
- await editor.reload();await expect(editor.locator('[data-step]')).toHaveCount(3);await editor.locator('[data-mode=preview]').click();
+ await editor.reload();await expect(editor.locator('[data-step]')).toHaveCount(3);await editor.getByRole('button',{name:'Toggle inspector',expanded:true}).click();await editor.locator('[data-mode=preview]').click();
  await widget(editor).locator(`[data-movcues-option-id="${choice.options[0].id}"]`).click();await widget(editor).locator('[data-movcues-survey-action=next]').click();await expect(widget(editor).locator('h2')).toHaveText('Final feedback');
  await widget(editor).locator('[data-movcues-question-input]').fill('Preview only');await widget(editor).locator('[data-movcues-survey-action=submit]').click();await expect(editor.locator('[data-preview-limit]')).toContainText('Preview complete');
  expect(await(await request.get(`${api}/__test__/analytics/${id}`)).json()).toEqual(before);

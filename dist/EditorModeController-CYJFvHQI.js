@@ -1,4 +1,4 @@
-import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as exchangeEditorSession, p as clearEditorContinuation, q as isChecklistDefinition, r as isGuideDefinition, t as guideInteractionTarget, u as matchesGuideRoute, v as findTarget, w as storeEditorContinuation } from "./module-BwExcCob.js";
+import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as exchangeEditorSession, p as clearEditorContinuation, q as isChecklistDefinition, r as isGuideDefinition, t as guideInteractionTarget, u as matchesGuideRoute, v as findTarget, w as storeEditorContinuation } from "./module-BfJgYd3d.js";
 function panelIcon(name) {
   const paths = {
     properties: '<path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
@@ -11486,7 +11486,7 @@ class EditorModeController {
     const globalRedo = this.root.querySelector("[data-global-redo]");
     if (globalUndo) globalUndo.disabled = !this.history.canUndo() && !((_c = this.contentEditor) == null ? void 0 : _c.canUndo());
     if (globalRedo) globalRedo.disabled = !this.history.canRedo() && !((_d = this.contentEditor) == null ? void 0 : _d.canRedo());
-    inspector.hidden = this.mode !== "design" || !editor || !selection || !this.guide && selection.kind === "step";
+    inspector.hidden = this.mode !== "design" || !editor || !selection || selection.kind === "step" && !this.guide && !this.checklist && !this.survey;
     this.root.querySelector("[data-content-inspector]").hidden = Boolean(editor) || this.mode !== "design" || !this.componentSelection;
     if (!editor || !selection) return;
     if (selection.kind === "step") this.syncGuideBehavior();
@@ -12606,4 +12606,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-DmlHyQCX.js.map
+//# sourceMappingURL=EditorModeController-CYJFvHQI.js.map
