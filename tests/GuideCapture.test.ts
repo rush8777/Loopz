@@ -137,6 +137,35 @@ describe("Guided Capture", () => {
     } finally { controller.destroy(); }
   });
 
+  it("cancels a planning request while keeping the selected elements and prompt", async () => {
+    document.body.innerHTML = '<button id="target">Invoice</button>';
+    const captured = describeCaptureTarget(target(), "one", path());
+    let requestSignal: AbortSignal | undefined;
+    const bridge = {
+      loadCapture: vi.fn().mockResolvedValue({ ...initial, targets: [captured] }),
+      planCapture: vi.fn((_input: unknown, signal: AbortSignal) => {
+        requestSignal = signal;
+        return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+      }),
+    } as unknown as CaptureBridge;
+    const controller = new GuidedCaptureController(bridge, session, draft, vi.fn(), vi.fn());
+    controller.mount();
+    try {
+      await vi.waitFor(() => expect(button("[data-plan]")?.disabled).toBe(false));
+      const field = checkpoint()!.querySelector<HTMLTextAreaElement>("[data-prompt]")!;
+      field.value = "Create a first invoice";
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      field.form!.dispatchEvent(new Event("submit", { cancelable: true }));
+      await vi.waitFor(() => expect(requestSignal).toBeDefined());
+      button("[data-cancel]")!.click();
+      await vi.waitFor(() => expect(checkpoint()?.querySelector("[data-message]")?.textContent).toContain("Request canceled"));
+      expect(requestSignal?.aborted).toBe(true);
+      expect(field.value).toBe("Create a first invoice");
+      expect(checkpoint()?.querySelector("[data-targets]")?.textContent).toContain("Invoice");
+      expect(button("[data-plan]")?.disabled).toBe(false);
+    } finally { controller.destroy(); }
+  });
+
   it("uses sanitized path matching for generated targets and preserves literal legacy matching", () => {
     document.body.innerHTML = '<button id="target">Invoice</button>';
     const { target: legacy } = describeCaptureTarget(target(), "one", "/invoices");
