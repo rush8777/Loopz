@@ -5,6 +5,16 @@ export function guideInteractionTarget(step: GuideStep): ExperienceTarget | unde
   return step.advance?.type === "element_click" || step.advance?.type === "element_hover" ? step.advance.target ?? step.target : undefined;
 }
 
+/** Path matching ignores query values while preserving literal legacy target contexts. */
+export function matchesGuideTargetPage(target: ExperienceTarget | undefined, path: string): boolean {
+  const context = target?.targetContext;
+  if (!context) return true;
+  if (context.match !== "path") return context.pagePath === path;
+  const [page, hash] = path.split("#", 2);
+  const route = hash?.startsWith("/") ? `#${hash.split("?", 1)[0]}` : "";
+  return context.pagePath === page.split("?", 1)[0] + route;
+}
+
 export function matchesGuideRoute(path: string, rules: PageRule[]): boolean {
   const match = (rule: PageRule): boolean => {
     if (rule.operator === "equals") return path === rule.value;

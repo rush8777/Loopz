@@ -26,6 +26,7 @@ export interface ExperienceTarget {
     reliability: "reliable" | "moderate" | "fragile";
     targetContext?: {
         pagePath: string;
+        match?: "path";
     };
 }
 export type LegacyExperienceWidth = "sm" | "md" | "lg";
@@ -377,6 +378,7 @@ export type EditorChecklistDefinition = RuntimeChecklistDefinition & {
     targeting: Pick<ExperienceTargeting, "pageRules" | "audience" | "priority" | "schedule" | "allowedOrigins">;
 };
 export interface EditorDraft {
+    guidedCapture?: boolean;
     references?: {
         guides: Array<{
             id: string;

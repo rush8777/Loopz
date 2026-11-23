@@ -29,11 +29,12 @@ import { ExperienceRenderer } from "../runtime/ExperienceRenderer";
 import { findTarget } from "../runtime/AnchoredCardRenderer";
 import { DraftConflictError, EditorAiRequestError, EditorBridge, EditorSessionExpiredError } from "./EditorBridge";
 import type { EditorAiStreamEvent, EditorAiProgressStage } from "./EditorAiProgress";
+import { GuidedCaptureController } from "./GuidedCaptureController";
 import { ElementPicker } from "./ElementPicker";
 import { OnsiteContentEditor, type OnsiteComponentSelection } from "./OnsiteContentEditor";
 import { OnsiteCompositionEditor, type CompositionSelection } from "./OnsiteCompositionEditor";
 import { applyOnsiteDocument, cloneOnsite, createOnsiteDocument, duplicateDocument, onsiteDocumentFromBuilder, type OnsiteBlock, type OnsiteCell } from "../onsite/OnsiteDocument";
-import { guideInteractionTarget, guideStepConfigurationErrors, matchesGuideRoute } from "../runtime/GuideStepLogic";
+import { guideInteractionTarget, guideStepConfigurationErrors, matchesGuideRoute, matchesGuideTargetPage } from "../runtime/GuideStepLogic";
 import type { SiteThemeTokens, VisualPresetId, VisualThemeState } from "../../themes/types";
 import { EXPERIENCE_PRESETS, resolvedTheme } from "../../themes/ExperienceTheme";
 import { applyEditorAiProposal, applyGuideAiProposal, editorAiContext, guideAiContext, type EditorAiProposal } from "./AiEditing";
@@ -51,6 +52,7 @@ export class EditorModeController {
   private host: HTMLElement | null = null;
   private root: ShadowRoot | null = null;
   private picker = new ElementPicker();
+  private capture: GuidedCaptureController | null = null;
   private preview = new ExperienceRenderer();
   private contentEditor: OnsiteContentEditor | null = null;
   private compositionEditor: OnsiteCompositionEditor | null = null;
@@ -179,7 +181,15 @@ export class EditorModeController {
     const restoredMode = (restored as { mode?: string } | undefined)?.mode;
     this.mode = restoredMode === "select" ? "target" : restoredMode === "design" || restoredMode === "target" || restoredMode === "navigate" || restoredMode === "preview" ? restoredMode : draft.experience.builderMode === "onsite" ? "design" : "target";
     this.updateContinuation();
-    this.mount();
+    if (draft.guidedCapture && this.guide && draft.experience.builderMode === "onsite") {
+      this.capture = new GuidedCaptureController(bridge, session, draft, version => {
+        void this.activate(session, { requestedStep: 0 }, { ...draft, guidedCapture: false, version });
+      }, () => {
+        window.opener?.focus();
+        this.destroy();
+      });
+      this.capture.mount();
+    } else this.mount();
     this.expiryTimer = window.setTimeout(() => this.expireSession(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
     this.validationTimer = window.setInterval(() => { void bridge.checkSession().catch(error => { if (this.bridge === bridge && error instanceof EditorSessionExpiredError) this.expireSession(); }); }, 15_000);
     return true;
@@ -807,6 +817,7 @@ export class EditorModeController {
 
   private expireSession(): void {
     if (this.saveState === "expired") return;
+    this.capture?.expire();
     this.contentEditor?.flush(); this.compositionEditor?.flush(); this.captureRecovery();
     this.dirty = this.dirty || !!this.contentEditor?.isComposing() || !!this.compositionEditor?.isComposing();
     this.saveState = "expired"; this.lifecycle++;
@@ -1472,7 +1483,7 @@ export class EditorModeController {
 
   private targetStatus(target?: ExperienceTarget): TargetStatus {
     if (!target) return "unconfigured";
-    if (target.targetContext?.pagePath && target.targetContext.pagePath !== (this.currentPath || currentPagePath())) return "off-page";
+    if (!matchesGuideTargetPage(target, this.currentPath || currentPagePath())) return "off-page";
     return findTarget(target) ? "found" : "missing";
   }
 
@@ -1545,6 +1556,8 @@ export class EditorModeController {
   destroy(): void { this.teardown(true); }
 
   private teardown(clearContinuation: boolean): void {
+    this.capture?.destroy();
+    this.capture = null;
     this.lifecycle++;
     this.cancelAiRequest(); this.aiProposal = null; this.aiConversationId = undefined; this.aiMessages = []; this.aiResolvedTargets.clear(); this.aiPreviewOriginal = null; this.aiPreviewCandidate = null; this.surveyAiPreviewOriginal = null; this.surveyAiPreviewCandidate = null; this.checklistAiPreviewOriginal = null; this.checklistAiPreviewCandidate = null; this.widgetAiPreviewOriginal = null; this.widgetAiPreviewCandidate = null; this.aiPreviewReturnMode = null;
     clearInterval(this.aiProgressTimer); this.aiProgressTimer = 0;

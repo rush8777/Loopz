@@ -6,6 +6,8 @@ const SEMANTIC_ATTRS = ["role", "aria-label", "name", "type", "href"];
 const DYNAMIC_CLASS_PATTERN = /^(css-|sc-|jsx-|_|[a-z0-9]{6,}$)/i;
 const UTILITY_CLASS_PATTERN = /^(sm:|md:|lg:|xl:|2xl:|hover:|focus:|active:|disabled:|dark:|-?(m|p)[trblxy]?-|w-|h-|min-|max-|inset-|top-|right-|bottom-|left-|z-|gap-|space-|grid|flex|items-|justify-|text-|font-|leading-|tracking-|bg-|border|rounded|shadow|opacity-|transition|duration-|absolute$|relative$|fixed$|sticky$|hidden$|block$|inline)/;
 
+type SelectorAttributePolicy = (name: string, value: string) => boolean;
+
 interface SelectorCandidate {
   selector: string;
   reliability: ExperienceTarget["reliability"];
@@ -18,7 +20,7 @@ export interface TargetSelectorDescriptor extends ExperienceTarget {
 /** Generates selectors for experience anchoring only. Every emitted selector
  * is verified to resolve uniquely to the exact element that was selected. */
 export class TargetSelectorGenerator {
-  generate(element: Element): Pick<ExperienceTarget, "primarySelector" | "fallbackSelectors" | "reliability"> {
+  generate(element: Element, allow: SelectorAttributePolicy = () => true): Pick<ExperienceTarget, "primarySelector" | "fallbackSelectors" | "reliability"> {
     const verified: SelectorCandidate[] = [];
     const seen = new Set<string>();
     const add = (selector: string, reliability: ExperienceTarget["reliability"]) => {
@@ -28,21 +30,21 @@ export class TargetSelectorGenerator {
     };
     const tag = element.tagName.toLowerCase();
 
-    const id = shortValue(element.getAttribute("id"));
+    const id = allowedValue(element, "id", allow);
     if (id) add(`${tag}#${cssIdentifier(id)}`, "reliable");
 
-    for (const selector of attributeSelectors(element, STABLE_DATA_ATTRS)) add(selector, "reliable");
-    const semantics = attributeSelectors(element, SEMANTIC_ATTRS);
+    for (const selector of attributeSelectors(element, STABLE_DATA_ATTRS, allow)) add(selector, "reliable");
+    const semantics = attributeSelectors(element, SEMANTIC_ATTRS, allow);
     for (const selector of semantics) add(selector, "moderate");
-    for (const selector of attributeCombinations(element, SEMANTIC_ATTRS)) add(selector, "moderate");
-    for (const selector of classSelectors(element)) add(selector, "moderate");
+    for (const selector of attributeCombinations(element, SEMANTIC_ATTRS, allow)) add(selector, "moderate");
+    for (const selector of classSelectors(element, allow)) add(selector, "moderate");
 
-    const childSelectors = [...semantics, ...attributeCombinations(element, SEMANTIC_ATTRS), ...classSelectors(element), tag];
+    const childSelectors = [...semantics, ...attributeCombinations(element, SEMANTIC_ATTRS, allow), ...classSelectors(element, allow), tag];
     let ancestor = element.parentElement;
     let depth = 1;
     while (ancestor && ancestor !== document.documentElement && depth <= 4) {
       const relation = depth === 1 ? " > " : " ";
-      for (const parentSelector of identitySelectors(ancestor)) {
+      for (const parentSelector of identitySelectors(ancestor, allow)) {
         for (const childSelector of childSelectors) add(`${parentSelector}${relation}${childSelector}`, "moderate");
       }
       ancestor = ancestor.parentElement;
@@ -65,18 +67,18 @@ export class TargetSelectorGenerator {
   }
 }
 
-function attributeSelectors(element: Element, attributes: string[]): string[] {
+function attributeSelectors(element: Element, attributes: string[], allow: SelectorAttributePolicy): string[] {
   const tag = element.tagName.toLowerCase();
   return attributes.flatMap(attribute => {
-    const value = shortValue(element.getAttribute(attribute));
+    const value = allowedValue(element, attribute, allow);
     return value ? [`${tag}[${attribute}="${cssString(value)}"]`] : [];
   });
 }
 
-function attributeCombinations(element: Element, attributes: string[]): string[] {
+function attributeCombinations(element: Element, attributes: string[], allow: SelectorAttributePolicy): string[] {
   const tag = element.tagName.toLowerCase();
   const present = attributes.flatMap(attribute => {
-    const value = shortValue(element.getAttribute(attribute));
+    const value = allowedValue(element, attribute, allow);
     return value ? [{ attribute, value }] : [];
   });
   const selectors: string[] = [];
@@ -88,9 +90,9 @@ function attributeCombinations(element: Element, attributes: string[]): string[]
   return selectors;
 }
 
-function classSelectors(element: Element): string[] {
+function classSelectors(element: Element, allow: SelectorAttributePolicy): string[] {
   const tag = element.tagName.toLowerCase();
-  const classes = (element.getAttribute("class") ?? "").split(/\s+/).filter(isStableClass).slice(0, 4);
+  const classes = (element.getAttribute("class") ?? "").split(/\s+/).filter(value => isStableClass(value) && allow("class", value)).slice(0, 4);
   if (!classes.length) return [];
   const selectors = [`${tag}.${classes.map(cssIdentifier).join(".")}`];
   if (classes.length > 1) {
@@ -100,12 +102,12 @@ function classSelectors(element: Element): string[] {
   return [...new Set(selectors)];
 }
 
-function identitySelectors(element: Element): string[] {
+function identitySelectors(element: Element, allow: SelectorAttributePolicy): string[] {
   const tag = element.tagName.toLowerCase();
   const selectors: string[] = [];
-  const id = shortValue(element.getAttribute("id"));
+  const id = allowedValue(element, "id", allow);
   if (id) selectors.push(`${tag}#${cssIdentifier(id)}`);
-  selectors.push(...attributeSelectors(element, STABLE_DATA_ATTRS), ...attributeSelectors(element, SEMANTIC_ATTRS), ...attributeCombinations(element, SEMANTIC_ATTRS), ...classSelectors(element));
+  selectors.push(...attributeSelectors(element, STABLE_DATA_ATTRS, allow), ...attributeSelectors(element, SEMANTIC_ATTRS, allow), ...attributeCombinations(element, SEMANTIC_ATTRS, allow), ...classSelectors(element, allow));
   return [...new Set(selectors)];
 }
 
@@ -132,7 +134,10 @@ function uniquelyMatches(selector: string, selected: Element): boolean {
   catch { return false; }
 }
 
-function shortValue(value: string | null): string | null { return value && value.length <= 160 ? value : null; }
+function allowedValue(element: Element, attribute: string, allow: SelectorAttributePolicy): string | null {
+  const value = element.getAttribute(attribute);
+  return value && value.length <= 160 && allow(attribute, value) ? value : null;
+}
 function isStableClass(value: string): boolean { const unescaped = value.replace(/\\/g, ""); return !!unescaped && !/^\d/.test(unescaped) && !DYNAMIC_CLASS_PATTERN.test(unescaped) && !UTILITY_CLASS_PATTERN.test(unescaped); }
 function cssIdentifier(value: string): string { return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(value) : value.replace(/[^a-zA-Z0-9_-]/g, "\\$&"); }
 function cssString(value: string): string { return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\r\n\f]/g, " "); }

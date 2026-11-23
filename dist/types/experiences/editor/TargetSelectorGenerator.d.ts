@@ -1,10 +1,12 @@
 import type { ExperienceTarget } from "../types";
+type SelectorAttributePolicy = (name: string, value: string) => boolean;
 export interface TargetSelectorDescriptor extends ExperienceTarget {
     primarySelector: string;
 }
 /** Generates selectors for experience anchoring only. Every emitted selector
  * is verified to resolve uniquely to the exact element that was selected. */
 export declare class TargetSelectorGenerator {
-    generate(element: Element): Pick<ExperienceTarget, "primarySelector" | "fallbackSelectors" | "reliability">;
+    generate(element: Element, allow?: SelectorAttributePolicy): Pick<ExperienceTarget, "primarySelector" | "fallbackSelectors" | "reliability">;
     describe(element: Element): TargetSelectorDescriptor;
 }
+export {};

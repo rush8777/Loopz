@@ -1,3 +1,4 @@
+import type { CapturePlan, CapturePreview, GuideCaptureCheckpoint, GuideCaptureRevision, StoredGuideCapture } from "./GuideCaptureTypes";
 import type { EditorDraft } from "../types";
 import type { SiteThemeTokens } from "../../themes/types";
 import type { EditorAiProposal } from "./AiEditing";
@@ -19,6 +20,25 @@ export declare class EditorBridge {
      * A 404 falls back to the old draft endpoint during a staggered deployment. */
     checkSession(): Promise<void>;
     save(definition: unknown, revision: number): Promise<EditorDraft["version"]>;
+    loadCapture(): Promise<StoredGuideCapture>;
+    saveCapture(checkpoint: GuideCaptureCheckpoint, checkpointRevision: number): Promise<{
+        checkpointRevision: number;
+    }>;
+    planCapture(input: GuideCaptureRevision & {
+        prompt: string;
+    }, signal: AbortSignal): Promise<{
+        plan: CapturePlan;
+    }>;
+    previewCapture(input: GuideCaptureRevision & {
+        plan: CapturePlan;
+    }, signal: AbortSignal): Promise<CapturePreview>;
+    applyCapture(input: GuideCaptureRevision & {
+        plan: CapturePlan;
+        previewTicket: string;
+    }): Promise<{
+        version: EditorDraft["version"];
+    }>;
+    private captureRequest;
     chat(input: {
         conversationId?: string;
         prompt: string;
@@ -47,4 +67,8 @@ export declare class EditorSessionExpiredError extends Error {
 export declare class EditorAiRequestError extends Error {
     readonly conversationId?: string | undefined;
     constructor(message: string, conversationId?: string | undefined);
+}
+export declare class CaptureRequestError extends Error {
+    readonly code: string | undefined;
+    constructor(code: string | undefined, message: string);
 }

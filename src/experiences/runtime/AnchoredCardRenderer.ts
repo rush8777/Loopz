@@ -4,7 +4,7 @@ import { applyBuilderSizeContent, applyWidgetSizeEnvelope } from "./WidgetSizing
 import { AnchoredTargetBackdrop } from "./AnchoredTargetBackdrop";
 import type { OrdinaryButtonContext } from "../OrdinaryButtonAction";
 
-export interface RenderCallbacks { onDismiss: () => void; onPrimary: () => void; onSecondary: () => void; onBack?: () => void; ordinaryActionContext?: OrdinaryButtonContext }
+export interface RenderCallbacks { onDismiss: () => void; onPrimary: () => void; onSecondary: () => void; onBack?: () => void; onTargetDetached?: () => void; ordinaryActionContext?: OrdinaryButtonContext }
 
 export function findTarget(target?: ExperienceTarget): Element | null {
   if (!target) return null;
@@ -156,6 +156,7 @@ export class AnchoredCardRenderer {
       if (destroyed) return;
       if (!target.isConnected) {
         setHidden(true);
+        callbacks.onTargetDetached?.();
         return;
       }
       const rect = target.getBoundingClientRect();

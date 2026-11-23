@@ -6,7 +6,7 @@ import { ExperienceRenderer } from "./ExperienceRenderer";
 import { ExperienceStateStore, type GuideProgress } from "./ExperienceStateStore";
 import { ChecklistManager } from "./ChecklistManager";
 import type { SurveyResume } from "./SurveyRenderer";
-import { matchesGuideRoute } from "./GuideStepLogic";
+import { matchesGuideRoute, matchesGuideTargetPage } from "./GuideStepLogic";
 
 interface ActiveExperience {
   identity: { anonymousId: string; trackedUserId?: string; sessionId: string; pageViewId: string };
@@ -108,7 +108,7 @@ export class ExperienceLoader {
       if (!chosen) return;
       const stored = this.state.getGuideProgress();
       const stepId = isGuideDefinition(chosen.definition) && stored?.experienceId === chosen.id && stored.versionId === chosen.versionId ? stored.currentStepId : undefined;
-      if (stepId && stored?.launchContext && stored.navigationAttempted && isGuideDefinition(chosen.definition)) { const step = chosen.definition.steps.find(item => item.id === stepId); const path = step && guideStepRequiresTarget(step) ? step.target?.targetContext?.pagePath : undefined; if (path && path !== currentPagePath()) { this.state.clearGuideProgress(chosen.id); this.checklist.setTransientActive(false); return; } }
+      if (stepId && stored?.launchContext && stored.navigationAttempted && isGuideDefinition(chosen.definition)) { const step = chosen.definition.steps.find(item => item.id === stepId); const target = step && guideStepRequiresTarget(step) ? step.target : undefined; if (!matchesGuideTargetPage(target, currentPagePath())) { this.state.clearGuideProgress(chosen.id); this.checklist.setTransientActive(false); return; } }
       this.show(chosen, stepId, stepId ? stored ?? undefined : undefined);
     } catch { /* experience delivery must never affect analytics or host code */ }
   }
@@ -344,8 +344,7 @@ export class ExperienceLoader {
 
   private currentGuideStepMatchesPage(runtime: ActiveExperience): boolean {
     const step = this.currentGuideStep(runtime);
-    const pagePath = step && guideStepRequiresTarget(step) ? step.target?.targetContext?.pagePath : undefined;
-    return !pagePath || pagePath === currentPagePath();
+    return matchesGuideTargetPage(step && guideStepRequiresTarget(step) ? step.target : undefined, currentPagePath());
   }
 
   private pauseGuide(): void {
@@ -364,7 +363,7 @@ export class ExperienceLoader {
       const experience = await response.json() as DeliveredExperience;
       if (this.destroyed || epoch !== this.deliveryEpoch || contextKey !== this.contextKey() || !isGuideDefinition(experience.definition)) return;
       const first = experience.definition.steps[0]; const targetPath = first && guideStepRequiresTarget(first) ? first.target?.targetContext?.pagePath : undefined;
-      if (targetPath && targetPath !== currentPagePath()) {
+      if (targetPath && !matchesGuideTargetPage(first.target, currentPagePath())) {
         const destination = new URL(targetPath, location.origin); if (destination.origin !== location.origin) return;
         this.state.setGuideProgress({ experienceId: experience.id, versionId: experience.versionId, currentStepId: first.id, status: "paused", launchContext: experience.launchContext, navigationAttempted: true });
         this.checklist.setTransientActive(true); location.assign(destination.href); return;

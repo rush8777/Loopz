@@ -14,3 +14,4 @@ export declare class ElementPicker {
     private finish;
     private cleanup;
 }
+export declare function isMovcuesSurface(element: Element): boolean;

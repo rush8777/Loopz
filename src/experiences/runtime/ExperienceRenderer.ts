@@ -146,7 +146,12 @@ export class ExperienceRenderer {
           if (!alive()) return; ensureGuideTargetInView(target);
           const root = this.root(experience.id, { layer: step.behavior.layer ?? definition.behavior?.layer }, target); const renderer = new AnchoredCardRenderer(); this.renderer = renderer;
           const behavior: ExperienceBehavior = { ...step.behavior, dismissible: step.behavior.dismissible ?? true };
-          const card = renderer.render(root, target, step.content, stepDesign, behavior, stepCallbacks, step.builder, "anchored_card"); addBack(card);
+          // A page can replace a DOM target immediately after a route update.
+          // Reuse target discovery and the existing missing-target timeout in that case.
+          const reconnect = step.target?.targetContext?.match === "path"
+            ? () => { if (alive()) this.render(experience, callbacks, step.id); }
+            : undefined;
+          const card = renderer.render(root, target, step.content, stepDesign, behavior, { ...stepCallbacks, onTargetDetached: reconnect }, step.builder, "anchored_card"); addBack(card);
           if (interaction) this.listenForAdvance(interaction, step.advance?.type ?? "button", step.advance?.type === "element_hover" ? step.advance.durationMs : undefined, advance);
           visible();
         };

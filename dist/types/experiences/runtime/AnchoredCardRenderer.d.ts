@@ -5,6 +5,7 @@ export interface RenderCallbacks {
     onPrimary: () => void;
     onSecondary: () => void;
     onBack?: () => void;
+    onTargetDetached?: () => void;
     ordinaryActionContext?: OrdinaryButtonContext;
 }
 export declare function findTarget(target?: ExperienceTarget): Element | null;

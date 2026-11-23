@@ -5,6 +5,7 @@ export declare class EditorModeController {
     private host;
     private root;
     private picker;
+    private capture;
     private preview;
     private contentEditor;
     private compositionEditor;

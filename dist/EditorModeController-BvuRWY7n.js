@@ -1,4 +1,4 @@
-import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, j as sanitizeBuilderHtml, k as getGuideStepPattern, l as guideStepRequiresTarget, m as guideStepConfigurationErrors, E as ExperienceRenderer, R as RouteObserver, n as exchangeEditorSession, p as clearEditorContinuation, q as isChecklistDefinition, r as isGuideDefinition, t as guideInteractionTarget, u as matchesGuideRoute, v as findTarget, w as storeEditorContinuation } from "./module-BfJgYd3d.js";
+import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, S as SensitiveElementDetector, j as findTarget, R as RouteObserver, E as ExperienceRenderer, k as sanitizeBuilderHtml, l as getGuideStepPattern, m as guideStepRequiresTarget, n as guideStepConfigurationErrors, p as exchangeEditorSession, q as clearEditorContinuation, r as isChecklistDefinition, t as isGuideDefinition, u as guideInteractionTarget, v as matchesGuideRoute, w as matchesGuideTargetPage, x as storeEditorContinuation } from "./module-I6ohY1wP.js";
 function panelIcon(name) {
   const paths = {
     properties: '<path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
@@ -1621,24 +1621,24 @@ let Container$8 = class Container extends Node$2 {
       }
     });
   }
-  walkRules(selector, callback) {
+  walkRules(selector2, callback) {
     if (!callback) {
-      callback = selector;
+      callback = selector2;
       return this.walk((child, i) => {
         if (child.type === "rule") {
           return callback(child, i);
         }
       });
     }
-    if (selector instanceof RegExp) {
+    if (selector2 instanceof RegExp) {
       return this.walk((child, i) => {
-        if (child.type === "rule" && selector.test(child.selector)) {
+        if (child.type === "rule" && selector2.test(child.selector)) {
           return callback(child, i);
         }
       });
     }
     return this.walk((child, i) => {
-      if (child.type === "rule" && child.selector === selector) {
+      if (child.type === "rule" && child.selector === selector2) {
         return callback(child, i);
       }
     });
@@ -4295,9 +4295,9 @@ function sourceEditingCssErrors(css) {
   root2.walkRules((rule2) => {
     var _a;
     if (((_a = rule2.parent) == null ? void 0 : _a.type) === "rule") errors.push("Nested CSS rules are not supported by live editing.");
-    for (const selector of rule2.selectors) {
-      if (!/^\.movcues-widget(?:\b|[.#:[>+~\s])/.test(selector.trim())) errors.push(`Unscoped selector: ${selector}`);
-      if (selector.includes("::") || /#[A-Za-z_-]/.test(selector) || selector.length > 512) errors.push(`Editable selectors must use classes/attributes, without IDs or pseudo-elements: ${selector}`);
+    for (const selector2 of rule2.selectors) {
+      if (!/^\.movcues-widget(?:\b|[.#:[>+~\s])/.test(selector2.trim())) errors.push(`Unscoped selector: ${selector2}`);
+      if (selector2.includes("::") || /#[A-Za-z_-]/.test(selector2) || selector2.length > 512) errors.push(`Editable selectors must use classes/attributes, without IDs or pseudo-elements: ${selector2}`);
     }
   });
   root2.walkDecls((decl) => {
@@ -4327,23 +4327,23 @@ class SourceStyles {
     element.dataset.movcuesResponsiveStack = "true";
     const identity = element.dataset.movcuesNodeId ? `data-movcues-node-id="${element.dataset.movcuesNodeId}"` : `data-movcues-block-id="${element.dataset.movcuesBlockId}"`;
     const marker = `[${identity}][data-movcues-responsive-stack="true"]`;
-    const selector = element === this.widget ? `.movcues-widget${marker}` : `.movcues-widget ${marker}`;
+    const selector2 = element === this.widget ? `.movcues-widget${marker}` : `.movcues-widget ${marker}`;
     let media = this.root.nodes.find((node2) => node2.type === "atrule" && node2.name === "media" && node2.params === "(max-width:480px)");
     if (!media) {
       media = postcss$1.atRule({ name: "media", params: "(max-width:480px)" });
       this.root.append(media);
     }
-    if ((_a = media.nodes) == null ? void 0 : _a.some((node2) => node2.type === "rule" && node2.selector === selector)) return;
-    const rule2 = postcss$1.rule({ selector });
+    if ((_a = media.nodes) == null ? void 0 : _a.some((node2) => node2.type === "rule" && node2.selector === selector2)) return;
+    const rule2 = postcss$1.rule({ selector: selector2 });
     rule2.append(postcss$1.decl({ prop: "display", value: "flex", important: true }), postcss$1.decl({ prop: "flex-direction", value: "column", important: true }));
     media.append(rule2);
   }
   removeIdentities(ids) {
     if (!ids.length) return;
     this.root.walkRules((rule2) => {
-      const selectors = rule2.selectors.filter((selector) => !ids.some((id) => ["node", "block"].some((key) => {
-        const marker = `[data-movcues-${key}-id="${id}"]`, count = selector.split(marker).length - 1;
-        return count > 0 && (selector === `.movcues-widget ${marker.repeat(count)}` || selector === `.movcues-widget${marker.repeat(count)}`);
+      const selectors = rule2.selectors.filter((selector2) => !ids.some((id) => ["node", "block"].some((key) => {
+        const marker = `[data-movcues-${key}-id="${id}"]`, count = selector2.split(marker).length - 1;
+        return count > 0 && (selector2 === `.movcues-widget ${marker.repeat(count)}` || selector2 === `.movcues-widget${marker.repeat(count)}`);
       })));
       if (!selectors.length) rule2.remove();
       else if (selectors.length !== rule2.selectors.length) rule2.selectors = selectors;
@@ -4360,7 +4360,7 @@ class SourceStyles {
   }
   matches(rule2, element) {
     try {
-      return rule2.selectors.some((selector) => element.matches(selector));
+      return rule2.selectors.some((selector2) => element.matches(selector2));
     } catch {
       throw new Error(`Cannot safely inspect CSS selector: ${rule2.selector}`);
     }
@@ -4403,10 +4403,10 @@ class SourceStyles {
       };
       target = scoped.find(isDedicated);
       const specificityBound = Math.max(1, ...active.filter((rule2) => rule2 !== target).map((rule2) => (rule2.selector.match(/[.[:]/g) ?? []).length + 1));
-      const selector = (element === this.widget ? ".movcues-widget" : ".movcues-widget ") + marker.repeat(specificityBound);
-      if (target) target.selector = selector;
+      const selector2 = (element === this.widget ? ".movcues-widget" : ".movcues-widget ") + marker.repeat(specificityBound);
+      if (target) target.selector = selector2;
       else {
-        target = postcss$1.rule({ selector });
+        target = postcss$1.rule({ selector: selector2 });
         scope.append(target);
       }
     }
@@ -4424,9 +4424,9 @@ class SourceStyles {
 function isShorthandFor(shorthand, property) {
   return shorthand === "font" && (property.startsWith("font-") || property === "line-height") || ["padding", "margin", "border", "background", "flex"].some((group) => shorthand === group && property.startsWith(`${group}-`));
 }
-function remapSourceSelector(selector, attribute, ids) {
-  for (const [before, after] of ids) for (const quote of ['"', "'", ""]) selector = selector.split(`[${attribute}=${quote}${before}${quote}]`).join(`[${attribute}=${quote}${after}${quote}]`);
-  return selector;
+function remapSourceSelector(selector2, attribute, ids) {
+  for (const [before, after] of ids) for (const quote of ['"', "'", ""]) selector2 = selector2.split(`[${attribute}=${quote}${before}${quote}]`).join(`[${attribute}=${quote}${after}${quote}]`);
+  return selector2;
 }
 function parse$1(html) {
   const template = document.createElement("template");
@@ -4771,16 +4771,16 @@ class ChecklistEditor {
   setDefinition(value) {
     this.definition = value;
   }
-  value(selector, value) {
-    const input2 = this.root.querySelector(selector);
+  value(selector2, value) {
+    const input2 = this.root.querySelector(selector2);
     if (input2 && this.root.activeElement !== input2) input2.value = value;
   }
-  check(selector, value) {
-    const input2 = this.root.querySelector(selector);
+  check(selector2, value) {
+    const input2 = this.root.querySelector(selector2);
     if (input2) input2.checked = value;
   }
-  hide(selector, value) {
-    const element = this.task.querySelector(selector);
+  hide(selector2, value) {
+    const element = this.task.querySelector(selector2);
     if (element) element.hidden = value;
   }
   destroyView() {
@@ -5050,21 +5050,21 @@ function compileOnsiteDocument(document2, widgetType, survey, checklist) {
 }
 function renderCell(cell, css, depth, survey, checklist) {
   var _a;
-  const selector = `.movcues-widget [data-movcues-node-id="${cell.id}"]`;
+  const selector2 = `.movcues-widget [data-movcues-node-id="${cell.id}"]`;
   const sizing = cell.sizing.mode === "flexible" ? `flex:${round(cell.sizing.weight)} 1 0` : cell.sizing.mode === "hug" ? "flex:0 0 auto" : `flex:0 1 ${cell.sizing.value}px`;
   const style = cell.style ?? {};
-  css.push(`${selector}{${sizing};flex-direction:${cell.direction};align-items:${cell.align};justify-content:${cell.justify};gap:${cell.gap}px;padding:${cell.padding.top}px ${cell.padding.right}px ${cell.padding.bottom}px ${cell.padding.left}px;${style.background ? `background:${style.background};` : ""}${style.borderWidth ? `border:${style.borderWidth}px solid ${style.borderColor ?? "#dbe2ea"};` : ""}${style.borderRadius ? `border-radius:${style.borderRadius}px;` : ""}}`);
+  css.push(`${selector2}{${sizing};flex-direction:${cell.direction};align-items:${cell.align};justify-content:${cell.justify};gap:${cell.gap}px;padding:${cell.padding.top}px ${cell.padding.right}px ${cell.padding.bottom}px ${cell.padding.left}px;${style.background ? `background:${style.background};` : ""}${style.borderWidth ? `border:${style.borderWidth}px solid ${style.borderColor ?? "#dbe2ea"};` : ""}${style.borderRadius ? `border-radius:${style.borderRadius}px;` : ""}}`);
   if (cell.checklistWidth !== void 0) css.push(`.movcues-widget--checklist:has([data-movcues-node-id="${cell.id}"].is-active){width:${cell.checklistWidth}px}`);
   const children = ((_a = cell.children) == null ? void 0 : _a.map((child) => renderCell(child, css, depth + 1, survey, checklist)).join("")) ?? (cell.block ? renderBlock(cell.block, css, survey, checklist) : "");
   return `<div class="movcues-cell" data-movcues-node-id="${cell.id}"${cell.checklistRole ? cell.checklistRole === "items" ? ' data-movcues-checklist-role="items"' : ` data-movcues-checklist-view="${cell.checklistRole}"` : ""} data-movcues-sizing="${cell.sizing.mode}"${cell.responsiveStack ? ' data-movcues-responsive-stack="true"' : ""}>${children}</div>`;
 }
 function renderBlock(block, css, survey, checklist) {
-  const selector = `.movcues-widget [data-movcues-block-id="${block.id}"]`;
+  const selector2 = `.movcues-widget [data-movcues-block-id="${block.id}"]`;
   const align = block.align ?? "left";
   if (block.type === "checklist_task" || block.type === "checklist_text" || block.type === "checklist_control" || block.type === "checklist_progress") {
     if (!checklist) throw new Error("Checklist component needs canonical context.");
     const item = block;
-    css.push(`${selector}{font-size:${item.fontSize}px;text-align:${align};${item.color ? `color:${item.color};` : ""}}`);
+    css.push(`${selector2}{font-size:${item.fontSize}px;text-align:${align};${item.color ? `color:${item.color};` : ""}}`);
     const attrs = `class="movcues-block" data-movcues-block-id="${block.id}"`;
     if (item.type === "checklist_task") {
       const task = checklist.items.find((value) => value.id === item.itemId);
@@ -5075,35 +5075,35 @@ function renderBlock(block, css, survey, checklist) {
     return `<div ${attrs}><div data-movcues-checklist-role="progress"></div><div class="movcues-checklist-progress-track"><span class="movcues-checklist-progress-fill"></span></div></div>`;
   }
   if (block.type === "question") {
-    css.push(`${selector}{font:${block.fontSize}px/1.5 var(--movcues-font-body,ui-sans-serif,system-ui,sans-serif);text-align:${align};${block.color ? `color:${block.color};` : ""}}`);
+    css.push(`${selector2}{font:${block.fontSize}px/1.5 var(--movcues-font-body,ui-sans-serif,system-ui,sans-serif);text-align:${align};${block.color ? `color:${block.color};` : ""}}`);
     return surveyQuestionMarkup(survey.questions.find((question) => question.id === block.questionId), block.id);
   }
   if (block.type === "survey_controls") return surveyControlsMarkup(block.id, (survey == null ? void 0 : survey.submitLabel) ?? "Submit");
   if (block.type === "heading") {
-    css.push(`${selector}{font:${block.weight} ${block.fontSize}px/${block.lineHeight ?? 1.25} var(--movcues-font-heading,ui-sans-serif,system-ui,sans-serif);text-align:${align};${block.color ? `color:${block.color};` : ""}}`);
+    css.push(`${selector2}{font:${block.weight} ${block.fontSize}px/${block.lineHeight ?? 1.25} var(--movcues-font-heading,ui-sans-serif,system-ui,sans-serif);text-align:${align};${block.color ? `color:${block.color};` : ""}}`);
     return `<h${block.level} class="movcues-block movcues-heading" data-movcues-block-id="${block.id}" data-movcues-content="heading">${sanitizeRichText(block.html)}</h${block.level}>`;
   }
   if (block.type === "text") {
-    css.push(`${selector}{font:${block.weight} ${block.fontSize}px/${block.lineHeight ?? 1.5} var(--movcues-font-body,ui-sans-serif,system-ui,sans-serif);text-align:${align};white-space:pre-wrap;${block.color ? `color:${block.color};` : ""}}`);
+    css.push(`${selector2}{font:${block.weight} ${block.fontSize}px/${block.lineHeight ?? 1.5} var(--movcues-font-body,ui-sans-serif,system-ui,sans-serif);text-align:${align};white-space:pre-wrap;${block.color ? `color:${block.color};` : ""}}`);
     return `<div class="movcues-block movcues-text" data-movcues-block-id="${block.id}" data-movcues-content="body">${sanitizeRichText(block.html)}</div>`;
   }
   if (block.type === "button") {
-    css.push(`${selector}{align-self:${align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center"};padding:${block.paddingY}px ${block.paddingX}px;border-radius:${block.radius}px;${block.width === "full" ? "width:100%;" : ""}${block.background ? `background:${block.background};` : ""}${block.color ? `color:${block.color};` : ""}}`);
+    css.push(`${selector2}{align-self:${align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center"};padding:${block.paddingY}px ${block.paddingX}px;border-radius:${block.radius}px;${block.width === "full" ? "width:100%;" : ""}${block.background ? `background:${block.background};` : ""}${block.color ? `color:${block.color};` : ""}}`);
     return `<button type="button" class="movcues-block movcues-button movcues-button--${block.variant}${block.width === "full" ? " movcues-block--full" : ""}" data-movcues-block-id="${block.id}" data-movcues-action-id="${block.action.id}">${escapeText$1(block.label)}</button>`;
   }
   if (block.type === "image") {
-    css.push(`${selector}{align-self:${align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center"};width:${block.width}%;${block.height ? `height:${block.height}px;` : "height:auto;"}object-fit:${block.fit};border-radius:${block.radius}px}`);
+    css.push(`${selector2}{align-self:${align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center"};width:${block.width}%;${block.height ? `height:${block.height}px;` : "height:auto;"}object-fit:${block.fit};border-radius:${block.radius}px}`);
     return `<img class="movcues-block movcues-image" data-movcues-block-id="${block.id}" src="${escapeAttribute(block.src)}" alt="${escapeAttribute(block.alt)}">`;
   }
   if (block.type === "divider") {
-    css.push(`${selector}{align-self:stretch;${block.orientation === "horizontal" ? `width:100%;height:${block.thickness}px` : `width:${block.thickness}px;min-height:24px`};border:0;background:${block.color}}`);
+    css.push(`${selector2}{align-self:stretch;${block.orientation === "horizontal" ? `width:100%;height:${block.thickness}px` : `width:${block.thickness}px;min-height:24px`};border:0;background:${block.color}}`);
     return `<hr class="movcues-block movcues-divider" data-movcues-block-id="${block.id}">`;
   }
   if (block.type === "spacer") {
-    css.push(`${selector}{flex:0 0 ${block.size}px;width:${block.size}px;height:${block.size}px}`);
+    css.push(`${selector2}{flex:0 0 ${block.size}px;width:${block.size}px;height:${block.size}px}`);
     return `<div class="movcues-block movcues-spacer" data-movcues-block-id="${block.id}" aria-hidden="true"></div>`;
   }
-  css.push(`${selector}{align-self:${align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center"};font-size:${block.size}px;line-height:1;${block.color ? `color:${block.color};` : ""}}`);
+  css.push(`${selector2}{align-self:${align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center"};font-size:${block.size}px;line-height:1;${block.color ? `color:${block.color};` : ""}}`);
   return `<span class="movcues-block movcues-icon" data-movcues-block-id="${block.id}" role="img" aria-label="${block.icon}">${ICONS[block.icon]}</span>`;
 }
 function validateOnsiteDocument(value) {
@@ -5827,12 +5827,12 @@ class SurveyEditor {
       } else if (doc && step.builder) Object.assign(step.content, applyOnsiteDocument(step.builder, doc, "survey", { questions: step.questions, submitLabel: this.survey.submitLabel }).content);
     });
   }
-  value(selector, value) {
-    const input2 = this.root.querySelector(selector);
+  value(selector2, value) {
+    const input2 = this.root.querySelector(selector2);
     if (input2 && this.root.activeElement !== input2) input2.value = value;
   }
-  check(selector, value) {
-    const input2 = this.root.querySelector(selector);
+  check(selector2, value) {
+    const input2 = this.root.querySelector(selector2);
     if (input2) input2.checked = value;
   }
   destroy() {
@@ -5906,6 +5906,36 @@ class EditorBridge {
     }
     const body = await response.json();
     return body.version;
+  }
+  loadCapture() {
+    return this.captureRequest("", "GET");
+  }
+  saveCapture(checkpoint, checkpointRevision) {
+    return this.captureRequest("", "PUT", { ...checkpoint, checkpointRevision });
+  }
+  planCapture(input2, signal) {
+    return this.captureRequest("/plan", "POST", input2, signal);
+  }
+  previewCapture(input2, signal) {
+    return this.captureRequest("/preview", "POST", input2, signal);
+  }
+  applyCapture(input2) {
+    return this.captureRequest("/apply", "POST", input2);
+  }
+  async captureRequest(action, method, input2, signal) {
+    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/guide-capture${action}`, {
+      method,
+      headers: this.headers(),
+      credentials: "omit",
+      cache: "no-store",
+      ...input2 !== void 0 ? { body: JSON.stringify(input2) } : {},
+      ...method === "PUT" ? { keepalive: true } : {},
+      signal
+    });
+    const body = await response.json().catch(() => null);
+    if (response.status === 401 || response.status === 410 || (body == null ? void 0 : body.error) === "invalid_editor_access") throw new EditorSessionExpiredError();
+    if (!response.ok) throw new CaptureRequestError(body == null ? void 0 : body.error, (body == null ? void 0 : body.message) ?? "Guided Capture could not complete the request. Try again.");
+    return body;
   }
   async chat(input2, signal, onEvent) {
     var _a, _b, _c;
@@ -5992,6 +6022,83 @@ class EditorAiRequestError extends Error {
     this.conversationId = conversationId;
   }
 }
+class CaptureRequestError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
+const guideCapturePanel = `
+<style>
+  :host{all:initial;font:14px/1.45 system-ui,sans-serif;color:#17233b}
+  *{box-sizing:border-box}
+  aside{position:fixed;top:12px;right:12px;width:min(390px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;pointer-events:auto;background:white;border:1px solid #dce3ed;border-radius:14px;box-shadow:0 8px 26px #15274626}
+  header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 15px;border-bottom:1px solid #e7edf5}
+  header .row{flex-wrap:nowrap}
+  main{display:grid;gap:12px;padding:14px}
+  h2,p,ol{margin:0} h2{font-size:15px}
+  label{display:grid;gap:5px;font-size:12px;font-weight:600}
+  button,input,select,textarea{font:inherit}
+  button{padding:6px 9px;border:1px solid #ccd6e4;background:white;color:#21314d;border-radius:6px;cursor:pointer;font-size:12px}
+  button:hover{background:#f3f6fc}
+  button[aria-pressed=true],button[data-primary]{background:#1d4ed8;color:white;border-color:#1d4ed8}
+  button:disabled{opacity:.55;cursor:default}
+  button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+  ol{list-style:none;padding:0;display:grid;gap:6px}
+  li,fieldset{background:#f7f9fc;border:1px solid #e1e8f3;border-radius:7px;padding:8px}
+  fieldset{display:grid;gap:7px;min-width:0;margin:0}
+  legend{font-weight:650;font-size:12px}
+  form,section{display:grid;gap:8px}
+  small{display:block;font-size:11px;color:#43546d;overflow-wrap:anywhere}
+  .row{display:flex;flex-wrap:wrap;align-items:center;gap:5px}
+  .list-head{display:flex;align-items:baseline;gap:7px;overflow-wrap:anywhere}
+  .number{font-weight:700;color:#1d4ed8}
+  .warning{color:#8d430c}
+  .muted{color:#475b75;font-size:12px}
+  input,select,textarea{width:100%;min-width:0;padding:6px 7px;border-radius:6px;border:1px solid #ccd6e4;color:#17233b;background:white}
+  textarea{resize:vertical}
+  [hidden]{display:none!important}
+</style>
+<aside aria-label="Guided Capture">
+  <header><h2>Guided Capture</h2><div class="row"><button type="button" data-collapse aria-expanded="true" aria-controls="movcues-capture-content">Minimize</button><button type="button" data-close aria-label="Close Guided Capture">Close</button></div></header>
+  <main id="movcues-capture-content">
+    <p class="muted" data-message role="status" aria-live="polite">Restoring capture…</p>
+    <section data-capture hidden>
+      <div class="row" role="group" aria-label="Capture mode">
+        <button type="button" data-mode="select">Select Elements</button>
+        <button type="button" data-mode="navigate">Navigate</button>
+      </div>
+      <p class="muted" data-instructions></p>
+      <ol data-targets aria-label="Captured elements"></ol>
+      <p class="muted" data-checkpoint role="status" aria-live="polite"></p>
+      <div class="row">
+        <button type="button" data-retry hidden>Retry checkpoint</button>
+        <button type="button" data-refresh hidden>Load latest checkpoint</button>
+      </div>
+      <form data-prompt-form>
+        <label>What should this guide help users do?
+          <textarea data-prompt rows="3" maxlength="2000" required placeholder="Help new customers create their first invoice."></textarea>
+        </label>
+        <div class="row"><button type="submit" data-primary data-plan>Plan with Geo</button><button type="button" data-cancel hidden>Cancel request</button></div>
+      </form>
+    </section>
+    <section data-plan-panel hidden>
+      <h2>Review the plan</h2>
+      <div data-plan-steps></div>
+      <div class="row"><button type="button" data-compile data-primary>Generate preview</button><button type="button" data-edit-capture>Back to capture</button></div>
+    </section>
+    <section data-preview hidden>
+      <h2>Guide preview</h2>
+      <p data-preview-position class="muted"></p>
+      <div class="row"><button type="button" data-previous>Previous step</button><button type="button" data-next>Next step</button></div>
+      <div class="row"><button type="button" data-apply data-primary>Apply to draft</button><button type="button" data-edit-plan>Edit plan</button></div>
+    </section>
+    <button type="button" data-reload hidden>Retry loading capture</button>
+  </main>
+</aside>`;
+function captureHtml(text2) {
+  return text2.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
+}
 class HighlightOverlay {
   constructor() {
     this.element = document.createElement("div");
@@ -6015,34 +6122,34 @@ const SEMANTIC_ATTRS = ["role", "aria-label", "name", "type", "href"];
 const DYNAMIC_CLASS_PATTERN = /^(css-|sc-|jsx-|_|[a-z0-9]{6,}$)/i;
 const UTILITY_CLASS_PATTERN = /^(sm:|md:|lg:|xl:|2xl:|hover:|focus:|active:|disabled:|dark:|-?(m|p)[trblxy]?-|w-|h-|min-|max-|inset-|top-|right-|bottom-|left-|z-|gap-|space-|grid|flex|items-|justify-|text-|font-|leading-|tracking-|bg-|border|rounded|shadow|opacity-|transition|duration-|absolute$|relative$|fixed$|sticky$|hidden$|block$|inline)/;
 class TargetSelectorGenerator {
-  generate(element) {
+  generate(element, allow = () => true) {
     const verified = [];
     const seen = /* @__PURE__ */ new Set();
-    const add = (selector, reliability) => {
-      if (!selector || seen.has(selector)) return;
-      seen.add(selector);
-      if (uniquelyMatches(selector, element)) verified.push({ selector, reliability });
+    const add = (selector2, reliability) => {
+      if (!selector2 || seen.has(selector2)) return;
+      seen.add(selector2);
+      if (uniquelyMatches(selector2, element)) verified.push({ selector: selector2, reliability });
     };
     const tag = element.tagName.toLowerCase();
-    const id = shortValue(element.getAttribute("id"));
+    const id = allowedValue(element, "id", allow);
     if (id) add(`${tag}#${cssIdentifier(id)}`, "reliable");
-    for (const selector of attributeSelectors(element, STABLE_DATA_ATTRS)) add(selector, "reliable");
-    const semantics = attributeSelectors(element, SEMANTIC_ATTRS);
-    for (const selector of semantics) add(selector, "moderate");
-    for (const selector of attributeCombinations(element, SEMANTIC_ATTRS)) add(selector, "moderate");
-    for (const selector of classSelectors(element)) add(selector, "moderate");
-    const childSelectors = [...semantics, ...attributeCombinations(element, SEMANTIC_ATTRS), ...classSelectors(element), tag];
+    for (const selector2 of attributeSelectors(element, STABLE_DATA_ATTRS, allow)) add(selector2, "reliable");
+    const semantics = attributeSelectors(element, SEMANTIC_ATTRS, allow);
+    for (const selector2 of semantics) add(selector2, "moderate");
+    for (const selector2 of attributeCombinations(element, SEMANTIC_ATTRS, allow)) add(selector2, "moderate");
+    for (const selector2 of classSelectors(element, allow)) add(selector2, "moderate");
+    const childSelectors = [...semantics, ...attributeCombinations(element, SEMANTIC_ATTRS, allow), ...classSelectors(element, allow), tag];
     let ancestor = element.parentElement;
     let depth = 1;
     while (ancestor && ancestor !== document.documentElement && depth <= 4) {
       const relation = depth === 1 ? " > " : " ";
-      for (const parentSelector of identitySelectors(ancestor)) {
+      for (const parentSelector of identitySelectors(ancestor, allow)) {
         for (const childSelector of childSelectors) add(`${parentSelector}${relation}${childSelector}`, "moderate");
       }
       ancestor = ancestor.parentElement;
       depth++;
     }
-    for (const selector of structuralSelectors(element)) add(selector, "fragile");
+    for (const selector2 of structuralSelectors(element)) add(selector2, "fragile");
     const primary = verified[0];
     if (!primary) throw new Error("Could not generate a unique selector for the selected element");
     return { primarySelector: primary.selector, fallbackSelectors: verified.slice(1, 6).map((item) => item.selector), reliability: primary.reliability };
@@ -6056,17 +6163,17 @@ class TargetSelectorGenerator {
     };
   }
 }
-function attributeSelectors(element, attributes) {
+function attributeSelectors(element, attributes, allow) {
   const tag = element.tagName.toLowerCase();
   return attributes.flatMap((attribute) => {
-    const value = shortValue(element.getAttribute(attribute));
+    const value = allowedValue(element, attribute, allow);
     return value ? [`${tag}[${attribute}="${cssString(value)}"]`] : [];
   });
 }
-function attributeCombinations(element, attributes) {
+function attributeCombinations(element, attributes, allow) {
   const tag = element.tagName.toLowerCase();
   const present = attributes.flatMap((attribute) => {
-    const value = shortValue(element.getAttribute(attribute));
+    const value = allowedValue(element, attribute, allow);
     return value ? [{ attribute, value }] : [];
   });
   const selectors = [];
@@ -6077,9 +6184,9 @@ function attributeCombinations(element, attributes) {
   }
   return selectors;
 }
-function classSelectors(element) {
+function classSelectors(element, allow) {
   const tag = element.tagName.toLowerCase();
-  const classes = (element.getAttribute("class") ?? "").split(/\s+/).filter(isStableClass).slice(0, 4);
+  const classes = (element.getAttribute("class") ?? "").split(/\s+/).filter((value) => isStableClass(value) && allow("class", value)).slice(0, 4);
   if (!classes.length) return [];
   const selectors = [`${tag}.${classes.map(cssIdentifier).join(".")}`];
   if (classes.length > 1) {
@@ -6088,12 +6195,12 @@ function classSelectors(element) {
   selectors.push(...classes.map((value) => `${tag}.${cssIdentifier(value)}`));
   return [...new Set(selectors)];
 }
-function identitySelectors(element) {
+function identitySelectors(element, allow) {
   const tag = element.tagName.toLowerCase();
   const selectors = [];
-  const id = shortValue(element.getAttribute("id"));
+  const id = allowedValue(element, "id", allow);
   if (id) selectors.push(`${tag}#${cssIdentifier(id)}`);
-  selectors.push(...attributeSelectors(element, STABLE_DATA_ATTRS), ...attributeSelectors(element, SEMANTIC_ATTRS), ...attributeCombinations(element, SEMANTIC_ATTRS), ...classSelectors(element));
+  selectors.push(...attributeSelectors(element, STABLE_DATA_ATTRS, allow), ...attributeSelectors(element, SEMANTIC_ATTRS, allow), ...attributeCombinations(element, SEMANTIC_ATTRS, allow), ...classSelectors(element, allow));
   return [...new Set(selectors)];
 }
 function structuralSelectors(element) {
@@ -6113,16 +6220,17 @@ function structuralSelectors(element) {
   }
   return selectors;
 }
-function uniquelyMatches(selector, selected) {
+function uniquelyMatches(selector2, selected) {
   try {
-    const matches = document.querySelectorAll(selector);
+    const matches = document.querySelectorAll(selector2);
     return matches.length === 1 && matches[0] === selected;
   } catch {
     return false;
   }
 }
-function shortValue(value) {
-  return value && value.length <= 160 ? value : null;
+function allowedValue(element, attribute, allow) {
+  const value = element.getAttribute(attribute);
+  return value && value.length <= 160 && allow(attribute, value) ? value : null;
 }
 function isStableClass(value) {
   const unescaped = value.replace(/\\/g, "");
@@ -6218,6 +6326,766 @@ function isMovcuesSurface(element) {
   if (element.closest("[data-movcues-editor],[data-movcues-experience],[data-movcues-picker-overlay]")) return true;
   const root2 = element.getRootNode();
   return root2 instanceof ShadowRoot && isMovcuesSurface(root2.host);
+}
+const selector = new TargetSelectorGenerator();
+const privateElement = new SensitiveElementDetector();
+const editable = "[contenteditable]:not([contenteditable=false])";
+const explicitlyPrivate = "[data-movcues-private],input[type=password],input[type=hidden],[autocomplete=current-password],[autocomplete=new-password],[autocomplete=one-time-code]";
+const interactive = `button,input,select,textarea,a[href],[role=button],[role=link],[role=checkbox],[role=tab],[role=switch],${editable}`;
+function captureTargetFor(node2) {
+  if (!(node2 instanceof Element) || isMovcuesSurface(node2) || node2.closest(explicitlyPrivate) || privateElement.isWithinPrivateSubtree(node2)) return null;
+  const target = node2.closest(interactive) ?? node2;
+  return target === document.body || target === document.documentElement ? null : target;
+}
+function guideCapturePath(url = location) {
+  const hash = url.hash.split("?")[0];
+  const path = `${url.pathname}${hash.startsWith("#/") ? hash : ""}`;
+  if (path.length > 350 || !/^\/(?!\/)[a-z0-9/_~.%+-]*(?:#\/[a-z0-9/_~.%+-]*)?$/i.test(path)) return null;
+  if (/%(?![\da-f]{2})|%(?:25|2f|3f|23|40|5c)|[a-f\d]{24,}|[\da-z_-]{40,}|(?:^|[\/_-])(?:token|secret|password|credential)(?:[\/_-]|$)/i.test(path)) return null;
+  return path;
+}
+function allowSelectorAttribute(attribute, value) {
+  return attribute !== "href" && attribute !== "aria-label" && /^[a-z_][\w-]{0,30}$/i.test(value) && !/token|secret|credential|password|session[_-]?id|\d{4,}/i.test(value);
+}
+function labelText(element) {
+  if (isMovcuesSurface(element) || privateElement.isWithinPrivateSubtree(element) || element.closest(editable) || element.matches("input,select,textarea")) return void 0;
+  const nodes = Array.from(element.childNodes);
+  if (element.matches("button,a[href],[role=button],[role=link],label")) {
+    return nodes.map((node2) => node2 instanceof Element ? node2.matches("span,strong,em") ? labelText(node2) : "" : node2.nodeType === Node.TEXT_NODE ? node2.textContent : "").filter(Boolean).join(" ");
+  }
+  return nodes.filter((node2) => node2.nodeType === Node.TEXT_NODE).map((node2) => node2.textContent).join(" ");
+}
+function safeLabel(text2) {
+  const value = text2 == null ? void 0 : text2.replace(/\s+/g, " ").trim();
+  if (!value || value.length > 100 || /[@<>\u0000-\u001f]|https?:|\d{4,}|[\da-z_-]{32,}/i.test(value)) return void 0;
+  return value;
+}
+function describeCaptureTarget(element, id, pagePath) {
+  var _a;
+  const generated = selector.generate(element, allowSelectorAttribute);
+  const tagName = element.tagName.toLowerCase();
+  const role = (_a = computeElementRole(element)) == null ? void 0 : _a.split(":")[0];
+  const formControl = element.matches(`input,textarea,select,${editable}`);
+  const submit = element instanceof HTMLButtonElement && element.type === "submit" && element.form || element instanceof HTMLInputElement && element.type === "submit";
+  const ordinaryLabel = safeLabel(element.getAttribute("aria-label")) ?? safeLabel(labelText(element));
+  const label = submit ? safeLabel(`Submit: ${ordinaryLabel ?? "form"}`) ?? "Submit form" : ordinaryLabel ?? (formControl ? "Field" : void 0);
+  if (generated.primarySelector.length > 240) throw new Error("This element has a long or unstable selector. Choose an element with a stable ID.");
+  return {
+    id,
+    target: {
+      ...generated,
+      fallbackSelectors: generated.fallbackSelectors.filter((value) => value.length <= 240),
+      tagName,
+      role: role && /^[a-z-]{1,40}$/.test(role) ? role : void 0,
+      label,
+      targetContext: { pagePath }
+    }
+  };
+}
+const interceptedEvents = ["pointerdown", "pointerup", "mousedown", "mouseup", "touchstart", "touchend", "click", "auxclick", "dblclick", "contextmenu", "beforeinput", "submit", "keydown"];
+class GuideCaptureSelection {
+  constructor(onSelect) {
+    this.onSelect = onSelect;
+    this.surface = document.createElement("div");
+    this.observer = new MutationObserver(() => this.refresh());
+    this.frame = 0;
+    this.enabled = false;
+    this.targets = [];
+    this.markers = /* @__PURE__ */ new Map();
+    this.invalidate = () => {
+      var _a;
+      (_a = this.hover) == null ? void 0 : _a.hide();
+      this.refresh();
+    };
+    this.move = (event) => {
+      var _a, _b;
+      const element = captureTargetFor(event.target);
+      if (element) (_a = this.hover) == null ? void 0 : _a.show(element);
+      else (_b = this.hover) == null ? void 0 : _b.hide();
+    };
+    this.intercept = (event) => {
+      if (event.composedPath().some((node2) => node2 instanceof Element && isMovcuesSurface(node2))) return;
+      if (event instanceof KeyboardEvent && !["Enter", " ", "Escape"].includes(event.key)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event instanceof KeyboardEvent && (event.repeat || event.key === "Escape")) return;
+      if (event.type !== "click" && event.type !== "keydown") return;
+      const element = captureTargetFor(event.target);
+      if (element) this.onSelect(element);
+    };
+    this.surface.dataset.movcuesPickerOverlay = "";
+    document.documentElement.append(this.surface);
+    this.observer.observe(document.body ?? document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["class", "id", "hidden", "style", "aria-hidden", "data-testid", "data-test", "data-qa", "data-cy"]
+    });
+    window.addEventListener("scroll", this.invalidate, { capture: true, passive: true });
+    window.addEventListener("resize", this.invalidate);
+  }
+  setEnabled(enabled) {
+    var _a;
+    if (this.enabled === enabled) return;
+    this.enabled = enabled;
+    if (enabled) {
+      this.hover = new HighlightOverlay();
+      window.addEventListener("pointermove", this.move, { capture: true, passive: true });
+      for (const type of interceptedEvents) window.addEventListener(type, this.intercept, { capture: true, passive: false });
+    } else {
+      (_a = this.hover) == null ? void 0 : _a.destroy();
+      this.hover = void 0;
+      window.removeEventListener("pointermove", this.move, true);
+      for (const type of interceptedEvents) window.removeEventListener(type, this.intercept, true);
+    }
+  }
+  setTargets(targets) {
+    this.targets = targets;
+    const ids = new Set(targets.map((target) => target.id));
+    for (const [id, marker] of this.markers) if (!ids.has(id)) {
+      marker.remove();
+      this.markers.delete(id);
+    }
+    this.refresh();
+  }
+  refresh() {
+    if (this.frame) return;
+    this.frame = requestAnimationFrame(() => {
+      this.frame = 0;
+      this.placeMarkers();
+    });
+  }
+  destroy() {
+    this.setEnabled(false);
+    this.observer.disconnect();
+    cancelAnimationFrame(this.frame);
+    window.removeEventListener("scroll", this.invalidate, true);
+    window.removeEventListener("resize", this.invalidate);
+    this.surface.remove();
+    this.markers.clear();
+  }
+  placeMarkers() {
+    const path = guideCapturePath();
+    this.targets.forEach(({ id, target }, index) => {
+      const found = path === target.targetContext.pagePath ? findTarget(target) : null;
+      const element = found && !isMovcuesSurface(found) ? found : null;
+      const rect = element == null ? void 0 : element.getBoundingClientRect();
+      let marker = this.markers.get(id);
+      if (!rect || !rect.width || !rect.height || rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth) {
+        if (marker) marker.hidden = true;
+        return;
+      }
+      if (!marker) {
+        marker = document.createElement("div");
+        marker.dataset.movcuesCaptureMarker = id;
+        marker.setAttribute("aria-hidden", "true");
+        marker.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;box-sizing:border-box;border:2px solid #2563eb";
+        const number = document.createElement("span");
+        number.style.cssText = "position:absolute;top:0;left:0;min-width:20px;padding:2px 4px;border-radius:0 0 6px 0;background:#1d4ed8;color:white;font:700 12px/16px system-ui;text-align:center";
+        marker.append(number);
+        this.surface.append(marker);
+        this.markers.set(id, marker);
+      }
+      marker.hidden = false;
+      marker.firstElementChild.textContent = String(index + 1);
+      Object.assign(marker.style, { top: `${rect.top}px`, left: `${rect.left}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+    });
+  }
+}
+const advanceLabels = {
+  unconfigured: "Choose how to advance",
+  button: "Guide button",
+  element_click: "Website element click",
+  element_hover: "Website element hover",
+  route: "Observed route change",
+  custom_event: "Confirmed application event"
+};
+class GuidedCaptureController {
+  constructor(bridge, session, draft, applied, closed) {
+    this.bridge = bridge;
+    this.draft = draft;
+    this.applied = applied;
+    this.closed = closed;
+    this.host = document.createElement("div");
+    this.root = this.host.attachShadow({ mode: "open" });
+    this.route = new RouteObserver();
+    this.preview = new ExperienceRenderer();
+    this.checkpoint = { mode: "select", targets: [] };
+    this.checkpointRevision = 0;
+    this.prompt = "";
+    this.pending = false;
+    this.localSaved = false;
+    this.checkpointError = false;
+    this.index = 0;
+    this.state = "loading";
+    this.busy = false;
+    this.destroyed = false;
+    this.handleClick = (event) => {
+      var _a;
+      const button = event.target.closest("button");
+      if (!button) return;
+      const action = button.dataset;
+      if ("close" in action) {
+        if (!this.busy || this.request) this.closed();
+        return;
+      }
+      if ("collapse" in action) {
+        const expanded = button.getAttribute("aria-expanded") === "true";
+        button.setAttribute("aria-expanded", String(!expanded));
+        button.textContent = expanded ? "Expand" : "Minimize";
+        this.toggle("main", !expanded);
+        return;
+      }
+      if ("cancel" in action) {
+        (_a = this.request) == null ? void 0 : _a.abort();
+        return;
+      }
+      if (this.busy) return;
+      if ("reload" in action) {
+        void this.restore();
+        return;
+      }
+      if ("refresh" in action) {
+        this.plan = void 0;
+        this.candidate = void 0;
+        void this.restore(true);
+        return;
+      }
+      if ("retry" in action) {
+        void this.retryCheckpoint();
+        return;
+      }
+      if (action.mode === "select" || action.mode === "navigate") {
+        if (action.mode === this.checkpoint.mode) return;
+        if (action.mode === "navigate") this.replacement = void 0;
+        this.checkpointChanged({ ...this.checkpoint, mode: action.mode });
+      }
+      if (action.earlier) this.moveTarget(action.earlier, -1);
+      if (action.later) this.moveTarget(action.later, 1);
+      if (action.remove) {
+        if (this.replacement === action.remove) this.replacement = void 0;
+        this.checkpointChanged({ ...this.checkpoint, targets: this.checkpoint.targets.filter((item) => item.id !== action.remove) });
+      }
+      if (action.replace) {
+        this.replacement = action.replace;
+        this.checkpointChanged({ ...this.checkpoint, mode: "select" });
+        this.message("Select the replacement element on this page.");
+      }
+      if ("compile" in action) void this.compile();
+      if ("editCapture" in action) {
+        this.state = "capture";
+        this.plan = void 0;
+        this.message("");
+        this.update();
+      }
+      if ("editPlan" in action) {
+        this.state = "plan";
+        this.candidate = void 0;
+        this.preview.destroy();
+        this.message("");
+        this.update();
+      }
+      if ("previous" in action) this.previewStep(-1);
+      if ("next" in action) this.previewStep(1);
+      if ("apply" in action) void this.apply();
+    };
+    this.handleInput = (event) => {
+      var _a;
+      const input2 = event.target;
+      const { prompt, heading, body, eventName, delay, timeout, hoverDuration } = input2.dataset;
+      if (prompt !== void 0) {
+        this.prompt = input2.value;
+        this.writeLocal();
+        return;
+      }
+      const row = input2.closest("[data-plan-step]");
+      const step = row && ((_a = this.plan) == null ? void 0 : _a.steps[Number(row.dataset.planStep)]);
+      if (!step) return;
+      if (heading !== void 0) step.heading = input2.value;
+      if (body !== void 0) step.body = input2.value;
+      if (eventName !== void 0 && step.advance.type === "custom_event") step.advance.eventName = input2.value;
+      if (!(input2 instanceof HTMLInputElement)) return;
+      if (delay !== void 0) step.delayMs = input2.valueAsNumber;
+      if (timeout !== void 0 && step.missingTarget) step.missingTarget.timeoutMs = input2.valueAsNumber;
+      if (hoverDuration !== void 0 && step.advance.type === "element_hover") step.advance.durationMs = input2.valueAsNumber;
+    };
+    this.handleChange = (event) => {
+      var _a, _b, _c;
+      const select = event.target;
+      if (!(select instanceof HTMLSelectElement)) return;
+      const row = select.closest("[data-plan-step]");
+      const index = row ? Number(row.dataset.planStep) : -1;
+      const step = (_a = this.plan) == null ? void 0 : _a.steps[index];
+      if (!step) return;
+      const type = select.value;
+      if ("advance" in select.dataset) {
+        const firstOther = this.checkpoint.targets.find((item) => item.target.targetContext.pagePath !== this.pathFor(step.targetId));
+        step.advance = type === "route" ? { type, targetId: (firstOther == null ? void 0 : firstOther.id) ?? "" } : type === "custom_event" ? { type, eventName: "" } : type === "element_hover" ? { type, durationMs: 500 } : type === "element_click" ? { type } : { type: "button" };
+      }
+      if ("routeTarget" in select.dataset && step.advance.type === "route") step.advance.targetId = select.value;
+      if ("missing" in select.dataset) {
+        const action = select.value;
+        step.missingTarget = action === "wait" || action === "skip" || action === "dismiss" ? { action, timeoutMs: ((_b = step.missingTarget) == null ? void 0 : _b.timeoutMs) ?? 5e3 } : null;
+      }
+      this.renderPlan();
+      (_c = this.root.querySelector(`[data-plan-step="${index}"] [data-${Object.keys(select.dataset)[0].replace(/[A-Z]/g, (letter) => "-" + letter.toLowerCase())}]`)) == null ? void 0 : _c.focus();
+    };
+    this.key = `movcues:guide-capture:${draft.experience.id}:${session.sessionId}`;
+    this.revision = draft.version.revision;
+  }
+  mount() {
+    var _a;
+    this.host.dataset.movcuesEditor = "";
+    this.host.dataset.movcuesGuideCapture = "";
+    this.host.style.cssText = "position:fixed;inset:0;z-index:2147483647;pointer-events:none";
+    this.root.innerHTML = guideCapturePanel;
+    document.documentElement.append(this.host);
+    this.root.addEventListener("click", this.handleClick);
+    this.root.addEventListener("input", this.handleInput);
+    this.root.addEventListener("change", this.handleChange);
+    (_a = this.root.querySelector("form")) == null ? void 0 : _a.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void this.planGuide();
+    });
+    this.selection = new GuideCaptureSelection((element) => this.select(element));
+    this.unsubscribe = this.route.onChange(() => {
+      var _a2;
+      (_a2 = this.selection) == null ? void 0 : _a2.refresh();
+      if (this.state === "preview") this.renderPreview();
+    });
+    this.route.start();
+    void this.restore();
+  }
+  expire() {
+    var _a, _b, _c;
+    if (this.state === "expired") return;
+    (_a = this.request) == null ? void 0 : _a.abort();
+    (_b = this.selection) == null ? void 0 : _b.destroy();
+    this.selection = void 0;
+    this.preview.destroy();
+    (_c = this.unsubscribe) == null ? void 0 : _c.call(this);
+    this.route.stop();
+    this.state = "expired";
+    this.busy = false;
+    this.message("This editor session expired. Resume Guided Capture from the dashboard to continue with your saved selections.");
+    this.update();
+  }
+  destroy() {
+    var _a, _b, _c;
+    this.destroyed = true;
+    (_a = this.request) == null ? void 0 : _a.abort();
+    (_b = this.selection) == null ? void 0 : _b.destroy();
+    this.preview.destroy();
+    (_c = this.unsubscribe) == null ? void 0 : _c.call(this);
+    this.route.stop();
+    this.host.remove();
+  }
+  async restore(discardLocal = false) {
+    this.toggle("[data-reload]", false);
+    this.message("Restoring capture…");
+    const local = discardLocal ? null : this.readLocal();
+    try {
+      const remote = await this.bridge.loadCapture();
+      if (this.destroyed || this.state === "expired") return;
+      this.adopt(remote);
+      this.prompt = (local == null ? void 0 : local.prompt) ?? this.prompt;
+      const field = this.root.querySelector("[data-prompt]");
+      if (field) field.value = this.prompt;
+      this.state = "capture";
+      if ((local == null ? void 0 : local.pending) && !sameCheckpoint(local.checkpoint, this.checkpoint)) {
+        if (local.baseRevision === remote.checkpointRevision || local.sending && sameCheckpoint(local.sending, this.checkpoint)) {
+          this.checkpoint = local.checkpoint;
+          this.pending = true;
+          void this.syncCheckpoint();
+        } else {
+          this.checkpoint = local.checkpoint;
+          this.pending = true;
+          this.checkpointError = true;
+          this.message("A newer checkpoint is available. Load it to continue, or keep this tab open to review your local selections.");
+        }
+      }
+      this.writeLocal();
+      if (!this.checkpointError) this.message("");
+      this.renderTargets();
+      this.update();
+    } catch (error) {
+      if (this.destroyed) return;
+      this.report(error);
+      if (this.state !== "expired") this.toggle("[data-reload]", true);
+    }
+  }
+  adopt(remote) {
+    this.checkpoint = { mode: remote.mode, targets: remote.targets };
+    this.revision = remote.revision;
+    this.checkpointRevision = remote.checkpointRevision;
+    this.pending = false;
+    this.checkpointError = false;
+    this.sending = void 0;
+  }
+  readLocal() {
+    var _a;
+    try {
+      const item = JSON.parse(sessionStorage.getItem(this.key) ?? "null");
+      if (item && typeof item.prompt === "string" && Number.isInteger(item.baseRevision) && Array.isArray((_a = item.checkpoint) == null ? void 0 : _a.targets)) return item;
+    } catch {
+    }
+    return null;
+  }
+  writeLocal() {
+    try {
+      const local = { checkpoint: this.checkpoint, baseRevision: this.checkpointRevision, pending: this.pending, sending: this.sending, prompt: this.prompt };
+      sessionStorage.setItem(this.key, JSON.stringify(local));
+      this.localSaved = true;
+    } catch {
+      this.localSaved = false;
+    }
+  }
+  checkpointChanged(checkpoint) {
+    this.checkpoint = checkpoint;
+    this.pending = true;
+    this.writeLocal();
+    this.renderTargets();
+    this.update();
+    void this.syncCheckpoint();
+  }
+  async syncCheckpoint() {
+    if (this.checkpointError || this.destroyed || this.state === "expired") return false;
+    if (this.inFlight) {
+      const saved2 = await this.inFlight;
+      return saved2 && (this.pending ? this.syncCheckpoint() : true);
+    }
+    if (!this.pending) return true;
+    const snapshot = this.checkpoint;
+    this.sending = snapshot;
+    this.writeLocal();
+    const operation = this.bridge.saveCapture(snapshot, this.checkpointRevision).then((remote) => {
+      this.checkpointRevision = remote.checkpointRevision;
+      this.pending = snapshot !== this.checkpoint;
+      this.sending = void 0;
+      this.writeLocal();
+      return true;
+    }).catch((error) => {
+      if (!this.destroyed) {
+        this.checkpointError = true;
+        this.report(error);
+      }
+      return false;
+    });
+    this.inFlight = operation;
+    this.update();
+    const saved = await operation;
+    this.inFlight = void 0;
+    if (!this.destroyed) this.update();
+    return saved && (this.pending ? this.syncCheckpoint() : true);
+  }
+  async retryCheckpoint() {
+    try {
+      const remote = await this.bridge.loadCapture();
+      if (this.destroyed || this.state === "expired") return;
+      if (sameCheckpoint(remote, this.checkpoint)) {
+        this.adopt(remote);
+        this.writeLocal();
+      } else if (remote.checkpointRevision === this.checkpointRevision || this.sending && sameCheckpoint(this.sending, remote)) {
+        this.revision = remote.revision;
+        this.checkpointRevision = remote.checkpointRevision;
+        this.checkpointError = false;
+        await this.syncCheckpoint();
+      } else {
+        this.message("A newer checkpoint exists. Load it before making further changes.");
+        return;
+      }
+      if (!this.checkpointError && this.state === "capture") this.message("");
+      this.update();
+    } catch (error) {
+      this.report(error);
+    }
+  }
+  select(element) {
+    const path = guideCapturePath();
+    if (!path) {
+      this.message("This URL contains a route that Guided Capture cannot store safely. Choose another page.");
+      return;
+    }
+    const selected = this.checkpoint.targets;
+    if (selected.length >= 20 && !this.replacement) {
+      this.message("You can capture up to 20 elements. Remove an element to continue.");
+      return;
+    }
+    try {
+      const id = this.replacement ?? "c-" + Array.from(crypto.getRandomValues(new Uint32Array(3)), (part) => part.toString(36)).join("-");
+      const target = describeCaptureTarget(element, id, path);
+      if (selected.some((item) => item.id !== id && item.target.targetContext.pagePath === path && item.target.primarySelector === target.target.primarySelector)) {
+        this.message("This element is already in your capture.");
+        return;
+      }
+      const targets = this.replacement ? selected.map((item) => item.id === id ? target : item) : [...selected, target];
+      this.replacement = void 0;
+      this.message("");
+      this.checkpointChanged({ ...this.checkpoint, targets });
+    } catch (error) {
+      this.report(error);
+    }
+  }
+  moveTarget(id, offset) {
+    var _a;
+    const list2 = [...this.checkpoint.targets];
+    const from = list2.findIndex((item) => item.id === id);
+    const to = from + offset;
+    if (from < 0 || to < 0 || to >= list2.length) return;
+    [list2[from], list2[to]] = [list2[to], list2[from]];
+    this.checkpointChanged({ ...this.checkpoint, targets: list2 });
+    (_a = this.root.querySelector(`[data-${offset < 0 ? "earlier" : "later"}="${id}"]:not(:disabled)`)) == null ? void 0 : _a.focus();
+  }
+  renderTargets() {
+    const { targets } = this.checkpoint;
+    const list2 = this.root.querySelector("[data-targets]");
+    if (!list2) return;
+    list2.innerHTML = targets.length ? targets.map(({ id, target }, index) => {
+      const name = captureHtml(target.label ?? target.role ?? target.tagName);
+      const warning2 = target.reliability !== "reliable";
+      return `<li><div class="list-head"><span class="number">${index + 1}</span><strong>${name}</strong></div>
+        <small>${captureHtml(target.targetContext.pagePath)}</small>
+        <small class="${warning2 ? "warning" : ""}">${target.reliability === "fragile" ? "Fragile selector · page layout changes may break this target" : target.reliability === "moderate" ? "Moderate reliability · verify after layout changes" : "Reliable selector"}</small>
+        <div class="row">
+          <button type="button" data-earlier="${id}" aria-label="Move element ${index + 1} earlier" ${index === 0 ? "disabled" : ""}>↑</button>
+          <button type="button" data-later="${id}" aria-label="Move element ${index + 1} later" ${index === targets.length - 1 ? "disabled" : ""}>↓</button>
+          <button type="button" data-replace="${id}" aria-label="Replace element ${index + 1}">Replace</button>
+          <button type="button" data-remove="${id}" aria-label="Remove element ${index + 1}">Remove</button>
+        </div></li>`;
+    }).join("") : '<li class="muted">Select the first element in the workflow.</li>';
+  }
+  async planGuide() {
+    if (this.busy || this.state !== "capture" || !this.checkpoint.targets.length || !this.prompt.trim()) return;
+    await this.run("Geo is planning your guide…", async (signal) => {
+      if (!await this.syncCheckpoint() || signal.aborted) return;
+      const { plan } = await this.bridge.planCapture({ ...this.revisions(), prompt: this.prompt.trim() }, signal);
+      if (signal.aborted || this.destroyed) return;
+      this.plan = plan;
+      this.state = "plan";
+      this.renderPlan();
+      this.message("");
+    });
+  }
+  revisions() {
+    return { revision: this.revision, checkpointRevision: this.checkpointRevision };
+  }
+  renderPlan() {
+    const container2 = this.root.querySelector("[data-plan-steps]");
+    if (!container2 || !this.plan) return;
+    container2.innerHTML = this.plan.steps.map((step, index) => {
+      const target = this.checkpoint.targets.find((target2) => target2.id === step.targetId);
+      const name = target ? `Anchored tooltip · ${target.target.label ?? target.target.tagName} · ${target.target.targetContext.pagePath}` : "Modal";
+      const advance = step.advance;
+      const types = ["button", "route", "custom_event"];
+      if (step.pattern === "anchored_card" && index < this.plan.steps.length - 1) types.splice(1, 0, "element_click", "element_hover");
+      if (advance.type === "unconfigured") types.unshift("unconfigured");
+      return `<fieldset data-plan-step="${index}"><legend>${index + 1}. ${captureHtml(name)}</legend>
+        <small>${captureHtml(step.purpose)}</small>
+        <label>Heading <input maxlength="140" data-heading value="${captureHtml(step.heading)}"></label>
+        <label>Description <textarea maxlength="500" rows="2" data-body>${captureHtml(step.body)}</textarea></label>
+        ${advance.type === "unconfigured" ? `<small class="warning">${captureHtml(advance.reason)}</small>` : ""}
+        <label>Advance when <select data-advance>${types.map((type) => `<option value="${type}" ${advance.type === type ? "selected" : ""}>${advanceLabels[type]}</option>`).join("")}</select></label>
+        ${advance.type === "route" ? this.routeOptions(step, advance.targetId) : ""}
+        ${advance.type === "custom_event" ? `<label>Verified event name <input maxlength="200" data-event-name value="${captureHtml(advance.eventName)}"></label>` : ""}
+        ${advance.type === "element_hover" ? `<label>Hover duration (ms) <input type="number" min="100" max="60000" data-hover-duration value="${advance.durationMs ?? 500}"></label>` : ""}
+        <label>Delay (ms) <input type="number" min="0" max="30000" data-delay value="${step.delayMs}"></label>
+        ${step.pattern === "anchored_card" ? this.missingTargetOptions(step) : ""}
+        </fieldset>`;
+    }).join("");
+  }
+  routeOptions(step, targetId) {
+    const routes = this.checkpoint.targets.filter((target) => target.target.targetContext.pagePath !== this.pathFor(step.targetId));
+    const options = routes.map(({ id, target }) => `<option value="${id}" ${id === targetId ? "selected" : ""}>${captureHtml(target.targetContext.pagePath)}</option>`);
+    return `<label>Destination <select data-route-target><option value="">Choose a captured page</option>${options.join("")}</select></label>`;
+  }
+  missingTargetOptions(step) {
+    const options = ["", "wait", "skip", "dismiss"].map((action) => {
+      var _a;
+      return `<option value="${action}" ${action === (((_a = step.missingTarget) == null ? void 0 : _a.action) ?? "") ? "selected" : ""}>${action || "Use default"}</option>`;
+    });
+    return `<label>If the element is missing <select data-missing>${options.join("")}</select></label>
+      ${step.missingTarget ? `<label>Target timeout (ms) <input type="number" min="100" max="60000" data-timeout value="${step.missingTarget.timeoutMs}"></label>` : ""}`;
+  }
+  pathFor(id) {
+    var _a;
+    return (_a = this.checkpoint.targets.find((item) => item.id === id)) == null ? void 0 : _a.target.targetContext.pagePath;
+  }
+  async compile() {
+    const plan = this.plan;
+    if (!plan || this.busy) return;
+    if (plan.steps.some((step) => step.advance.type === "unconfigured")) {
+      this.message("Choose how to advance each step marked for configuration.");
+      return;
+    }
+    await this.run("Generating an editable guide…", async (signal) => {
+      const candidate = await this.bridge.previewCapture({ ...this.revisions(), plan }, signal);
+      if (signal.aborted || this.destroyed) return;
+      this.candidate = candidate;
+      this.index = 0;
+      this.state = "preview";
+      this.message("");
+      this.renderPreview();
+    });
+  }
+  previewStep(offset) {
+    const index = this.index + offset;
+    if (!this.candidate || index < 0 || index >= this.candidate.definition.steps.length) return;
+    this.index = index;
+    this.renderPreview();
+    this.update();
+  }
+  renderPreview() {
+    var _a, _b;
+    if (!this.candidate) return;
+    const { definition } = this.candidate;
+    const step = definition.steps[this.index];
+    const path = (_b = (_a = step.target) == null ? void 0 : _a.targetContext) == null ? void 0 : _b.pagePath;
+    const position = this.root.querySelector("[data-preview-position]");
+    if (position) position.textContent = `${this.index + 1} of ${definition.steps.length} · ${step.label ?? step.content.heading}`;
+    this.preview.destroy();
+    if (path && guideCapturePath() !== path) {
+      this.message(`Navigate to ${path} in your application to see this tooltip.`);
+      return;
+    }
+    this.message("");
+    const noop = () => {
+    };
+    this.preview.render({ id: this.draft.experience.id, versionId: this.draft.version.id, kind: "guide", widgetType: null, priority: 0, definition }, {
+      onVisible: noop,
+      onDismiss: noop,
+      onAction: noop,
+      onComplete: noop,
+      onGuideAdvance: () => this.previewStep(1),
+      onGuideBack: () => this.previewStep(-1),
+      onUnavailable: () => this.message("The target is missing on this page. You can return to capture and replace it.")
+    }, step.id);
+  }
+  async apply() {
+    const candidate = this.candidate;
+    const plan = this.plan;
+    if (!candidate || !plan || this.busy) return;
+    this.busy = true;
+    this.message("Applying the guide to your draft…");
+    this.update();
+    try {
+      const { version } = await this.bridge.applyCapture({ ...this.revisions(), plan, previewTicket: candidate.previewTicket });
+      if (!this.destroyed) this.finish(version);
+    } catch (error) {
+      if (this.destroyed) return;
+      let latest;
+      try {
+        latest = await this.bridge.load();
+      } catch {
+      }
+      if (latest && !latest.guidedCapture && latest.version.revision === this.revision + 1 && JSON.stringify(latest.version.definition) === JSON.stringify(candidate.definition)) {
+        this.finish(latest.version);
+        return;
+      }
+      this.report(error);
+      if (error instanceof CaptureRequestError && ["capture_conflict", "draft_conflict", "stale_preview"].includes(error.code ?? "")) {
+        this.preview.destroy();
+        this.candidate = void 0;
+        this.plan = void 0;
+        await this.restore();
+        if (this.state === "capture") this.message("The draft changed. Your selections are available. Generate a fresh plan to continue.");
+      }
+    } finally {
+      this.busy = false;
+      if (!this.destroyed) this.update();
+    }
+  }
+  finish(version) {
+    try {
+      sessionStorage.removeItem(this.key);
+    } catch {
+    }
+    this.applied(version);
+  }
+  async run(message, task) {
+    const request = new AbortController();
+    this.request = request;
+    this.busy = true;
+    this.message(message);
+    this.update();
+    try {
+      await task(request.signal);
+      if (request.signal.aborted && this.state !== "expired" && !this.destroyed) this.message("Request canceled. Your capture is still available.");
+    } catch (error) {
+      if (!this.destroyed) {
+        if (request.signal.aborted && this.state !== "expired") this.message("Request canceled. Your capture is still available.");
+        else if (!request.signal.aborted) {
+          if (error instanceof CaptureRequestError && error.code === "capture_conflict") {
+            this.plan = void 0;
+            this.candidate = void 0;
+            await this.restore();
+            if (this.state === "capture") this.message("The draft changed. Your selections are available. Generate a fresh plan to continue.");
+          } else this.report(error);
+        }
+      }
+    } finally {
+      this.request = void 0;
+      this.busy = false;
+      if (!this.destroyed) this.update();
+    }
+  }
+  report(error) {
+    if (error instanceof EditorSessionExpiredError) {
+      this.expire();
+      return;
+    }
+    this.message(error instanceof Error ? error.message : "Guided Capture could not continue. Try again.");
+  }
+  toggle(selector2, shown) {
+    const element = this.root.querySelector(selector2);
+    if (element) element.hidden = !shown;
+  }
+  message(text2) {
+    const status = this.root.querySelector("[data-message]");
+    if (status) status.textContent = text2;
+    this.toggle("[data-message]", Boolean(text2));
+  }
+  update() {
+    var _a, _b, _c;
+    this.toggle("[data-capture]", this.state === "capture");
+    this.toggle("[data-plan-panel]", this.state === "plan");
+    this.toggle("[data-preview]", this.state === "preview");
+    this.toggle("[data-retry]", this.checkpointError);
+    this.toggle("[data-refresh]", this.checkpointError);
+    this.toggle("[data-cancel]", Boolean(this.request));
+    const active = this.state === "capture" && this.checkpoint.mode === "select" && !this.busy;
+    (_a = this.selection) == null ? void 0 : _a.setEnabled(active);
+    (_b = this.selection) == null ? void 0 : _b.setTargets(this.state === "capture" ? this.checkpoint.targets : []);
+    const instructions = this.root.querySelector("[data-instructions]");
+    if (instructions) instructions.textContent = this.checkpoint.mode === "select" ? "Click an element to capture it. Switch to Navigate to use your application." : "Use your application as usual. Switch to Select Elements when you reach the next screen.";
+    this.root.querySelectorAll("[data-mode]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.mode === this.checkpoint.mode));
+      button.disabled = this.busy;
+    });
+    const checkpoint = this.root.querySelector("[data-checkpoint]");
+    if (checkpoint) checkpoint.textContent = this.checkpointError ? this.localSaved ? "Saved in this tab. The server checkpoint needs attention." : "The latest selection could not be saved. Keep this tab open and retry." : this.inFlight ? "Saving capture…" : this.checkpoint.targets.length ? "Capture saved" : "";
+    const planButton = this.root.querySelector("[data-plan]");
+    if (planButton) planButton.disabled = this.busy || !this.checkpoint.targets.length || this.checkpointError;
+    this.root.querySelectorAll("[data-apply],[data-edit-plan],[data-compile],[data-edit-capture],[data-prompt],[data-plan-steps] input,[data-plan-steps] textarea,[data-plan-steps] select").forEach((control) => {
+      control.disabled = this.busy;
+    });
+    const previous = this.root.querySelector("[data-previous]");
+    const next = this.root.querySelector("[data-next]");
+    if (previous) previous.disabled = this.busy || this.index === 0;
+    if (next) next.disabled = this.busy || this.index >= (((_c = this.candidate) == null ? void 0 : _c.definition.steps.length) ?? 0) - 1;
+  }
+}
+function sameCheckpoint(left, right) {
+  const fingerprint = ({ id, target }) => JSON.stringify([
+    id,
+    target.primarySelector,
+    target.fallbackSelectors,
+    target.targetContext.pagePath,
+    target.tagName,
+    target.reliability,
+    target.label,
+    target.role
+  ]);
+  return left.mode === right.mode && left.targets.length === right.targets.length && left.targets.every((target, index) => fingerprint(target) === fingerprint(right.targets[index]));
 }
 function editorSelection(root2) {
   var _a;
@@ -6940,7 +7808,7 @@ class SourceDocumentAdapter {
       this.addLegacyIdentities(this.root);
       const before = [previous, ...Array.from(previous.querySelectorAll("*"))], after = [this.root, ...Array.from(this.root.querySelectorAll("*"))];
       postcss$1.parse(builder.css).walkRules((rule2) => {
-        for (const selector of rule2.selectors) if (before.some((element, index) => element.matches(selector) !== after[index].matches(selector))) throw new Error("Editing identities would change this legacy design's CSS selectors. Its original source is preserved.");
+        for (const selector2 of rule2.selectors) if (before.some((element, index) => element.matches(selector2) !== after[index].matches(selector2))) throw new Error("Editing identities would change this legacy design's CSS selectors. Its original source is preserved.");
       });
     }
     const errors = validateSourceMarkup(this.operation(this.root.outerHTML), { ...options, editable: true });
@@ -7001,9 +7869,9 @@ class SourceDocumentAdapter {
     var _a;
     if (!same(next.items.map((item) => item.id), (_a = this.options.checklist) == null ? void 0 : _a.items.map((item) => item.id))) throw new Error("Protected source task identities must remain unchanged.");
     const root2 = this.root.cloneNode(true), copy = checklistCopy(next);
-    const text2 = (selector, value) => {
+    const text2 = (selector2, value) => {
       var _a2;
-      const element = root2.querySelector(selector);
+      const element = root2.querySelector(selector2);
       if (!element || element.textContent === value) return;
       const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
       const nodes = [];
@@ -7234,9 +8102,9 @@ class SourceDocumentAdapter {
       const remap = (rule2) => {
         let changed = false;
         for (const key of ["node", "block"]) {
-          const selector = remapSourceSelector(rule2.selector, `data-movcues-${key}-id`, mapping);
-          if (selector !== rule2.selector) {
-            rule2.selector = selector;
+          const selector2 = remapSourceSelector(rule2.selector, `data-movcues-${key}-id`, mapping);
+          if (selector2 !== rule2.selector) {
+            rule2.selector = selector2;
             changed = true;
           }
         }
@@ -9647,6 +10515,7 @@ class EditorModeController {
     this.host = null;
     this.root = null;
     this.picker = new ElementPicker();
+    this.capture = null;
     this.preview = new ExperienceRenderer();
     this.contentEditor = null;
     this.compositionEditor = null;
@@ -9832,7 +10701,16 @@ class EditorModeController {
     const restoredMode = restored == null ? void 0 : restored.mode;
     this.mode = restoredMode === "select" ? "target" : restoredMode === "design" || restoredMode === "target" || restoredMode === "navigate" || restoredMode === "preview" ? restoredMode : draft.experience.builderMode === "onsite" ? "design" : "target";
     this.updateContinuation();
-    this.mount();
+    if (draft.guidedCapture && this.guide && draft.experience.builderMode === "onsite") {
+      this.capture = new GuidedCaptureController(bridge, session, draft, (version) => {
+        void this.activate(session, { requestedStep: 0 }, { ...draft, guidedCapture: false, version });
+      }, () => {
+        var _a2;
+        (_a2 = window.opener) == null ? void 0 : _a2.focus();
+        this.destroy();
+      });
+      this.capture.mount();
+    } else this.mount();
     this.expiryTimer = window.setTimeout(() => this.expireSession(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
     this.validationTimer = window.setInterval(() => {
       void bridge.checkSession().catch((error) => {
@@ -10230,13 +11108,13 @@ class EditorModeController {
   bindCompositionInspector() {
     var _a, _b, _c, _d, _e;
     const root2 = this.root;
-    const change = (selector, run) => {
+    const change = (selector2, run) => {
       var _a2;
-      return (_a2 = root2.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => run(event.currentTarget.value));
+      return (_a2 = root2.querySelector(selector2)) == null ? void 0 : _a2.addEventListener("change", (event) => run(event.currentTarget.value));
     };
-    const input2 = (selector, run) => {
+    const input2 = (selector2, run) => {
       var _a2;
-      return (_a2 = root2.querySelector(selector)) == null ? void 0 : _a2.addEventListener("input", (event) => run(event.currentTarget.value));
+      return (_a2 = root2.querySelector(selector2)) == null ? void 0 : _a2.addEventListener("input", (event) => run(event.currentTarget.value));
     };
     const number = (value, fallback) => {
       const parsed = Number(value);
@@ -10512,17 +11390,17 @@ class EditorModeController {
       else next.overrides[key] = value;
       this.applyVisualTheme();
     };
-    const color = (selector, key) => {
+    const color = (selector2, key) => {
       var _a2;
-      return (_a2 = root2.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => override(key, event.currentTarget.value));
+      return (_a2 = root2.querySelector(selector2)) == null ? void 0 : _a2.addEventListener("change", (event) => override(key, event.currentTarget.value));
     };
-    const textInput = (selector, key) => {
+    const textInput = (selector2, key) => {
       var _a2;
-      return (_a2 = root2.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => override(key, event.currentTarget.value.trim()));
+      return (_a2 = root2.querySelector(selector2)) == null ? void 0 : _a2.addEventListener("change", (event) => override(key, event.currentTarget.value.trim()));
     };
-    const number = (selector, key, min, max) => {
+    const number = (selector2, key, min, max) => {
       var _a2;
-      return (_a2 = root2.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => {
+      return (_a2 = root2.querySelector(selector2)) == null ? void 0 : _a2.addEventListener("change", (event) => {
         const value = Number(event.currentTarget.value);
         override(key, Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : void 0);
       });
@@ -10647,9 +11525,9 @@ class EditorModeController {
   bindGuideBehavior() {
     var _a, _b, _c, _d, _e, _f, _g, _h;
     if (!this.guide || !this.root) return;
-    const change = (selector, run) => {
+    const change = (selector2, run) => {
       var _a2;
-      return (_a2 = this.root.querySelector(selector)) == null ? void 0 : _a2.addEventListener("change", (event) => {
+      return (_a2 = this.root.querySelector(selector2)) == null ? void 0 : _a2.addEventListener("change", (event) => {
         run(event.currentTarget.value);
         this.changed();
       });
@@ -10951,23 +11829,23 @@ class EditorModeController {
       window.addEventListener("pointercancel", stop);
     });
   }
-  onSelect(selector, update) {
+  onSelect(selector2, update) {
     var _a, _b;
-    (_b = (_a = this.root) == null ? void 0 : _a.querySelector(selector)) == null ? void 0 : _b.addEventListener("change", (event) => {
+    (_b = (_a = this.root) == null ? void 0 : _a.querySelector(selector2)) == null ? void 0 : _b.addEventListener("change", (event) => {
       update(event.currentTarget.value);
       this.changed();
     });
   }
-  onInput(selector, update) {
+  onInput(selector2, update) {
     var _a, _b;
-    (_b = (_a = this.root) == null ? void 0 : _a.querySelector(selector)) == null ? void 0 : _b.addEventListener("input", (event) => {
+    (_b = (_a = this.root) == null ? void 0 : _a.querySelector(selector2)) == null ? void 0 : _b.addEventListener("input", (event) => {
       update(event.currentTarget.value);
       this.changed();
     });
   }
-  onCheck(selector, update) {
+  onCheck(selector2, update) {
     var _a, _b;
-    (_b = (_a = this.root) == null ? void 0 : _a.querySelector(selector)) == null ? void 0 : _b.addEventListener("change", (event) => {
+    (_b = (_a = this.root) == null ? void 0 : _a.querySelector(selector2)) == null ? void 0 : _b.addEventListener("change", (event) => {
       update(event.currentTarget.checked);
       this.changed();
     });
@@ -11142,32 +12020,33 @@ class EditorModeController {
     }
   }
   expireSession() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
     if (this.saveState === "expired") return;
-    (_a = this.contentEditor) == null ? void 0 : _a.flush();
-    (_b = this.compositionEditor) == null ? void 0 : _b.flush();
+    (_a = this.capture) == null ? void 0 : _a.expire();
+    (_b = this.contentEditor) == null ? void 0 : _b.flush();
+    (_c = this.compositionEditor) == null ? void 0 : _c.flush();
     this.captureRecovery();
-    this.dirty = this.dirty || !!((_c = this.contentEditor) == null ? void 0 : _c.isComposing()) || !!((_d = this.compositionEditor) == null ? void 0 : _d.isComposing());
+    this.dirty = this.dirty || !!((_d = this.contentEditor) == null ? void 0 : _d.isComposing()) || !!((_e = this.compositionEditor) == null ? void 0 : _e.isComposing());
     this.saveState = "expired";
     this.lifecycle++;
     clearTimeout(this.saveTimer);
     clearTimeout(this.expiryTimer);
     clearInterval(this.validationTimer);
-    (_e = this.contentEditor) == null ? void 0 : _e.destroy();
+    (_f = this.contentEditor) == null ? void 0 : _f.destroy();
     this.contentEditor = null;
-    (_f = this.compositionEditor) == null ? void 0 : _f.destroy();
+    (_g = this.compositionEditor) == null ? void 0 : _g.destroy();
     this.compositionEditor = null;
     this.previewGeneration++;
     this.preview.destroy();
     this.previewRendered = false;
     this.picker.cancel();
-    (_g = this.mutationObserver) == null ? void 0 : _g.disconnect();
-    (_h = this.routeUnsubscribe) == null ? void 0 : _h.call(this);
+    (_h = this.mutationObserver) == null ? void 0 : _h.disconnect();
+    (_i = this.routeUnsubscribe) == null ? void 0 : _i.call(this);
     this.routeObserver.stop();
     this.bridge = null;
     this.session = null;
     clearEditorContinuation();
-    (_i = this.root) == null ? void 0 : _i.querySelectorAll("button,input,select").forEach((control) => {
+    (_j = this.root) == null ? void 0 : _j.querySelectorAll("button,input,select").forEach((control) => {
       if (!control.matches("[data-export-draft],[data-discard-draft],[data-reload-draft],[data-minimize],[data-close]")) control.disabled = true;
     });
     this.showSaveState();
@@ -12393,9 +13272,8 @@ class EditorModeController {
     return this.definition.target;
   }
   targetStatus(target) {
-    var _a;
     if (!target) return "unconfigured";
-    if (((_a = target.targetContext) == null ? void 0 : _a.pagePath) && target.targetContext.pagePath !== (this.currentPath || currentPagePath())) return "off-page";
+    if (!matchesGuideTargetPage(target, this.currentPath || currentPagePath())) return "off-page";
     return findTarget(target) ? "found" : "missing";
   }
   currentBehavior() {
@@ -12443,26 +13321,28 @@ class EditorModeController {
     const type = (_a = this.draft) == null ? void 0 : _a.experience.widgetType;
     return this.guide ? guideStepRequiresTarget(this.guide.steps[this.stepIndex]) : type === "anchored_card" || type === "hotspot";
   }
-  setText(selector, value) {
+  setText(selector2, value) {
     var _a;
-    const element = (_a = this.root) == null ? void 0 : _a.querySelector(selector);
+    const element = (_a = this.root) == null ? void 0 : _a.querySelector(selector2);
     if (element) element.textContent = value;
   }
-  setValue(selector, value) {
+  setValue(selector2, value) {
     var _a, _b;
-    const element = (_a = this.root) == null ? void 0 : _a.querySelector(selector);
+    const element = (_a = this.root) == null ? void 0 : _a.querySelector(selector2);
     if (element && element !== ((_b = this.root) == null ? void 0 : _b.activeElement)) element.value = value;
   }
-  setChecked(selector, value) {
+  setChecked(selector2, value) {
     var _a;
-    const element = (_a = this.root) == null ? void 0 : _a.querySelector(selector);
+    const element = (_a = this.root) == null ? void 0 : _a.querySelector(selector2);
     if (element) element.checked = value;
   }
   destroy() {
     this.teardown(true);
   }
   teardown(clearContinuation) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m;
+    (_a = this.capture) == null ? void 0 : _a.destroy();
+    this.capture = null;
     this.lifecycle++;
     this.cancelAiRequest();
     this.aiProposal = null;
@@ -12485,7 +13365,7 @@ class EditorModeController {
     clearTimeout(this.saveTimer);
     clearTimeout(this.targetRefreshTimer);
     this.selectionGeneration++;
-    (_a = this.routeUnsubscribe) == null ? void 0 : _a.call(this);
+    (_b = this.routeUnsubscribe) == null ? void 0 : _b.call(this);
     this.routeUnsubscribe = null;
     this.routeObserver.stop();
     window.removeEventListener("pagehide", this.persistBeforePageLeave);
@@ -12493,27 +13373,27 @@ class EditorModeController {
     document.removeEventListener("submit", this.protectPreviewSubmission, true);
     window.removeEventListener("beforeunload", this.protectUnsavedChanges);
     window.removeEventListener("resize", this.fitPanel);
-    (_b = window.visualViewport) == null ? void 0 : _b.removeEventListener("resize", this.fitPanel);
-    (_c = window.visualViewport) == null ? void 0 : _c.removeEventListener("scroll", this.fitPanel);
-    (_d = this.mutationObserver) == null ? void 0 : _d.disconnect();
+    (_c = window.visualViewport) == null ? void 0 : _c.removeEventListener("resize", this.fitPanel);
+    (_d = window.visualViewport) == null ? void 0 : _d.removeEventListener("scroll", this.fitPanel);
+    (_e = this.mutationObserver) == null ? void 0 : _e.disconnect();
     this.mutationObserver = null;
-    (_e = this.dragCleanup) == null ? void 0 : _e.call(this);
+    (_f = this.dragCleanup) == null ? void 0 : _f.call(this);
     this.dragCleanup = null;
-    (_f = this.contentEditor) == null ? void 0 : _f.flush();
-    (_g = this.compositionEditor) == null ? void 0 : _g.flush();
+    (_g = this.contentEditor) == null ? void 0 : _g.flush();
+    (_h = this.compositionEditor) == null ? void 0 : _h.flush();
     this.previewGeneration++;
     this.preview.destroy();
-    (_h = this.contentEditor) == null ? void 0 : _h.destroy();
+    (_i = this.contentEditor) == null ? void 0 : _i.destroy();
     this.contentEditor = null;
     this.componentSelection = null;
-    (_i = this.compositionEditor) == null ? void 0 : _i.destroy();
+    (_j = this.compositionEditor) == null ? void 0 : _j.destroy();
     this.compositionEditor = null;
     this.compositionSelection = null;
     this.picker.cancel();
-    (_j = this.host) == null ? void 0 : _j.remove();
-    (_k = this.surveyEditor) == null ? void 0 : _k.destroy();
+    (_k = this.host) == null ? void 0 : _k.remove();
+    (_l = this.surveyEditor) == null ? void 0 : _l.destroy();
     this.surveyEditor = null;
-    (_l = this.checklistEditor) == null ? void 0 : _l.destroy();
+    (_m = this.checklistEditor) == null ? void 0 : _m.destroy();
     this.checklistEditor = null;
     this.checklist = null;
     this.host = null;
@@ -12606,4 +13486,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-CYJFvHQI.js.map
+//# sourceMappingURL=EditorModeController-BvuRWY7n.js.map

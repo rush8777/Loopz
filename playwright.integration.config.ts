@@ -8,7 +8,7 @@ export default defineConfig({
     {
       command:
         "NODE_ENV=test DASHBOARD_URL=http://127.0.0.1:5173 node --import tsx tests/fixtures/builder-integration-server.ts",
-      cwd: "../Loopz-Backend",
+      cwd: process.env.MOVCUES_INTEGRATION_BACKEND ?? "../Loopz-Backend",
       gracefulShutdown: { signal: "SIGTERM", timeout: 5000 },
       url: "http://127.0.0.1:4310/__test__/ready",
       reuseExistingServer: false,
@@ -16,7 +16,7 @@ export default defineConfig({
     {
       command:
         "VITE_API_URL=http://127.0.0.1:4310 npm run dev --workspace=@movcues/dashboard -- --host 127.0.0.1 --port 5173",
-      cwd: "../Loopz-Frontend",
+      cwd: process.env.MOVCUES_INTEGRATION_FRONTEND ?? "../Loopz-Frontend",
       url: "http://127.0.0.1:5173",
       reuseExistingServer: false,
     },
@@ -28,7 +28,7 @@ export default defineConfig({
     },
   ],
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "chromium", use: { ...devices["Desktop Chrome"], launchOptions: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : undefined } },
     { name: "firefox", use: { ...devices["Desktop Firefox"] } },
     { name: "webkit", use: { ...devices["Desktop Safari"] } },
   ],

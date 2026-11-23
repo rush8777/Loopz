@@ -2462,9 +2462,11 @@ class AnchoredCardRenderer {
       backdrop == null ? void 0 : backdrop.setHidden(next);
     };
     const update = () => {
+      var _a2;
       if (destroyed) return;
       if (!target.isConnected) {
         setHidden(true);
+        (_a2 = callbacks.onTargetDetached) == null ? void 0 : _a2.call(callbacks);
         return;
       }
       const rect = target.getBoundingClientRect();
@@ -3346,6 +3348,14 @@ function guideInteractionTarget(step) {
   var _a, _b;
   return ((_a = step.advance) == null ? void 0 : _a.type) === "element_click" || ((_b = step.advance) == null ? void 0 : _b.type) === "element_hover" ? step.advance.target ?? step.target : void 0;
 }
+function matchesGuideTargetPage(target, path) {
+  const context = target == null ? void 0 : target.targetContext;
+  if (!context) return true;
+  if (context.match !== "path") return context.pagePath === path;
+  const [page, hash] = path.split("#", 2);
+  const route = (hash == null ? void 0 : hash.startsWith("/")) ? `#${hash.split("?", 1)[0]}` : "";
+  return context.pagePath === page.split("?", 1)[0] + route;
+}
 function matchesGuideRoute(path, rules) {
   const match = (rule) => {
     if (rule.operator === "equals") return path === rule.value;
@@ -3621,16 +3631,19 @@ class ExperienceRenderer {
       };
       resolve(step.target, (target) => {
         const mount = (interaction2) => {
-          var _a3, _b3, _c;
+          var _a3, _b3, _c, _d, _e;
           if (!alive()) return;
           ensureGuideTargetInView(target);
           const root = this.root(experience.id, { layer: step.behavior.layer ?? ((_a3 = definition.behavior) == null ? void 0 : _a3.layer) }, target);
           const renderer = new AnchoredCardRenderer();
           this.renderer = renderer;
           const behavior = { ...step.behavior, dismissible: step.behavior.dismissible ?? true };
-          const card = renderer.render(root, target, step.content, stepDesign, behavior, stepCallbacks, step.builder, "anchored_card");
+          const reconnect = ((_c = (_b3 = step.target) == null ? void 0 : _b3.targetContext) == null ? void 0 : _c.match) === "path" ? () => {
+            if (alive()) this.render(experience, callbacks, step.id);
+          } : void 0;
+          const card = renderer.render(root, target, step.content, stepDesign, behavior, { ...stepCallbacks, onTargetDetached: reconnect }, step.builder, "anchored_card");
           addBack(card);
-          if (interaction2) this.listenForAdvance(interaction2, ((_b3 = step.advance) == null ? void 0 : _b3.type) ?? "button", ((_c = step.advance) == null ? void 0 : _c.type) === "element_hover" ? step.advance.durationMs : void 0, advance);
+          if (interaction2) this.listenForAdvance(interaction2, ((_d = step.advance) == null ? void 0 : _d.type) ?? "button", ((_e = step.advance) == null ? void 0 : _e.type) === "element_hover" ? step.advance.durationMs : void 0, advance);
           visible2();
         };
         const interaction = guideInteractionTarget(step);
@@ -4101,7 +4114,7 @@ class ExperienceLoader {
     this.state = new ExperienceStateStore(this.stateScope());
   }
   async evaluate(trigger) {
-    var _a, _b, _c;
+    var _a;
     if (this.destroyed) return;
     this.syncContext();
     const epoch = this.deliveryEpoch;
@@ -4157,8 +4170,8 @@ class ExperienceLoader {
       const stepId = isGuideDefinition(chosen.definition) && (stored == null ? void 0 : stored.experienceId) === chosen.id && stored.versionId === chosen.versionId ? stored.currentStepId : void 0;
       if (stepId && (stored == null ? void 0 : stored.launchContext) && stored.navigationAttempted && isGuideDefinition(chosen.definition)) {
         const step = chosen.definition.steps.find((item) => item.id === stepId);
-        const path = step && guideStepRequiresTarget(step) ? (_c = (_b = step.target) == null ? void 0 : _b.targetContext) == null ? void 0 : _c.pagePath : void 0;
-        if (path && path !== currentPagePath()) {
+        const target = step && guideStepRequiresTarget(step) ? step.target : void 0;
+        if (!matchesGuideTargetPage(target, currentPagePath())) {
           this.state.clearGuideProgress(chosen.id);
           this.checklist.setTransientActive(false);
           return;
@@ -4479,10 +4492,8 @@ class ExperienceLoader {
     return !isGuideDefinition(definition) ? ((_a = definition.survey) == null ? void 0 : _a.steps.findIndex((step) => step.id === stepId)) ?? -1 : -1;
   }
   currentGuideStepMatchesPage(runtime) {
-    var _a, _b;
     const step = this.currentGuideStep(runtime);
-    const pagePath = step && guideStepRequiresTarget(step) ? (_b = (_a = step.target) == null ? void 0 : _a.targetContext) == null ? void 0 : _b.pagePath : void 0;
-    return !pagePath || pagePath === currentPagePath();
+    return matchesGuideTargetPage(step && guideStepRequiresTarget(step) ? step.target : void 0, currentPagePath());
   }
   pauseGuide() {
     const runtime = this.activeGuide();
@@ -4509,7 +4520,7 @@ class ExperienceLoader {
       if (this.destroyed || epoch !== this.deliveryEpoch || contextKey !== this.contextKey() || !isGuideDefinition(experience.definition)) return;
       const first = experience.definition.steps[0];
       const targetPath = first && guideStepRequiresTarget(first) ? (_b = (_a = first.target) == null ? void 0 : _a.targetContext) == null ? void 0 : _b.pagePath : void 0;
-      if (targetPath && targetPath !== currentPagePath()) {
+      if (targetPath && !matchesGuideTargetPage(first.target, currentPagePath())) {
         const destination = new URL(targetPath, location.origin);
         if (destination.origin !== location.origin) return;
         this.state.setGuideProgress({ experienceId: experience.id, versionId: experience.versionId, currentStepId: first.id, status: "paused", launchContext: experience.launchContext, navigationAttempted: true });
@@ -4627,7 +4638,7 @@ const bundledRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-CYJFvHQI.js");
+    const { EditorModeController } = await import("./EditorModeController-BvuRWY7n.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -4657,6 +4668,7 @@ export {
   ExperienceRenderer as E,
   ORDINARY_ACTION_ID_PATTERN as O,
   RouteObserver as R,
+  SensitiveElementDetector as S,
   BUILDER_SURVEY_INPUT_TAGS as a,
   BUILDER_ALLOWED_ATTRIBUTES as b,
   builderImageUrlIsSafe as c,
@@ -4666,20 +4678,21 @@ export {
   surveyBranchErrors as g,
   computeElementRole as h,
   computeElementLabel as i,
-  sanitizeBuilderHtml as j,
-  getGuideStepPattern as k,
-  guideStepRequiresTarget as l,
-  guideStepConfigurationErrors as m,
-  exchangeEditorSession as n,
+  findTarget as j,
+  sanitizeBuilderHtml as k,
+  getGuideStepPattern as l,
+  guideStepRequiresTarget as m,
+  guideStepConfigurationErrors as n,
   ordinaryButtonActionsFor as o,
-  clearEditorContinuation as p,
-  isChecklistDefinition as q,
-  isGuideDefinition as r,
+  exchangeEditorSession as p,
+  clearEditorContinuation as q,
+  isChecklistDefinition as r,
   safeScopedBuilderCss as s,
-  guideInteractionTarget as t,
-  matchesGuideRoute as u,
-  findTarget as v,
-  storeEditorContinuation as w,
-  createAnalytics as x
+  isGuideDefinition as t,
+  guideInteractionTarget as u,
+  matchesGuideRoute as v,
+  matchesGuideTargetPage as w,
+  storeEditorContinuation as x,
+  createAnalytics as y
 };
-//# sourceMappingURL=module-BfJgYd3d.js.map
+//# sourceMappingURL=module-I6ohY1wP.js.map

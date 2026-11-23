@@ -37,7 +37,7 @@ export class ElementPicker {
   private cleanup(): void { document.removeEventListener("pointermove", this.move, true); document.removeEventListener("click", this.click, true); document.removeEventListener("keydown", this.keyDown, true); document.removeEventListener("keyup", this.keyUp, true); window.removeEventListener("blur", this.resetPassthrough); document.removeEventListener("visibilitychange", this.resetPassthrough); this.shiftPassthrough = false; this.overlay?.destroy(); this.overlay = null; }
 }
 
-function isMovcuesSurface(element: Element): boolean {
+export function isMovcuesSurface(element: Element): boolean {
   if (element.closest("[data-movcues-editor],[data-movcues-experience],[data-movcues-picker-overlay]")) return true;
   const root = element.getRootNode();
   return root instanceof ShadowRoot && isMovcuesSurface(root.host);

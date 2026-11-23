@@ -3,7 +3,7 @@ export type WidgetType = "anchored_card" | "toast" | "cursor_follow" | "modal" |
 export type BuilderMode = "grapesjs" | "onsite";
 export interface ExperienceAction { id?: string; label: string; type: "dismiss" | "next_step" | "previous_step" | "open_url" | "track_event"; url?: string; eventName?: string }
 export interface ExperienceContent { heading: string; body: string; primaryAction?: ExperienceAction; secondaryAction?: { label: string; type: "dismiss" } }
-export interface ExperienceTarget { primarySelector: string; fallbackSelectors: string[]; label?: string; role?: string; tagName?: string; reliability: "reliable" | "moderate" | "fragile"; targetContext?: { pagePath: string } }
+export interface ExperienceTarget { primarySelector: string; fallbackSelectors: string[]; label?: string; role?: string; tagName?: string; reliability: "reliable" | "moderate" | "fragile"; targetContext?: { pagePath: string; match?: "path" } }
 export type LegacyExperienceWidth = "sm" | "md" | "lg";
 export interface ExperienceSize { width: { mode: "auto" | "fixed" | "full"; value?: number }; height: { mode: "auto" | "fixed" | "viewport"; value?: number } }
 import type { SiteThemeTokens, VisualThemeState } from "../themes/types";
@@ -46,6 +46,6 @@ export interface DeliveredExperience { id: string; versionId: string; kind: Expe
 export interface DeliveredChecklist { id: string; versionId: string; kind: "checklist"; priority: number; definition: RuntimeChecklistDefinition; progress: ChecklistProgress }
 export type EditorDefinition = RuntimeDefinition & { targeting: ExperienceTargeting };
 export type EditorChecklistDefinition = RuntimeChecklistDefinition & { targeting: Pick<ExperienceTargeting,"pageRules"|"audience"|"priority"|"schedule"|"allowedOrigins"> };
-export interface EditorDraft { references?: {guides:Array<{id:string;name:string;status:string}>;segments:Array<{id:string;name:string}>;stylePresets?:Array<{id:string;name:string;tokens:SiteThemeTokens}>;siteTheme?:SiteThemeTokens|null}; experience: { id: string; name: string; kind: ExperienceKind; widgetType: WidgetType | null; builderMode: BuilderMode }; version: { id: string; versionNumber: number; revision: number; definition: EditorDefinition | EditorChecklistDefinition } }
+export interface EditorDraft { guidedCapture?: boolean; references?: {guides:Array<{id:string;name:string;status:string}>;segments:Array<{id:string;name:string}>;stylePresets?:Array<{id:string;name:string;tokens:SiteThemeTokens}>;siteTheme?:SiteThemeTokens|null}; experience: { id: string; name: string; kind: ExperienceKind; widgetType: WidgetType | null; builderMode: BuilderMode }; version: { id: string; versionNumber: number; revision: number; definition: EditorDefinition | EditorChecklistDefinition } }
 export function isGuideDefinition(value: RuntimeDefinition): value is RuntimeGuideDefinition { return "steps" in value; }
 export function isChecklistDefinition(value: RuntimeDefinition | RuntimeChecklistDefinition): value is RuntimeChecklistDefinition { return "items" in value; }

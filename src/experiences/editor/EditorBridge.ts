@@ -1,3 +1,4 @@
+import type { CapturePlan, CapturePreview, GuideCaptureCheckpoint, GuideCaptureRevision, StoredGuideCapture } from "./GuideCaptureTypes";
 import type { EditorDraft } from "../types";
 import type { SiteThemeTokens } from "../../themes/types";
 import type { EditorAiProposal } from "./AiEditing";
@@ -52,6 +53,31 @@ export class EditorBridge {
     }
     const body = await response.json() as { version: EditorDraft["version"] };
     return body.version;
+  }
+  loadCapture(): Promise<StoredGuideCapture> { return this.captureRequest("", "GET"); }
+  saveCapture(checkpoint: GuideCaptureCheckpoint, checkpointRevision: number): Promise<{ checkpointRevision: number }> {
+    return this.captureRequest("", "PUT", { ...checkpoint, checkpointRevision });
+  }
+  planCapture(input: GuideCaptureRevision & { prompt: string }, signal: AbortSignal): Promise<{ plan: CapturePlan }> {
+    return this.captureRequest("/plan", "POST", input, signal);
+  }
+  previewCapture(input: GuideCaptureRevision & { plan: CapturePlan }, signal: AbortSignal): Promise<CapturePreview> {
+    return this.captureRequest("/preview", "POST", input, signal);
+  }
+  applyCapture(input: GuideCaptureRevision & { plan: CapturePlan; previewTicket: string }): Promise<{ version: EditorDraft["version"] }> {
+    return this.captureRequest("/apply", "POST", input);
+  }
+  private async captureRequest<T>(action: string, method: "GET" | "POST" | "PUT", input?: unknown, signal?: AbortSignal): Promise<T> {
+    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/guide-capture${action}`, {
+      method, headers: this.headers(), credentials: "omit", cache: "no-store",
+      ...(input !== undefined ? { body: JSON.stringify(input) } : {}),
+      ...(method === "PUT" ? { keepalive: true } : {}),
+      signal,
+    });
+    const body = await response.json().catch(() => null);
+    if (response.status === 401 || response.status === 410 || body?.error === "invalid_editor_access") throw new EditorSessionExpiredError();
+    if (!response.ok) throw new CaptureRequestError(body?.error, body?.message ?? "Guided Capture could not complete the request. Try again.");
+    return body as T;
   }
   async chat(input: { conversationId?: string; prompt: string; revision: number; context: unknown }, signal?: AbortSignal, onEvent?: (event: EditorAiStreamEvent) => void): Promise<EditorAiResponse> {
     const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/ai/chat`, { method: "POST", headers: { ...this.headers(), Accept: `${EDITOR_AI_STREAM_MEDIA_TYPE}, application/json` }, credentials: "omit", body: JSON.stringify(input), signal });
@@ -111,3 +137,7 @@ export class EditorAiRequestError extends Error {
   constructor(message: string, readonly conversationId?: string) { super(message); }
 }
 
+
+export class CaptureRequestError extends Error {
+  constructor(readonly code: string | undefined, message: string) { super(message); }
+}
