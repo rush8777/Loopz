@@ -28,6 +28,7 @@ interface ActiveExperience {
   completedStepIds: Set<string>;
   finished: boolean;
   stepEntryRoute: string;
+  clickPending?: boolean;
   launchContext?: DeliveredExperience["launchContext"];
 }
 
@@ -197,7 +198,7 @@ export class ExperienceLoader {
     this.checklist.setTransientActive(runtime.launchContext?.source === "checklist");
     if (currentStepId) this.persistGuide(runtime, "active");
     const mounted = currentStepId
-      ? (progress && (!progress.routePath || progress.routePath !== currentPagePath()) && this.advanceForRoute(runtime) ? true : (this.renderActiveGuide(), true))
+      ? (progress && progress.clickPending !== true && (!progress.routePath || progress.routePath !== currentPagePath()) && this.advanceForRoute(runtime) ? true : (this.renderActiveGuide(), true))
       : this.renderer.render(experience, this.callbacks(runtime), currentStepId);
     if (!mounted && this.active === runtime) { this.active = null; this.checklist.setTransientActive(false); if (currentStepId) this.state.clearGuideProgress(experience.id); }
   }
@@ -210,7 +211,7 @@ export class ExperienceLoader {
       onDismiss: () => { if (valid()) return this.finish(runtime, "dismissed"); },
       onAction: (action: ExperienceAction) => { if (valid()) this.handleAction(runtime, action); },
       onComplete: () => { if (valid()) void this.finish(runtime, "completed"); },
-      onGuideAdvance: () => { if (valid()) this.advanceGuide(); },
+      onGuideAdvance: source => { if (valid()) this.advanceGuide(source); },
       onGuideBack: () => { if (valid()) this.backGuide(); },
       onUnavailable: () => {
         if (!valid()) return;
@@ -282,7 +283,7 @@ export class ExperienceLoader {
     if (!this.destroyed) void this.evaluate();
   }
 
-  private advanceGuide(): void {
+  private advanceGuide(source?: "element_click"): void {
     const runtime = this.activeGuide(); if (!runtime) return;
     const definition = runtime.experience.definition;
     const index = definition.steps.findIndex(step => step.id === runtime.currentStepId);
@@ -292,8 +293,17 @@ export class ExperienceLoader {
       void this.post(runtime, "interaction", undefined, "guide_step_completed", this.currentStepPayload(runtime, true));
     }
     if (index === definition.steps.length - 1) { void this.finish(runtime, "completed"); return; }
-    runtime.currentStepId = definition.steps[index + 1].id;
+    const next = definition.steps[index + 1];
+    runtime.currentStepId = next.id;
     runtime.stepEntryRoute = location.href;
+    runtime.clickPending = source === "element_click" && next.advance?.type === "route";
+    if (runtime.clickPending) window.setTimeout(() => {
+      if (!this.owns(runtime) || runtime.finished || runtime.currentStepId !== next.id) return;
+      runtime.clickPending = false;
+      runtime.stepEntryRoute = location.href;
+      if (this.active === runtime) this.persistGuide(runtime, "active");
+      else if (this.pausedGuide === runtime) this.persistGuide(runtime, "paused");
+    }, 0);
     this.persistGuide(runtime, "active");
     this.renderActiveGuide();
   }
@@ -303,6 +313,7 @@ export class ExperienceLoader {
     const definition = runtime.experience.definition;
     const index = definition.steps.findIndex(step => step.id === runtime.currentStepId);
     if (index <= 0) return;
+    runtime.clickPending = false;
     runtime.currentStepId = definition.steps[index - 1].id;
     runtime.stepEntryRoute = location.href;
     runtime.stepStartedAt = null; runtime.visibleStepId = null;
@@ -380,7 +391,7 @@ export class ExperienceLoader {
 
   private advanceForRoute(runtime: ActiveExperience): boolean {
     const step = this.currentGuideStep(runtime);
-    if (step?.advance?.type !== "route" || !matchesGuideRoute(currentPagePath(), step.advance.pageRules)) return false;
+    if (runtime.clickPending || step?.advance?.type !== "route" || !matchesGuideRoute(currentPagePath(), step.advance.pageRules)) return false;
     if (runtime === this.active) this.advanceGuide();
     else {
       const definition = runtime.experience.definition as RuntimeGuideDefinition;
@@ -401,7 +412,7 @@ export class ExperienceLoader {
   }
 
   private persistGuide(runtime: ActiveExperience, status: GuideProgress["status"]): void {
-    if (runtime.currentStepId) { const previous = this.state.getGuideProgress(); this.state.setGuideProgress({ experienceId: runtime.experience.id, versionId: runtime.experience.versionId, currentStepId: runtime.currentStepId, status, shownRequested: runtime.shownRequested, seenStepIds: [...runtime.seenStepIds], completedStepIds: [...runtime.completedStepIds], routePath: currentPagePath(), ...(runtime.impressionId ? { impressionId: runtime.impressionId } : {}), ...(runtime.launchContext ? { launchContext: runtime.launchContext } : {}), ...(previous?.experienceId === runtime.experience.id && previous.navigationAttempted ? { navigationAttempted: true } : {}) }); }
+    if (runtime.currentStepId) { const previous = this.state.getGuideProgress(); this.state.setGuideProgress({ experienceId: runtime.experience.id, versionId: runtime.experience.versionId, currentStepId: runtime.currentStepId, status, shownRequested: runtime.shownRequested, seenStepIds: [...runtime.seenStepIds], completedStepIds: [...runtime.completedStepIds], routePath: currentPagePath(), ...(runtime.clickPending ? { clickPending: true } : {}), ...(runtime.impressionId ? { impressionId: runtime.impressionId } : {}), ...(runtime.launchContext ? { launchContext: runtime.launchContext } : {}), ...(previous?.experienceId === runtime.experience.id && previous.navigationAttempted ? { navigationAttempted: true } : {}) }); }
   }
 
   private async post(runtime: ActiveExperience, event: "shown" | "dismissed" | "completed" | "action" | "interaction", action?: string, eventType: "experience_shown" | "guide_step_shown" | "guide_step_completed" | "guide_completed" | "guide_dismissed" | "survey_started" | "survey_step_completed" | "survey_submitted" | "survey_abandoned" | "widget_interacted" | "widget_dismissed" = "widget_interacted", detail?: { stepId: string; stepIndex: number; durationMs?: number }): Promise<{ impressionId?: string } | null> {

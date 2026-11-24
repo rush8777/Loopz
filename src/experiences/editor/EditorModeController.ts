@@ -94,6 +94,7 @@ export class EditorModeController {
   private currentPath = "";
   private guidePreviewComplete = false;
   private guidePreviewEntryPath = "";
+  private guidePreviewClickPending = false;
   private previewDevice: "desktop" | "tablet" | "mobile" = "desktop";
   private aiConversationId: string | undefined;
   private aiMessages: AiChatMessage[] = [];
@@ -181,7 +182,8 @@ export class EditorModeController {
     this.mode = restoredMode === "select" ? "target" : restoredMode === "design" || restoredMode === "target" || restoredMode === "navigate" || restoredMode === "preview" ? restoredMode : draft.experience.builderMode === "onsite" ? "design" : "target";
     const preview = this.mode === "preview" && restoredIndex >= 0 && restored?.guidePreview?.versionId === draft.version.id
       ? restored.guidePreview : undefined;
-    this.guidePreviewEntryPath = preview?.entryPath ?? this.currentPath;
+    this.guidePreviewClickPending = false;
+    this.guidePreviewEntryPath = preview?.clickPending ? this.currentPath : preview?.entryPath ?? this.currentPath;
     this.guidePreviewComplete = preview?.completed ?? false;
     if (preview && this.guide && this.matchesPreviewRoute(this.currentPath)) {
       this.guidePreviewEntryPath = this.currentPath;
@@ -615,15 +617,16 @@ export class EditorModeController {
     if (!this.guide || !this.flushContent()) return;
     this.guidePreviewComplete = false;
     this.stepIndex = 0;
+    this.guidePreviewClickPending = false;
     this.guidePreviewEntryPath = currentPagePath();
     if (this.mode !== "preview") this.setMode("preview");
     else { this.updateContinuation(); this.renderPreview(); this.syncPanel(); }
   }
 
-  private advanceGuidePreview(delta: -1 | 1): void {
+  private advanceGuidePreview(delta: -1 | 1, source?: "element_click"): void {
     if (!this.guide || this.mode !== "preview" || this.guidePreviewComplete && delta > 0) return;
     if (this.stepIndex + delta >= this.guide.steps.length) { this.guidePreviewComplete = true; this.previewGeneration++; this.preview.destroy(); this.previewRendered = false; this.updateContinuation(); this.syncGuideBehavior(); this.setText("[data-trigger-status]", this.previewTriggerHint()); return; }
-    this.guidePreviewComplete = false; this.switchStep(this.stepIndex + delta);
+    this.guidePreviewComplete = false; this.switchStep(this.stepIndex + delta, source);
   }
 
   private addGuideStep(pattern: "modal" | "anchored_card"): void {
@@ -702,7 +705,7 @@ export class EditorModeController {
     this.root?.querySelector<HTMLInputElement>(selector)?.addEventListener("change", event => { update((event.currentTarget as HTMLInputElement).checked); this.changed(); });
   }
 
-  private switchStep(index: number): void {
+  private switchStep(index: number, source?: "element_click"): void {
     const steps = this.guide?.steps ?? this.survey?.steps;
     if (!steps || index < 0 || index >= steps.length || index === this.stepIndex) return;
     if (!this.flushContent()) return;
@@ -712,7 +715,21 @@ export class EditorModeController {
     this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
     if (this.dirty) void this.persist();
     this.stepIndex = index;
-    if (this.mode === "preview") this.guidePreviewEntryPath = currentPagePath();
+    if (this.mode === "preview") {
+      this.guidePreviewEntryPath = currentPagePath();
+      this.guidePreviewClickPending = source === "element_click" && this.guide?.steps[index].advance?.type === "route";
+      if (this.guidePreviewClickPending) {
+        const lifecycle = this.lifecycle;
+        const entered = steps[index].id;
+        // The same click can also synchronously navigate. Let its handlers settle first.
+        window.setTimeout(() => {
+          if (this.lifecycle !== lifecycle || this.mode !== "preview" || this.guide?.steps[this.stepIndex]?.id !== entered) return;
+          this.guidePreviewClickPending = false;
+          this.guidePreviewEntryPath = currentPagePath();
+          this.updateContinuation();
+        }, 0);
+      }
+    }
     this.updateContinuation();
     this.syncPanel();
     this.applyMode();
@@ -727,7 +744,7 @@ export class EditorModeController {
     this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
     this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
     if (this.dirty) void this.persist();
-    this.mode = mode; this.guidePreviewComplete = false;
+    this.mode = mode; this.guidePreviewComplete = false; this.guidePreviewClickPending = false;
     if (mode === "preview") this.guidePreviewEntryPath = currentPagePath();
     this.configureDiagnostics();
     this.updateContinuation();
@@ -936,7 +953,7 @@ export class EditorModeController {
         this.previewRendered = true; this.applyPreviewDevice(); if (this.mode === "design") this.attachContentEditor(); this.updateDiagnostics(); },
       onDismiss: () => { this.previewRendered = false; this.setText("[data-trigger-status]", "Preview closed. Start or Reset to try again."); this.updateDiagnostics(); },
       onAction: () => void 0,
-      onGuideAdvance: () => { if (this.mode === "preview" && this.guide) this.advanceGuidePreview(1); },
+      onGuideAdvance: source => { if (this.mode === "preview" && this.guide) this.advanceGuidePreview(1, source); },
       onGuideBack: () => { if (this.mode === "preview" && this.guide) this.advanceGuidePreview(-1); },
       onGuideStatus: status => { if (generation === this.previewGeneration && this.mode === "preview") this.setText("[data-trigger-status]", status === "delay" ? "Waiting for presentation delay…" : status === "waiting" ? "Waiting for a website element…" : status === "unavailable" ? "Target missing; use Next, Reset or reselect the target." : this.previewTriggerHint()); },
       onSurveySubmit: this.mode === "preview" && this.survey ? () => { this.setText("[data-preview-limit]", "Preview complete. No response or production analytics were sent. Website interactions can still run your site's JavaScript."); } : undefined,
@@ -1492,7 +1509,7 @@ export class EditorModeController {
 
   private matchesPreviewRoute(path: string): boolean {
     const advance = this.guide?.steps[this.stepIndex]?.advance;
-    return !this.guidePreviewComplete && path !== this.guidePreviewEntryPath && advance?.type === "route" && matchesGuideRoute(path, advance.pageRules);
+    return !this.guidePreviewComplete && !this.guidePreviewClickPending && path !== this.guidePreviewEntryPath && advance?.type === "route" && matchesGuideRoute(path, advance.pageRules);
   }
 
   private currentTarget(): ExperienceTarget | undefined {
@@ -1542,7 +1559,7 @@ export class EditorModeController {
         selectedStepId: this.guide?.steps[this.stepIndex]?.id ?? this.survey?.steps[this.stepIndex]?.id,
         mode: this.mode,
         ...(this.mode === "preview" && this.guide && !this.aiPreviewOriginal ? {
-          guidePreview: { versionId: this.draft.version.id, entryPath: this.guidePreviewEntryPath, completed: this.guidePreviewComplete },
+          guidePreview: { versionId: this.draft.version.id, entryPath: this.guidePreviewEntryPath, completed: this.guidePreviewComplete, ...(this.guidePreviewClickPending ? { clickPending: true } : {}) },
         } : {}),
       },
     });

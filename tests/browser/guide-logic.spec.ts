@@ -169,3 +169,48 @@ test('preview consumes a matching full-page route once and restores completion a
   await expect(page.locator('[data-preview-step]')).toContainText('Complete');
   await expect(widgetHeading(page)).toHaveCount(0);
 });
+
+for (const context of ['preview', 'playback'] as const) {
+  for (const navigation of ['deferred SPA', 'full page'] as const) {
+    test(`${context} restores the next step after an element click and ${navigation} navigation`, async ({ page }) => {
+      if (context === 'preview') {
+        await editor(page);
+        await page.locator('[data-mode=preview]').click();
+        await page.addInitScript(() => {
+          addEventListener('DOMContentLoaded', async () => {
+            const stored = sessionStorage.getItem('__movcues_experience_editor_session__');
+            const fixture = (window as any).journey;
+            if (stored && fixture) await new fixture.Controller(location.origin).resume(JSON.parse(stored));
+          });
+        });
+      } else await production(page);
+      await page.getByRole('button', { name: 'Get Started', exact: true }).click();
+      await expect(widgetHeading(page)).toHaveText('Feature');
+      await page.evaluate(kind => {
+        document.querySelector('#use-feature')!.addEventListener('click', event => {
+          event.stopImmediatePropagation();
+          if (kind === 'full page') location.assign('/journey/done');
+          else setTimeout(() => (window as any).guideReactApp.go('/journey/done'), 20);
+        }, { capture: true, once: true });
+      }, navigation);
+      await page.locator('#use-feature').click();
+      await expect(page).toHaveURL(/\/journey\/done$/);
+      await expect(widgetHeading(page)).toHaveText('Completion');
+      await page.reload();
+      await expect(widgetHeading(page)).toHaveText('Completion');
+    });
+  }
+}
+
+test('a click-triggered navigation does not also complete the following route step', async ({ page }) => {
+  const definition = guide();
+  definition.steps[2].advance = { type: 'route', pageRules: [{ id: 'destination', kind: 'include', operator: 'equals', value: '/journey/done' }] };
+  await editor(page, definition);
+  await page.locator('[data-mode=preview]').click();
+  await page.getByRole('button', { name: 'Get Started', exact: true }).click();
+  await expect(widgetHeading(page)).toHaveText('Feature');
+  await page.locator('#use-feature').click();
+  await expect(page).toHaveURL(/\/journey\/done$/);
+  await expect(page.locator('[data-route-change]')).toContainText('/journey/done');
+  await expect(page.locator('[data-preview-step]')).toHaveText('3/3');
+});

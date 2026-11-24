@@ -18,7 +18,7 @@ export interface ExperienceRendererCallbacks {
   onDismiss: () => void;
   onAction: (action: ExperienceAction) => void;
   onComplete: () => void;
-  onGuideAdvance?: () => void;
+  onGuideAdvance?: (source?: "element_click") => void;
   onGuideBack?: () => void;
   onUnavailable?: () => void;
   onGuideStatus?: (status: "delay" | "waiting" | "ready" | "unavailable") => void;
@@ -106,7 +106,7 @@ export class ExperienceRenderer {
     const generation = this.renderGeneration; let finished = false;
     const alive = () => generation === this.renderGeneration && !finished;
     const once = (run: () => void) => { if (!alive()) return; finished = true; run(); };
-    const advance = () => once(() => callbacks.onGuideAdvance?.());
+    const advance = (source?: "element_click") => once(() => callbacks.onGuideAdvance?.(source));
     const back = () => once(() => callbacks.onGuideBack?.());
     const dismiss = () => { if (generation !== this.renderGeneration) return; finished = true; callbacks.onDismiss(); this.destroy(); };
     const guarded = { ...callbacks, onGuideAdvance: advance, onGuideBack: back, onDismiss: dismiss };
@@ -164,14 +164,14 @@ export class ExperienceRenderer {
     return true;
   }
 
-  private listenForAdvance(target: Element, type: string, durationMs: number | undefined, advance?: () => void): void {
+  private listenForAdvance(target: Element, type: string, durationMs: number | undefined, advance?: (source?: "element_click") => void): void {
     if (!advance) return;
     if (type === "element_click") {
       let active = true;
       const click = (event: MouseEvent) => {
         if (!event.composedPath().includes(target)) return;
         // Observe the host activation before its handlers can stop propagation or navigate.
-        queueMicrotask(() => { if (active) advance(); });
+        queueMicrotask(() => { if (active) advance("element_click"); });
       };
       document.addEventListener("click", click, true);
       this.cleanupAdvance = () => { active = false; document.removeEventListener("click", click, true); };

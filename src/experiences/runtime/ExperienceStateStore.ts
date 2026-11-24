@@ -14,6 +14,7 @@ export interface GuideProgress {
   seenStepIds?: string[];
   completedStepIds?: string[];
   routePath?: string;
+  clickPending?: boolean;
 }
 
 function read(storage: Storage, key: string): Set<string> {
