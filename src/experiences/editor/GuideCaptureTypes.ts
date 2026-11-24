@@ -5,9 +5,26 @@ export interface CapturedGuideTarget {
   target: ExperienceTarget & { tagName: string; targetContext: { pagePath: string } };
 }
 
+export type CaptureObservation = { sequence: number } & (
+  | { type: "target"; path: string; targetId: string }
+  | { type: "click"; path: string; targetId?: string; control: "link" | "button" | "choice" }
+  | { type: "route"; from: string; to: string; afterClick?: number }
+  | { type: "ui"; path: string; surface: "dialog" | "menu" | "expanded"; afterClick?: number }
+);
+
+export interface CaptureWorkflow {
+  prompt: string;
+  stage: "capture" | "plan" | "preview";
+  draftRevision: number;
+  plan?: CapturePlan;
+  previewStepId?: string;
+}
+
 export interface GuideCaptureCheckpoint {
   mode: "select" | "navigate";
   targets: CapturedGuideTarget[];
+  observations?: CaptureObservation[];
+  workflow?: CaptureWorkflow;
 }
 
 export interface GuideCaptureRevision {

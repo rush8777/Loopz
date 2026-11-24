@@ -143,6 +143,7 @@ describe("Guided Capture", () => {
     let requestSignal: AbortSignal | undefined;
     const bridge = {
       loadCapture: vi.fn().mockResolvedValue({ ...initial, targets: [captured] }),
+      saveCapture: vi.fn().mockResolvedValue({ checkpointRevision: 1 }),
       planCapture: vi.fn((_input: unknown, signal: AbortSignal) => {
         requestSignal = signal;
         return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));

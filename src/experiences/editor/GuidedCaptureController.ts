@@ -4,6 +4,7 @@ import { ExperienceRenderer } from "../runtime/ExperienceRenderer";
 import type { EditorDraft } from "../types";
 import { CaptureRequestError, EditorSessionExpiredError } from "./EditorBridge";
 import { captureHtml, guideCapturePanel } from "./GuideCapturePanel";
+import { GuideCaptureJourney, type NewCaptureObservation } from "./GuideCaptureJourney";
 import { GuideCaptureSelection } from "./GuideCaptureSelection";
 import { describeCaptureTarget, guideCapturePath } from "./GuideCaptureTargets";
 import type { CaptureAdvance, CaptureBridge, CapturePlan, CapturePlanStep, CapturePreview, GuideCaptureCheckpoint, StoredGuideCapture } from "./GuideCaptureTypes";
@@ -14,6 +15,7 @@ interface LocalCheckpoint {
   pending: boolean;
   sending?: GuideCaptureCheckpoint;
   prompt: string;
+  navigationPath?: string | null;
 }
 
 const advanceLabels: Record<CaptureAdvance["type"], string> = {
@@ -31,6 +33,11 @@ export class GuidedCaptureController {
   private readonly route = new RouteObserver();
   private readonly preview = new ExperienceRenderer();
   private readonly key: string;
+  private readonly previousKey: string;
+  private readonly journey = new GuideCaptureJourney(() => this.checkpoint.targets, observation => this.recordObservation(observation));
+  private navigationPath: string | null | undefined;
+  private saveTimer = 0;
+  private ticketRevision = -1;
   private selection: GuideCaptureSelection | undefined;
   private unsubscribe: (() => void) | undefined;
   private checkpoint: GuideCaptureCheckpoint = { mode: "select", targets: [] };
@@ -58,7 +65,8 @@ export class GuidedCaptureController {
     private readonly applied: (version: EditorDraft["version"]) => void,
     private readonly closed: () => void,
   ) {
-    this.key = `movcues:guide-capture:${draft.experience.id}:${session.sessionId}`;
+    this.previousKey = `movcues:guide-capture:${draft.experience.id}:${session.sessionId}`;
+    this.key = `movcues:guide-capture:${draft.experience.id}`;
     this.revision = draft.version.revision;
   }
 
@@ -73,7 +81,13 @@ export class GuidedCaptureController {
     this.root.addEventListener("change", this.handleChange);
     this.root.querySelector("form")?.addEventListener("submit", event => { event.preventDefault(); void this.planGuide(); });
     this.selection = new GuideCaptureSelection(element => this.select(element));
-    this.unsubscribe = this.route.onChange(() => { this.selection?.refresh(); if (this.state === "preview") this.renderPreview(); });
+    this.unsubscribe = this.route.onChange(() => {
+      this.journey.routeChanged();
+      this.selection?.refresh();
+      if (this.state === "preview") this.renderPreview();
+      this.writeLocal();
+    });
+    window.addEventListener("pagehide", this.flushCheckpoint);
     this.route.start();
     void this.restore();
   }
@@ -81,6 +95,8 @@ export class GuidedCaptureController {
   expire(): void {
     if (this.state === "expired") return;
     this.request?.abort();
+    this.journey.stop();
+    clearTimeout(this.saveTimer);
     this.selection?.destroy();
     this.selection = undefined;
     this.preview.destroy();
@@ -93,6 +109,9 @@ export class GuidedCaptureController {
   }
 
   destroy(): void {
+    window.removeEventListener("pagehide", this.flushCheckpoint);
+    this.journey.stop();
+    clearTimeout(this.saveTimer);
     this.destroyed = true;
     this.request?.abort();
     this.selection?.destroy();
@@ -104,16 +123,17 @@ export class GuidedCaptureController {
 
   private async restore(discardLocal = false): Promise<void> {
     this.toggle("[data-reload]", false);
+    this.journey.stop();
+    this.preview.destroy();
+    this.candidate = undefined;
     this.message("Restoring capture…");
     const local = discardLocal ? null : this.readLocal();
     try {
       const remote = await this.bridge.loadCapture();
       if (this.destroyed || this.state === "expired") return;
       this.adopt(remote);
-      this.prompt = local?.prompt ?? this.prompt;
-      const field = this.root.querySelector<HTMLTextAreaElement>("[data-prompt]");
-      if (field) field.value = this.prompt;
       this.state = "capture";
+      this.navigationPath = local?.navigationPath;
       if (local?.pending && !sameCheckpoint(local.checkpoint, this.checkpoint)) {
         if (local.baseRevision === remote.checkpointRevision || (local.sending && sameCheckpoint(local.sending, this.checkpoint))) {
           this.checkpoint = local.checkpoint;
@@ -126,10 +146,24 @@ export class GuidedCaptureController {
           this.message("A newer checkpoint is available. Load it to continue, or keep this tab open to review your local selections.");
         }
       }
-      this.writeLocal();
+      const workflow = this.checkpoint.workflow;
+      this.prompt = workflow?.prompt ?? local?.prompt ?? "";
+      const field = this.root.querySelector<HTMLTextAreaElement>("[data-prompt]");
+      if (field) field.value = this.prompt;
+      this.plan = workflow?.plan ? structuredClone(workflow.plan) : undefined;
+      if (this.plan && workflow?.stage !== "capture") {
+        this.state = "plan";
+        this.renderPlan();
+      }
       if (!this.checkpointError) this.message("");
       this.renderTargets();
       this.update();
+      this.writeLocal();
+      if (this.plan && workflow?.draftRevision !== this.revision) {
+        this.message("The guide draft changed. Review your restored plan before generating a fresh preview.");
+      } else if (workflow?.stage === "preview" && !this.checkpointError && !this.busy) {
+        await this.compile(workflow.previewStepId);
+      }
     } catch (error) {
       if (this.destroyed) return;
       this.report(error);
@@ -138,7 +172,7 @@ export class GuidedCaptureController {
   }
 
   private adopt(remote: StoredGuideCapture): void {
-    this.checkpoint = { mode: remote.mode, targets: remote.targets };
+    this.checkpoint = { mode: remote.mode, targets: remote.targets, observations: remote.observations, workflow: remote.workflow };
     this.revision = remote.revision;
     this.checkpointRevision = remote.checkpointRevision;
     this.pending = false;
@@ -148,7 +182,7 @@ export class GuidedCaptureController {
 
   private readLocal(): LocalCheckpoint | null {
     try {
-      const item = JSON.parse(sessionStorage.getItem(this.key) ?? "null") as LocalCheckpoint | null;
+      const item = JSON.parse(sessionStorage.getItem(this.key) ?? sessionStorage.getItem(this.previousKey) ?? "null") as LocalCheckpoint | null;
       if (item && typeof item.prompt === "string" && Number.isInteger(item.baseRevision) && Array.isArray(item.checkpoint?.targets)) return item;
     } catch { /* A server checkpoint is also available. */ }
     return null;
@@ -156,10 +190,37 @@ export class GuidedCaptureController {
 
   private writeLocal(): void {
     try {
-      const local: LocalCheckpoint = { checkpoint: this.checkpoint, baseRevision: this.checkpointRevision, pending: this.pending, sending: this.sending, prompt: this.prompt };
+      const local: LocalCheckpoint = { checkpoint: this.checkpoint, baseRevision: this.checkpointRevision, pending: this.pending, sending: this.sending, prompt: this.prompt,
+        navigationPath: this.state === "capture" && this.checkpoint.mode === "navigate" ? guideCapturePath() : undefined };
       sessionStorage.setItem(this.key, JSON.stringify(local));
       this.localSaved = true;
     } catch { this.localSaved = false; }
+  }
+
+  private flushCheckpoint = () => { if (this.state !== "loading") this.writeLocal(); void this.syncCheckpoint(); };
+
+  private recordObservation(observation: NewCaptureObservation): number {
+    const history = this.checkpoint.observations ?? [];
+    const sequence = (history[history.length - 1]?.sequence ?? 0) + 1;
+    this.checkpoint = { ...this.checkpoint, observations: [...history.slice(-31), { ...observation, sequence }] };
+    this.queueCheckpoint();
+    return sequence;
+  }
+
+  private workflowChanged(): void {
+    if (this.state === "expired" || this.state === "loading") return;
+    this.checkpoint = { ...this.checkpoint, workflow: {
+      stage: this.state, prompt: this.prompt, draftRevision: this.revision, plan: this.plan ? structuredClone(this.plan) : undefined,
+      previewStepId: this.state === "preview" ? this.candidate?.definition.steps[this.index]?.id : undefined,
+    } };
+    this.queueCheckpoint();
+  }
+
+  private queueCheckpoint(): void {
+    this.pending = true;
+    this.writeLocal();
+    clearTimeout(this.saveTimer);
+    this.saveTimer = window.setTimeout(() => void this.syncCheckpoint(), 200);
   }
 
   private checkpointChanged(checkpoint: GuideCaptureCheckpoint): void {
@@ -172,6 +233,7 @@ export class GuidedCaptureController {
   }
 
   private async syncCheckpoint(): Promise<boolean> {
+    clearTimeout(this.saveTimer);
     if (this.checkpointError || this.destroyed || this.state === "expired") return false;
     if (this.inFlight) {
       const saved = await this.inFlight;
@@ -238,6 +300,7 @@ export class GuidedCaptureController {
       this.replacement = undefined;
       this.message("");
       this.checkpointChanged({ ...this.checkpoint, targets });
+      this.recordObservation({ type: "target", path, targetId: id });
     } catch (error) { this.report(error); }
   }
 
@@ -274,7 +337,7 @@ export class GuidedCaptureController {
     const button = (event.target as Element).closest("button");
     if (!button) return;
     const action = button.dataset;
-    if ("close" in action) { if (!this.busy || this.request) this.closed(); return; }
+    if ("close" in action) { if (!this.busy || this.request) { this.flushCheckpoint(); this.closed(); } return; }
     if ("collapse" in action) {
       const expanded = button.getAttribute("aria-expanded") === "true";
       button.setAttribute("aria-expanded", String(!expanded));
@@ -304,8 +367,8 @@ export class GuidedCaptureController {
       this.message("Select the replacement element on this page.");
     }
     if ("compile" in action) void this.compile();
-    if ("editCapture" in action) { this.state = "capture"; this.plan = undefined; this.message(""); this.update(); }
-    if ("editPlan" in action) { this.state = "plan"; this.candidate = undefined; this.preview.destroy(); this.message(""); this.update(); }
+    if ("editCapture" in action) { this.state = "capture"; this.plan = undefined; this.message(""); this.workflowChanged(); this.update(); }
+    if ("editPlan" in action) { this.state = "plan"; this.candidate = undefined; this.preview.destroy(); this.message(""); this.workflowChanged(); this.update(); }
     if ("previous" in action) this.previewStep(-1);
     if ("next" in action) this.previewStep(1);
     if ("apply" in action) void this.apply();
@@ -314,17 +377,19 @@ export class GuidedCaptureController {
   private handleInput = (event: Event) => {
     const input = event.target as HTMLInputElement | HTMLTextAreaElement;
     const { prompt, heading, body, eventName, delay, timeout, hoverDuration } = input.dataset;
-    if (prompt !== undefined) { this.prompt = input.value; this.writeLocal(); return; }
+    if (prompt !== undefined) { this.prompt = input.value; this.workflowChanged(); return; }
     const row = input.closest<HTMLElement>("[data-plan-step]");
     const step = row && this.plan?.steps[Number(row.dataset.planStep)];
     if (!step) return;
     if (heading !== undefined) step.heading = input.value;
     if (body !== undefined) step.body = input.value;
     if (eventName !== undefined && step.advance.type === "custom_event") step.advance.eventName = input.value;
-    if (!(input instanceof HTMLInputElement)) return;
-    if (delay !== undefined) step.delayMs = input.valueAsNumber;
-    if (timeout !== undefined && step.missingTarget) step.missingTarget.timeoutMs = input.valueAsNumber;
-    if (hoverDuration !== undefined && step.advance.type === "element_hover") step.advance.durationMs = input.valueAsNumber;
+    if (input instanceof HTMLInputElement) {
+      if (delay !== undefined) step.delayMs = input.valueAsNumber;
+      if (timeout !== undefined && step.missingTarget) step.missingTarget.timeoutMs = input.valueAsNumber;
+      if (hoverDuration !== undefined && step.advance.type === "element_hover") step.advance.durationMs = input.valueAsNumber;
+    }
+    this.workflowChanged();
   };
 
   private handleChange = (event: Event) => {
@@ -347,6 +412,7 @@ export class GuidedCaptureController {
       const action = select.value;
       step.missingTarget = action === "wait" || action === "skip" || action === "dismiss" ? { action, timeoutMs: step.missingTarget?.timeoutMs ?? 5000 } : null;
     }
+    this.workflowChanged();
     this.renderPlan();
     this.root.querySelector<HTMLSelectElement>(`[data-plan-step="${index}"] [data-${Object.keys(select.dataset)[0].replace(/[A-Z]/g, letter => "-" + letter.toLowerCase())}]`)?.focus();
   };
@@ -359,6 +425,7 @@ export class GuidedCaptureController {
       if (signal.aborted || this.destroyed) return;
       this.plan = plan;
       this.state = "plan";
+      this.workflowChanged();
       this.renderPlan();
       this.message("");
     });
@@ -407,16 +474,20 @@ export class GuidedCaptureController {
     return this.checkpoint.targets.find(item => item.id === id)?.target.targetContext.pagePath;
   }
 
-  private async compile(): Promise<void> {
+  private async compile(restoredStepId?: string): Promise<void> {
     const plan = this.plan;
     if (!plan || this.busy) return;
     if (plan.steps.some(step => step.advance.type === "unconfigured")) { this.message("Choose how to advance each step marked for configuration."); return; }
     await this.run("Generating an editable guide…", async signal => {
-      const candidate = await this.bridge.previewCapture({ ...this.revisions(), plan }, signal);
+      if (!await this.syncCheckpoint() || signal.aborted) return;
+      const revisions = this.revisions();
+      const candidate = await this.bridge.previewCapture({ ...revisions, plan }, signal);
       if (signal.aborted || this.destroyed) return;
       this.candidate = candidate;
-      this.index = 0;
+      this.ticketRevision = revisions.checkpointRevision;
+      this.index = Math.max(0, candidate.definition.steps.findIndex(step => step.id === restoredStepId));
       this.state = "preview";
+      if (!restoredStepId) this.workflowChanged();
       this.message("");
       this.renderPreview();
     });
@@ -426,6 +497,7 @@ export class GuidedCaptureController {
     const index = this.index + offset;
     if (!this.candidate || index < 0 || index >= this.candidate.definition.steps.length) return;
     this.index = index;
+    this.workflowChanged();
     this.renderPreview();
     this.update();
   }
@@ -459,7 +531,14 @@ export class GuidedCaptureController {
     this.message("Applying the guide to your draft…");
     this.update();
     try {
-      const { version } = await this.bridge.applyCapture({ ...this.revisions(), plan, previewTicket: candidate.previewTicket });
+      if (!await this.syncCheckpoint() || this.destroyed) return;
+      const revisions = this.revisions();
+      if (this.ticketRevision !== revisions.checkpointRevision) {
+        const fresh = await this.bridge.previewCapture({ ...revisions, plan }, AbortSignal.timeout(15_000));
+        this.candidate = fresh;
+        this.ticketRevision = revisions.checkpointRevision;
+      }
+      const { version } = await this.bridge.applyCapture({ ...revisions, plan, previewTicket: this.candidate!.previewTicket });
       if (!this.destroyed) this.finish(version);
     } catch (error) {
       if (this.destroyed) return;
@@ -475,13 +554,13 @@ export class GuidedCaptureController {
         this.candidate = undefined;
         this.plan = undefined;
         await this.restore();
-        if (this.state === "capture") this.message("The draft changed. Your selections are available. Generate a fresh plan to continue.");
+        this.message("The draft or checkpoint changed. Review the recovered work before generating a fresh preview.");
       }
     } finally { this.busy = false; if (!this.destroyed) this.update(); }
   }
 
   private finish(version: EditorDraft["version"]): void {
-    try { sessionStorage.removeItem(this.key); } catch { /* The server has committed the guide. */ }
+    try { sessionStorage.removeItem(this.key); sessionStorage.removeItem(this.previousKey); } catch { /* The server has committed the guide. */ }
     this.applied(version);
   }
 
@@ -502,7 +581,7 @@ export class GuidedCaptureController {
             this.plan = undefined;
             this.candidate = undefined;
             await this.restore();
-            if (this.state === "capture") this.message("The draft changed. Your selections are available. Generate a fresh plan to continue.");
+            this.message("The draft or checkpoint changed. Review the recovered work before generating a fresh preview.");
           } else this.report(error);
         }
       }
@@ -539,6 +618,11 @@ export class GuidedCaptureController {
     const active = this.state === "capture" && this.checkpoint.mode === "select" && !this.busy;
     this.selection?.setEnabled(active);
     this.selection?.setTargets(this.state === "capture" ? this.checkpoint.targets : []);
+    if (this.state === "capture" && this.checkpoint.mode === "navigate" && !this.busy) {
+      const path = this.navigationPath;
+      this.navigationPath = undefined;
+      this.journey.activate(path);
+    } else this.journey.stop();
     const instructions = this.root.querySelector("[data-instructions]");
     if (instructions) instructions.textContent = this.checkpoint.mode === "select"
       ? "Click an element to capture it. Switch to Navigate to use your application."
@@ -553,7 +637,7 @@ export class GuidedCaptureController {
       : this.inFlight ? "Saving capture…" : this.checkpoint.targets.length ? "Capture saved" : "";
     const planButton = this.root.querySelector<HTMLButtonElement>("[data-plan]");
     if (planButton) planButton.disabled = this.busy || !this.checkpoint.targets.length || this.checkpointError;
-    this.root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-apply],[data-edit-plan],[data-compile],[data-edit-capture],[data-prompt],[data-plan-steps] input,[data-plan-steps] textarea,[data-plan-steps] select").forEach(control => { control.disabled = this.busy; });
+    this.root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-apply],[data-edit-plan],[data-compile],[data-edit-capture],[data-prompt],[data-plan-steps] input,[data-plan-steps] textarea,[data-plan-steps] select").forEach(control => { control.disabled = this.busy || control.matches("[data-apply],[data-compile]") && this.checkpointError; });
     const previous = this.root.querySelector<HTMLButtonElement>("[data-previous]");
     const next = this.root.querySelector<HTMLButtonElement>("[data-next]");
     if (previous) previous.disabled = this.busy || this.index === 0;
@@ -562,9 +646,11 @@ export class GuidedCaptureController {
 }
 
 function sameCheckpoint(left: GuideCaptureCheckpoint, right: GuideCaptureCheckpoint): boolean {
-  const fingerprint = ({ id, target }: GuideCaptureCheckpoint["targets"][number]) => JSON.stringify([
-    id, target.primarySelector, target.fallbackSelectors, target.targetContext.pagePath, target.tagName, target.reliability, target.label, target.role,
-  ]);
-  return left.mode === right.mode && left.targets.length === right.targets.length
-    && left.targets.every((target, index) => fingerprint(target) === fingerprint(right.targets[index]));
+  const canonical = (state: GuideCaptureCheckpoint) => JSON.stringify(
+    { mode: state.mode, targets: state.targets, observations: state.observations, workflow: state.workflow },
+    (_key, value) => value && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]))
+      : value,
+  );
+  return canonical(left) === canonical(right);
 }

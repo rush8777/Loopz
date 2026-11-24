@@ -40,11 +40,6 @@ export const guideCapturePanel = `
       </div>
       <p class="muted" data-instructions></p>
       <ol data-targets aria-label="Captured elements"></ol>
-      <p class="muted" data-checkpoint role="status" aria-live="polite"></p>
-      <div class="row">
-        <button type="button" data-retry hidden>Retry checkpoint</button>
-        <button type="button" data-refresh hidden>Load latest checkpoint</button>
-      </div>
       <form data-prompt-form>
         <label>What should this guide help users do?
           <textarea data-prompt rows="3" maxlength="2000" required placeholder="Help new customers create their first invoice."></textarea>
@@ -63,6 +58,11 @@ export const guideCapturePanel = `
       <div class="row"><button type="button" data-previous>Previous step</button><button type="button" data-next>Next step</button></div>
       <div class="row"><button type="button" data-apply data-primary>Apply to draft</button><button type="button" data-edit-plan>Edit plan</button></div>
     </section>
+      <p class="muted" data-checkpoint role="status" aria-live="polite"></p>
+      <div class="row">
+        <button type="button" data-retry hidden>Retry checkpoint</button>
+        <button type="button" data-refresh hidden>Load latest checkpoint</button>
+      </div>
     <button type="button" data-reload hidden>Retry loading capture</button>
   </main>
 </aside>`;

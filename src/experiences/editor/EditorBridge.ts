@@ -68,10 +68,12 @@ export class EditorBridge {
     return this.captureRequest("/apply", "POST", input);
   }
   private async captureRequest<T>(action: string, method: "GET" | "POST" | "PUT", input?: unknown, signal?: AbortSignal): Promise<T> {
+    const bodyText = input === undefined ? undefined : JSON.stringify(input);
+    const keepalive = method === "PUT" && bodyText !== undefined && new Blob([bodyText]).size < 60_000;
     const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/guide-capture${action}`, {
       method, headers: this.headers(), credentials: "omit", cache: "no-store",
-      ...(input !== undefined ? { body: JSON.stringify(input) } : {}),
-      ...(method === "PUT" ? { keepalive: true } : {}),
+      ...(bodyText !== undefined ? { body: bodyText } : {}),
+      keepalive,
       signal,
     });
     const body = await response.json().catch(() => null);
