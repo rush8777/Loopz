@@ -34,5 +34,9 @@ function isSession(value: unknown): value is EditorSession {
 function isEditorState(value: unknown): value is EditorAuthoringState {
   if (!value || typeof value !== "object") return false;
   const state = value as Partial<EditorAuthoringState>;
+  if (state.guidePreview !== undefined && (
+    !state.guidePreview || typeof state.guidePreview.versionId !== "string"
+    || typeof state.guidePreview.entryPath !== "string" || typeof state.guidePreview.completed !== "boolean"
+  )) return false;
   return typeof state.experienceId === "string" && !!state.experienceId && (state.selectedStepId === undefined || typeof state.selectedStepId === "string") && (state.mode === "select" || state.mode === "design" || state.mode === "target" || state.mode === "navigate" || state.mode === "preview");
 }

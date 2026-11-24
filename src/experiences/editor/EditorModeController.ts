@@ -170,7 +170,6 @@ export class EditorModeController {
     this.draft = draft;
     this.checklist = isChecklistDefinition(draft.version.definition) ? draft.version.definition : null;
     this.definition = this.checklist ? checklistEditorAdapter(this.checklist) : draft.version.definition as EditorDefinition;
-    this.history.reset({ definition: cloneOnsite(this.checklist ?? this.definition), selection: null, stepIndex: this.stepIndex });
     this.guide = isGuideDefinition(this.definition) ? this.definition : null;
     this.survey = !this.guide && draft.experience.widgetType === "survey" ? (this.definition as RuntimeWidgetDefinition).survey ?? null : null;
     const selectableSteps = this.guide?.steps ?? this.survey?.steps;
@@ -180,6 +179,16 @@ export class EditorModeController {
     this.currentPath = currentPagePath();
     const restoredMode = (restored as { mode?: string } | undefined)?.mode;
     this.mode = restoredMode === "select" ? "target" : restoredMode === "design" || restoredMode === "target" || restoredMode === "navigate" || restoredMode === "preview" ? restoredMode : draft.experience.builderMode === "onsite" ? "design" : "target";
+    const preview = this.mode === "preview" && restoredIndex >= 0 && restored?.guidePreview?.versionId === draft.version.id
+      ? restored.guidePreview : undefined;
+    this.guidePreviewEntryPath = preview?.entryPath ?? this.currentPath;
+    this.guidePreviewComplete = preview?.completed ?? false;
+    if (preview && this.guide && this.matchesPreviewRoute(this.currentPath)) {
+      this.guidePreviewEntryPath = this.currentPath;
+      if (this.stepIndex + 1 < this.guide.steps.length) this.stepIndex++;
+      else this.guidePreviewComplete = true;
+    }
+    this.history.reset({ definition: cloneOnsite(this.checklist ?? this.definition), selection: null, stepIndex: this.stepIndex });
     this.updateContinuation();
     if (draft.guidedCapture && this.guide && draft.experience.builderMode === "onsite") {
       this.capture = new GuidedCaptureController(bridge, session, draft, version => {
@@ -604,13 +613,16 @@ export class EditorModeController {
 
   private startGuidePreview(): void {
     if (!this.guide || !this.flushContent()) return;
-    this.guidePreviewComplete = false; this.stepIndex = 0;
-    if (this.mode !== "preview") this.setMode("preview"); else { this.renderPreview(); this.syncPanel(); }
+    this.guidePreviewComplete = false;
+    this.stepIndex = 0;
+    this.guidePreviewEntryPath = currentPagePath();
+    if (this.mode !== "preview") this.setMode("preview");
+    else { this.updateContinuation(); this.renderPreview(); this.syncPanel(); }
   }
 
   private advanceGuidePreview(delta: -1 | 1): void {
     if (!this.guide || this.mode !== "preview" || this.guidePreviewComplete && delta > 0) return;
-    if (this.stepIndex + delta >= this.guide.steps.length) { this.guidePreviewComplete = true; this.previewGeneration++; this.preview.destroy(); this.previewRendered = false; this.syncGuideBehavior(); this.setText("[data-trigger-status]", this.previewTriggerHint()); return; }
+    if (this.stepIndex + delta >= this.guide.steps.length) { this.guidePreviewComplete = true; this.previewGeneration++; this.preview.destroy(); this.previewRendered = false; this.updateContinuation(); this.syncGuideBehavior(); this.setText("[data-trigger-status]", this.previewTriggerHint()); return; }
     this.guidePreviewComplete = false; this.switchStep(this.stepIndex + delta);
   }
 
@@ -700,6 +712,7 @@ export class EditorModeController {
     this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
     if (this.dirty) void this.persist();
     this.stepIndex = index;
+    if (this.mode === "preview") this.guidePreviewEntryPath = currentPagePath();
     this.updateContinuation();
     this.syncPanel();
     this.applyMode();
@@ -715,6 +728,7 @@ export class EditorModeController {
     this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
     if (this.dirty) void this.persist();
     this.mode = mode; this.guidePreviewComplete = false;
+    if (mode === "preview") this.guidePreviewEntryPath = currentPagePath();
     this.configureDiagnostics();
     this.updateContinuation();
     this.applyMode();
@@ -876,8 +890,12 @@ export class EditorModeController {
     if (!this.definition || !this.draft || this.mode === "navigate" || this.saveState === "expired") return;
     if (!this.flushContent()) return;
     const generation = ++this.previewGeneration;
-    if (this.mode === "preview" && this.guide) this.guidePreviewEntryPath = currentPagePath();
     this.previewRendered = false;
+    if (this.mode === "preview" && this.guide && (this.guidePreviewComplete || !matchesGuideTargetPage(this.currentTarget(), currentPagePath()))) {
+      this.preview.destroy();
+      this.updateDiagnostics();
+      return;
+    }
     this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
     this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
     if(this.checklist && this.checklistEditor){
@@ -1468,11 +1486,13 @@ export class EditorModeController {
     if (notice) notice.hidden = false;
     this.setText("[data-route-change]", `${previous} → ${next}`);
     this.updateDiagnostics();
-    if (this.mode === "preview" && this.guide && !this.guidePreviewComplete) {
-      const advance = this.guide.steps[this.stepIndex].advance;
-      if (next !== this.guidePreviewEntryPath && advance?.type === "route" && matchesGuideRoute(next, advance.pageRules)) { this.advanceGuidePreview(1); return; }
-    }
+    if (this.mode === "preview" && this.matchesPreviewRoute(next)) { this.advanceGuidePreview(1); return; }
     if (this.mode !== "navigate" && !this.guidePreviewComplete) { this.renderPreview(); if (this.mode === "target") this.startPicker(); }
+  }
+
+  private matchesPreviewRoute(path: string): boolean {
+    const advance = this.guide?.steps[this.stepIndex]?.advance;
+    return !this.guidePreviewComplete && path !== this.guidePreviewEntryPath && advance?.type === "route" && matchesGuideRoute(path, advance.pageRules);
   }
 
   private currentTarget(): ExperienceTarget | undefined {
@@ -1521,6 +1541,9 @@ export class EditorModeController {
         experienceId: this.draft.experience.id,
         selectedStepId: this.guide?.steps[this.stepIndex]?.id ?? this.survey?.steps[this.stepIndex]?.id,
         mode: this.mode,
+        ...(this.mode === "preview" && this.guide && !this.aiPreviewOriginal ? {
+          guidePreview: { versionId: this.draft.version.id, entryPath: this.guidePreviewEntryPath, completed: this.guidePreviewComplete },
+        } : {}),
       },
     });
   }

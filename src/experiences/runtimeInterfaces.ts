@@ -25,6 +25,7 @@ export interface EditorSession {
 export interface EditorAuthoringState {
   experienceId: string;
   selectedStepId?: string;
+  guidePreview?: { versionId: string; entryPath: string; completed: boolean };
   mode: "design" | "target" | "navigate" | "preview" | "select"; // select is a read-only legacy continuation value
 }
 

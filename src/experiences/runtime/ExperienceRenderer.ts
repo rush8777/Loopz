@@ -168,9 +168,13 @@ export class ExperienceRenderer {
     if (!advance) return;
     if (type === "element_click") {
       let active = true;
-      const click = () => queueMicrotask(() => { if (active) advance(); });
-      target.addEventListener("click", click);
-      this.cleanupAdvance = () => { active = false; target.removeEventListener("click", click); };
+      const click = (event: MouseEvent) => {
+        if (!event.composedPath().includes(target)) return;
+        // Observe the host activation before its handlers can stop propagation or navigate.
+        queueMicrotask(() => { if (active) advance(); });
+      };
+      document.addEventListener("click", click, true);
+      this.cleanupAdvance = () => { active = false; document.removeEventListener("click", click, true); };
     } else if (type === "element_hover") {
       let timer: number | null = null;
       const leave = () => { if (timer !== null) window.clearTimeout(timer); timer = null; };

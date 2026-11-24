@@ -116,3 +116,56 @@ for (const width of [320, 360, 390]) test(`Guide behavior and preview controls f
   const definition = guide(); definition.steps = [definition.steps[1], definition.steps[2]]; definition.steps[0].advance.target.primarySelector = '#not-rendered'; definition.steps[0].presentation = { delayMs: 0, missingTarget: { action: 'skip', timeoutMs: 500 } };
   await editor(page, definition); await page.locator('[data-mode=preview]').click(); await expect(page.locator('[data-trigger-status]')).toContainText('Waiting for a website element'); await expect(widgetHeading(page)).toHaveText('Completion'); await expect(page.locator('[data-preview-step]')).toHaveText('2/2');
  });
+
+for (const context of ['preview', 'playback'] as const) {
+  test(`${context} commits a navigation click even when the host stops propagation`, async ({ page }) => {
+    const definition = guide();
+    definition.steps = [definition.steps[1], definition.steps[2]];
+    if (context === 'preview') {
+      await editor(page, definition);
+      await page.locator('[data-mode=preview]').click();
+    } else {
+      await production(page);
+      await page.getByRole('button', { name: 'Get Started', exact: true }).click();
+    }
+    await expect(widgetHeading(page)).toHaveText('Feature');
+    await page.evaluate(() => {
+      document.querySelector('#use-feature')!.addEventListener('click', event => {
+        event.stopImmediatePropagation();
+        (window as any).guideReactApp.go('/journey/done');
+      }, { capture: true, once: true });
+    });
+    await page.locator('#use-feature').click();
+    await expect(page).toHaveURL(/\/journey\/done$/);
+    await expect(widgetHeading(page)).toHaveText('Completion');
+  });
+}
+
+test('preview consumes a matching full-page route once and restores completion after reload', async ({ page }) => {
+  const definition = guide();
+  definition.steps[0].advance = { type: 'route', pageRules: [{ id: 'route', kind: 'include', operator: 'equals', value: '/journey/feature' }] };
+  definition.steps[1].target.targetContext = { pagePath: '/journey/feature' };
+  await editor(page, definition);
+  await page.locator('[data-mode=preview]').click();
+  await page.addInitScript(() => {
+    addEventListener('DOMContentLoaded', async () => {
+      const stored = sessionStorage.getItem('__movcues_experience_editor_session__');
+      if (!stored || !(window as any).journey) return;
+      const { Controller } = (window as any).journey;
+      await new Controller(location.origin).resume(JSON.parse(stored));
+    });
+  });
+  await page.goto('/journey/unexpected');
+  await expect(widgetHeading(page)).toHaveText('Welcome');
+  await page.goto('/journey/feature');
+  await expect(widgetHeading(page)).toHaveText('Feature');
+  await expect(page.locator('[data-preview-step]')).toHaveText('2/3');
+  await page.reload();
+  await expect(page.locator('[data-preview-step]')).toHaveText('2/3');
+  await page.locator('[data-preview-next]').click();
+  await page.locator('[data-preview-test]').click();
+  await expect(page.locator('[data-preview-step]')).toContainText('Complete');
+  await page.reload();
+  await expect(page.locator('[data-preview-step]')).toContainText('Complete');
+  await expect(widgetHeading(page)).toHaveCount(0);
+});
