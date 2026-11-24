@@ -59,6 +59,9 @@ test("real dashboard → SDK editor → database → reviewed publish → visito
   await dialog
     .getByLabel("Name", { exact: true })
     .fill("Pre-survey verified Guide");
+  await expect(dialog.getByRole("button", { name: /^(Begin Guided Capture|Create & open dashboard)$/ })).toBeEnabled();
+  const manual = dialog.getByRole("button", { name: /^Manual Creation/ });
+  if (await manual.isVisible()) await manual.click();
   await dialog.getByRole("button", { name: /On-site Visual Builder/ }).click();
   await dialog.getByLabel("First step").selectOption("modal");
   await dialog.getByLabel("Page URL").fill(hostUrl);
