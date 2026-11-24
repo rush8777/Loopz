@@ -231,6 +231,7 @@ test('published playback does not attribute one navigation to two steps', async 
   await page.reload();
   await expect(widgetHeading(page)).toHaveText('Completion');
   expect(events.filter(event => event.eventType === 'guide_completed')).toHaveLength(0);
+  await page.waitForFunction(() => typeof (window as any).guideReactApp?.go === 'function');
   const observed = page.waitForRequest(request => new URL(request.url()).searchParams.get('url')?.endsWith('/journey/feature') === true);
   await page.evaluate(() => (window as any).guideReactApp.go('/journey/feature'));
   await observed;

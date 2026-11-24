@@ -206,11 +206,13 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
 
   const visitor = await context.newPage();
   await visitor.goto(launch);
+  await expect(visitor.locator("#feature-card")).toBeVisible();
   await expect(currentHeading(visitor)).toHaveText("Create your first project");
   await expect(visitor.locator("[data-movcues-guide-capture]")).toHaveCount(0);
   await widget(visitor).getByRole("button", { name: "Next", exact: true }).click();
   await expect(currentHeading(visitor)).toHaveText("Open Features");
   await visitor.locator("#nav-feature").click();
+  await expect(visitor.locator("[data-app-path]")).toHaveText("/integration/feature");
   await expect(currentHeading(visitor)).toHaveText("Review project details");
   await widget(visitor).getByRole("button", { name: "Next", exact: true }).click();
   await visitor.locator("#use-feature").click();
