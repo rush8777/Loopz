@@ -214,3 +214,21 @@ test('a click-triggered navigation does not also complete the following route st
   await expect(page.locator('[data-route-change]')).toContainText('/journey/done');
   await expect(page.locator('[data-preview-step]')).toHaveText('3/3');
 });
+
+test('published playback does not attribute one navigation to two steps', async ({ page }) => {
+  const definition = guide();
+  definition.steps[2].advance = { type: 'route', pageRules: [{ id: 'destination', kind: 'include', operator: 'equals', value: '/journey/done' }] };
+  const events = await production(page, definition);
+  await page.getByRole('button', { name: 'Get Started', exact: true }).click();
+  await expect(widgetHeading(page)).toHaveText('Feature');
+  await page.locator('#use-feature').click();
+  await expect(page).toHaveURL(/\/journey\/done$/);
+  await expect(widgetHeading(page)).toHaveText('Completion');
+  await page.reload();
+  await expect(widgetHeading(page)).toHaveText('Completion');
+  expect(events.filter(event => event.eventType === 'guide_completed')).toHaveLength(0);
+  await page.evaluate(() => (window as any).guideReactApp.go('/journey/feature'));
+  await expect(page).toHaveURL(/\/journey\/feature$/);
+  await page.evaluate(() => (window as any).guideReactApp.go('/journey/done'));
+  await expect.poll(() => events.filter(event => event.eventType === 'guide_completed').length).toBe(1);
+});

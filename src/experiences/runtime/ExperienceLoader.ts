@@ -211,7 +211,7 @@ export class ExperienceLoader {
       onDismiss: () => { if (valid()) return this.finish(runtime, "dismissed"); },
       onAction: (action: ExperienceAction) => { if (valid()) this.handleAction(runtime, action); },
       onComplete: () => { if (valid()) void this.finish(runtime, "completed"); },
-      onGuideAdvance: source => { if (valid()) this.advanceGuide(source); },
+      onGuideAdvance: (source?: "element_click") => { if (valid()) this.advanceGuide(source); },
       onGuideBack: () => { if (valid()) this.backGuide(); },
       onUnavailable: () => {
         if (!valid()) return;
