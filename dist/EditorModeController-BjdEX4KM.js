@@ -1,4 +1,4 @@
-import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, S as SensitiveElementDetector, j as findTarget, R as RouteObserver, E as ExperienceRenderer, k as sanitizeBuilderHtml, l as getGuideStepPattern, m as guideStepRequiresTarget, n as guideStepConfigurationErrors, p as exchangeEditorSession, q as clearEditorContinuation, r as isChecklistDefinition, t as isGuideDefinition, u as guideInteractionTarget, v as matchesGuideTargetPage, w as matchesGuideRoute, x as storeEditorContinuation } from "./module-0PhqYMGB.js";
+import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, S as SensitiveElementDetector, j as findTarget, R as RouteObserver, E as ExperienceRenderer, k as sanitizeBuilderHtml, l as getGuideStepPattern, m as guideStepRequiresTarget, n as guideStepConfigurationErrors, p as exchangeEditorSession, q as clearEditorContinuation, r as isChecklistDefinition, t as isGuideDefinition, u as guideInteractionTarget, v as matchesGuideTargetPage, w as matchesGuideRoute, x as storeEditorContinuation } from "./module-B7kI4Xw-.js";
 function panelIcon(name) {
   const paths = {
     properties: '<path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
@@ -13506,15 +13506,18 @@ class EditorModeController {
     const next = currentPagePath();
     if (next === previous) return;
     this.currentPath = next;
-    this.updateContinuation();
     const notice = (_a = this.root) == null ? void 0 : _a.querySelector("[data-route-notice]");
     if (notice) notice.hidden = false;
     this.setText("[data-route-change]", `${previous} → ${next}`);
     this.updateDiagnostics();
-    if (this.mode === "preview" && this.matchesPreviewRoute(next)) {
-      this.advanceGuidePreview(1);
-      return;
+    if (this.mode === "preview") {
+      if (this.matchesPreviewRoute(next)) {
+        this.advanceGuidePreview(1);
+        return;
+      }
+      this.guidePreviewEntryPath = next;
     }
+    this.updateContinuation();
     if (this.mode !== "navigate" && !this.guidePreviewComplete) {
       this.renderPreview();
       if (this.mode === "target") this.startPicker();
@@ -13751,4 +13754,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-DDPHROP-.js.map
+//# sourceMappingURL=EditorModeController-BjdEX4KM.js.map

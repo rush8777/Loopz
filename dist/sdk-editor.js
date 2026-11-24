@@ -15626,15 +15626,18 @@ ${ISOLATION_CSS}`;
       const next = currentPagePath();
       if (next === previous) return;
       this.currentPath = next;
-      this.updateContinuation();
       const notice = (_a = this.root) == null ? void 0 : _a.querySelector("[data-route-notice]");
       if (notice) notice.hidden = false;
       this.setText("[data-route-change]", `${previous} → ${next}`);
       this.updateDiagnostics();
-      if (this.mode === "preview" && this.matchesPreviewRoute(next)) {
-        this.advanceGuidePreview(1);
-        return;
+      if (this.mode === "preview") {
+        if (this.matchesPreviewRoute(next)) {
+          this.advanceGuidePreview(1);
+          return;
+        }
+        this.guidePreviewEntryPath = next;
       }
+      this.updateContinuation();
       if (this.mode !== "navigate" && !this.guidePreviewComplete) {
         this.renderPreview();
         if (this.mode === "target") this.startPicker();

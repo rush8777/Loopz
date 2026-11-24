@@ -121,7 +121,11 @@ export class ExperienceLoader {
     const activeGuide = this.activeGuide();
     if (activeGuide) {
       const advanced = activeGuide.stepEntryRoute !== location.href && this.advanceForRoute(activeGuide);
-      if (!advanced) { this.persistGuide(activeGuide, "active"); this.renderActiveGuide(); }
+      if (!advanced) {
+        activeGuide.stepEntryRoute = location.href;
+        this.persistGuide(activeGuide, "active");
+        this.renderActiveGuide();
+      }
       else if (!this.active) return;
     } else if (this.active) {
       this.renderer.destroy(); this.active = null; this.checklist.setTransientActive(false);

@@ -2177,6 +2177,7 @@ ${ISOLATION_CSS}`;
       if (activeGuide) {
         const advanced = activeGuide.stepEntryRoute !== location.href && this.advanceForRoute(activeGuide);
         if (!advanced) {
+          activeGuide.stepEntryRoute = location.href;
           this.persistGuide(activeGuide, "active");
           this.renderActiveGuide();
         } else if (!this.active) return;

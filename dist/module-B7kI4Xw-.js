@@ -4193,6 +4193,7 @@ class ExperienceLoader {
     if (activeGuide) {
       const advanced = activeGuide.stepEntryRoute !== location.href && this.advanceForRoute(activeGuide);
       if (!advanced) {
+        activeGuide.stepEntryRoute = location.href;
         this.persistGuide(activeGuide, "active");
         this.renderActiveGuide();
       } else if (!this.active) return;
@@ -4653,7 +4654,7 @@ const bundledRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-DDPHROP-.js");
+    const { EditorModeController } = await import("./EditorModeController-BjdEX4KM.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -4710,4 +4711,4 @@ export {
   storeEditorContinuation as x,
   createAnalytics as y
 };
-//# sourceMappingURL=module-0PhqYMGB.js.map
+//# sourceMappingURL=module-B7kI4Xw-.js.map

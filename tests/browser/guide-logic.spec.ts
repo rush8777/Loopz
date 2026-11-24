@@ -213,6 +213,10 @@ test('a click-triggered navigation does not also complete the following route st
   await expect(page).toHaveURL(/\/journey\/done$/);
   await expect(page.locator('[data-route-change]')).toContainText('/journey/done');
   await expect(page.locator('[data-preview-step]')).toHaveText('3/3');
+  await page.evaluate(() => (window as any).guideReactApp.go('/journey/feature'));
+  await expect(page.locator('[data-route-change]')).toHaveText('/journey/done → /journey/feature');
+  await page.evaluate(() => (window as any).guideReactApp.go('/journey/done'));
+  await expect(page.locator('[data-preview-step]')).toContainText('Complete');
 });
 
 test('published playback does not attribute one navigation to two steps', async ({ page }) => {
@@ -227,8 +231,9 @@ test('published playback does not attribute one navigation to two steps', async 
   await page.reload();
   await expect(widgetHeading(page)).toHaveText('Completion');
   expect(events.filter(event => event.eventType === 'guide_completed')).toHaveLength(0);
+  const observed = page.waitForRequest(request => new URL(request.url()).searchParams.get('url')?.endsWith('/journey/feature') === true);
   await page.evaluate(() => (window as any).guideReactApp.go('/journey/feature'));
-  await expect(page).toHaveURL(/\/journey\/feature$/);
+  await observed;
   await page.evaluate(() => (window as any).guideReactApp.go('/journey/done'));
   await expect.poll(() => events.filter(event => event.eventType === 'guide_completed').length).toBe(1);
 });
