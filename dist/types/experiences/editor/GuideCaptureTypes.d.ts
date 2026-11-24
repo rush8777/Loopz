@@ -1,6 +1,16 @@
 import type { EditorDraft, ExperienceTarget, RuntimeGuideDefinition } from "../types";
+export interface CaptureSemantics {
+    kind: "navigation" | "text_input" | "dropdown" | "checkbox" | "submit" | "action" | "information";
+    description?: string;
+    section?: string;
+    form?: string;
+    inputType?: string;
+    required?: boolean;
+    disabled?: boolean;
+}
 export interface CapturedGuideTarget {
     id: string;
+    semantics?: CaptureSemantics;
     target: ExperienceTarget & {
         tagName: string;
         targetContext: {
@@ -8,9 +18,40 @@ export interface CapturedGuideTarget {
         };
     };
 }
+export type CaptureObservation = {
+    sequence: number;
+} & ({
+    type: "target";
+    path: string;
+    targetId: string;
+} | {
+    type: "click";
+    path: string;
+    targetId?: string;
+    control: "link" | "button" | "choice";
+} | {
+    type: "route";
+    from: string;
+    to: string;
+    afterClick?: number;
+} | {
+    type: "ui";
+    path: string;
+    surface: "dialog" | "menu" | "expanded";
+    afterClick?: number;
+});
+export interface CaptureWorkflow {
+    prompt: string;
+    stage: "capture" | "plan" | "preview";
+    draftRevision: number;
+    plan?: CapturePlan;
+    previewStepId?: string;
+}
 export interface GuideCaptureCheckpoint {
     mode: "select" | "navigate";
     targets: CapturedGuideTarget[];
+    observations?: CaptureObservation[];
+    workflow?: CaptureWorkflow;
 }
 export interface GuideCaptureRevision {
     revision: number;
@@ -34,6 +75,7 @@ export type CaptureAdvance = {
 };
 export interface CapturePlanStep {
     pattern: "modal" | "anchored_card";
+    variant?: "welcome" | "completion" | "action" | "information";
     targetId: string | null;
     heading: string;
     body: string;

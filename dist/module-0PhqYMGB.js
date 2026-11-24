@@ -1393,6 +1393,7 @@ function isSession(value) {
 function isEditorState(value) {
   if (!value || typeof value !== "object") return false;
   const state = value;
+  if (state.guidePreview !== void 0 && (!state.guidePreview || typeof state.guidePreview.versionId !== "string" || typeof state.guidePreview.entryPath !== "string" || typeof state.guidePreview.completed !== "boolean")) return false;
   return typeof state.experienceId === "string" && !!state.experienceId && (state.selectedStepId === void 0 || typeof state.selectedStepId === "string") && (state.mode === "select" || state.mode === "design" || state.mode === "target" || state.mode === "navigate" || state.mode === "preview");
 }
 function isEditorSession(value) {
@@ -3539,9 +3540,9 @@ class ExperienceRenderer {
       finished = true;
       run2();
     };
-    const advance = () => once(() => {
+    const advance = (source) => once(() => {
       var _a2;
-      return (_a2 = callbacks.onGuideAdvance) == null ? void 0 : _a2.call(callbacks);
+      return (_a2 = callbacks.onGuideAdvance) == null ? void 0 : _a2.call(callbacks, source);
     });
     const back = () => once(() => {
       var _a2;
@@ -3662,13 +3663,16 @@ class ExperienceRenderer {
     if (!advance) return;
     if (type === "element_click") {
       let active = true;
-      const click = () => queueMicrotask(() => {
-        if (active) advance();
-      });
-      target.addEventListener("click", click);
+      const click = (event) => {
+        if (!event.composedPath().includes(target)) return;
+        queueMicrotask(() => {
+          if (active) advance("element_click");
+        });
+      };
+      document.addEventListener("click", click, true);
       this.cleanupAdvance = () => {
         active = false;
-        target.removeEventListener("click", click);
+        document.removeEventListener("click", click, true);
       };
     } else if (type === "element_hover") {
       let timer = null;
@@ -4309,7 +4313,7 @@ class ExperienceLoader {
     this.active = runtime;
     this.checklist.setTransientActive(((_c = runtime.launchContext) == null ? void 0 : _c.source) === "checklist");
     if (currentStepId) this.persistGuide(runtime, "active");
-    const mounted = currentStepId ? progress && (!progress.routePath || progress.routePath !== currentPagePath()) && this.advanceForRoute(runtime) ? true : (this.renderActiveGuide(), true) : this.renderer.render(experience, this.callbacks(runtime), currentStepId);
+    const mounted = currentStepId ? progress && progress.clickPending !== true && (!progress.routePath || progress.routePath !== currentPagePath()) && this.advanceForRoute(runtime) ? true : (this.renderActiveGuide(), true) : this.renderer.render(experience, this.callbacks(runtime), currentStepId);
     if (!mounted && this.active === runtime) {
       this.active = null;
       this.checklist.setTransientActive(false);
@@ -4338,8 +4342,8 @@ class ExperienceLoader {
       onComplete: () => {
         if (valid()) void this.finish(runtime, "completed");
       },
-      onGuideAdvance: () => {
-        if (valid()) this.advanceGuide();
+      onGuideAdvance: (source) => {
+        if (valid()) this.advanceGuide(source);
       },
       onGuideBack: () => {
         if (valid()) this.backGuide();
@@ -4428,7 +4432,8 @@ class ExperienceLoader {
     void this.checklist.refresh();
     if (!this.destroyed) void this.evaluate();
   }
-  advanceGuide() {
+  advanceGuide(source) {
+    var _a;
     const runtime = this.activeGuide();
     if (!runtime) return;
     const definition = runtime.experience.definition;
@@ -4442,8 +4447,17 @@ class ExperienceLoader {
       void this.finish(runtime, "completed");
       return;
     }
-    runtime.currentStepId = definition.steps[index + 1].id;
+    const next = definition.steps[index + 1];
+    runtime.currentStepId = next.id;
     runtime.stepEntryRoute = location.href;
+    runtime.clickPending = source === "element_click" && ((_a = next.advance) == null ? void 0 : _a.type) === "route";
+    if (runtime.clickPending) window.setTimeout(() => {
+      if (!this.owns(runtime) || runtime.finished || runtime.currentStepId !== next.id) return;
+      runtime.clickPending = false;
+      runtime.stepEntryRoute = location.href;
+      if (this.active === runtime) this.persistGuide(runtime, "active");
+      else if (this.pausedGuide === runtime) this.persistGuide(runtime, "paused");
+    }, 0);
     this.persistGuide(runtime, "active");
     this.renderActiveGuide();
   }
@@ -4453,6 +4467,7 @@ class ExperienceLoader {
     const definition = runtime.experience.definition;
     const index = definition.steps.findIndex((step) => step.id === runtime.currentStepId);
     if (index <= 0) return;
+    runtime.clickPending = false;
     runtime.currentStepId = definition.steps[index - 1].id;
     runtime.stepEntryRoute = location.href;
     runtime.stepStartedAt = null;
@@ -4553,7 +4568,7 @@ class ExperienceLoader {
   advanceForRoute(runtime) {
     var _a;
     const step = this.currentGuideStep(runtime);
-    if (((_a = step == null ? void 0 : step.advance) == null ? void 0 : _a.type) !== "route" || !matchesGuideRoute(currentPagePath(), step.advance.pageRules)) return false;
+    if (runtime.clickPending || ((_a = step == null ? void 0 : step.advance) == null ? void 0 : _a.type) !== "route" || !matchesGuideRoute(currentPagePath(), step.advance.pageRules)) return false;
     if (runtime === this.active) this.advanceGuide();
     else {
       const definition = runtime.experience.definition;
@@ -4576,7 +4591,7 @@ class ExperienceLoader {
   persistGuide(runtime, status) {
     if (runtime.currentStepId) {
       const previous = this.state.getGuideProgress();
-      this.state.setGuideProgress({ experienceId: runtime.experience.id, versionId: runtime.experience.versionId, currentStepId: runtime.currentStepId, status, shownRequested: runtime.shownRequested, seenStepIds: [...runtime.seenStepIds], completedStepIds: [...runtime.completedStepIds], routePath: currentPagePath(), ...runtime.impressionId ? { impressionId: runtime.impressionId } : {}, ...runtime.launchContext ? { launchContext: runtime.launchContext } : {}, ...(previous == null ? void 0 : previous.experienceId) === runtime.experience.id && previous.navigationAttempted ? { navigationAttempted: true } : {} });
+      this.state.setGuideProgress({ experienceId: runtime.experience.id, versionId: runtime.experience.versionId, currentStepId: runtime.currentStepId, status, shownRequested: runtime.shownRequested, seenStepIds: [...runtime.seenStepIds], completedStepIds: [...runtime.completedStepIds], routePath: currentPagePath(), ...runtime.clickPending ? { clickPending: true } : {}, ...runtime.impressionId ? { impressionId: runtime.impressionId } : {}, ...runtime.launchContext ? { launchContext: runtime.launchContext } : {}, ...(previous == null ? void 0 : previous.experienceId) === runtime.experience.id && previous.navigationAttempted ? { navigationAttempted: true } : {} });
     }
   }
   async post(runtime, event, action, eventType = "widget_interacted", detail) {
@@ -4638,7 +4653,7 @@ const bundledRuntimeProviders = {
     createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-BvuRWY7n.js");
+    const { EditorModeController } = await import("./EditorModeController-DDPHROP-.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -4690,9 +4705,9 @@ export {
   safeScopedBuilderCss as s,
   isGuideDefinition as t,
   guideInteractionTarget as u,
-  matchesGuideRoute as v,
-  matchesGuideTargetPage as w,
+  matchesGuideTargetPage as v,
+  matchesGuideRoute as w,
   storeEditorContinuation as x,
   createAnalytics as y
 };
-//# sourceMappingURL=module-I6ohY1wP.js.map
+//# sourceMappingURL=module-0PhqYMGB.js.map

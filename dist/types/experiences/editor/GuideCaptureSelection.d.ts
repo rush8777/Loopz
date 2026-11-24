@@ -3,6 +3,7 @@ export declare class GuideCaptureSelection {
     private readonly onSelect;
     private readonly surface;
     private readonly observer;
+    private mutationTimer;
     private hover;
     private frame;
     private enabled;

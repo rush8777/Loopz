@@ -16,6 +16,7 @@ export interface GuideProgress {
     seenStepIds?: string[];
     completedStepIds?: string[];
     routePath?: string;
+    clickPending?: boolean;
 }
 export declare class ExperienceStateStore {
     private scope;

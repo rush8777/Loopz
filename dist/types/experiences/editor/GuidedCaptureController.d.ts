@@ -11,6 +11,11 @@ export declare class GuidedCaptureController {
     private readonly route;
     private readonly preview;
     private readonly key;
+    private readonly previousKey;
+    private readonly journey;
+    private navigationPath;
+    private saveTimer;
+    private ticketRevision;
     private selection;
     private unsubscribe;
     private checkpoint;
@@ -38,6 +43,10 @@ export declare class GuidedCaptureController {
     private adopt;
     private readLocal;
     private writeLocal;
+    private flushCheckpoint;
+    private recordObservation;
+    private workflowChanged;
+    private queueCheckpoint;
     private checkpointChanged;
     private syncCheckpoint;
     private retryCheckpoint;

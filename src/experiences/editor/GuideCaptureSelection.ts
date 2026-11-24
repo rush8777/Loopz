@@ -8,7 +8,13 @@ const interceptedEvents = ["pointerdown", "pointerup", "mousedown", "mouseup", "
 
 export class GuideCaptureSelection {
   private readonly surface = document.createElement("div");
-  private readonly observer = new MutationObserver(() => this.refresh());
+  private readonly observer = new MutationObserver(() => {
+    if (!this.mutationTimer) this.mutationTimer = window.setTimeout(() => {
+      this.mutationTimer = 0;
+      this.refresh();
+    }, 100);
+  });
+  private mutationTimer = 0;
   private hover: HighlightOverlay | undefined;
   private frame = 0;
   private enabled = false;
@@ -18,10 +24,6 @@ export class GuideCaptureSelection {
   constructor(private readonly onSelect: (element: Element) => void) {
     this.surface.dataset.movcuesPickerOverlay = "";
     document.documentElement.append(this.surface);
-    this.observer.observe(document.body ?? document.documentElement, {
-      subtree: true, childList: true, attributes: true,
-      attributeFilter: ["class", "id", "hidden", "style", "aria-hidden", "data-testid", "data-test", "data-qa", "data-cy"],
-    });
     window.addEventListener("scroll", this.invalidate, { capture: true, passive: true });
     window.addEventListener("resize", this.invalidate);
   }
@@ -42,6 +44,18 @@ export class GuideCaptureSelection {
   }
 
   setTargets(targets: CapturedGuideTarget[]): void {
+    if (targets === this.targets) return;
+    const hadTargets = this.targets.length > 0;
+    if (targets.length && !hadTargets) {
+      this.observer.observe(document.body ?? document.documentElement, {
+        subtree: true, childList: true, attributes: true,
+        attributeFilter: ["class", "id", "hidden", "style", "aria-hidden", "data-testid", "data-test", "data-qa", "data-cy"],
+      });
+    } else if (!targets.length && hadTargets) {
+      this.observer.disconnect();
+      clearTimeout(this.mutationTimer);
+      this.mutationTimer = 0;
+    }
     this.targets = targets;
     const ids = new Set(targets.map(target => target.id));
     for (const [id, marker] of this.markers) if (!ids.has(id)) { marker.remove(); this.markers.delete(id); }
@@ -56,6 +70,7 @@ export class GuideCaptureSelection {
   destroy(): void {
     this.setEnabled(false);
     this.observer.disconnect();
+    clearTimeout(this.mutationTimer);
     cancelAnimationFrame(this.frame);
     window.removeEventListener("scroll", this.invalidate, true);
     window.removeEventListener("resize", this.invalidate);

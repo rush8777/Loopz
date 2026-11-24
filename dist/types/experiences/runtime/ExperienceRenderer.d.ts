@@ -5,7 +5,7 @@ export interface ExperienceRendererCallbacks {
     onDismiss: () => void;
     onAction: (action: ExperienceAction) => void;
     onComplete: () => void;
-    onGuideAdvance?: () => void;
+    onGuideAdvance?: (source?: "element_click") => void;
     onGuideBack?: () => void;
     onUnavailable?: () => void;
     onGuideStatus?: (status: "delay" | "waiting" | "ready" | "unavailable") => void;

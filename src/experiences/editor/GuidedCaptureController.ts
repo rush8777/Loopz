@@ -353,6 +353,7 @@ export class GuidedCaptureController {
     if (action.mode === "select" || action.mode === "navigate") {
       if (action.mode === this.checkpoint.mode) return;
       if (action.mode === "navigate") this.replacement = undefined;
+      else this.journey.routeChanged();
       this.checkpointChanged({ ...this.checkpoint, mode: action.mode });
     }
     if (action.earlier) this.moveTarget(action.earlier, -1);
@@ -407,6 +408,9 @@ export class GuidedCaptureController {
         : type === "element_hover" ? { type, durationMs: 500 }
         : type === "element_click" ? { type } : { type: "button" };
     }
+    if ("variant" in select.dataset) {
+      step.variant = select.value ? select.value as CapturePlanStep["variant"] : undefined;
+    }
     if ("routeTarget" in select.dataset && step.advance.type === "route") step.advance.targetId = select.value;
     if ("missing" in select.dataset) {
       const action = select.value;
@@ -440,6 +444,10 @@ export class GuidedCaptureController {
       const target = this.checkpoint.targets.find(target => target.id === step.targetId);
       const name = target ? `Anchored tooltip · ${target.target.label ?? target.target.tagName} · ${target.target.targetContext.pagePath}` : "Modal";
       const advance = step.advance;
+      const variants: [NonNullable<CapturePlanStep["variant"]>, string][] = step.pattern === "anchored_card"
+        ? [["action", "Action tooltip"], ["information", "Informational tooltip"]]
+        : index === 0 ? [["welcome", "Welcome modal"]]
+          : index === this.plan!.steps.length - 1 ? [["completion", "Completion modal"]] : [];
       const types: CaptureAdvance["type"][] = ["button", "route", "custom_event"];
       if (step.pattern === "anchored_card" && index < this.plan!.steps.length - 1) types.splice(1, 0, "element_click", "element_hover");
       if (advance.type === "unconfigured") types.unshift("unconfigured");
@@ -448,6 +456,7 @@ export class GuidedCaptureController {
         <label>Heading <input maxlength="140" data-heading value="${captureHtml(step.heading)}"></label>
         <label>Description <textarea maxlength="500" rows="2" data-body>${captureHtml(step.body)}</textarea></label>
         ${advance.type === "unconfigured" ? `<small class="warning">${captureHtml(advance.reason)}</small>` : ""}
+        ${variants.length ? `<label>Template <select data-variant><option value="">Automatic</option>${variants.map(([key, label]) => `<option value="${key}" ${step.variant === key ? "selected" : ""}>${label}</option>`).join("")}</select></label>` : ""}
         <label>Advance when <select data-advance>${types.map(type => `<option value="${type}" ${advance.type === type ? "selected" : ""}>${advanceLabels[type]}</option>`).join("")}</select></label>
         ${advance.type === "route" ? this.routeOptions(step, advance.targetId) : ""}
         ${advance.type === "custom_event" ? `<label>Verified event name <input maxlength="200" data-event-name value="${captureHtml(advance.eventName)}"></label>` : ""}
@@ -507,19 +516,38 @@ export class GuidedCaptureController {
     const { definition } = this.candidate;
     const step = definition.steps[this.index];
     const path = step.target?.targetContext?.pagePath;
+    const planned = this.plan?.steps[this.index];
+    const advance = planned?.advance;
+    const details = this.root.querySelector("[data-preview-details]");
+    const targetStatus = this.root.querySelector("[data-preview-target]");
+    const destination = advance?.type === "route" ? this.pathFor(advance.targetId) : undefined;
+    const observed = destination && this.checkpoint.observations?.some(item => item.type === "route" && item.to === destination && (!path || item.from === path));
+    if (details && advance) {
+      const how = destination ? `${advanceLabels[advance.type]} to ${destination} · ${observed ? "observed during capture" : "author-configured route"}`
+        : advance.type === "custom_event" ? `${advanceLabels[advance.type]} “${advance.eventName}”` : advanceLabels[advance.type];
+      details.textContent = `${path ?? "Modal without an anchor"} · ${how}`;
+    }
+    if (targetStatus) targetStatus.textContent = path ? "Locating target…" : "Target-free modal";
     const position = this.root.querySelector("[data-preview-position]");
     if (position) position.textContent = `${this.index + 1} of ${definition.steps.length} · ${step.label ?? step.content.heading}`;
     this.preview.destroy();
     if (path && guideCapturePath() !== path) {
+      if (targetStatus) targetStatus.textContent = "Target is on a different page";
       this.message(`Navigate to ${path} in your application to see this tooltip.`);
       return;
     }
     this.message("");
     const noop = () => {};
-    this.preview.render({ id: this.draft.experience.id, versionId: this.draft.version.id, kind: "guide", widgetType: null, priority: 0, definition }, {
-      onVisible: noop, onDismiss: noop, onAction: noop, onComplete: noop,
-      onGuideAdvance: () => this.previewStep(1), onGuideBack: () => this.previewStep(-1),
-      onUnavailable: () => this.message("The target is missing on this page. You can return to capture and replace it."),
+    const inspection = { ...definition, steps: definition.steps.map(item => item.id !== step.id ? item : {
+      ...item, advance: { type: "button" as const }, presentation: undefined,
+    }) };
+    this.preview.render({ id: this.draft.experience.id, versionId: this.draft.version.id, kind: "guide", widgetType: null, priority: 0, definition: inspection }, {
+      onVisible: () => { if (targetStatus && path) targetStatus.textContent = "Target found"; },
+      onDismiss: noop, onAction: noop, onComplete: noop,
+      onUnavailable: () => {
+        if (targetStatus) targetStatus.textContent = "Target missing";
+        this.message("The target is missing on this page. You can return to capture and replace it.");
+      },
     }, step.id);
   }
 
@@ -634,7 +662,7 @@ export class GuidedCaptureController {
     const checkpoint = this.root.querySelector("[data-checkpoint]");
     if (checkpoint) checkpoint.textContent = this.checkpointError
       ? this.localSaved ? "Saved in this tab. The server checkpoint needs attention." : "The latest selection could not be saved. Keep this tab open and retry."
-      : this.inFlight ? "Saving capture…" : this.checkpoint.targets.length ? "Capture saved" : "";
+      : this.inFlight || this.pending ? "Saving capture…" : this.checkpoint.targets.length ? "Capture saved" : "";
     const planButton = this.root.querySelector<HTMLButtonElement>("[data-plan]");
     if (planButton) planButton.disabled = this.busy || !this.checkpoint.targets.length || this.checkpointError;
     this.root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-apply],[data-edit-plan],[data-compile],[data-edit-capture],[data-prompt],[data-plan-steps] input,[data-plan-steps] textarea,[data-plan-steps] select").forEach(control => { control.disabled = this.busy || control.matches("[data-apply],[data-compile]") && this.checkpointError; });

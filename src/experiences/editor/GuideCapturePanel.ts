@@ -44,7 +44,7 @@ export const guideCapturePanel = `
         <label>What should this guide help users do?
           <textarea data-prompt rows="3" maxlength="2000" required placeholder="Help new customers create their first invoice."></textarea>
         </label>
-        <div class="row"><button type="submit" data-primary data-plan>Plan with Geo</button><button type="button" data-cancel hidden>Cancel request</button></div>
+        <div class="row"><button type="submit" data-primary data-plan>Plan with Geo</button></div>
       </form>
     </section>
     <section data-plan-panel hidden>
@@ -53,16 +53,20 @@ export const guideCapturePanel = `
       <div class="row"><button type="button" data-compile data-primary>Generate preview</button><button type="button" data-edit-capture>Back to capture</button></div>
     </section>
     <section data-preview hidden>
-      <h2>Guide preview</h2>
+      <h2>Design preview</h2>
+      <p class="muted">Inspect layouts here. Apply the draft to test the full journey in the editor.</p>
       <p data-preview-position class="muted"></p>
+      <p data-preview-details class="muted"></p>
+      <p data-preview-target class="muted" role="status"></p>
       <div class="row"><button type="button" data-previous>Previous step</button><button type="button" data-next>Next step</button></div>
       <div class="row"><button type="button" data-apply data-primary>Apply to draft</button><button type="button" data-edit-plan>Edit plan</button></div>
     </section>
-      <p class="muted" data-checkpoint role="status" aria-live="polite"></p>
-      <div class="row">
-        <button type="button" data-retry hidden>Retry checkpoint</button>
-        <button type="button" data-refresh hidden>Load latest checkpoint</button>
-      </div>
+    <p class="muted" data-checkpoint role="status" aria-live="polite"></p>
+    <div class="row">
+      <button type="button" data-cancel hidden>Cancel request</button>
+      <button type="button" data-retry hidden>Retry checkpoint</button>
+      <button type="button" data-refresh hidden>Load latest checkpoint</button>
+    </div>
     <button type="button" data-reload hidden>Retry loading capture</button>
   </main>
 </aside>`;

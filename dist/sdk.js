@@ -1389,6 +1389,7 @@
   function isEditorState(value) {
     if (!value || typeof value !== "object") return false;
     const state = value;
+    if (state.guidePreview !== void 0 && (!state.guidePreview || typeof state.guidePreview.versionId !== "string" || typeof state.guidePreview.entryPath !== "string" || typeof state.guidePreview.completed !== "boolean")) return false;
     return typeof state.experienceId === "string" && !!state.experienceId && (state.selectedStepId === void 0 || typeof state.selectedStepId === "string") && (state.mode === "select" || state.mode === "design" || state.mode === "target" || state.mode === "navigate" || state.mode === "preview");
   }
   function isEditorSession(value) {

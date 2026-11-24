@@ -89,9 +89,7 @@ describe("Guided Capture", () => {
       await changes();
       expect(marker("two")?.hidden).toBe(true);
       document.body.append(other);
-      await changes();
-      await changes();
-      expect(marker("two")?.hidden).toBe(false);
+      await vi.waitFor(() => expect(marker("two")?.hidden).toBe(false));
       selection.setTargets([selected[1]]);
       expect(marker("one")).toBeNull();
     } finally { selection.destroy(); }
@@ -165,6 +163,18 @@ describe("Guided Capture", () => {
       expect(checkpoint()?.querySelector("[data-targets]")?.textContent).toContain("Invoice");
       expect(button("[data-plan]")?.disabled).toBe(false);
     } finally { controller.destroy(); }
+  });
+
+  it("uses field labels and explicit context without reading values or private referenced text", () => {
+    document.body.innerHTML = '<form aria-label="Create invoice"><fieldset><legend>Line items</legend><label for="amount">Amount</label><p id="hint">Enter the amount before tax</p><p id="private" data-private>Private customer notes</p><input id="amount" type="number" required aria-describedby="hint private" value="9988"></fieldset></form>';
+    const input = document.querySelector("#amount")!;
+    const capture = describeCaptureTarget(input, "amount", "/invoice/new");
+    expect(capture.target.label).toBe("Amount");
+    expect(capture.semantics).toMatchObject({
+      kind: "text_input", inputType: "number", required: true,
+      section: "Line items", form: "Create invoice", description: "Enter the amount before tax",
+    });
+    expect(JSON.stringify(capture)).not.toMatch(/9988|Private customer notes/);
   });
 
   it("uses sanitized path matching for generated targets and preserves literal legacy matching", () => {

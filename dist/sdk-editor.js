@@ -7644,9 +7644,9 @@ ${ISOLATION_CSS}`;
         finished = true;
         run2();
       };
-      const advance = () => once(() => {
+      const advance = (source) => once(() => {
         var _a2;
-        return (_a2 = callbacks.onGuideAdvance) == null ? void 0 : _a2.call(callbacks);
+        return (_a2 = callbacks.onGuideAdvance) == null ? void 0 : _a2.call(callbacks, source);
       });
       const back = () => once(() => {
         var _a2;
@@ -7767,13 +7767,16 @@ ${ISOLATION_CSS}`;
       if (!advance) return;
       if (type === "element_click") {
         let active = true;
-        const click = () => queueMicrotask(() => {
-          if (active) advance();
-        });
-        target.addEventListener("click", click);
+        const click = (event) => {
+          if (!event.composedPath().includes(target)) return;
+          queueMicrotask(() => {
+            if (active) advance("element_click");
+          });
+        };
+        document.addEventListener("click", click, true);
         this.cleanupAdvance = () => {
           active = false;
-          target.removeEventListener("click", click);
+          document.removeEventListener("click", click, true);
         };
       } else if (type === "element_hover") {
         let timer = null;
@@ -7952,13 +7955,15 @@ ${ISOLATION_CSS}`;
       return this.captureRequest("/apply", "POST", input2);
     }
     async captureRequest(action, method, input2, signal) {
+      const bodyText = input2 === void 0 ? void 0 : JSON.stringify(input2);
+      const keepalive = method === "PUT" && bodyText !== void 0 && new Blob([bodyText]).size < 6e4;
       const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/guide-capture${action}`, {
         method,
         headers: this.headers(),
         credentials: "omit",
         cache: "no-store",
-        ...input2 !== void 0 ? { body: JSON.stringify(input2) } : {},
-        ...method === "PUT" ? { keepalive: true } : {},
+        ...bodyText !== void 0 ? { body: bodyText } : {},
+        keepalive,
         signal
       });
       const body = await response.json().catch(() => null);
@@ -8099,16 +8104,11 @@ ${ISOLATION_CSS}`;
       </div>
       <p class="muted" data-instructions></p>
       <ol data-targets aria-label="Captured elements"></ol>
-      <p class="muted" data-checkpoint role="status" aria-live="polite"></p>
-      <div class="row">
-        <button type="button" data-retry hidden>Retry checkpoint</button>
-        <button type="button" data-refresh hidden>Load latest checkpoint</button>
-      </div>
       <form data-prompt-form>
         <label>What should this guide help users do?
           <textarea data-prompt rows="3" maxlength="2000" required placeholder="Help new customers create their first invoice."></textarea>
         </label>
-        <div class="row"><button type="submit" data-primary data-plan>Plan with Geo</button><button type="button" data-cancel hidden>Cancel request</button></div>
+        <div class="row"><button type="submit" data-primary data-plan>Plan with Geo</button></div>
       </form>
     </section>
     <section data-plan-panel hidden>
@@ -8117,34 +8117,25 @@ ${ISOLATION_CSS}`;
       <div class="row"><button type="button" data-compile data-primary>Generate preview</button><button type="button" data-edit-capture>Back to capture</button></div>
     </section>
     <section data-preview hidden>
-      <h2>Guide preview</h2>
+      <h2>Design preview</h2>
+      <p class="muted">Inspect layouts here. Apply the draft to test the full journey in the editor.</p>
       <p data-preview-position class="muted"></p>
+      <p data-preview-details class="muted"></p>
+      <p data-preview-target class="muted" role="status"></p>
       <div class="row"><button type="button" data-previous>Previous step</button><button type="button" data-next>Next step</button></div>
       <div class="row"><button type="button" data-apply data-primary>Apply to draft</button><button type="button" data-edit-plan>Edit plan</button></div>
     </section>
+    <p class="muted" data-checkpoint role="status" aria-live="polite"></p>
+    <div class="row">
+      <button type="button" data-cancel hidden>Cancel request</button>
+      <button type="button" data-retry hidden>Retry checkpoint</button>
+      <button type="button" data-refresh hidden>Load latest checkpoint</button>
+    </div>
     <button type="button" data-reload hidden>Retry loading capture</button>
   </main>
 </aside>`;
   function captureHtml(text2) {
     return text2.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
-  }
-  class HighlightOverlay {
-    constructor() {
-      this.element = document.createElement("div");
-      this.element.dataset.movcuesPickerOverlay = "";
-      this.element.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #2563eb;background:rgba(37,99,235,.12);display:none;box-sizing:border-box";
-      document.documentElement.appendChild(this.element);
-    }
-    show(target) {
-      const rect = target.getBoundingClientRect();
-      Object.assign(this.element.style, { display: "block", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
-    }
-    hide() {
-      this.element.style.display = "none";
-    }
-    destroy() {
-      this.element.remove();
-    }
   }
   const SENSITIVE_INPUT_TYPES = /* @__PURE__ */ new Set(["password", "email", "tel", "credit-card", "cc-number"]);
   const SENSITIVE_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA", "SELECT"]);
@@ -8233,6 +8224,24 @@ ${ISOLATION_CSS}`;
     if (tag === "select") return "select";
     if (tag === "textarea") return "textarea";
     return void 0;
+  }
+  class HighlightOverlay {
+    constructor() {
+      this.element = document.createElement("div");
+      this.element.dataset.movcuesPickerOverlay = "";
+      this.element.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #2563eb;background:rgba(37,99,235,.12);display:none;box-sizing:border-box";
+      document.documentElement.appendChild(this.element);
+    }
+    show(target) {
+      const rect = target.getBoundingClientRect();
+      Object.assign(this.element.style, { display: "block", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+    }
+    hide() {
+      this.element.style.display = "none";
+    }
+    destroy() {
+      this.element.remove();
+    }
   }
   const STABLE_DATA_ATTRS = ["data-testid", "data-test", "data-qa", "data-cy", "data-analytics-id"];
   const SEMANTIC_ATTRS = ["role", "aria-label", "name", "type", "href"];
@@ -8448,7 +8457,7 @@ ${ISOLATION_CSS}`;
   const privateElement = new SensitiveElementDetector();
   const editable = "[contenteditable]:not([contenteditable=false])";
   const explicitlyPrivate = "[data-movcues-private],input[type=password],input[type=hidden],[autocomplete=current-password],[autocomplete=new-password],[autocomplete=one-time-code]";
-  const interactive = `button,input,select,textarea,a[href],[role=button],[role=link],[role=checkbox],[role=tab],[role=switch],${editable}`;
+  const interactive = `button,input,select,textarea,a[href],[role=button],[role=link],[role=checkbox],[role=combobox],[role=tab],[role=switch],${editable}`;
   function captureTargetFor(node2) {
     if (!(node2 instanceof Element) || isMovcuesSurface(node2) || node2.closest(explicitlyPrivate) || privateElement.isWithinPrivateSubtree(node2)) return null;
     const target = node2.closest(interactive) ?? node2;
@@ -8474,8 +8483,31 @@ ${ISOLATION_CSS}`;
   }
   function safeLabel(text2) {
     const value = text2 == null ? void 0 : text2.replace(/\s+/g, " ").trim();
-    if (!value || value.length > 100 || /[@<>\u0000-\u001f]|https?:|\d{4,}|[\da-z_-]{32,}/i.test(value)) return void 0;
+    if (!value || value.length > 100 || /(?:\+?\d[\s().-]*){7,}/.test(value) || /[@<>\u0000-\u001f]|https?:|\d{4,}|[\da-z_-]{32,}/i.test(value)) return void 0;
     return value;
+  }
+  function safeElementText(element) {
+    if (!element || element.closest(explicitlyPrivate) || privateElement.isWithinPrivateSubtree(element)) return void 0;
+    return safeLabel(labelText(element));
+  }
+  function referenceText(element, attribute) {
+    const ids = (element.getAttribute(attribute) ?? "").trim().split(/\s+/).slice(0, 3);
+    return safeLabel(ids.map((id) => safeElementText(element.ownerDocument.getElementById(id))).filter(Boolean).join(" "));
+  }
+  function semanticContext(element, submit) {
+    const inputType = element instanceof HTMLInputElement ? element.type : void 0;
+    const kind = submit ? "submit" : element.matches('a[href],[role="link"],[role="tab"]') ? "navigation" : element.matches('select,[role="combobox"],[aria-haspopup="listbox"]') ? "dropdown" : element.matches('input[type="checkbox"],input[type="radio"],[role="checkbox"],[role="switch"]') ? "checkbox" : element.matches('button,input[type="button"],[role="button"]') ? "action" : element.matches(`input,textarea,${editable}`) ? "text_input" : "information";
+    const section = element.closest("fieldset,section,[role='group'],form");
+    const form = element.closest("form");
+    return {
+      kind,
+      description: referenceText(element, "aria-describedby"),
+      section: safeElementText((section == null ? void 0 : section.querySelector(":scope > legend,:scope > h1,:scope > h2,:scope > h3")) ?? null),
+      form: form && !privateElement.isWithinPrivateSubtree(form) ? safeLabel(form.getAttribute("aria-label")) ?? referenceText(form, "aria-labelledby") : void 0,
+      inputType,
+      required: element.hasAttribute("required") || element.getAttribute("aria-required") === "true" || void 0,
+      disabled: element.matches(":disabled") || element.getAttribute("aria-disabled") === "true" || void 0
+    };
   }
   function describeCaptureTarget(element, id, pagePath) {
     var _a;
@@ -8483,12 +8515,15 @@ ${ISOLATION_CSS}`;
     const tagName = element.tagName.toLowerCase();
     const role = (_a = computeElementRole(element)) == null ? void 0 : _a.split(":")[0];
     const formControl = element.matches(`input,textarea,select,${editable}`);
-    const submit = element instanceof HTMLButtonElement && element.type === "submit" && element.form || element instanceof HTMLInputElement && element.type === "submit";
-    const ordinaryLabel = safeLabel(element.getAttribute("aria-label")) ?? safeLabel(labelText(element));
+    const submit = Boolean(element instanceof HTMLButtonElement && element.type === "submit" && element.form || element instanceof HTMLInputElement && element.type === "submit");
+    const labels = "labels" in element ? element.labels : null;
+    const associatedLabel = labels ? safeLabel(Array.from(labels).slice(0, 3).map(safeElementText).filter(Boolean).join(" ")) : void 0;
+    const ordinaryLabel = referenceText(element, "aria-labelledby") ?? safeLabel(element.getAttribute("aria-label")) ?? associatedLabel ?? safeElementText(element) ?? (formControl ? safeLabel(element.getAttribute("placeholder")) : void 0);
     const label = submit ? safeLabel(`Submit: ${ordinaryLabel ?? "form"}`) ?? "Submit form" : ordinaryLabel ?? (formControl ? "Field" : void 0);
     if (generated.primarySelector.length > 240) throw new Error("This element has a long or unstable selector. Choose an element with a stable ID.");
     return {
       id,
+      semantics: semanticContext(element, submit),
       target: {
         ...generated,
         fallbackSelectors: generated.fallbackSelectors.filter((value) => value.length <= 240),
@@ -8499,12 +8534,83 @@ ${ISOLATION_CSS}`;
       }
     };
   }
+  const surfaceSelector = 'dialog[open],[role="dialog"][aria-modal="true"],[role="menu"][data-state="open"]';
+  const linkSelector = 'a[href],[role="link"]';
+  const choiceSelector = 'select,input[type="checkbox"],input[type="radio"],[role="checkbox"],[role="switch"],[role="tab"]';
+  const controlSelector = `button,[role="button"],input[type="button"],input[type="submit"],${linkSelector},${choiceSelector}`;
+  class GuideCaptureJourney {
+    constructor(targets, record) {
+      this.targets = targets;
+      this.record = record;
+      this.active = false;
+      this.path = null;
+      this.frame = 0;
+      this.observeClick = (event) => {
+        var _a;
+        if (!event.isTrusted) return;
+        this.routeChanged();
+        const path = this.path;
+        const element = captureTargetFor(event.target);
+        if (!path || !(element == null ? void 0 : element.matches(controlSelector))) return;
+        const control = element.matches(linkSelector) ? "link" : element.matches(choiceSelector) ? "choice" : "button";
+        const targetId = (_a = this.targets().find((item) => item.target.targetContext.pagePath === path && findTarget(item.target) === element)) == null ? void 0 : _a.id;
+        const afterClick = this.record({ type: "click", path, control, targetId });
+        this.recentClick = { sequence: afterClick, path, time: performance.now() };
+        cancelAnimationFrame(this.frame);
+        if (control === "link") return;
+        const before = document.querySelector(surfaceSelector);
+        const alreadyExpanded = element.getAttribute("aria-expanded") === "true";
+        this.frame = requestAnimationFrame(() => {
+          if (!this.active || guideCapturePath() !== path) return;
+          const shown = document.querySelector(surfaceSelector);
+          if (shown && shown !== before && captureTargetFor(shown)) {
+            this.record({ type: "ui", path, afterClick, surface: shown.getAttribute("role") === "menu" ? "menu" : "dialog" });
+          } else if (!alreadyExpanded && element.getAttribute("aria-expanded") === "true") {
+            this.record({ type: "ui", path, afterClick, surface: "expanded" });
+          }
+        });
+      };
+    }
+    activate(previousPath) {
+      if (this.active) return;
+      this.active = true;
+      this.path = previousPath ?? guideCapturePath();
+      window.addEventListener("click", this.observeClick, { capture: true, passive: true });
+      this.routeChanged();
+    }
+    stop() {
+      if (!this.active) return;
+      this.active = false;
+      this.recentClick = void 0;
+      cancelAnimationFrame(this.frame);
+      this.frame = 0;
+      window.removeEventListener("click", this.observeClick, true);
+    }
+    routeChanged() {
+      if (!this.active) return;
+      const from = this.path;
+      const to = guideCapturePath();
+      this.path = to;
+      if (from && to && from !== to) {
+        const click = this.recentClick;
+        const afterClick = (click == null ? void 0 : click.path) === from && performance.now() - click.time <= 2500 ? click.sequence : void 0;
+        this.record({ type: "route", from, to, afterClick });
+      }
+      if (from !== to) this.recentClick = void 0;
+    }
+  }
   const interceptedEvents = ["pointerdown", "pointerup", "mousedown", "mouseup", "touchstart", "touchend", "click", "auxclick", "dblclick", "contextmenu", "beforeinput", "submit", "keydown"];
   class GuideCaptureSelection {
     constructor(onSelect) {
       this.onSelect = onSelect;
       this.surface = document.createElement("div");
-      this.observer = new MutationObserver(() => this.refresh());
+      this.observer = new MutationObserver(() => {
+        if (!this.mutationTimer) this.mutationTimer = window.setTimeout(() => {
+          this.mutationTimer = 0;
+          this.refresh();
+        }, 100);
+      });
+      this.mutationTimer = 0;
       this.frame = 0;
       this.enabled = false;
       this.targets = [];
@@ -8532,12 +8638,6 @@ ${ISOLATION_CSS}`;
       };
       this.surface.dataset.movcuesPickerOverlay = "";
       document.documentElement.append(this.surface);
-      this.observer.observe(document.body ?? document.documentElement, {
-        subtree: true,
-        childList: true,
-        attributes: true,
-        attributeFilter: ["class", "id", "hidden", "style", "aria-hidden", "data-testid", "data-test", "data-qa", "data-cy"]
-      });
       window.addEventListener("scroll", this.invalidate, { capture: true, passive: true });
       window.addEventListener("resize", this.invalidate);
     }
@@ -8557,6 +8657,20 @@ ${ISOLATION_CSS}`;
       }
     }
     setTargets(targets) {
+      if (targets === this.targets) return;
+      const hadTargets = this.targets.length > 0;
+      if (targets.length && !hadTargets) {
+        this.observer.observe(document.body ?? document.documentElement, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ["class", "id", "hidden", "style", "aria-hidden", "data-testid", "data-test", "data-qa", "data-cy"]
+        });
+      } else if (!targets.length && hadTargets) {
+        this.observer.disconnect();
+        clearTimeout(this.mutationTimer);
+        this.mutationTimer = 0;
+      }
       this.targets = targets;
       const ids = new Set(targets.map((target) => target.id));
       for (const [id, marker] of this.markers) if (!ids.has(id)) {
@@ -8575,6 +8689,7 @@ ${ISOLATION_CSS}`;
     destroy() {
       this.setEnabled(false);
       this.observer.disconnect();
+      clearTimeout(this.mutationTimer);
       cancelAnimationFrame(this.frame);
       window.removeEventListener("scroll", this.invalidate, true);
       window.removeEventListener("resize", this.invalidate);
@@ -8627,6 +8742,9 @@ ${ISOLATION_CSS}`;
       this.root = this.host.attachShadow({ mode: "open" });
       this.route = new RouteObserver();
       this.preview = new ExperienceRenderer();
+      this.journey = new GuideCaptureJourney(() => this.checkpoint.targets, (observation) => this.recordObservation(observation));
+      this.saveTimer = 0;
+      this.ticketRevision = -1;
       this.checkpoint = { mode: "select", targets: [] };
       this.checkpointRevision = 0;
       this.prompt = "";
@@ -8637,13 +8755,20 @@ ${ISOLATION_CSS}`;
       this.state = "loading";
       this.busy = false;
       this.destroyed = false;
+      this.flushCheckpoint = () => {
+        if (this.state !== "loading") this.writeLocal();
+        void this.syncCheckpoint();
+      };
       this.handleClick = (event) => {
         var _a;
         const button = event.target.closest("button");
         if (!button) return;
         const action = button.dataset;
         if ("close" in action) {
-          if (!this.busy || this.request) this.closed();
+          if (!this.busy || this.request) {
+            this.flushCheckpoint();
+            this.closed();
+          }
           return;
         }
         if ("collapse" in action) {
@@ -8675,6 +8800,7 @@ ${ISOLATION_CSS}`;
         if (action.mode === "select" || action.mode === "navigate") {
           if (action.mode === this.checkpoint.mode) return;
           if (action.mode === "navigate") this.replacement = void 0;
+          else this.journey.routeChanged();
           this.checkpointChanged({ ...this.checkpoint, mode: action.mode });
         }
         if (action.earlier) this.moveTarget(action.earlier, -1);
@@ -8693,6 +8819,7 @@ ${ISOLATION_CSS}`;
           this.state = "capture";
           this.plan = void 0;
           this.message("");
+          this.workflowChanged();
           this.update();
         }
         if ("editPlan" in action) {
@@ -8700,6 +8827,7 @@ ${ISOLATION_CSS}`;
           this.candidate = void 0;
           this.preview.destroy();
           this.message("");
+          this.workflowChanged();
           this.update();
         }
         if ("previous" in action) this.previewStep(-1);
@@ -8712,7 +8840,7 @@ ${ISOLATION_CSS}`;
         const { prompt, heading, body, eventName, delay, timeout, hoverDuration } = input2.dataset;
         if (prompt !== void 0) {
           this.prompt = input2.value;
-          this.writeLocal();
+          this.workflowChanged();
           return;
         }
         const row = input2.closest("[data-plan-step]");
@@ -8721,10 +8849,12 @@ ${ISOLATION_CSS}`;
         if (heading !== void 0) step.heading = input2.value;
         if (body !== void 0) step.body = input2.value;
         if (eventName !== void 0 && step.advance.type === "custom_event") step.advance.eventName = input2.value;
-        if (!(input2 instanceof HTMLInputElement)) return;
-        if (delay !== void 0) step.delayMs = input2.valueAsNumber;
-        if (timeout !== void 0 && step.missingTarget) step.missingTarget.timeoutMs = input2.valueAsNumber;
-        if (hoverDuration !== void 0 && step.advance.type === "element_hover") step.advance.durationMs = input2.valueAsNumber;
+        if (input2 instanceof HTMLInputElement) {
+          if (delay !== void 0) step.delayMs = input2.valueAsNumber;
+          if (timeout !== void 0 && step.missingTarget) step.missingTarget.timeoutMs = input2.valueAsNumber;
+          if (hoverDuration !== void 0 && step.advance.type === "element_hover") step.advance.durationMs = input2.valueAsNumber;
+        }
+        this.workflowChanged();
       };
       this.handleChange = (event) => {
         var _a, _b, _c;
@@ -8739,15 +8869,20 @@ ${ISOLATION_CSS}`;
           const firstOther = this.checkpoint.targets.find((item) => item.target.targetContext.pagePath !== this.pathFor(step.targetId));
           step.advance = type === "route" ? { type, targetId: (firstOther == null ? void 0 : firstOther.id) ?? "" } : type === "custom_event" ? { type, eventName: "" } : type === "element_hover" ? { type, durationMs: 500 } : type === "element_click" ? { type } : { type: "button" };
         }
+        if ("variant" in select.dataset) {
+          step.variant = select.value ? select.value : void 0;
+        }
         if ("routeTarget" in select.dataset && step.advance.type === "route") step.advance.targetId = select.value;
         if ("missing" in select.dataset) {
           const action = select.value;
           step.missingTarget = action === "wait" || action === "skip" || action === "dismiss" ? { action, timeoutMs: ((_b = step.missingTarget) == null ? void 0 : _b.timeoutMs) ?? 5e3 } : null;
         }
+        this.workflowChanged();
         this.renderPlan();
         (_c = this.root.querySelector(`[data-plan-step="${index}"] [data-${Object.keys(select.dataset)[0].replace(/[A-Z]/g, (letter) => "-" + letter.toLowerCase())}]`)) == null ? void 0 : _c.focus();
       };
-      this.key = `movcues:guide-capture:${draft.experience.id}:${session.sessionId}`;
+      this.previousKey = `movcues:guide-capture:${draft.experience.id}:${session.sessionId}`;
+      this.key = `movcues:guide-capture:${draft.experience.id}`;
       this.revision = draft.version.revision;
     }
     mount() {
@@ -8767,9 +8902,12 @@ ${ISOLATION_CSS}`;
       this.selection = new GuideCaptureSelection((element) => this.select(element));
       this.unsubscribe = this.route.onChange(() => {
         var _a2;
+        this.journey.routeChanged();
         (_a2 = this.selection) == null ? void 0 : _a2.refresh();
         if (this.state === "preview") this.renderPreview();
+        this.writeLocal();
       });
+      window.addEventListener("pagehide", this.flushCheckpoint);
       this.route.start();
       void this.restore();
     }
@@ -8777,6 +8915,8 @@ ${ISOLATION_CSS}`;
       var _a, _b, _c;
       if (this.state === "expired") return;
       (_a = this.request) == null ? void 0 : _a.abort();
+      this.journey.stop();
+      clearTimeout(this.saveTimer);
       (_b = this.selection) == null ? void 0 : _b.destroy();
       this.selection = void 0;
       this.preview.destroy();
@@ -8789,6 +8929,9 @@ ${ISOLATION_CSS}`;
     }
     destroy() {
       var _a, _b, _c;
+      window.removeEventListener("pagehide", this.flushCheckpoint);
+      this.journey.stop();
+      clearTimeout(this.saveTimer);
       this.destroyed = true;
       (_a = this.request) == null ? void 0 : _a.abort();
       (_b = this.selection) == null ? void 0 : _b.destroy();
@@ -8799,16 +8942,17 @@ ${ISOLATION_CSS}`;
     }
     async restore(discardLocal = false) {
       this.toggle("[data-reload]", false);
+      this.journey.stop();
+      this.preview.destroy();
+      this.candidate = void 0;
       this.message("Restoring capture…");
       const local = discardLocal ? null : this.readLocal();
       try {
         const remote = await this.bridge.loadCapture();
         if (this.destroyed || this.state === "expired") return;
         this.adopt(remote);
-        this.prompt = (local == null ? void 0 : local.prompt) ?? this.prompt;
-        const field = this.root.querySelector("[data-prompt]");
-        if (field) field.value = this.prompt;
         this.state = "capture";
+        this.navigationPath = local == null ? void 0 : local.navigationPath;
         if ((local == null ? void 0 : local.pending) && !sameCheckpoint(local.checkpoint, this.checkpoint)) {
           if (local.baseRevision === remote.checkpointRevision || local.sending && sameCheckpoint(local.sending, this.checkpoint)) {
             this.checkpoint = local.checkpoint;
@@ -8821,10 +8965,24 @@ ${ISOLATION_CSS}`;
             this.message("A newer checkpoint is available. Load it to continue, or keep this tab open to review your local selections.");
           }
         }
-        this.writeLocal();
+        const workflow = this.checkpoint.workflow;
+        this.prompt = (workflow == null ? void 0 : workflow.prompt) ?? (local == null ? void 0 : local.prompt) ?? "";
+        const field = this.root.querySelector("[data-prompt]");
+        if (field) field.value = this.prompt;
+        this.plan = (workflow == null ? void 0 : workflow.plan) ? structuredClone(workflow.plan) : void 0;
+        if (this.plan && (workflow == null ? void 0 : workflow.stage) !== "capture") {
+          this.state = "plan";
+          this.renderPlan();
+        }
         if (!this.checkpointError) this.message("");
         this.renderTargets();
         this.update();
+        this.writeLocal();
+        if (this.plan && (workflow == null ? void 0 : workflow.draftRevision) !== this.revision) {
+          this.message("The guide draft changed. Review your restored plan before generating a fresh preview.");
+        } else if ((workflow == null ? void 0 : workflow.stage) === "preview" && !this.checkpointError && !this.busy) {
+          await this.compile(workflow.previewStepId);
+        }
       } catch (error) {
         if (this.destroyed) return;
         this.report(error);
@@ -8832,7 +8990,7 @@ ${ISOLATION_CSS}`;
       }
     }
     adopt(remote) {
-      this.checkpoint = { mode: remote.mode, targets: remote.targets };
+      this.checkpoint = { mode: remote.mode, targets: remote.targets, observations: remote.observations, workflow: remote.workflow };
       this.revision = remote.revision;
       this.checkpointRevision = remote.checkpointRevision;
       this.pending = false;
@@ -8842,7 +9000,7 @@ ${ISOLATION_CSS}`;
     readLocal() {
       var _a;
       try {
-        const item = JSON.parse(sessionStorage.getItem(this.key) ?? "null");
+        const item = JSON.parse(sessionStorage.getItem(this.key) ?? sessionStorage.getItem(this.previousKey) ?? "null");
         if (item && typeof item.prompt === "string" && Number.isInteger(item.baseRevision) && Array.isArray((_a = item.checkpoint) == null ? void 0 : _a.targets)) return item;
       } catch {
       }
@@ -8850,12 +9008,45 @@ ${ISOLATION_CSS}`;
     }
     writeLocal() {
       try {
-        const local = { checkpoint: this.checkpoint, baseRevision: this.checkpointRevision, pending: this.pending, sending: this.sending, prompt: this.prompt };
+        const local = {
+          checkpoint: this.checkpoint,
+          baseRevision: this.checkpointRevision,
+          pending: this.pending,
+          sending: this.sending,
+          prompt: this.prompt,
+          navigationPath: this.state === "capture" && this.checkpoint.mode === "navigate" ? guideCapturePath() : void 0
+        };
         sessionStorage.setItem(this.key, JSON.stringify(local));
         this.localSaved = true;
       } catch {
         this.localSaved = false;
       }
+    }
+    recordObservation(observation) {
+      var _a;
+      const history2 = this.checkpoint.observations ?? [];
+      const sequence = (((_a = history2[history2.length - 1]) == null ? void 0 : _a.sequence) ?? 0) + 1;
+      this.checkpoint = { ...this.checkpoint, observations: [...history2.slice(-31), { ...observation, sequence }] };
+      this.queueCheckpoint();
+      return sequence;
+    }
+    workflowChanged() {
+      var _a, _b;
+      if (this.state === "expired" || this.state === "loading") return;
+      this.checkpoint = { ...this.checkpoint, workflow: {
+        stage: this.state,
+        prompt: this.prompt,
+        draftRevision: this.revision,
+        plan: this.plan ? structuredClone(this.plan) : void 0,
+        previewStepId: this.state === "preview" ? (_b = (_a = this.candidate) == null ? void 0 : _a.definition.steps[this.index]) == null ? void 0 : _b.id : void 0
+      } };
+      this.queueCheckpoint();
+    }
+    queueCheckpoint() {
+      this.pending = true;
+      this.writeLocal();
+      clearTimeout(this.saveTimer);
+      this.saveTimer = window.setTimeout(() => void this.syncCheckpoint(), 200);
     }
     checkpointChanged(checkpoint) {
       this.checkpoint = checkpoint;
@@ -8866,6 +9057,7 @@ ${ISOLATION_CSS}`;
       void this.syncCheckpoint();
     }
     async syncCheckpoint() {
+      clearTimeout(this.saveTimer);
       if (this.checkpointError || this.destroyed || this.state === "expired") return false;
       if (this.inFlight) {
         const saved2 = await this.inFlight;
@@ -8939,6 +9131,7 @@ ${ISOLATION_CSS}`;
         this.replacement = void 0;
         this.message("");
         this.checkpointChanged({ ...this.checkpoint, targets });
+        this.recordObservation({ type: "target", path, targetId: id });
       } catch (error) {
         this.report(error);
       }
@@ -8979,6 +9172,7 @@ ${ISOLATION_CSS}`;
         if (signal.aborted || this.destroyed) return;
         this.plan = plan;
         this.state = "plan";
+        this.workflowChanged();
         this.renderPlan();
         this.message("");
       });
@@ -8993,6 +9187,7 @@ ${ISOLATION_CSS}`;
         const target = this.checkpoint.targets.find((target2) => target2.id === step.targetId);
         const name = target ? `Anchored tooltip · ${target.target.label ?? target.target.tagName} · ${target.target.targetContext.pagePath}` : "Modal";
         const advance = step.advance;
+        const variants = step.pattern === "anchored_card" ? [["action", "Action tooltip"], ["information", "Informational tooltip"]] : index === 0 ? [["welcome", "Welcome modal"]] : index === this.plan.steps.length - 1 ? [["completion", "Completion modal"]] : [];
         const types = ["button", "route", "custom_event"];
         if (step.pattern === "anchored_card" && index < this.plan.steps.length - 1) types.splice(1, 0, "element_click", "element_hover");
         if (advance.type === "unconfigured") types.unshift("unconfigured");
@@ -9001,6 +9196,7 @@ ${ISOLATION_CSS}`;
         <label>Heading <input maxlength="140" data-heading value="${captureHtml(step.heading)}"></label>
         <label>Description <textarea maxlength="500" rows="2" data-body>${captureHtml(step.body)}</textarea></label>
         ${advance.type === "unconfigured" ? `<small class="warning">${captureHtml(advance.reason)}</small>` : ""}
+        ${variants.length ? `<label>Template <select data-variant><option value="">Automatic</option>${variants.map(([key, label]) => `<option value="${key}" ${step.variant === key ? "selected" : ""}>${label}</option>`).join("")}</select></label>` : ""}
         <label>Advance when <select data-advance>${types.map((type) => `<option value="${type}" ${advance.type === type ? "selected" : ""}>${advanceLabels[type]}</option>`).join("")}</select></label>
         ${advance.type === "route" ? this.routeOptions(step, advance.targetId) : ""}
         ${advance.type === "custom_event" ? `<label>Verified event name <input maxlength="200" data-event-name value="${captureHtml(advance.eventName)}"></label>` : ""}
@@ -9027,7 +9223,7 @@ ${ISOLATION_CSS}`;
       var _a;
       return (_a = this.checkpoint.targets.find((item) => item.id === id)) == null ? void 0 : _a.target.targetContext.pagePath;
     }
-    async compile() {
+    async compile(restoredStepId) {
       const plan = this.plan;
       if (!plan || this.busy) return;
       if (plan.steps.some((step) => step.advance.type === "unconfigured")) {
@@ -9035,11 +9231,15 @@ ${ISOLATION_CSS}`;
         return;
       }
       await this.run("Generating an editable guide…", async (signal) => {
-        const candidate = await this.bridge.previewCapture({ ...this.revisions(), plan }, signal);
+        if (!await this.syncCheckpoint() || signal.aborted) return;
+        const revisions = this.revisions();
+        const candidate = await this.bridge.previewCapture({ ...revisions, plan }, signal);
         if (signal.aborted || this.destroyed) return;
         this.candidate = candidate;
-        this.index = 0;
+        this.ticketRevision = revisions.checkpointRevision;
+        this.index = Math.max(0, candidate.definition.steps.findIndex((step) => step.id === restoredStepId));
         this.state = "preview";
+        if (!restoredStepId) this.workflowChanged();
         this.message("");
         this.renderPreview();
       });
@@ -9048,33 +9248,54 @@ ${ISOLATION_CSS}`;
       const index = this.index + offset;
       if (!this.candidate || index < 0 || index >= this.candidate.definition.steps.length) return;
       this.index = index;
+      this.workflowChanged();
       this.renderPreview();
       this.update();
     }
     renderPreview() {
-      var _a, _b;
+      var _a, _b, _c, _d;
       if (!this.candidate) return;
       const { definition } = this.candidate;
       const step = definition.steps[this.index];
       const path = (_b = (_a = step.target) == null ? void 0 : _a.targetContext) == null ? void 0 : _b.pagePath;
+      const planned = (_c = this.plan) == null ? void 0 : _c.steps[this.index];
+      const advance = planned == null ? void 0 : planned.advance;
+      const details = this.root.querySelector("[data-preview-details]");
+      const targetStatus = this.root.querySelector("[data-preview-target]");
+      const destination = (advance == null ? void 0 : advance.type) === "route" ? this.pathFor(advance.targetId) : void 0;
+      const observed = destination && ((_d = this.checkpoint.observations) == null ? void 0 : _d.some((item) => item.type === "route" && item.to === destination && (!path || item.from === path)));
+      if (details && advance) {
+        const how = destination ? `${advanceLabels[advance.type]} to ${destination} · ${observed ? "observed during capture" : "author-configured route"}` : advance.type === "custom_event" ? `${advanceLabels[advance.type]} “${advance.eventName}”` : advanceLabels[advance.type];
+        details.textContent = `${path ?? "Modal without an anchor"} · ${how}`;
+      }
+      if (targetStatus) targetStatus.textContent = path ? "Locating target…" : "Target-free modal";
       const position = this.root.querySelector("[data-preview-position]");
       if (position) position.textContent = `${this.index + 1} of ${definition.steps.length} · ${step.label ?? step.content.heading}`;
       this.preview.destroy();
       if (path && guideCapturePath() !== path) {
+        if (targetStatus) targetStatus.textContent = "Target is on a different page";
         this.message(`Navigate to ${path} in your application to see this tooltip.`);
         return;
       }
       this.message("");
       const noop = () => {
       };
-      this.preview.render({ id: this.draft.experience.id, versionId: this.draft.version.id, kind: "guide", widgetType: null, priority: 0, definition }, {
-        onVisible: noop,
+      const inspection = { ...definition, steps: definition.steps.map((item) => item.id !== step.id ? item : {
+        ...item,
+        advance: { type: "button" },
+        presentation: void 0
+      }) };
+      this.preview.render({ id: this.draft.experience.id, versionId: this.draft.version.id, kind: "guide", widgetType: null, priority: 0, definition: inspection }, {
+        onVisible: () => {
+          if (targetStatus && path) targetStatus.textContent = "Target found";
+        },
         onDismiss: noop,
         onAction: noop,
         onComplete: noop,
-        onGuideAdvance: () => this.previewStep(1),
-        onGuideBack: () => this.previewStep(-1),
-        onUnavailable: () => this.message("The target is missing on this page. You can return to capture and replace it.")
+        onUnavailable: () => {
+          if (targetStatus) targetStatus.textContent = "Target missing";
+          this.message("The target is missing on this page. You can return to capture and replace it.");
+        }
       }, step.id);
     }
     async apply() {
@@ -9085,7 +9306,14 @@ ${ISOLATION_CSS}`;
       this.message("Applying the guide to your draft…");
       this.update();
       try {
-        const { version } = await this.bridge.applyCapture({ ...this.revisions(), plan, previewTicket: candidate.previewTicket });
+        if (!await this.syncCheckpoint() || this.destroyed) return;
+        const revisions = this.revisions();
+        if (this.ticketRevision !== revisions.checkpointRevision) {
+          const fresh = await this.bridge.previewCapture({ ...revisions, plan }, AbortSignal.timeout(15e3));
+          this.candidate = fresh;
+          this.ticketRevision = revisions.checkpointRevision;
+        }
+        const { version } = await this.bridge.applyCapture({ ...revisions, plan, previewTicket: this.candidate.previewTicket });
         if (!this.destroyed) this.finish(version);
       } catch (error) {
         if (this.destroyed) return;
@@ -9104,7 +9332,7 @@ ${ISOLATION_CSS}`;
           this.candidate = void 0;
           this.plan = void 0;
           await this.restore();
-          if (this.state === "capture") this.message("The draft changed. Your selections are available. Generate a fresh plan to continue.");
+          this.message("The draft or checkpoint changed. Review the recovered work before generating a fresh preview.");
         }
       } finally {
         this.busy = false;
@@ -9114,6 +9342,7 @@ ${ISOLATION_CSS}`;
     finish(version) {
       try {
         sessionStorage.removeItem(this.key);
+        sessionStorage.removeItem(this.previousKey);
       } catch {
       }
       this.applied(version);
@@ -9135,7 +9364,7 @@ ${ISOLATION_CSS}`;
               this.plan = void 0;
               this.candidate = void 0;
               await this.restore();
-              if (this.state === "capture") this.message("The draft changed. Your selections are available. Generate a fresh plan to continue.");
+              this.message("The draft or checkpoint changed. Review the recovered work before generating a fresh preview.");
             } else this.report(error);
           }
         }
@@ -9172,6 +9401,11 @@ ${ISOLATION_CSS}`;
       const active = this.state === "capture" && this.checkpoint.mode === "select" && !this.busy;
       (_a = this.selection) == null ? void 0 : _a.setEnabled(active);
       (_b = this.selection) == null ? void 0 : _b.setTargets(this.state === "capture" ? this.checkpoint.targets : []);
+      if (this.state === "capture" && this.checkpoint.mode === "navigate" && !this.busy) {
+        const path = this.navigationPath;
+        this.navigationPath = void 0;
+        this.journey.activate(path);
+      } else this.journey.stop();
       const instructions = this.root.querySelector("[data-instructions]");
       if (instructions) instructions.textContent = this.checkpoint.mode === "select" ? "Click an element to capture it. Switch to Navigate to use your application." : "Use your application as usual. Switch to Select Elements when you reach the next screen.";
       this.root.querySelectorAll("[data-mode]").forEach((button) => {
@@ -9179,11 +9413,11 @@ ${ISOLATION_CSS}`;
         button.disabled = this.busy;
       });
       const checkpoint = this.root.querySelector("[data-checkpoint]");
-      if (checkpoint) checkpoint.textContent = this.checkpointError ? this.localSaved ? "Saved in this tab. The server checkpoint needs attention." : "The latest selection could not be saved. Keep this tab open and retry." : this.inFlight ? "Saving capture…" : this.checkpoint.targets.length ? "Capture saved" : "";
+      if (checkpoint) checkpoint.textContent = this.checkpointError ? this.localSaved ? "Saved in this tab. The server checkpoint needs attention." : "The latest selection could not be saved. Keep this tab open and retry." : this.inFlight || this.pending ? "Saving capture…" : this.checkpoint.targets.length ? "Capture saved" : "";
       const planButton = this.root.querySelector("[data-plan]");
       if (planButton) planButton.disabled = this.busy || !this.checkpoint.targets.length || this.checkpointError;
       this.root.querySelectorAll("[data-apply],[data-edit-plan],[data-compile],[data-edit-capture],[data-prompt],[data-plan-steps] input,[data-plan-steps] textarea,[data-plan-steps] select").forEach((control) => {
-        control.disabled = this.busy;
+        control.disabled = this.busy || control.matches("[data-apply],[data-compile]") && this.checkpointError;
       });
       const previous = this.root.querySelector("[data-previous]");
       const next = this.root.querySelector("[data-next]");
@@ -9192,17 +9426,11 @@ ${ISOLATION_CSS}`;
     }
   }
   function sameCheckpoint(left, right) {
-    const fingerprint = ({ id, target }) => JSON.stringify([
-      id,
-      target.primarySelector,
-      target.fallbackSelectors,
-      target.targetContext.pagePath,
-      target.tagName,
-      target.reliability,
-      target.label,
-      target.role
-    ]);
-    return left.mode === right.mode && left.targets.length === right.targets.length && left.targets.every((target, index) => fingerprint(target) === fingerprint(right.targets[index]));
+    const canonical = (state) => JSON.stringify(
+      { mode: state.mode, targets: state.targets, observations: state.observations, workflow: state.workflow },
+      (_key, value) => value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]])) : value
+    );
+    return canonical(left) === canonical(right);
   }
   function editorSelection(root2) {
     var _a;
@@ -12674,6 +12902,7 @@ ${ISOLATION_CSS}`;
       this.currentPath = "";
       this.guidePreviewComplete = false;
       this.guidePreviewEntryPath = "";
+      this.guidePreviewClickPending = false;
       this.previewDevice = "desktop";
       this.aiMessages = [];
       this.aiProposal = null;
@@ -12788,7 +13017,7 @@ ${ISOLATION_CSS}`;
       }
     }
     async activate(session, options, prefetchedDraft) {
-      var _a, _b, _c;
+      var _a, _b, _c, _d;
       this.teardown(false);
       const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
       let draft;
@@ -12807,7 +13036,6 @@ ${ISOLATION_CSS}`;
       this.draft = draft;
       this.checklist = isChecklistDefinition(draft.version.definition) ? draft.version.definition : null;
       this.definition = this.checklist ? checklistEditorAdapter(this.checklist) : draft.version.definition;
-      this.history.reset({ definition: cloneOnsite(this.checklist ?? this.definition), selection: null, stepIndex: this.stepIndex });
       this.guide = isGuideDefinition(this.definition) ? this.definition : null;
       this.survey = !this.guide && draft.experience.widgetType === "survey" ? this.definition.survey ?? null : null;
       const selectableSteps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
@@ -12817,6 +13045,16 @@ ${ISOLATION_CSS}`;
       this.currentPath = currentPagePath();
       const restoredMode = restored == null ? void 0 : restored.mode;
       this.mode = restoredMode === "select" ? "target" : restoredMode === "design" || restoredMode === "target" || restoredMode === "navigate" || restoredMode === "preview" ? restoredMode : draft.experience.builderMode === "onsite" ? "design" : "target";
+      const preview = this.mode === "preview" && restoredIndex >= 0 && ((_d = restored == null ? void 0 : restored.guidePreview) == null ? void 0 : _d.versionId) === draft.version.id ? restored.guidePreview : void 0;
+      this.guidePreviewClickPending = false;
+      this.guidePreviewEntryPath = (preview == null ? void 0 : preview.clickPending) ? this.currentPath : (preview == null ? void 0 : preview.entryPath) ?? this.currentPath;
+      this.guidePreviewComplete = (preview == null ? void 0 : preview.completed) ?? false;
+      if (preview && this.guide && this.matchesPreviewRoute(this.currentPath)) {
+        this.guidePreviewEntryPath = this.currentPath;
+        if (this.stepIndex + 1 < this.guide.steps.length) this.stepIndex++;
+        else this.guidePreviewComplete = true;
+      }
+      this.history.reset({ definition: cloneOnsite(this.checklist ?? this.definition), selection: null, stepIndex: this.stepIndex });
       this.updateContinuation();
       if (draft.guidedCapture && this.guide && draft.experience.builderMode === "onsite") {
         this.capture = new GuidedCaptureController(bridge, session, draft, (version) => {
@@ -13796,25 +14034,29 @@ ${ISOLATION_CSS}`;
       if (!this.guide || !this.flushContent()) return;
       this.guidePreviewComplete = false;
       this.stepIndex = 0;
+      this.guidePreviewClickPending = false;
+      this.guidePreviewEntryPath = currentPagePath();
       if (this.mode !== "preview") this.setMode("preview");
       else {
+        this.updateContinuation();
         this.renderPreview();
         this.syncPanel();
       }
     }
-    advanceGuidePreview(delta) {
+    advanceGuidePreview(delta, source) {
       if (!this.guide || this.mode !== "preview" || this.guidePreviewComplete && delta > 0) return;
       if (this.stepIndex + delta >= this.guide.steps.length) {
         this.guidePreviewComplete = true;
         this.previewGeneration++;
         this.preview.destroy();
         this.previewRendered = false;
+        this.updateContinuation();
         this.syncGuideBehavior();
         this.setText("[data-trigger-status]", this.previewTriggerHint());
         return;
       }
       this.guidePreviewComplete = false;
-      this.switchStep(this.stepIndex + delta);
+      this.switchStep(this.stepIndex + delta, source);
     }
     addGuideStep(pattern) {
       if (!this.guide || !this.flushContent()) return;
@@ -13967,8 +14209,8 @@ ${ISOLATION_CSS}`;
         this.changed();
       });
     }
-    switchStep(index) {
-      var _a, _b, _c, _d;
+    switchStep(index, source) {
+      var _a, _b, _c, _d, _e, _f;
       const steps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
       if (!steps || index < 0 || index >= steps.length || index === this.stepIndex) return;
       if (!this.flushContent()) return;
@@ -13982,6 +14224,21 @@ ${ISOLATION_CSS}`;
       this.compositionSelection = null;
       if (this.dirty) void this.persist();
       this.stepIndex = index;
+      if (this.mode === "preview") {
+        this.guidePreviewEntryPath = currentPagePath();
+        this.guidePreviewClickPending = source === "element_click" && ((_f = (_e = this.guide) == null ? void 0 : _e.steps[index].advance) == null ? void 0 : _f.type) === "route";
+        if (this.guidePreviewClickPending) {
+          const lifecycle = this.lifecycle;
+          const entered = steps[index].id;
+          window.setTimeout(() => {
+            var _a2, _b2;
+            if (this.lifecycle !== lifecycle || this.mode !== "preview" || ((_b2 = (_a2 = this.guide) == null ? void 0 : _a2.steps[this.stepIndex]) == null ? void 0 : _b2.id) !== entered) return;
+            this.guidePreviewClickPending = false;
+            this.guidePreviewEntryPath = currentPagePath();
+            this.updateContinuation();
+          }, 0);
+        }
+      }
       this.updateContinuation();
       this.syncPanel();
       this.applyMode();
@@ -14002,6 +14259,8 @@ ${ISOLATION_CSS}`;
       if (this.dirty) void this.persist();
       this.mode = mode;
       this.guidePreviewComplete = false;
+      this.guidePreviewClickPending = false;
+      if (mode === "preview") this.guidePreviewEntryPath = currentPagePath();
       this.configureDiagnostics();
       this.updateContinuation();
       this.applyMode();
@@ -14227,8 +14486,12 @@ ${ISOLATION_CSS}`;
       if (!this.definition || !this.draft || this.mode === "navigate" || this.saveState === "expired") return;
       if (!this.flushContent()) return;
       const generation = ++this.previewGeneration;
-      if (this.mode === "preview" && this.guide) this.guidePreviewEntryPath = currentPagePath();
       this.previewRendered = false;
+      if (this.mode === "preview" && this.guide && (this.guidePreviewComplete || !matchesGuideTargetPage(this.currentTarget(), currentPagePath()))) {
+        this.preview.destroy();
+        this.updateDiagnostics();
+        return;
+      }
       (_a = this.contentEditor) == null ? void 0 : _a.destroy();
       this.contentEditor = null;
       this.componentSelection = null;
@@ -14299,8 +14562,8 @@ ${ISOLATION_CSS}`;
           this.updateDiagnostics();
         },
         onAction: () => void 0,
-        onGuideAdvance: () => {
-          if (this.mode === "preview" && this.guide) this.advanceGuidePreview(1);
+        onGuideAdvance: (source) => {
+          if (this.mode === "preview" && this.guide) this.advanceGuidePreview(1, source);
         },
         onGuideBack: () => {
           if (this.mode === "preview" && this.guide) this.advanceGuidePreview(-1);
@@ -15368,17 +15631,19 @@ ${ISOLATION_CSS}`;
       if (notice) notice.hidden = false;
       this.setText("[data-route-change]", `${previous} → ${next}`);
       this.updateDiagnostics();
-      if (this.mode === "preview" && this.guide && !this.guidePreviewComplete) {
-        const advance = this.guide.steps[this.stepIndex].advance;
-        if (next !== this.guidePreviewEntryPath && (advance == null ? void 0 : advance.type) === "route" && matchesGuideRoute(next, advance.pageRules)) {
-          this.advanceGuidePreview(1);
-          return;
-        }
+      if (this.mode === "preview" && this.matchesPreviewRoute(next)) {
+        this.advanceGuidePreview(1);
+        return;
       }
       if (this.mode !== "navigate" && !this.guidePreviewComplete) {
         this.renderPreview();
         if (this.mode === "target") this.startPicker();
       }
+    }
+    matchesPreviewRoute(path) {
+      var _a, _b;
+      const advance = (_b = (_a = this.guide) == null ? void 0 : _a.steps[this.stepIndex]) == null ? void 0 : _b.advance;
+      return !this.guidePreviewComplete && !this.guidePreviewClickPending && path !== this.guidePreviewEntryPath && (advance == null ? void 0 : advance.type) === "route" && matchesGuideRoute(path, advance.pageRules);
     }
     currentTarget() {
       if (!this.definition) return void 0;
@@ -15429,7 +15694,10 @@ ${ISOLATION_CSS}`;
         editorState: {
           experienceId: this.draft.experience.id,
           selectedStepId: ((_b = (_a = this.guide) == null ? void 0 : _a.steps[this.stepIndex]) == null ? void 0 : _b.id) ?? ((_d = (_c = this.survey) == null ? void 0 : _c.steps[this.stepIndex]) == null ? void 0 : _d.id),
-          mode: this.mode
+          mode: this.mode,
+          ...this.mode === "preview" && this.guide && !this.aiPreviewOriginal ? {
+            guidePreview: { versionId: this.draft.version.id, entryPath: this.guidePreviewEntryPath, completed: this.guidePreviewComplete, ...this.guidePreviewClickPending ? { clickPending: true } : {} }
+          } : {}
         }
       });
     }

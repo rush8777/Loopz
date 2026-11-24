@@ -2,13 +2,13 @@ import { SensitiveElementDetector } from "../../privacy/SensitiveElementDetector
 import { computeElementRole } from "../../dom/ElementLabeler";
 import { isMovcuesSurface } from "./ElementPicker";
 import { TargetSelectorGenerator } from "./TargetSelectorGenerator";
-import type { CapturedGuideTarget } from "./GuideCaptureTypes";
+import type { CaptureSemantics, CapturedGuideTarget } from "./GuideCaptureTypes";
 
 const selector = new TargetSelectorGenerator();
 const privateElement = new SensitiveElementDetector();
 const editable = "[contenteditable]:not([contenteditable=false])";
 const explicitlyPrivate = "[data-movcues-private],input[type=password],input[type=hidden],[autocomplete=current-password],[autocomplete=new-password],[autocomplete=one-time-code]";
-const interactive = `button,input,select,textarea,a[href],[role=button],[role=link],[role=checkbox],[role=tab],[role=switch],${editable}`;
+const interactive = `button,input,select,textarea,a[href],[role=button],[role=link],[role=checkbox],[role=combobox],[role=tab],[role=switch],${editable}`;
 
 export function captureTargetFor(node: EventTarget | null): Element | null {
   if (!(node instanceof Element) || isMovcuesSurface(node) || node.closest(explicitlyPrivate) || privateElement.isWithinPrivateSubtree(node)) return null;
@@ -43,8 +43,39 @@ function labelText(element: Element): string | undefined {
 
 function safeLabel(text?: string | null): string | undefined {
   const value = text?.replace(/\s+/g, " ").trim();
-  if (!value || value.length > 100 || /[@<>\u0000-\u001f]|https?:|\d{4,}|[\da-z_-]{32,}/i.test(value)) return undefined;
+  if (!value || value.length > 100 || /(?:\+?\d[\s().-]*){7,}/.test(value) || /[@<>\u0000-\u001f]|https?:|\d{4,}|[\da-z_-]{32,}/i.test(value)) return undefined;
   return value;
+}
+
+function safeElementText(element: Element | null): string | undefined {
+  if (!element || element.closest(explicitlyPrivate) || privateElement.isWithinPrivateSubtree(element)) return undefined;
+  return safeLabel(labelText(element));
+}
+
+function referenceText(element: Element, attribute: "aria-labelledby" | "aria-describedby"): string | undefined {
+  const ids = (element.getAttribute(attribute) ?? "").trim().split(/\s+/).slice(0, 3);
+  return safeLabel(ids.map(id => safeElementText(element.ownerDocument.getElementById(id))).filter(Boolean).join(" "));
+}
+
+function semanticContext(element: Element, submit: boolean): CaptureSemantics {
+  const inputType = element instanceof HTMLInputElement ? element.type : undefined;
+  const kind = submit ? "submit"
+    : element.matches('a[href],[role="link"],[role="tab"]') ? "navigation"
+    : element.matches('select,[role="combobox"],[aria-haspopup="listbox"]') ? "dropdown"
+    : element.matches('input[type="checkbox"],input[type="radio"],[role="checkbox"],[role="switch"]') ? "checkbox"
+    : element.matches('button,input[type="button"],[role="button"]') ? "action"
+    : element.matches(`input,textarea,${editable}`) ? "text_input" : "information";
+  const section = element.closest("fieldset,section,[role='group'],form");
+  const form = element.closest("form");
+  return {
+    kind,
+    description: referenceText(element, "aria-describedby"),
+    section: safeElementText(section?.querySelector(":scope > legend,:scope > h1,:scope > h2,:scope > h3") ?? null),
+    form: form && !privateElement.isWithinPrivateSubtree(form) ? safeLabel(form.getAttribute("aria-label")) ?? referenceText(form, "aria-labelledby") : undefined,
+    inputType,
+    required: element.hasAttribute("required") || element.getAttribute("aria-required") === "true" || undefined,
+    disabled: element.matches(":disabled") || element.getAttribute("aria-disabled") === "true" || undefined,
+  };
 }
 
 export function describeCaptureTarget(element: Element, id: string, pagePath: string): CapturedGuideTarget {
@@ -52,14 +83,18 @@ export function describeCaptureTarget(element: Element, id: string, pagePath: st
   const tagName = element.tagName.toLowerCase();
   const role = computeElementRole(element)?.split(":")[0];
   const formControl = element.matches(`input,textarea,select,${editable}`);
-  const submit = element instanceof HTMLButtonElement && element.type === "submit" && element.form
-    || element instanceof HTMLInputElement && element.type === "submit";
-  const ordinaryLabel = safeLabel(element.getAttribute("aria-label")) ?? safeLabel(labelText(element));
+  const submit = Boolean(element instanceof HTMLButtonElement && element.type === "submit" && element.form
+    || element instanceof HTMLInputElement && element.type === "submit");
+  const labels = "labels" in element ? (element as HTMLInputElement).labels : null;
+  const associatedLabel = labels ? safeLabel(Array.from(labels).slice(0, 3).map(safeElementText).filter(Boolean).join(" ")) : undefined;
+  const ordinaryLabel = referenceText(element, "aria-labelledby") ?? safeLabel(element.getAttribute("aria-label"))
+    ?? associatedLabel ?? safeElementText(element) ?? (formControl ? safeLabel(element.getAttribute("placeholder")) : undefined);
   const label = submit ? safeLabel(`Submit: ${ordinaryLabel ?? "form"}`) ?? "Submit form"
     : ordinaryLabel ?? (formControl ? "Field" : undefined);
   if (generated.primarySelector.length > 240) throw new Error("This element has a long or unstable selector. Choose an element with a stable ID.");
   return {
     id,
+    semantics: semanticContext(element, submit),
     target: {
       ...generated,
       fallbackSelectors: generated.fallbackSelectors.filter(value => value.length <= 240),

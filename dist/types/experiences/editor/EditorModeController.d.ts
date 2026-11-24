@@ -47,6 +47,7 @@ export declare class EditorModeController {
     private currentPath;
     private guidePreviewComplete;
     private guidePreviewEntryPath;
+    private guidePreviewClickPending;
     private previewDevice;
     private aiConversationId;
     private aiMessages;
@@ -163,6 +164,7 @@ export declare class EditorModeController {
     private fitPanel;
     private scheduleTargetRefresh;
     private onRouteChange;
+    private matchesPreviewRoute;
     private currentTarget;
     private targetStatus;
     private currentBehavior;

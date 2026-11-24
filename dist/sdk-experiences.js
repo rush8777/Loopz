@@ -1524,9 +1524,9 @@ ${ISOLATION_CSS}`;
         finished = true;
         run2();
       };
-      const advance = () => once(() => {
+      const advance = (source) => once(() => {
         var _a2;
-        return (_a2 = callbacks.onGuideAdvance) == null ? void 0 : _a2.call(callbacks);
+        return (_a2 = callbacks.onGuideAdvance) == null ? void 0 : _a2.call(callbacks, source);
       });
       const back = () => once(() => {
         var _a2;
@@ -1647,13 +1647,16 @@ ${ISOLATION_CSS}`;
       if (!advance) return;
       if (type === "element_click") {
         let active = true;
-        const click = () => queueMicrotask(() => {
-          if (active) advance();
-        });
-        target.addEventListener("click", click);
+        const click = (event) => {
+          if (!event.composedPath().includes(target)) return;
+          queueMicrotask(() => {
+            if (active) advance("element_click");
+          });
+        };
+        document.addEventListener("click", click, true);
         this.cleanupAdvance = () => {
           active = false;
-          target.removeEventListener("click", click);
+          document.removeEventListener("click", click, true);
         };
       } else if (type === "element_hover") {
         let timer = null;
@@ -2294,7 +2297,7 @@ ${ISOLATION_CSS}`;
       this.active = runtime2;
       this.checklist.setTransientActive(((_c = runtime2.launchContext) == null ? void 0 : _c.source) === "checklist");
       if (currentStepId) this.persistGuide(runtime2, "active");
-      const mounted = currentStepId ? progress && (!progress.routePath || progress.routePath !== currentPagePath()) && this.advanceForRoute(runtime2) ? true : (this.renderActiveGuide(), true) : this.renderer.render(experience, this.callbacks(runtime2), currentStepId);
+      const mounted = currentStepId ? progress && progress.clickPending !== true && (!progress.routePath || progress.routePath !== currentPagePath()) && this.advanceForRoute(runtime2) ? true : (this.renderActiveGuide(), true) : this.renderer.render(experience, this.callbacks(runtime2), currentStepId);
       if (!mounted && this.active === runtime2) {
         this.active = null;
         this.checklist.setTransientActive(false);
@@ -2323,8 +2326,8 @@ ${ISOLATION_CSS}`;
         onComplete: () => {
           if (valid()) void this.finish(runtime2, "completed");
         },
-        onGuideAdvance: () => {
-          if (valid()) this.advanceGuide();
+        onGuideAdvance: (source) => {
+          if (valid()) this.advanceGuide(source);
         },
         onGuideBack: () => {
           if (valid()) this.backGuide();
@@ -2413,7 +2416,8 @@ ${ISOLATION_CSS}`;
       void this.checklist.refresh();
       if (!this.destroyed) void this.evaluate();
     }
-    advanceGuide() {
+    advanceGuide(source) {
+      var _a;
       const runtime2 = this.activeGuide();
       if (!runtime2) return;
       const definition = runtime2.experience.definition;
@@ -2427,8 +2431,17 @@ ${ISOLATION_CSS}`;
         void this.finish(runtime2, "completed");
         return;
       }
-      runtime2.currentStepId = definition.steps[index + 1].id;
+      const next = definition.steps[index + 1];
+      runtime2.currentStepId = next.id;
       runtime2.stepEntryRoute = location.href;
+      runtime2.clickPending = source === "element_click" && ((_a = next.advance) == null ? void 0 : _a.type) === "route";
+      if (runtime2.clickPending) window.setTimeout(() => {
+        if (!this.owns(runtime2) || runtime2.finished || runtime2.currentStepId !== next.id) return;
+        runtime2.clickPending = false;
+        runtime2.stepEntryRoute = location.href;
+        if (this.active === runtime2) this.persistGuide(runtime2, "active");
+        else if (this.pausedGuide === runtime2) this.persistGuide(runtime2, "paused");
+      }, 0);
       this.persistGuide(runtime2, "active");
       this.renderActiveGuide();
     }
@@ -2438,6 +2451,7 @@ ${ISOLATION_CSS}`;
       const definition = runtime2.experience.definition;
       const index = definition.steps.findIndex((step) => step.id === runtime2.currentStepId);
       if (index <= 0) return;
+      runtime2.clickPending = false;
       runtime2.currentStepId = definition.steps[index - 1].id;
       runtime2.stepEntryRoute = location.href;
       runtime2.stepStartedAt = null;
@@ -2538,7 +2552,7 @@ ${ISOLATION_CSS}`;
     advanceForRoute(runtime2) {
       var _a;
       const step = this.currentGuideStep(runtime2);
-      if (((_a = step == null ? void 0 : step.advance) == null ? void 0 : _a.type) !== "route" || !matchesGuideRoute(currentPagePath(), step.advance.pageRules)) return false;
+      if (runtime2.clickPending || ((_a = step == null ? void 0 : step.advance) == null ? void 0 : _a.type) !== "route" || !matchesGuideRoute(currentPagePath(), step.advance.pageRules)) return false;
       if (runtime2 === this.active) this.advanceGuide();
       else {
         const definition = runtime2.experience.definition;
@@ -2561,7 +2575,7 @@ ${ISOLATION_CSS}`;
     persistGuide(runtime2, status) {
       if (runtime2.currentStepId) {
         const previous = this.state.getGuideProgress();
-        this.state.setGuideProgress({ experienceId: runtime2.experience.id, versionId: runtime2.experience.versionId, currentStepId: runtime2.currentStepId, status, shownRequested: runtime2.shownRequested, seenStepIds: [...runtime2.seenStepIds], completedStepIds: [...runtime2.completedStepIds], routePath: currentPagePath(), ...runtime2.impressionId ? { impressionId: runtime2.impressionId } : {}, ...runtime2.launchContext ? { launchContext: runtime2.launchContext } : {}, ...(previous == null ? void 0 : previous.experienceId) === runtime2.experience.id && previous.navigationAttempted ? { navigationAttempted: true } : {} });
+        this.state.setGuideProgress({ experienceId: runtime2.experience.id, versionId: runtime2.experience.versionId, currentStepId: runtime2.currentStepId, status, shownRequested: runtime2.shownRequested, seenStepIds: [...runtime2.seenStepIds], completedStepIds: [...runtime2.completedStepIds], routePath: currentPagePath(), ...runtime2.clickPending ? { clickPending: true } : {}, ...runtime2.impressionId ? { impressionId: runtime2.impressionId } : {}, ...runtime2.launchContext ? { launchContext: runtime2.launchContext } : {}, ...(previous == null ? void 0 : previous.experienceId) === runtime2.experience.id && previous.navigationAttempted ? { navigationAttempted: true } : {} });
       }
     }
     async post(runtime2, event, action, eventType = "widget_interacted", detail) {

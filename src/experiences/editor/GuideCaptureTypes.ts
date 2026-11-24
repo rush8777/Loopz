@@ -1,7 +1,18 @@
 import type { EditorDraft, ExperienceTarget, RuntimeGuideDefinition } from "../types";
 
+export interface CaptureSemantics {
+  kind: "navigation" | "text_input" | "dropdown" | "checkbox" | "submit" | "action" | "information";
+  description?: string;
+  section?: string;
+  form?: string;
+  inputType?: string;
+  required?: boolean;
+  disabled?: boolean;
+}
+
 export interface CapturedGuideTarget {
   id: string;
+  semantics?: CaptureSemantics;
   target: ExperienceTarget & { tagName: string; targetContext: { pagePath: string } };
 }
 
@@ -43,6 +54,7 @@ export type CaptureAdvance =
 
 export interface CapturePlanStep {
   pattern: "modal" | "anchored_card";
+  variant?: "welcome" | "completion" | "action" | "information";
   targetId: string | null;
   heading: string;
   body: string;
