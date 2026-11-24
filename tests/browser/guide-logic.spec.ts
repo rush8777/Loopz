@@ -238,3 +238,51 @@ test('published playback does not attribute one navigation to two steps', async 
   await page.evaluate(() => (window as any).guideReactApp.go('/journey/done'));
   await expect.poll(() => events.filter(event => event.eventType === 'guide_completed').length).toBe(1);
 });
+
+test('a late manifest for the previous React route cannot reopen or interrupt the guide', async ({ page }) => {
+  const staleRoute = '/journey/feature';
+  await page.addInitScript(path => {
+    const fetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input, location.href);
+      if (!url.searchParams.get('url')?.endsWith(path)) return fetch(input, init);
+      // Model a transport that still delivers an old response after the SDK aborts it.
+      return fetch(input, { ...init, signal: undefined });
+    };
+  }, staleRoute);
+  const events = await production(page);
+  let releaseResponse!: () => void;
+  const holdResponse = new Promise<void>(resolve => { releaseResponse = resolve; });
+  await page.route('**/public/sites/site/**', async route => {
+    const url = new URL(route.request().url());
+    if (!url.searchParams.get('url')?.endsWith(staleRoute)) return route.fallback();
+    await holdResponse;
+    return route.fulfill({ json: { experiences: [{
+      id: 'stale-interrupt-guide', versionId: 'old', kind: 'guide', widgetType: null,
+      priority: 99, interruptPolicy: 'interrupt', definition: guide(),
+    }] } });
+  });
+  try {
+    await page.getByRole('button', { name: 'Get Started', exact: true }).click();
+    await expect(widgetHeading(page)).toHaveText('Feature');
+    const previousTarget = await page.locator('#feature-card').elementHandle();
+    const staleRequest = page.waitForRequest(request => new URL(request.url()).searchParams.get('url')?.endsWith(staleRoute) === true);
+    await page.locator('#nav-feature').click();
+    await staleRequest;
+    await expect(page.locator('[data-app-path]')).toHaveText(staleRoute);
+    await page.waitForFunction(previous => {
+      const current = document.querySelector('#feature-card');
+      return Boolean(current && current !== previous);
+    }, previousTarget);
+    await page.locator('#use-feature').click();
+    await expect(widgetHeading(page)).toHaveText('Completion');
+    const staleResponse = page.waitForResponse(response => new URL(response.url()).searchParams.get('url')?.endsWith(staleRoute) === true);
+    releaseResponse();
+    await (await staleResponse).finished();
+    await page.evaluate(async () => { await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); });
+    await expect(widgetHeading(page)).toHaveText('Completion');
+    expect(events.filter(event => event.eventType === 'experience_shown')).toHaveLength(1);
+  } finally {
+    releaseResponse();
+  }
+});
