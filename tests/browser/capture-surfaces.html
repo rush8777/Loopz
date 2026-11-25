@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Guided Capture host surfaces</title>
+<style>
+  body { font: 16px system-ui; }
+  button, input { margin: 4px; }
+  .surface { background: white; border: 1px solid; padding: 8px; }
+  .surface [role] { padding: 6px; }
+  .modal { position: fixed; top: 30%; left: 20%; }
+</style>
+<div id="app"></div>
+<script type="module">
+  import { GuidedCaptureController } from '/src/experiences/editor/GuidedCaptureController.ts';
+  import '/tests/browser/.generated/capture-surfaces.js';
+  const key = "host-fixture-checkpoint";
+  const loadCapture = () => JSON.parse(sessionStorage.getItem(key) ??
+    '{"mode":"select","targets":[],"revision":1,"checkpointRevision":0}');
+  const bridge = {
+    loadCapture: async () => loadCapture(),
+    saveCapture: async (checkpoint, revision) => {
+      const saved = { ...checkpoint, revision: 1, checkpointRevision: revision + 1 };
+      sessionStorage.setItem(key, JSON.stringify(saved));
+      return saved;
+    },
+  };
+  const capture = new GuidedCaptureController(bridge, { sessionId: "fixture" },
+    { experience: { id: "fixture" }, version: { revision: 1 } }, () => {}, () => capture.destroy());
+  window.fixture = {
+    loadCapture,
+    localCapture: () => JSON.parse(sessionStorage.getItem("movcues:guide-capture:fixture")).checkpoint,
+    expire: () => capture.expire(),
+    destroy: () => capture.destroy(),
+  };
+  capture.mount();
+</script>

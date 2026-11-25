@@ -49,6 +49,8 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   const panel = capture(editor);
   const timeline = panel.getByRole("list", { name: "Captured elements" });
   const rows = timeline.locator("[data-remove]");
+  await expect(panel.getByRole("button", { name: "Navigate", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await editor.keyboard.press("Shift+Tab");
   await expect(panel.getByRole("button", { name: "Select Elements" })).toHaveAttribute("aria-pressed", "true");
   await expect(widget(editor)).toHaveCount(0);
   const started = await editor.evaluate(() => performance.now());
@@ -88,6 +90,7 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   console.log(`Guided Capture startup: ${Math.round(timing.startup ?? 0)} ms, scenario interactions: ${Math.round(timing.now - started)} ms`);
   await editor.reload();
   await expect(rows).toHaveCount(4);
+  await expect(panel.getByRole("button", { name: "Select Elements" })).toHaveAttribute("aria-pressed", "true");
   await expect(editor.locator("[data-movcues-capture-marker]:visible")).toHaveText("4");
 
   await panel.getByLabel("What should this guide help users do?").fill("Help a new user create a project");
@@ -173,6 +176,7 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   expect(editedRow.children[0].block.type).toBe("heading");
   expect(editedRow.children[0].sizing.weight).not.toBe(editedRow.children[1].sizing.weight);
   expect(Object.values(styled.actionBindings)).toEqual(expect.arrayContaining([expect.objectContaining({ type: "previous_step" }), expect.objectContaining({ type: "next_step" })]));
+  await editor.setViewportSize({ width: 1600, height: 1000 });
   await editor.reload();
   await expect(currentHeading(editor)).toHaveText("Review project details");
   await expect(currentHeading(editor)).toHaveCSS("font-size", "22px");

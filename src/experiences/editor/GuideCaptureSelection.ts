@@ -1,10 +1,11 @@
 import { findTarget } from "../runtime/AnchoredCardRenderer";
 import { isMovcuesSurface } from "./ElementPicker";
 import { HighlightOverlay } from "./HighlightOverlay";
-import { captureTargetFor, guideCapturePath } from "./GuideCaptureTargets";
+import { captureTargetFor, guideCapturePath, isCaptureTextInput } from "./GuideCaptureTargets";
 import type { CapturedGuideTarget } from "./GuideCaptureTypes";
 
-const interceptedEvents = ["pointerdown", "pointerup", "mousedown", "mouseup", "touchstart", "touchend", "click", "auxclick", "dblclick", "contextmenu", "beforeinput", "submit", "keydown"] as const;
+const interceptedEvents = ["pointerdown", "pointerup", "mousedown", "mouseup", "touchstart", "touchend", "click", "auxclick", "dblclick", "contextmenu", "keydown"] as const;
+const hoverEvents = ["pointermove", "pointerover", "pointerout", "pointerenter", "pointerleave", "mousemove", "mouseover", "mouseout", "mouseenter", "mouseleave"] as const;
 
 export class GuideCaptureSelection {
   private readonly surface = document.createElement("div");
@@ -33,12 +34,16 @@ export class GuideCaptureSelection {
     this.enabled = enabled;
     if (enabled) {
       this.hover = new HighlightOverlay();
-      window.addEventListener("pointermove", this.move, { capture: true, passive: true });
+      for (const type of hoverEvents) window.addEventListener(type, this.move, { capture: true, passive: true });
+      window.addEventListener("blur", this.invalidate);
+      document.addEventListener("visibilitychange", this.invalidate);
       for (const type of interceptedEvents) window.addEventListener(type, this.intercept, { capture: true, passive: false });
     } else {
       this.hover?.destroy();
       this.hover = undefined;
-      window.removeEventListener("pointermove", this.move, true);
+      for (const type of hoverEvents) window.removeEventListener(type, this.move, true);
+      window.removeEventListener("blur", this.invalidate);
+      document.removeEventListener("visibilitychange", this.invalidate);
       for (const type of interceptedEvents) window.removeEventListener(type, this.intercept, true);
     }
   }
@@ -80,18 +85,26 @@ export class GuideCaptureSelection {
 
   private invalidate = () => { this.hover?.hide(); this.refresh(); };
 
-  private move = (event: PointerEvent) => {
+  private move = (event: Event) => {
+    const path = event.composedPath();
+    // Menu libraries may move focus or dismiss a submenu from pointer hover alone.
+    if (!path.some(node => node instanceof Element && isMovcuesSurface(node))) event.stopImmediatePropagation();
+    if (event.type !== "pointermove") return;
     const element = captureTargetFor(event.target);
     if (element) this.hover?.show(element);
     else this.hover?.hide();
   };
 
   private intercept = (event: Event) => {
-    if (event.composedPath().some(node => node instanceof Element && isMovcuesSurface(node))) return;
-    if (event instanceof KeyboardEvent && !["Enter", " ", "Escape"].includes(event.key)) return;
+    const path = event.composedPath();
+    if (path.some(node => node instanceof Element && isMovcuesSurface(node))) return;
+    if (event instanceof KeyboardEvent && (
+      !["Enter", " "].includes(event.key) || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
+      || isCaptureTextInput(path) || path.some(node => node instanceof HTMLSelectElement)
+    )) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    if (event instanceof KeyboardEvent && (event.repeat || event.key === "Escape")) return;
+    if (event instanceof KeyboardEvent && event.repeat) return;
     if (event.type !== "click" && event.type !== "keydown") return;
     const element = captureTargetFor(event.target);
     if (element) this.onSelect(element);

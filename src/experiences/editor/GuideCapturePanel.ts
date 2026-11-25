@@ -38,7 +38,8 @@ export const guideCapturePanel = `
         <button type="button" data-mode="select">Select Elements</button>
         <button type="button" data-mode="navigate">Navigate</button>
       </div>
-      <p class="muted" data-instructions></p>
+      <p class="muted" data-instructions role="status"></p>
+      <p class="muted">Shift + Tab to switch modes. Use Shift + F8 when a website control uses Shift + Tab.</p>
       <ol data-targets aria-label="Captured elements"></ol>
       <form data-prompt-form>
         <label>What should this guide help users do?

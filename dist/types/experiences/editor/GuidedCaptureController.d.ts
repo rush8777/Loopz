@@ -53,6 +53,8 @@ export declare class GuidedCaptureController {
     private select;
     private moveTarget;
     private renderTargets;
+    private setMode;
+    private handleModeShortcut;
     private handleClick;
     private handleInput;
     private handleChange;

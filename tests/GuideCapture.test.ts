@@ -10,7 +10,7 @@ import type { EditorDraft } from "../src/experiences/types";
 const session = { sessionId: "capture-test-session", accessToken: "do-not-copy-this-token", expiresAt: "2099-01-01" };
 const draft = { experience: { id: "guide", kind: "guide", widgetType: null, builderMode: "onsite", name: "Guide" }, version: { id: "draft", revision: 1, versionNumber: 1 } } as EditorDraft;
 const path = () => new URL(location.href).pathname;
-const initial: StoredGuideCapture = { targets: [], mode: "select", revision: 1, checkpointRevision: 0 };
+const initial: StoredGuideCapture = { targets: [], mode: "select", revision: 1, checkpointRevision: 1 };
 const target = () => document.querySelector("#target")!;
 const checkpoint = () => document.querySelector("[data-movcues-guide-capture]")?.shadowRoot;
 const button = (selector: string) => checkpoint()?.querySelector<HTMLButtonElement>(selector);
@@ -23,6 +23,41 @@ afterEach(() => {
 });
 
 describe("Guided Capture", () => {
+  it("starts fresh captures in Navigate and switches on keydown without moving focus", async () => {
+    document.body.innerHTML = '<button id="target">Menu</button><input id="field">';
+    const bridge = {
+      loadCapture: vi.fn().mockResolvedValue({ ...initial, checkpointRevision: 0 }),
+      saveCapture: vi.fn().mockResolvedValue({ checkpointRevision: 1 }),
+    } as unknown as CaptureBridge;
+    const controller = new GuidedCaptureController(bridge, session, draft, vi.fn(), vi.fn());
+    const key = (type: string, options: KeyboardEventInit = {}) => document.activeElement!.dispatchEvent(new KeyboardEvent(type, {
+      key: "Tab", shiftKey: true, bubbles: true, cancelable: true, composed: true, ...options,
+    }));
+    controller.mount();
+    try {
+      await vi.waitFor(() => expect(button("[data-mode=navigate]")?.getAttribute("aria-pressed")).toBe("true"));
+      (target() as HTMLElement).focus();
+      expect(key("keydown", { ctrlKey: true })).toBe(true);
+      expect(key("keydown")).toBe(false);
+      expect(key("keydown", { repeat: true })).toBe(false);
+      expect(key("keyup")).toBe(true);
+      window.dispatchEvent(new Event("blur"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(document.activeElement).toBe(target());
+      expect(button("[data-mode=select]")?.getAttribute("aria-pressed")).toBe("true");
+      document.querySelector<HTMLInputElement>("#field")!.focus();
+      expect(key("keydown")).toBe(true);
+      checkpoint()!.querySelector("textarea")!.focus();
+      expect(key("keydown")).toBe(true);
+      button("[data-mode=navigate]")!.click();
+      expect(button("[data-mode=navigate]")?.getAttribute("aria-pressed")).toBe("true");
+      (target() as HTMLElement).focus();
+      expect(key("keydown")).toBe(false);
+      controller.expire();
+      expect(key("keydown")).toBe(true);
+    } finally { controller.destroy(); }
+  });
+
   it("captures the containing link instead of a nested icon and omits href, queries and form values", () => {
     document.body.innerHTML = '<a id="target" href="/path?token=secret-value"><span>Open invoices</span></a><input aria-label="Invoice memo" value="private text"><input type="password" value="pass"><div data-private><button>Private</button></div>';
     const picked = captureTargetFor(document.querySelector("#target span"));

@@ -3,10 +3,11 @@ import type { EditorSession } from "../runtimeInterfaces";
 import { ExperienceRenderer } from "../runtime/ExperienceRenderer";
 import type { EditorDraft } from "../types";
 import { CaptureRequestError, EditorSessionExpiredError } from "./EditorBridge";
+import { isMovcuesSurface } from "./ElementPicker";
 import { captureHtml, guideCapturePanel } from "./GuideCapturePanel";
 import { GuideCaptureJourney, type NewCaptureObservation } from "./GuideCaptureJourney";
 import { GuideCaptureSelection } from "./GuideCaptureSelection";
-import { describeCaptureTarget, guideCapturePath } from "./GuideCaptureTargets";
+import { describeCaptureTarget, guideCapturePath, isCaptureTextInput } from "./GuideCaptureTargets";
 import type { CaptureAdvance, CaptureBridge, CapturePlan, CapturePlanStep, CapturePreview, GuideCaptureCheckpoint, StoredGuideCapture } from "./GuideCaptureTypes";
 
 interface LocalCheckpoint {
@@ -40,7 +41,7 @@ export class GuidedCaptureController {
   private ticketRevision = -1;
   private selection: GuideCaptureSelection | undefined;
   private unsubscribe: (() => void) | undefined;
-  private checkpoint: GuideCaptureCheckpoint = { mode: "select", targets: [] };
+  private checkpoint: GuideCaptureCheckpoint = { mode: "navigate", targets: [] };
   private revision: number;
   private checkpointRevision = 0;
   private replacement: string | undefined;
@@ -88,12 +89,14 @@ export class GuidedCaptureController {
       this.writeLocal();
     });
     window.addEventListener("pagehide", this.flushCheckpoint);
+    window.addEventListener("keydown", this.handleModeShortcut, true);
     this.route.start();
     void this.restore();
   }
 
   expire(): void {
     if (this.state === "expired") return;
+    window.removeEventListener("keydown", this.handleModeShortcut, true);
     this.request?.abort();
     this.journey.stop();
     clearTimeout(this.saveTimer);
@@ -110,6 +113,7 @@ export class GuidedCaptureController {
 
   destroy(): void {
     window.removeEventListener("pagehide", this.flushCheckpoint);
+    window.removeEventListener("keydown", this.handleModeShortcut, true);
     this.journey.stop();
     clearTimeout(this.saveTimer);
     this.destroyed = true;
@@ -172,7 +176,9 @@ export class GuidedCaptureController {
   }
 
   private adopt(remote: StoredGuideCapture): void {
-    this.checkpoint = { mode: remote.mode, targets: remote.targets, observations: remote.observations, workflow: remote.workflow };
+    // The server seeds new captures with the legacy Select default. Saved modes are authoritative.
+    const fresh = remote.checkpointRevision === 0 && !remote.targets.length && !remote.observations?.length && !remote.workflow;
+    this.checkpoint = { mode: fresh ? "navigate" : remote.mode, targets: remote.targets, observations: remote.observations, workflow: remote.workflow };
     this.revision = remote.revision;
     this.checkpointRevision = remote.checkpointRevision;
     this.pending = false;
@@ -333,6 +339,32 @@ export class GuidedCaptureController {
     }).join("") : '<li class="muted">Select the first element in the workflow.</li>';
   }
 
+  private setMode(mode: GuideCaptureCheckpoint["mode"]): void {
+    if (this.state !== "capture" || this.busy || this.checkpoint.mode === mode) return;
+    if (mode === "navigate") this.replacement = undefined;
+    else this.journey.routeChanged();
+    this.checkpointChanged({ ...this.checkpoint, mode });
+  }
+
+  private handleModeShortcut = (event: KeyboardEvent): void => {
+    if (this.state !== "capture" || this.busy || !event.cancelable || event.defaultPrevented || event.isComposing
+      || !event.shiftKey || event.altKey || event.ctrlKey || event.metaKey
+      || (event.key !== "Tab" && event.key !== "F8")) return;
+    const path = event.composedPath();
+    if (path.some(node => node instanceof Element && isMovcuesSurface(node))) return;
+    if (event.key === "Tab") {
+      const matches = (selector: string) => path.some(node => node instanceof Element && node.matches(selector));
+      // Leave backward Tab to focus-managed controls. Menus and listboxes can use
+      // the shortcut even when embedded in a dialog.
+      if (isCaptureTextInput(path)
+        || matches('select,[role="grid"],[role="tree"],[role="toolbar"],[role="tablist"],[aria-keyshortcuts~="Shift+Tab" i]')
+        || (matches('dialog[open],[role="dialog"],[role="alertdialog"]') && !matches('[role="menu"],[role="listbox"]'))) return;
+    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!event.repeat) this.setMode(this.checkpoint.mode === "navigate" ? "select" : "navigate");
+  };
+
   private handleClick = (event: Event) => {
     const button = (event.target as Element).closest("button");
     if (!button) return;
@@ -350,12 +382,7 @@ export class GuidedCaptureController {
     if ("reload" in action) { void this.restore(); return; }
     if ("refresh" in action) { this.plan = undefined; this.candidate = undefined; void this.restore(true); return; }
     if ("retry" in action) { void this.retryCheckpoint(); return; }
-    if (action.mode === "select" || action.mode === "navigate") {
-      if (action.mode === this.checkpoint.mode) return;
-      if (action.mode === "navigate") this.replacement = undefined;
-      else this.journey.routeChanged();
-      this.checkpointChanged({ ...this.checkpoint, mode: action.mode });
-    }
+    if (action.mode === "select" || action.mode === "navigate") this.setMode(action.mode);
     if (action.earlier) this.moveTarget(action.earlier, -1);
     if (action.later) this.moveTarget(action.later, 1);
     if (action.remove) {
@@ -364,7 +391,7 @@ export class GuidedCaptureController {
     }
     if (action.replace) {
       this.replacement = action.replace;
-      this.checkpointChanged({ ...this.checkpoint, mode: "select" });
+      this.setMode("select");
       this.message("Select the replacement element on this page.");
     }
     if ("compile" in action) void this.compile();
@@ -653,8 +680,8 @@ export class GuidedCaptureController {
     } else this.journey.stop();
     const instructions = this.root.querySelector("[data-instructions]");
     if (instructions) instructions.textContent = this.checkpoint.mode === "select"
-      ? "Click an element to capture it. Switch to Navigate to use your application."
-      : "Use your application as usual. Switch to Select Elements when you reach the next screen.";
+      ? "Select Elements mode. Click the elements you want to capture."
+      : "Navigate mode. Use your website as usual.";
     this.root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => {
       button.setAttribute("aria-pressed", String(button.dataset.mode === this.checkpoint.mode));
       button.disabled = this.busy;

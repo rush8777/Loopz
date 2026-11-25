@@ -31,3 +31,30 @@ window.addEventListener("load", function () {
     document.body.insertBefore(enableInvoicesButton, document.querySelector("footer"));
 });
 </script>
+<script>
+window.addEventListener("load", function () {
+    var nav = document.querySelector(".nav-links");
+    if (nav) {
+        [ ["experiments.html", "Experiments"], ["event-lab.html", "SDK Event Lab"] ].forEach(function (item) {
+            var link = document.createElement("a"); link.href = item[0]; link.textContent = item[1]; nav.appendChild(link);
+        });
+    }
+    var footer = document.querySelector("footer");
+    var panel = document.createElement("section");
+    panel.className = "panel";
+    panel.style.cssText = "margin:1rem auto;max-width:1080px";
+    panel.innerHTML = '<h2>Sandbox operations</h2><p class="muted">Run async mock workflows to exercise SDK event delivery.</p><div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.8rem"><button class="btn" data-job="sync">Sync workspace</button><button class="btn" data-job="export">Export activity</button><button class="btn" data-job="invite">Invite teammate</button><a class="btn" href="event-lab.html">Open SDK event lab</a><a class="btn" href="experiments.html">Open experiments</a></div><p id="dashboard-job-status" class="muted" role="status" style="margin-top:.8rem">All systems operational · sandbox mode</p>';
+    document.body.insertBefore(panel, footer);
+    panel.querySelectorAll("[data-job]").forEach(function (button) {
+        button.addEventListener("click", async function () {
+            var job = button.dataset.job; button.disabled = true;
+            analytics.event("dashboard_job_started", { job: job, simulated: true });
+            document.querySelector("#dashboard-job-status").textContent = "Running " + job + "…";
+            await new Promise(function (resolve) { setTimeout(resolve, 700 + Math.random() * 500); });
+            analytics.event("dashboard_job_completed", { job: job, simulated: true });
+            document.querySelector("#dashboard-job-status").textContent = job + " completed successfully · sandbox result";
+            button.disabled = false;
+        });
+    });
+});
+</script>

@@ -389,11 +389,9 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
         if (number === this.line) {
           if (line.length > 160) {
             let padding = 20;
+            let endColumn = typeof this.endColumn === "number" ? this.endColumn : this.column;
             let subLineStart = Math.max(0, this.column - padding);
-            let subLineEnd = Math.max(
-              this.column + padding,
-              this.endColumn + padding
-            );
+            let subLineEnd = Math.max(this.column + padding, endColumn + padding);
             let subLine = line.slice(subLineStart, subLineEnd);
             let spacing2 = aside(gutter.replace(/\d/g, " ")) + line.slice(0, Math.min(this.column - 1, padding - 1)).replace(/[^\t]/g, " ");
             return mark(">") + aside(gutter) + highlight(subLine) + "\n " + spacing2 + mark("^");
@@ -2419,8 +2417,10 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
         while ((startIndex = this.css.indexOf(annotation, cursor)) !== -1) {
           let endIndex = this.css.indexOf("*/", startIndex + annotation.length);
           if (endIndex === -1) break;
-          while (startIndex > cursor && this.css[startIndex - 1] === "\n") {
-            startIndex--;
+          if (endIndex + 2 === this.css.length || /[\t\n\f\r ]/.test(this.css[endIndex + 2])) {
+            while (startIndex > cursor && (this.css[startIndex - 1] === "\n" || this.css[startIndex - 1] === "\r")) {
+              startIndex--;
+            }
           }
           css += this.css.slice(cursor, startIndex);
           cursor = endIndex + 2;
@@ -2696,14 +2696,15 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
   const RE_WORD_END = /[\t\n\f\r !"#'():;@[\\\]{}]|\/(?=\*)/g;
   const RE_BAD_BRACKET = /.[\r\n"'(/\\]/;
   const RE_HEX_ESCAPE = /[\da-f]/i;
+  const RE_URL_NAME = /(^|[\t\n\f\r "'(),/:;[\]{}])url$/i;
+  const RE_QUOTED = /[\t\n\f\r ]*["']/y;
   var tokenize = function tokenizer2(input2, options = {}) {
     let css = input2.css.valueOf();
     let ignore = options.ignoreErrors;
     let code, content, escape2, next, quote;
-    let currentToken, escaped, escapePos, n, prev;
+    let currentToken, escaped, escapePos;
     let length = css.length;
     let pos = 0;
-    let buffer = [];
     let returned = [];
     let lastBadParen = -1;
     function position() {
@@ -2747,9 +2748,8 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
           break;
         }
         case OPEN_PARENTHESES: {
-          prev = buffer.length ? buffer.pop()[1] : "";
-          n = css.charCodeAt(pos + 1);
-          if (prev === "url" && n !== SINGLE_QUOTE && n !== DOUBLE_QUOTE && n !== SPACE && n !== NEWLINE && n !== TAB && n !== FEED && n !== CR) {
+          RE_QUOTED.lastIndex = pos + 1;
+          if (RE_URL_NAME.test(css.substring(pos - 4, pos)) && !RE_QUOTED.test(css)) {
             next = pos;
             do {
               escaped = false;
@@ -2866,7 +2866,6 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
               next = RE_WORD_END.lastIndex - 2;
             }
             currentToken = ["word", css.slice(pos, next + 1), pos, next];
-            buffer.push(currentToken);
             pos = next;
           }
           break;
@@ -4157,7 +4156,7 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
   let Root$1 = root;
   let Processor$1 = class Processor {
     constructor(plugins = []) {
-      this.version = "8.5.32";
+      this.version = "8.5.33";
       this.plugins = this.normalize(plugins);
     }
     normalize(plugins) {
@@ -8062,80 +8061,23 @@ ${ISOLATION_CSS}`;
       this.code = code;
     }
   }
-  const guideCapturePanel = `
-<style>
-  :host{all:initial;font:14px/1.45 system-ui,sans-serif;color:#17233b}
-  *{box-sizing:border-box}
-  aside{position:fixed;top:12px;right:12px;width:min(390px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;pointer-events:auto;background:white;border:1px solid #dce3ed;border-radius:14px;box-shadow:0 8px 26px #15274626}
-  header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 15px;border-bottom:1px solid #e7edf5}
-  header .row{flex-wrap:nowrap}
-  main{display:grid;gap:12px;padding:14px}
-  h2,p,ol{margin:0} h2{font-size:15px}
-  label{display:grid;gap:5px;font-size:12px;font-weight:600}
-  button,input,select,textarea{font:inherit}
-  button{padding:6px 9px;border:1px solid #ccd6e4;background:white;color:#21314d;border-radius:6px;cursor:pointer;font-size:12px}
-  button:hover{background:#f3f6fc}
-  button[aria-pressed=true],button[data-primary]{background:#1d4ed8;color:white;border-color:#1d4ed8}
-  button:disabled{opacity:.55;cursor:default}
-  button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
-  ol{list-style:none;padding:0;display:grid;gap:6px}
-  li,fieldset{background:#f7f9fc;border:1px solid #e1e8f3;border-radius:7px;padding:8px}
-  fieldset{display:grid;gap:7px;min-width:0;margin:0}
-  legend{font-weight:650;font-size:12px}
-  form,section{display:grid;gap:8px}
-  small{display:block;font-size:11px;color:#43546d;overflow-wrap:anywhere}
-  .row{display:flex;flex-wrap:wrap;align-items:center;gap:5px}
-  .list-head{display:flex;align-items:baseline;gap:7px;overflow-wrap:anywhere}
-  .number{font-weight:700;color:#1d4ed8}
-  .warning{color:#8d430c}
-  .muted{color:#475b75;font-size:12px}
-  input,select,textarea{width:100%;min-width:0;padding:6px 7px;border-radius:6px;border:1px solid #ccd6e4;color:#17233b;background:white}
-  textarea{resize:vertical}
-  [hidden]{display:none!important}
-</style>
-<aside aria-label="Guided Capture">
-  <header><h2>Guided Capture</h2><div class="row"><button type="button" data-collapse aria-expanded="true" aria-controls="movcues-capture-content">Minimize</button><button type="button" data-close aria-label="Close Guided Capture">Close</button></div></header>
-  <main id="movcues-capture-content">
-    <p class="muted" data-message role="status" aria-live="polite">Restoring capture…</p>
-    <section data-capture hidden>
-      <div class="row" role="group" aria-label="Capture mode">
-        <button type="button" data-mode="select">Select Elements</button>
-        <button type="button" data-mode="navigate">Navigate</button>
-      </div>
-      <p class="muted" data-instructions></p>
-      <ol data-targets aria-label="Captured elements"></ol>
-      <form data-prompt-form>
-        <label>What should this guide help users do?
-          <textarea data-prompt rows="3" maxlength="2000" required placeholder="Help new customers create their first invoice."></textarea>
-        </label>
-        <div class="row"><button type="submit" data-primary data-plan>Plan with Geo</button></div>
-      </form>
-    </section>
-    <section data-plan-panel hidden>
-      <h2>Review the plan</h2>
-      <div data-plan-steps></div>
-      <div class="row"><button type="button" data-compile data-primary>Generate preview</button><button type="button" data-edit-capture>Back to capture</button></div>
-    </section>
-    <section data-preview hidden>
-      <h2>Design preview</h2>
-      <p class="muted">Inspect layouts here. Apply the draft to test the full journey in the editor.</p>
-      <p data-preview-position class="muted"></p>
-      <p data-preview-details class="muted"></p>
-      <p data-preview-target class="muted" role="status"></p>
-      <div class="row"><button type="button" data-previous>Previous step</button><button type="button" data-next>Next step</button></div>
-      <div class="row"><button type="button" data-apply data-primary>Apply to draft</button><button type="button" data-edit-plan>Edit plan</button></div>
-    </section>
-    <p class="muted" data-checkpoint role="status" aria-live="polite"></p>
-    <div class="row">
-      <button type="button" data-cancel hidden>Cancel request</button>
-      <button type="button" data-retry hidden>Retry checkpoint</button>
-      <button type="button" data-refresh hidden>Load latest checkpoint</button>
-    </div>
-    <button type="button" data-reload hidden>Retry loading capture</button>
-  </main>
-</aside>`;
-  function captureHtml(text2) {
-    return text2.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
+  class HighlightOverlay {
+    constructor() {
+      this.element = document.createElement("div");
+      this.element.dataset.movcuesPickerOverlay = "";
+      this.element.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #2563eb;background:rgba(37,99,235,.12);display:none;box-sizing:border-box";
+      document.documentElement.appendChild(this.element);
+    }
+    show(target) {
+      const rect = target.getBoundingClientRect();
+      Object.assign(this.element.style, { display: "block", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+    }
+    hide() {
+      this.element.style.display = "none";
+    }
+    destroy() {
+      this.element.remove();
+    }
   }
   const SENSITIVE_INPUT_TYPES = /* @__PURE__ */ new Set(["password", "email", "tel", "credit-card", "cc-number"]);
   const SENSITIVE_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA", "SELECT"]);
@@ -8224,24 +8166,6 @@ ${ISOLATION_CSS}`;
     if (tag === "select") return "select";
     if (tag === "textarea") return "textarea";
     return void 0;
-  }
-  class HighlightOverlay {
-    constructor() {
-      this.element = document.createElement("div");
-      this.element.dataset.movcuesPickerOverlay = "";
-      this.element.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #2563eb;background:rgba(37,99,235,.12);display:none;box-sizing:border-box";
-      document.documentElement.appendChild(this.element);
-    }
-    show(target) {
-      const rect = target.getBoundingClientRect();
-      Object.assign(this.element.style, { display: "block", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
-    }
-    hide() {
-      this.element.style.display = "none";
-    }
-    destroy() {
-      this.element.remove();
-    }
   }
   const STABLE_DATA_ATTRS = ["data-testid", "data-test", "data-qa", "data-cy", "data-analytics-id"];
   const SEMANTIC_ATTRS = ["role", "aria-label", "name", "type", "href"];
@@ -8453,11 +8377,92 @@ ${ISOLATION_CSS}`;
     const root2 = element.getRootNode();
     return root2 instanceof ShadowRoot && isMovcuesSurface(root2.host);
   }
+  const guideCapturePanel = `
+<style>
+  :host{all:initial;font:14px/1.45 system-ui,sans-serif;color:#17233b}
+  *{box-sizing:border-box}
+  aside{position:fixed;top:12px;right:12px;width:min(390px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;pointer-events:auto;background:white;border:1px solid #dce3ed;border-radius:14px;box-shadow:0 8px 26px #15274626}
+  header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 15px;border-bottom:1px solid #e7edf5}
+  header .row{flex-wrap:nowrap}
+  main{display:grid;gap:12px;padding:14px}
+  h2,p,ol{margin:0} h2{font-size:15px}
+  label{display:grid;gap:5px;font-size:12px;font-weight:600}
+  button,input,select,textarea{font:inherit}
+  button{padding:6px 9px;border:1px solid #ccd6e4;background:white;color:#21314d;border-radius:6px;cursor:pointer;font-size:12px}
+  button:hover{background:#f3f6fc}
+  button[aria-pressed=true],button[data-primary]{background:#1d4ed8;color:white;border-color:#1d4ed8}
+  button:disabled{opacity:.55;cursor:default}
+  button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+  ol{list-style:none;padding:0;display:grid;gap:6px}
+  li,fieldset{background:#f7f9fc;border:1px solid #e1e8f3;border-radius:7px;padding:8px}
+  fieldset{display:grid;gap:7px;min-width:0;margin:0}
+  legend{font-weight:650;font-size:12px}
+  form,section{display:grid;gap:8px}
+  small{display:block;font-size:11px;color:#43546d;overflow-wrap:anywhere}
+  .row{display:flex;flex-wrap:wrap;align-items:center;gap:5px}
+  .list-head{display:flex;align-items:baseline;gap:7px;overflow-wrap:anywhere}
+  .number{font-weight:700;color:#1d4ed8}
+  .warning{color:#8d430c}
+  .muted{color:#475b75;font-size:12px}
+  input,select,textarea{width:100%;min-width:0;padding:6px 7px;border-radius:6px;border:1px solid #ccd6e4;color:#17233b;background:white}
+  textarea{resize:vertical}
+  [hidden]{display:none!important}
+</style>
+<aside aria-label="Guided Capture">
+  <header><h2>Guided Capture</h2><div class="row"><button type="button" data-collapse aria-expanded="true" aria-controls="movcues-capture-content">Minimize</button><button type="button" data-close aria-label="Close Guided Capture">Close</button></div></header>
+  <main id="movcues-capture-content">
+    <p class="muted" data-message role="status" aria-live="polite">Restoring capture…</p>
+    <section data-capture hidden>
+      <div class="row" role="group" aria-label="Capture mode">
+        <button type="button" data-mode="select">Select Elements</button>
+        <button type="button" data-mode="navigate">Navigate</button>
+      </div>
+      <p class="muted" data-instructions role="status"></p>
+      <p class="muted">Shift + Tab to switch modes. Use Shift + F8 when a website control uses Shift + Tab.</p>
+      <ol data-targets aria-label="Captured elements"></ol>
+      <form data-prompt-form>
+        <label>What should this guide help users do?
+          <textarea data-prompt rows="3" maxlength="2000" required placeholder="Help new customers create their first invoice."></textarea>
+        </label>
+        <div class="row"><button type="submit" data-primary data-plan>Plan with Geo</button></div>
+      </form>
+    </section>
+    <section data-plan-panel hidden>
+      <h2>Review the plan</h2>
+      <div data-plan-steps></div>
+      <div class="row"><button type="button" data-compile data-primary>Generate preview</button><button type="button" data-edit-capture>Back to capture</button></div>
+    </section>
+    <section data-preview hidden>
+      <h2>Design preview</h2>
+      <p class="muted">Inspect layouts here. Apply the draft to test the full journey in the editor.</p>
+      <p data-preview-position class="muted"></p>
+      <p data-preview-details class="muted"></p>
+      <p data-preview-target class="muted" role="status"></p>
+      <div class="row"><button type="button" data-previous>Previous step</button><button type="button" data-next>Next step</button></div>
+      <div class="row"><button type="button" data-apply data-primary>Apply to draft</button><button type="button" data-edit-plan>Edit plan</button></div>
+    </section>
+    <p class="muted" data-checkpoint role="status" aria-live="polite"></p>
+    <div class="row">
+      <button type="button" data-cancel hidden>Cancel request</button>
+      <button type="button" data-retry hidden>Retry checkpoint</button>
+      <button type="button" data-refresh hidden>Load latest checkpoint</button>
+    </div>
+    <button type="button" data-reload hidden>Retry loading capture</button>
+  </main>
+</aside>`;
+  function captureHtml(text2) {
+    return text2.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
+  }
   const selector = new TargetSelectorGenerator();
   const privateElement = new SensitiveElementDetector();
   const editable = "[contenteditable]:not([contenteditable=false])";
   const explicitlyPrivate = "[data-movcues-private],input[type=password],input[type=hidden],[autocomplete=current-password],[autocomplete=new-password],[autocomplete=one-time-code]";
-  const interactive = `button,input,select,textarea,a[href],[role=button],[role=link],[role=checkbox],[role=combobox],[role=tab],[role=switch],${editable}`;
+  const menuItem = "[role=menuitem],[role=menuitemcheckbox],[role=menuitemradio],[role=option]";
+  const interactive = `button,input,select,textarea,a[href],[role=button],[role=link],[role=checkbox],[role=combobox],[role=tab],[role=switch],${menuItem},${editable}`;
+  const nonTextInput = 'input:is([type="button"],[type="submit"],[type="reset"],[type="image"],[type="checkbox"],[type="radio"],[type="range"],[type="color"],[type="file"])';
+  function isCaptureTextInput(path) {
+    return path.some((node2) => node2 instanceof Element && (node2.matches(`textarea,[role=textbox],[role=searchbox],input:not(${nonTextInput})`) || node2 instanceof HTMLElement && node2.isContentEditable));
+  }
   function captureTargetFor(node2) {
     if (!(node2 instanceof Element) || isMovcuesSurface(node2) || node2.closest(explicitlyPrivate) || privateElement.isWithinPrivateSubtree(node2)) return null;
     const target = node2.closest(interactive) ?? node2;
@@ -8476,7 +8481,7 @@ ${ISOLATION_CSS}`;
   function labelText(element) {
     if (isMovcuesSurface(element) || privateElement.isWithinPrivateSubtree(element) || element.closest(editable) || element.matches("input,select,textarea")) return void 0;
     const nodes = Array.from(element.childNodes);
-    if (element.matches("button,a[href],[role=button],[role=link],label")) {
+    if (element.matches(`button,a[href],[role=button],[role=link],label,${menuItem}`)) {
       return nodes.map((node2) => node2 instanceof Element ? node2.matches("span,strong,em") ? labelText(node2) : "" : node2.nodeType === Node.TEXT_NODE ? node2.textContent : "").filter(Boolean).join(" ");
     }
     return nodes.filter((node2) => node2.nodeType === Node.TEXT_NODE).map((node2) => node2.textContent).join(" ");
@@ -8599,7 +8604,8 @@ ${ISOLATION_CSS}`;
       if (from !== to) this.recentClick = void 0;
     }
   }
-  const interceptedEvents = ["pointerdown", "pointerup", "mousedown", "mouseup", "touchstart", "touchend", "click", "auxclick", "dblclick", "contextmenu", "beforeinput", "submit", "keydown"];
+  const interceptedEvents = ["pointerdown", "pointerup", "mousedown", "mouseup", "touchstart", "touchend", "click", "auxclick", "dblclick", "contextmenu", "keydown"];
+  const hoverEvents = ["pointermove", "pointerover", "pointerout", "pointerenter", "pointerleave", "mousemove", "mouseover", "mouseout", "mouseenter", "mouseleave"];
   class GuideCaptureSelection {
     constructor(onSelect) {
       this.onSelect = onSelect;
@@ -8622,16 +8628,20 @@ ${ISOLATION_CSS}`;
       };
       this.move = (event) => {
         var _a, _b;
+        const path = event.composedPath();
+        if (!path.some((node2) => node2 instanceof Element && isMovcuesSurface(node2))) event.stopImmediatePropagation();
+        if (event.type !== "pointermove") return;
         const element = captureTargetFor(event.target);
         if (element) (_a = this.hover) == null ? void 0 : _a.show(element);
         else (_b = this.hover) == null ? void 0 : _b.hide();
       };
       this.intercept = (event) => {
-        if (event.composedPath().some((node2) => node2 instanceof Element && isMovcuesSurface(node2))) return;
-        if (event instanceof KeyboardEvent && !["Enter", " ", "Escape"].includes(event.key)) return;
+        const path = event.composedPath();
+        if (path.some((node2) => node2 instanceof Element && isMovcuesSurface(node2))) return;
+        if (event instanceof KeyboardEvent && (!["Enter", " "].includes(event.key) || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || isCaptureTextInput(path) || path.some((node2) => node2 instanceof HTMLSelectElement))) return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        if (event instanceof KeyboardEvent && (event.repeat || event.key === "Escape")) return;
+        if (event instanceof KeyboardEvent && event.repeat) return;
         if (event.type !== "click" && event.type !== "keydown") return;
         const element = captureTargetFor(event.target);
         if (element) this.onSelect(element);
@@ -8647,12 +8657,16 @@ ${ISOLATION_CSS}`;
       this.enabled = enabled;
       if (enabled) {
         this.hover = new HighlightOverlay();
-        window.addEventListener("pointermove", this.move, { capture: true, passive: true });
+        for (const type of hoverEvents) window.addEventListener(type, this.move, { capture: true, passive: true });
+        window.addEventListener("blur", this.invalidate);
+        document.addEventListener("visibilitychange", this.invalidate);
         for (const type of interceptedEvents) window.addEventListener(type, this.intercept, { capture: true, passive: false });
       } else {
         (_a = this.hover) == null ? void 0 : _a.destroy();
         this.hover = void 0;
-        window.removeEventListener("pointermove", this.move, true);
+        for (const type of hoverEvents) window.removeEventListener(type, this.move, true);
+        window.removeEventListener("blur", this.invalidate);
+        document.removeEventListener("visibilitychange", this.invalidate);
         for (const type of interceptedEvents) window.removeEventListener(type, this.intercept, true);
       }
     }
@@ -8745,7 +8759,7 @@ ${ISOLATION_CSS}`;
       this.journey = new GuideCaptureJourney(() => this.checkpoint.targets, (observation) => this.recordObservation(observation));
       this.saveTimer = 0;
       this.ticketRevision = -1;
-      this.checkpoint = { mode: "select", targets: [] };
+      this.checkpoint = { mode: "navigate", targets: [] };
       this.checkpointRevision = 0;
       this.prompt = "";
       this.pending = false;
@@ -8758,6 +8772,18 @@ ${ISOLATION_CSS}`;
       this.flushCheckpoint = () => {
         if (this.state !== "loading") this.writeLocal();
         void this.syncCheckpoint();
+      };
+      this.handleModeShortcut = (event) => {
+        if (this.state !== "capture" || this.busy || !event.cancelable || event.defaultPrevented || event.isComposing || !event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.key !== "Tab" && event.key !== "F8") return;
+        const path = event.composedPath();
+        if (path.some((node2) => node2 instanceof Element && isMovcuesSurface(node2))) return;
+        if (event.key === "Tab") {
+          const matches2 = (selector2) => path.some((node2) => node2 instanceof Element && node2.matches(selector2));
+          if (isCaptureTextInput(path) || matches2('select,[role="grid"],[role="tree"],[role="toolbar"],[role="tablist"],[aria-keyshortcuts~="Shift+Tab" i]') || matches2('dialog[open],[role="dialog"],[role="alertdialog"]') && !matches2('[role="menu"],[role="listbox"]')) return;
+        }
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (!event.repeat) this.setMode(this.checkpoint.mode === "navigate" ? "select" : "navigate");
       };
       this.handleClick = (event) => {
         var _a;
@@ -8797,12 +8823,7 @@ ${ISOLATION_CSS}`;
           void this.retryCheckpoint();
           return;
         }
-        if (action.mode === "select" || action.mode === "navigate") {
-          if (action.mode === this.checkpoint.mode) return;
-          if (action.mode === "navigate") this.replacement = void 0;
-          else this.journey.routeChanged();
-          this.checkpointChanged({ ...this.checkpoint, mode: action.mode });
-        }
+        if (action.mode === "select" || action.mode === "navigate") this.setMode(action.mode);
         if (action.earlier) this.moveTarget(action.earlier, -1);
         if (action.later) this.moveTarget(action.later, 1);
         if (action.remove) {
@@ -8811,7 +8832,7 @@ ${ISOLATION_CSS}`;
         }
         if (action.replace) {
           this.replacement = action.replace;
-          this.checkpointChanged({ ...this.checkpoint, mode: "select" });
+          this.setMode("select");
           this.message("Select the replacement element on this page.");
         }
         if ("compile" in action) void this.compile();
@@ -8908,12 +8929,14 @@ ${ISOLATION_CSS}`;
         this.writeLocal();
       });
       window.addEventListener("pagehide", this.flushCheckpoint);
+      window.addEventListener("keydown", this.handleModeShortcut, true);
       this.route.start();
       void this.restore();
     }
     expire() {
       var _a, _b, _c;
       if (this.state === "expired") return;
+      window.removeEventListener("keydown", this.handleModeShortcut, true);
       (_a = this.request) == null ? void 0 : _a.abort();
       this.journey.stop();
       clearTimeout(this.saveTimer);
@@ -8930,6 +8953,7 @@ ${ISOLATION_CSS}`;
     destroy() {
       var _a, _b, _c;
       window.removeEventListener("pagehide", this.flushCheckpoint);
+      window.removeEventListener("keydown", this.handleModeShortcut, true);
       this.journey.stop();
       clearTimeout(this.saveTimer);
       this.destroyed = true;
@@ -8990,7 +9014,9 @@ ${ISOLATION_CSS}`;
       }
     }
     adopt(remote) {
-      this.checkpoint = { mode: remote.mode, targets: remote.targets, observations: remote.observations, workflow: remote.workflow };
+      var _a;
+      const fresh = remote.checkpointRevision === 0 && !remote.targets.length && !((_a = remote.observations) == null ? void 0 : _a.length) && !remote.workflow;
+      this.checkpoint = { mode: fresh ? "navigate" : remote.mode, targets: remote.targets, observations: remote.observations, workflow: remote.workflow };
       this.revision = remote.revision;
       this.checkpointRevision = remote.checkpointRevision;
       this.pending = false;
@@ -9163,6 +9189,12 @@ ${ISOLATION_CSS}`;
           <button type="button" data-remove="${id}" aria-label="Remove element ${index + 1}">Remove</button>
         </div></li>`;
       }).join("") : '<li class="muted">Select the first element in the workflow.</li>';
+    }
+    setMode(mode) {
+      if (this.state !== "capture" || this.busy || this.checkpoint.mode === mode) return;
+      if (mode === "navigate") this.replacement = void 0;
+      else this.journey.routeChanged();
+      this.checkpointChanged({ ...this.checkpoint, mode });
     }
     async planGuide() {
       if (this.busy || this.state !== "capture" || !this.checkpoint.targets.length || !this.prompt.trim()) return;
@@ -9407,7 +9439,7 @@ ${ISOLATION_CSS}`;
         this.journey.activate(path);
       } else this.journey.stop();
       const instructions = this.root.querySelector("[data-instructions]");
-      if (instructions) instructions.textContent = this.checkpoint.mode === "select" ? "Click an element to capture it. Switch to Navigate to use your application." : "Use your application as usual. Switch to Select Elements when you reach the next screen.";
+      if (instructions) instructions.textContent = this.checkpoint.mode === "select" ? "Select Elements mode. Click the elements you want to capture." : "Navigate mode. Use your website as usual.";
       this.root.querySelectorAll("[data-mode]").forEach((button) => {
         button.setAttribute("aria-pressed", String(button.dataset.mode === this.checkpoint.mode));
         button.disabled = this.busy;

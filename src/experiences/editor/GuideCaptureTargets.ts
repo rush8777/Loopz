@@ -8,7 +8,16 @@ const selector = new TargetSelectorGenerator();
 const privateElement = new SensitiveElementDetector();
 const editable = "[contenteditable]:not([contenteditable=false])";
 const explicitlyPrivate = "[data-movcues-private],input[type=password],input[type=hidden],[autocomplete=current-password],[autocomplete=new-password],[autocomplete=one-time-code]";
-const interactive = `button,input,select,textarea,a[href],[role=button],[role=link],[role=checkbox],[role=combobox],[role=tab],[role=switch],${editable}`;
+const menuItem = "[role=menuitem],[role=menuitemcheckbox],[role=menuitemradio],[role=option]";
+const interactive = `button,input,select,textarea,a[href],[role=button],[role=link],[role=checkbox],[role=combobox],[role=tab],[role=switch],${menuItem},${editable}`;
+const nonTextInput = 'input:is([type="button"],[type="submit"],[type="reset"],[type="image"],[type="checkbox"],[type="radio"],[type="range"],[type="color"],[type="file"])';
+
+export function isCaptureTextInput(path: EventTarget[]): boolean {
+  return path.some(node => node instanceof Element && (
+    node.matches(`textarea,[role=textbox],[role=searchbox],input:not(${nonTextInput})`)
+    || node instanceof HTMLElement && node.isContentEditable
+  ));
+}
 
 export function captureTargetFor(node: EventTarget | null): Element | null {
   if (!(node instanceof Element) || isMovcuesSurface(node) || node.closest(explicitlyPrivate) || privateElement.isWithinPrivateSubtree(node)) return null;
@@ -33,7 +42,7 @@ function allowSelectorAttribute(attribute: string, value: string): boolean {
 function labelText(element: Element): string | undefined {
   if (isMovcuesSurface(element) || privateElement.isWithinPrivateSubtree(element) || element.closest(editable) || element.matches("input,select,textarea")) return undefined;
   const nodes = Array.from(element.childNodes);
-  if (element.matches("button,a[href],[role=button],[role=link],label")) {
+  if (element.matches(`button,a[href],[role=button],[role=link],label,${menuItem}`)) {
     return nodes.map(node => node instanceof Element
       ? node.matches("span,strong,em") ? labelText(node) : ""
       : node.nodeType === Node.TEXT_NODE ? node.textContent : "").filter(Boolean).join(" ");
