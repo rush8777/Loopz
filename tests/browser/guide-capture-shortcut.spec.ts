@@ -136,8 +136,9 @@ test("retains mode on blur and reload and releases interception on expiry and cl
   await page.evaluate(() => (window as any).fixture.expire());
   await page.locator("#custom-trigger").click();
   await expect(page.locator("#custom-menu")).toBeVisible();
+  await page.locator("#before-input").focus();
   await page.keyboard.press("Shift+Tab");
-  await expect(page.locator("#custom-trigger")).not.toBeFocused();
+  await expect(page.locator("#dialog-trigger")).toBeFocused();
   await page.evaluate(() => (window as any).fixture.destroy());
   await expect(page.locator("[data-movcues-guide-capture], [data-movcues-picker-overlay]")).toHaveCount(0);
 });
