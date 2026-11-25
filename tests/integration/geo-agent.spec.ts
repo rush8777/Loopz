@@ -1,0 +1,115 @@
+import { expect, test } from "@playwright/test";
+
+const api = "http://127.0.0.1:4310";
+const host = "http://127.0.0.1:4179";
+
+test.skip(process.env.GEO_AGENT_INTEGRATION !== "true", "Enable the isolated Geo Agent provider and Knowledge worker for this workflow");
+
+test("indexes knowledge, configures and publishes Geo Agent, and chats on the customer site", async ({ page, context, request }) => {
+  test.setTimeout(120_000);
+  const email = `geo-agent-${Date.now()}@example.test`;
+  const password = "correct-horse-battery-staple";
+  const account = await (await request.post(`${api}/auth/signup`, { data: { email, password } })).json();
+  const headers = { authorization: `Bearer ${account.accessToken}` };
+  const setup = await request.post(`${api}/auth/onboarding`, { headers, data: { workspaceName: "Geo Agent QA", siteName: "Test host", domain: host } });
+  expect(setup.status()).toBe(201);
+  const { organization, site } = await setup.json();
+  await request.post(`${api}/auth/onboarding/skip`, { headers });
+  const launch = `${host}/integration/start?site=${site.siteId}`;
+  const visitor = await context.newPage();
+  const lazyRequests: string[] = [];
+  visitor.on("request", request => {
+    if (/\/dist\/(widget-|sdk-geo-agent)/.test(request.url())) lazyRequests.push(request.url());
+  });
+  await visitor.goto(launch);
+  await expect(visitor.locator("#nav-feature")).toBeVisible();
+  await expect(visitor.locator("[data-movcues-geo-agent]")).toHaveCount(0);
+  expect(lazyRequests).toEqual([]);
+
+  await page.goto("/login");
+  await page.getByLabel("Email address").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page).toHaveURL(/\/analytics$/);
+  await page.goto("/knowledge");
+  await page.getByRole("button", { name: "Add source" }).click();
+  const source = page.getByRole("dialog", { name: "Add knowledge source" });
+  await source.getByLabel("Source type").selectOption("manual");
+  await source.getByLabel("Name", { exact: true }).fill("Invoice help");
+  await source.getByLabel("Article title").fill("Creating invoices");
+  await source.getByLabel("Content", { exact: true }).fill("Open Billing and choose New invoice. Fill out the invoice details.");
+  await source.getByLabel("Source reference (optional)").fill("https://docs.example.com/invoices");
+  await source.getByLabel("Access").selectOption("public");
+  await source.getByRole("button", { name: "Add source" }).click();
+  await expect(page.getByText("Ready", { exact: true })).toBeVisible({ timeout: 15_000 });
+
+  await page.goto("/experiences/geo-agents");
+  await page.getByRole("button", { name: "Create Geo Agent", exact: true }).first().click();
+  const creation = page.getByRole("dialog", { name: "Create Geo Agent" });
+  await creation.getByLabel("Name", { exact: true }).fill("Billing assistant");
+  await creation.getByRole("button", { name: "Create Geo Agent" }).click();
+  await expect(page).toHaveURL(/\/experiences\/[^/]+\/edit$/);
+  await page.getByRole("textbox", { name: "Assistant name" }).fill("Invoice assistant");
+  await page.getByRole("tab", { name: "Knowledge" }).click();
+  await page.getByRole("checkbox", { name: /Invoice help/ }).check();
+  await page.getByRole("textbox", { name: "Preview question" }).fill("How do I create an invoice?");
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await expect(page.getByText("Open Billing and choose New invoice.")).toBeVisible();
+  await page.getByRole("tab", { name: "Behavior" }).click();
+  await page.getByLabel("Page paths, one per line").fill("/integration");
+  await page.getByRole("button", { name: "Review & publish" }).click();
+  await page.getByRole("button", { name: "Publish now" }).click();
+  await expect(page.getByText("Geo Agent published.")).toBeVisible();
+
+  await visitor.reload();
+  const launcher = visitor.getByRole("button", { name: "Chat with Invoice assistant" });
+  await expect(launcher).toBeVisible();
+  expect(lazyRequests).toHaveLength(1);
+  await visitor.setViewportSize({ width: 320, height: 650 });
+  await launcher.click();
+  const panel = visitor.getByRole("dialog", { name: "Invoice assistant" });
+  const composer = panel.getByRole("textbox", { name: "Your message" });
+  await expect(composer).toBeFocused();
+  const box = await panel.boundingBox();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(320);
+  await composer.fill("How do I create an invoice?");
+  await composer.press("Enter");
+  await expect(panel.getByText("Open Billing and choose New invoice.", { exact: true }).first()).toBeVisible();
+  await expect(panel.getByRole("link", { name: "Creating invoices" })).toHaveAttribute("href", "https://docs.example.com/invoices");
+  await panel.getByRole("button", { name: "Helpful", exact: true }).click();
+  await expect(panel.getByRole("button", { name: "Helpful", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await composer.press("Escape");
+  await expect(launcher).toBeFocused();
+
+  await visitor.locator("#nav-feature").click();
+  await expect(launcher).toBeVisible();
+  expect(lazyRequests).toHaveLength(1);
+  await visitor.reload();
+  await launcher.click();
+  await expect(panel.getByRole("link", { name: "Creating invoices" })).toBeVisible();
+  await composer.fill("slow invoice question");
+  const started = visitor.waitForResponse(response => response.url().includes("/messages?") && response.request().method() === "POST");
+  await composer.press("Enter");
+  await started;
+  await panel.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(panel.getByRole("button", { name: "Retry" })).toBeVisible();
+  await panel.getByRole("button", { name: "New chat" }).click();
+  await expect(panel.getByText("Hi! How can I help?")).toBeVisible();
+  await expect(panel.getByRole("link", { name: "Creating invoices" })).toHaveCount(0);
+
+  await visitor.evaluate(() => (window as any).analytics.reset());
+  await expect(launcher).toBeVisible();
+  await launcher.click();
+  await expect(panel.getByText("Hi! How can I help?")).toBeVisible();
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(page.getByText("Geo Agent paused.")).toBeVisible();
+  await visitor.evaluate(() => history.pushState({}, "", "/integration/start"));
+  await expect(visitor.locator("[data-movcues-geo-agent]")).toHaveCount(0);
+  const id = page.url().match(/experiences\/([^/]+)\/edit/)![1];
+  const metrics = await request.get(`${api}/orgs/${organization.id}/sites/${site.id}/experiences/${id}/geo-agent/metrics`, { headers });
+  expect(metrics.status()).toBe(200);
+  const activity = await metrics.json();
+  expect(activity).toMatchObject({ conversations: 1, responses: 1, helpful: 1, tokens: 60 });
+  console.log(`Local mock provider: ${activity.averageFirstDeltaMs} ms to first delta, 60 AI tokens for the completed answer`);
+});

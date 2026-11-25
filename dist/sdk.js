@@ -1175,6 +1175,7 @@
       siteId: input.siteId,
       endpoint: input.endpoint || "https://api.movcues.com",
       experienceRuntimeBundleUrl: input.experienceRuntimeBundleUrl ?? "",
+      geoAgent: input.geoAgent,
       editorRuntimeBundleUrl: input.editorRuntimeBundleUrl ?? "",
       debug: input.debug ?? true,
       sessionInactivityMs: input.sessionInactivityMs ?? 30 * 60 * 1e3,
@@ -1297,8 +1298,9 @@
       const url = new URL(scriptUrl, typeof location === "undefined" ? void 0 : location.href);
       const parts = url.pathname.split("/");
       const file = parts[parts.length - 1] ?? "";
-      const readable = file === "sdk.js";
-      if (file !== "sdk.js" && file !== "sdk.min.js" && file !== "v1.js" && file !== "v1.min.js") {
+      const experienceSibling = bundle === "geo-agent" && /^sdk-experiences(?:\.min)?\.js$/.test(file);
+      const readable = file === "sdk.js" || file === "sdk-experiences.js";
+      if (!experienceSibling && file !== "sdk.js" && file !== "sdk.min.js" && file !== "v1.js" && file !== "v1.min.js") {
         return null;
       }
       parts[parts.length - 1] = `sdk-${bundle}${readable ? "" : ".min"}.js`;
@@ -1827,7 +1829,8 @@
           this.config.endpoint,
           this.config.siteId,
           this.session,
-          (name) => this.event(name)
+          (name) => this.event(name),
+          this.config.geoAgent
         );
         await this.experiences.evaluate();
         for (const id of this.pendingExperienceLaunches.splice(0)) void ((_b = (_a = this.experiences).launchExperience) == null ? void 0 : _b.call(_a, id));

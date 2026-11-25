@@ -34,8 +34,11 @@ import type { AnalyticsConfig } from "./types/config";
  */
 const bundledRuntimeProviders: AnalyticsRuntimeProviders = {
   experiences: {
-    createLoader: (apiBase, siteId, session, trackEvent) =>
-      new ExperienceLoader(apiBase, siteId, session, trackEvent),
+    createLoader: (apiBase, siteId, session, trackEvent, geoAgent) =>
+      new ExperienceLoader(apiBase, siteId, session, trackEvent, geoAgent, async () => {
+        const { mountGeoAgent } = await import("./experiences/geoAgent/widget");
+        return { mount: mountGeoAgent };
+      }),
   },
   loadEditor: async () => {
     const { EditorModeController } = await import("./experiences/editor/EditorModeController");

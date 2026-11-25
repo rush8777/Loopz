@@ -1,6 +1,6 @@
 import { currentScriptUrl } from "./scriptOrigin";
 
-export type SdkBundle = "experiences" | "editor";
+export type SdkBundle = "experiences" | "editor" | "geo-agent";
 
 const pendingLoads = new Map<string, Promise<unknown | null>>();
 
@@ -16,9 +16,10 @@ export function deriveSiblingBundleUrl(scriptUrl: string | null, bundle: SdkBund
     const url = new URL(scriptUrl, typeof location === "undefined" ? undefined : location.href);
     const parts = url.pathname.split("/");
     const file = parts[parts.length - 1] ?? "";
-    const readable = file === "sdk.js";
+    const experienceSibling = bundle === "geo-agent" && /^sdk-experiences(?:\.min)?\.js$/.test(file);
+    const readable = file === "sdk.js" || file === "sdk-experiences.js";
 
-    if (file !== "sdk.js" && file !== "sdk.min.js" && file !== "v1.js" && file !== "v1.min.js") {
+    if (!experienceSibling && file !== "sdk.js" && file !== "sdk.min.js" && file !== "v1.js" && file !== "v1.min.js") {
       return null;
     }
 

@@ -1,5 +1,64 @@
 (function() {
   "use strict";
+  const currentScriptElement = typeof document !== "undefined" && document.currentScript instanceof HTMLScriptElement ? document.currentScript : null;
+  const currentScriptUrl = (currentScriptElement == null ? void 0 : currentScriptElement.src) ?? null;
+  const pendingLoads = /* @__PURE__ */ new Map();
+  function deriveSiblingBundleUrl(scriptUrl, bundle) {
+    if (!scriptUrl) return null;
+    try {
+      const url = new URL(scriptUrl, typeof location === "undefined" ? void 0 : location.href);
+      const parts = url.pathname.split("/");
+      const file = parts[parts.length - 1] ?? "";
+      const experienceSibling = bundle === "geo-agent" && /^sdk-experiences(?:\.min)?\.js$/.test(file);
+      const readable = file === "sdk.js" || file === "sdk-experiences.js";
+      if (!experienceSibling && file !== "sdk.js" && file !== "sdk.min.js" && file !== "v1.js" && file !== "v1.min.js") {
+        return null;
+      }
+      parts[parts.length - 1] = `sdk-${bundle}${readable ? "" : ".min"}.js`;
+      url.pathname = parts.join("/");
+      return url.href;
+    } catch {
+      return null;
+    }
+  }
+  function sdkBundleUrl(bundle, overrideUrl) {
+    return overrideUrl || deriveSiblingBundleUrl(currentScriptUrl, bundle);
+  }
+  function loadSdkBundle(url, globalCheck, label) {
+    const available = globalCheck();
+    if (available) return Promise.resolve(available);
+    if (!url || typeof document === "undefined") return Promise.resolve(null);
+    const existingPromise = pendingLoads.get(url);
+    if (existingPromise) return existingPromise;
+    const promise = new Promise((resolve) => {
+      const selector = `script[data-movcues-bundle-url="${escapeAttribute(url)}"]`;
+      const existing = document.querySelector(selector);
+      const script = existing ?? document.createElement("script");
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      script.addEventListener("load", () => finish(globalCheck() ?? null), { once: true });
+      script.addEventListener("error", () => {
+        console.warn(`[Analytics] failed to load ${label} bundle from ${url}`);
+        finish(null);
+      }, { once: true });
+      if (!existing) {
+        script.src = url;
+        script.async = true;
+        script.dataset.movcuesBundleUrl = url;
+        (document.head ?? document.documentElement).appendChild(script);
+      }
+    });
+    pendingLoads.set(url, promise);
+    return promise;
+  }
+  function escapeAttribute(value) {
+    if (typeof CSS !== "undefined" && typeof CSS.escape === "function") return CSS.escape(value);
+    return value.replace(/["\\]/g, "\\$&");
+  }
   function getGuideStepPattern(step) {
     return step.pattern ?? "anchored_card";
   }
@@ -2074,11 +2133,13 @@ ${ISOLATION_CSS}`;
     }
   }
   class ExperienceLoader {
-    constructor(apiBase, siteId, session, trackEvent) {
+    constructor(apiBase, siteId, session, trackEvent, geoOptions, loadGeoAgent) {
       this.apiBase = apiBase;
       this.siteId = siteId;
       this.session = session;
       this.trackEvent = trackEvent;
+      this.geoOptions = geoOptions;
+      this.loadGeoAgent = loadGeoAgent;
       this.renderer = new ExperienceRenderer();
       this.eligibility = new EligibilityEngine();
       this.state = new ExperienceStateStore();
@@ -2088,6 +2149,8 @@ ${ISOLATION_CSS}`;
       this.justFinishedId = null;
       this.destroyed = false;
       this.hasChecklistCandidates = false;
+      this.geoAgent = null;
+      this.geoGeneration = 0;
       this.lastRoute = location.href;
       this.deliveryEpoch = 0;
       this.finishing = /* @__PURE__ */ new Set();
@@ -2131,6 +2194,7 @@ ${ISOLATION_CSS}`;
           } else this.triggerLeases.delete(trigger);
           while (this.triggerLeases.size > 20) this.triggerLeases.delete(this.triggerLeases.keys().next().value);
         }
+        if (!trigger) this.reconcileGeoAgent(manifest.geoAgent);
         this.hasChecklistCandidates = manifest.hasChecklists;
         this.checklist.setChecklist(manifest.checklists[0] ?? null);
         const experiences = manifest.experiences;
@@ -2170,9 +2234,11 @@ ${ISOLATION_CSS}`;
       }
     }
     onRouteChange() {
+      var _a;
       if (this.destroyed) return;
       if (this.lastRoute === location.href) return;
       this.lastRoute = location.href;
+      if (((_a = this.geoAgentDelivery) == null ? void 0 : _a.configuration.persistence) === "page") this.clearGeoAgent(true);
       const activeGuide = this.activeGuide();
       if (activeGuide) {
         const advanced = activeGuide.stepEntryRoute !== location.href && this.advanceForRoute(activeGuide);
@@ -2232,6 +2298,7 @@ ${ISOLATION_CSS}`;
       this.finishing.clear();
       this.justFinishedId = null;
       this.checklist.destroy();
+      this.clearGeoAgent(true);
       this.checklist = new ChecklistManager(this.apiBase, this.siteId, this.session, (id, context) => this.launch(id, context));
       this.hasChecklistCandidates = false;
       this.owner = this.ownerKey();
@@ -2257,8 +2324,61 @@ ${ISOLATION_CSS}`;
     launchExperience(experienceId) {
       return this.launch(experienceId, { source: "api" });
     }
+    clearGeoAgent(clearPersistence = false) {
+      var _a;
+      this.geoGeneration++;
+      clearTimeout(this.geoRefreshTimer);
+      (_a = this.geoAgent) == null ? void 0 : _a.destroy(clearPersistence);
+      this.geoAgent = null;
+      this.geoAgentDelivery = void 0;
+    }
+    reconcileGeoAgent(candidate) {
+      var _a, _b;
+      const current = this.geoAgentDelivery;
+      if ((candidate == null ? void 0 : candidate.versionId) === (current == null ? void 0 : current.versionId) && (candidate == null ? void 0 : candidate.id) === (current == null ? void 0 : current.id)) return;
+      this.clearGeoAgent();
+      if (!candidate || ((_a = candidate.configuration) == null ? void 0 : _a.schemaVersion) !== 1 || !this.loadGeoAgent) return;
+      this.geoAgentDelivery = candidate;
+      const generation = this.geoGeneration;
+      const ownerKey = this.ownerKey();
+      void this.loadGeoAgent((_b = this.geoOptions) == null ? void 0 : _b.bundleUrl).then((bundle) => {
+        if (generation !== this.geoGeneration || this.destroyed || ownerKey !== this.ownerKey()) return;
+        if (!bundle) {
+          this.clearGeoAgent();
+          return;
+        }
+        this.geoAgent = bundle.mount(candidate, {
+          ...this.geoOptions,
+          siteId: this.siteId,
+          apiBase: this.apiBase,
+          ownerKey,
+          onUnavailable: () => {
+            if (generation === this.geoGeneration) this.clearGeoAgent(true);
+          }
+        });
+        this.scheduleGeoAgentCheck(generation);
+      }).catch(() => {
+        if (generation === this.geoGeneration) this.clearGeoAgent();
+      });
+    }
+    scheduleGeoAgentCheck(generation) {
+      this.geoRefreshTimer = setTimeout(async () => {
+        if (generation !== this.geoGeneration || this.destroyed) return;
+        if (document.visibilityState !== "hidden") {
+          const context = this.contextKey();
+          const signal = AbortSignal.timeout(8e3);
+          try {
+            const manifest = await this.fetchExperiences(void 0, signal);
+            if (generation === this.geoGeneration && context === this.contextKey()) this.reconcileGeoAgent(manifest.geoAgent);
+          } catch {
+          }
+        }
+        if (generation === this.geoGeneration && !this.destroyed) this.scheduleGeoAgentCheck(generation);
+      }, 6e4);
+    }
     destroy() {
       var _a;
+      this.clearGeoAgent();
       (_a = this.manifestAbort) == null ? void 0 : _a.abort();
       this.requestGeneration++;
       this.destroyed = true;
@@ -2281,7 +2401,7 @@ ${ISOLATION_CSS}`;
       const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experiences?${query}`, { credentials: "omit", signal });
       if (!response.ok) return { experiences: [], checklists: [], hasChecklists: this.hasChecklistCandidates };
       const manifest = await response.json();
-      return { experiences: Array.isArray(manifest.experiences) ? manifest.experiences : [], checklists: Array.isArray(manifest.checklists) ? manifest.checklists : [], hasChecklists: manifest.hasChecklists === true };
+      return { experiences: Array.isArray(manifest.experiences) ? manifest.experiences : [], checklists: Array.isArray(manifest.checklists) ? manifest.checklists : [], hasChecklists: manifest.hasChecklists === true, geoAgent: manifest.geoAgent };
     }
     show(experience, requestedStepId, progress) {
       var _a, _b, _c;
@@ -2634,7 +2754,11 @@ ${ISOLATION_CSS}`;
     return `${location.pathname}${location.search}${location.hash}`;
   }
   const runtime = {
-    createLoader: (apiBase, siteId, session, trackEvent) => new ExperienceLoader(apiBase, siteId, session, trackEvent)
+    createLoader: (apiBase, siteId, session, trackEvent, geoAgent) => new ExperienceLoader(apiBase, siteId, session, trackEvent, geoAgent, (overrideUrl) => loadSdkBundle(
+      sdkBundleUrl("geo-agent", overrideUrl),
+      () => window.__movcuesGeoAgentRuntime__,
+      "Geo Agent runtime"
+    ))
   };
   window.__movcuesExperienceRuntime__ = runtime;
 })();

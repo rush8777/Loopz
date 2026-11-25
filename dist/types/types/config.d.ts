@@ -1,3 +1,4 @@
+import type { GeoAgentOptions } from "../experiences/geoAgent/types";
 export interface RageClickConfig {
     minClicks: number;
     timeWindowMs: number;
@@ -54,6 +55,8 @@ export interface AnalyticsConfig {
     endpoint?: string;
     /** Optional URL for the separately lazy-loaded experience runtime bundle. */
     experienceRuntimeBundleUrl?: string;
+    /** Optional runtime URL and customer-issued visitor identity supplier for Geo Agent. */
+    geoAgent?: GeoAgentOptions;
     /** Optional URL for the separately lazy-loaded visual editor bundle. */
     editorRuntimeBundleUrl?: string;
     /** @deprecated This option is ignored. */
@@ -92,7 +95,7 @@ export interface AnalyticsConfig {
         enabled?: boolean;
     };
 }
-export interface ResolvedAnalyticsConfig extends Required<Omit<AnalyticsConfig, "heatmapSnapshotBundleUrl" | "autocapture" | "rageClick" | "move" | "scroll" | "hover" | "cursor" | "queue" | "sessionReplay" | "feedback" | "experiences">> {
+export interface ResolvedAnalyticsConfig extends Required<Omit<AnalyticsConfig, "heatmapSnapshotBundleUrl" | "autocapture" | "rageClick" | "move" | "scroll" | "hover" | "cursor" | "queue" | "sessionReplay" | "feedback" | "experiences" | "geoAgent">> {
     autocapture: {
         click: boolean;
         scroll: boolean;
@@ -104,4 +107,5 @@ export interface ResolvedAnalyticsConfig extends Required<Omit<AnalyticsConfig, 
     experiences: {
         enabled: boolean;
     };
+    geoAgent?: GeoAgentOptions;
 }

@@ -1,9 +1,12 @@
+import type { GeoAgentOptions, LoadGeoAgent } from "../geoAgent/types";
 import type { ExperienceSession } from "../runtimeInterfaces";
 export declare class ExperienceLoader {
     private apiBase;
     private siteId;
     private session;
     private trackEvent?;
+    private geoOptions?;
+    private loadGeoAgent?;
     private renderer;
     private eligibility;
     private state;
@@ -14,6 +17,10 @@ export declare class ExperienceLoader {
     private destroyed;
     private hasChecklistCandidates;
     private checklist;
+    private geoAgent;
+    private geoAgentDelivery;
+    private geoGeneration;
+    private geoRefreshTimer;
     private lastRoute;
     private deliveryEpoch;
     private finishing;
@@ -22,7 +29,7 @@ export declare class ExperienceLoader {
     private owner;
     private context;
     private triggerLeases;
-    constructor(apiBase: string, siteId: string, session: ExperienceSession, trackEvent?: ((name: string) => void) | undefined);
+    constructor(apiBase: string, siteId: string, session: ExperienceSession, trackEvent?: ((name: string) => void) | undefined, geoOptions?: GeoAgentOptions | undefined, loadGeoAgent?: LoadGeoAgent | undefined);
     evaluate(trigger?: string): Promise<void>;
     onRouteChange(): void;
     onCustomEvent(name: string): void;
@@ -37,6 +44,9 @@ export declare class ExperienceLoader {
     private syncContext;
     private owns;
     launchExperience(experienceId: string): Promise<void>;
+    private clearGeoAgent;
+    private reconcileGeoAgent;
+    private scheduleGeoAgentCheck;
     destroy(): void;
     private fetchExperiences;
     private show;

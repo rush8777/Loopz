@@ -1,3 +1,4 @@
+import type { DeliveredGeoAgent, GeoAgentOptions, GeoAgentRuntime, LoadGeoAgent } from "../geoAgent/types";
 import type { DeliveredChecklist, DeliveredExperience, ExperienceAction, RuntimeGuideDefinition, SurveyAnswers } from "../types";
 import { guideStepRequiresTarget, isGuideDefinition } from "../types";
 import type { ExperienceSession } from "../runtimeInterfaces";
@@ -43,6 +44,10 @@ export class ExperienceLoader {
   private destroyed = false;
   private hasChecklistCandidates = false;
   private checklist: ChecklistManager;
+  private geoAgent: GeoAgentRuntime | null = null;
+  private geoAgentDelivery: DeliveredGeoAgent | undefined;
+  private geoGeneration = 0;
+  private geoRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   private lastRoute = location.href;
   private deliveryEpoch = 0;
   private finishing = new Set<string>();
@@ -52,7 +57,10 @@ export class ExperienceLoader {
   private context = "";
   private triggerLeases = new Map<string, { ids: Set<string>; expiresAt: number }>();
 
-  constructor(private apiBase: string, private siteId: string, private session: ExperienceSession, private trackEvent?: (name: string) => void) {
+  constructor(
+    private apiBase: string, private siteId: string, private session: ExperienceSession,
+    private trackEvent?: (name: string) => void, private geoOptions?: GeoAgentOptions, private loadGeoAgent?: LoadGeoAgent,
+  ) {
     this.checklist = new ChecklistManager(apiBase, siteId, session, (id, context) => this.launch(id, context));
     this.owner = this.ownerKey(); this.context = this.contextKey();
     this.state = new ExperienceStateStore(this.stateScope());
@@ -84,6 +92,7 @@ export class ExperienceLoader {
         else this.triggerLeases.delete(trigger);
         while (this.triggerLeases.size > 20) this.triggerLeases.delete(this.triggerLeases.keys().next().value!);
       }
+      if (!trigger) this.reconcileGeoAgent(manifest.geoAgent);
       this.hasChecklistCandidates = manifest.hasChecklists;
       this.checklist.setChecklist(manifest.checklists[0] ?? null);
       const experiences = manifest.experiences;
@@ -118,6 +127,7 @@ export class ExperienceLoader {
     if (this.destroyed) return;
     if (this.lastRoute === location.href) return;
     this.lastRoute = location.href;
+    if (this.geoAgentDelivery?.configuration.persistence === "page") this.clearGeoAgent(true);
     const activeGuide = this.activeGuide();
     if (activeGuide) {
       const advanced = activeGuide.stepEntryRoute !== location.href && this.advanceForRoute(activeGuide);
@@ -158,6 +168,7 @@ export class ExperienceLoader {
     this.renderer.destroy(); this.active = null; this.pausedGuide = null; this.queued = null;
     this.triggerLeases.clear(); this.finishing.clear(); this.justFinishedId = null;
     this.checklist.destroy();
+    this.clearGeoAgent(true);
     this.checklist = new ChecklistManager(this.apiBase, this.siteId, this.session, (id, context) => this.launch(id, context));
     this.hasChecklistCandidates = false;
     this.owner = this.ownerKey(); this.context = this.contextKey();
@@ -177,17 +188,59 @@ export class ExperienceLoader {
 
   launchExperience(experienceId: string): Promise<void> { return this.launch(experienceId, { source: "api" }); }
 
-  destroy(): void { this.manifestAbort?.abort(); this.requestGeneration++; this.destroyed = true; this.renderer.destroy(); this.checklist.destroy(); this.active = null; this.pausedGuide = null; this.queued = null; }
+  private clearGeoAgent(clearPersistence = false) {
+    this.geoGeneration++;
+    clearTimeout(this.geoRefreshTimer);
+    this.geoAgent?.destroy(clearPersistence);
+    this.geoAgent = null;
+    this.geoAgentDelivery = undefined;
+  }
 
-  private async fetchExperiences(trigger?: string, signal?: AbortSignal): Promise<{ experiences: DeliveredExperience[]; checklists: DeliveredChecklist[]; hasChecklists: boolean }> {
+  private reconcileGeoAgent(candidate: DeliveredGeoAgent | undefined): void {
+    const current = this.geoAgentDelivery;
+    if (candidate?.versionId === current?.versionId && candidate?.id === current?.id) return;
+    this.clearGeoAgent();
+    if (!candidate || candidate.configuration?.schemaVersion !== 1 || !this.loadGeoAgent) return;
+    this.geoAgentDelivery = candidate;
+    const generation = this.geoGeneration;
+    const ownerKey = this.ownerKey();
+    void this.loadGeoAgent(this.geoOptions?.bundleUrl).then(bundle => {
+      if (generation !== this.geoGeneration || this.destroyed || ownerKey !== this.ownerKey()) return;
+      if (!bundle) { this.clearGeoAgent(); return; }
+      this.geoAgent = bundle.mount(candidate, {
+        ...this.geoOptions, siteId: this.siteId, apiBase: this.apiBase, ownerKey,
+        onUnavailable: () => { if (generation === this.geoGeneration) this.clearGeoAgent(true); },
+      });
+      this.scheduleGeoAgentCheck(generation);
+    }).catch(() => { if (generation === this.geoGeneration) this.clearGeoAgent(); });
+  }
+
+  private scheduleGeoAgentCheck(generation: number): void {
+    this.geoRefreshTimer = setTimeout(async () => {
+      if (generation !== this.geoGeneration || this.destroyed) return;
+      if (document.visibilityState !== "hidden") {
+        const context = this.contextKey();
+        const signal = AbortSignal.timeout(8000);
+        try {
+          const manifest = await this.fetchExperiences(undefined, signal);
+          if (generation === this.geoGeneration && context === this.contextKey()) this.reconcileGeoAgent(manifest.geoAgent);
+        } catch { /* A temporary delivery failure is retried while the launcher is active. */ }
+      }
+      if (generation === this.geoGeneration && !this.destroyed) this.scheduleGeoAgentCheck(generation);
+    }, 60_000);
+  }
+
+  destroy(): void { this.clearGeoAgent(); this.manifestAbort?.abort(); this.requestGeneration++; this.destroyed = true; this.renderer.destroy(); this.checklist.destroy(); this.active = null; this.pausedGuide = null; this.queued = null; }
+
+  private async fetchExperiences(trigger?: string, signal?: AbortSignal): Promise<{ experiences: DeliveredExperience[]; checklists: DeliveredChecklist[]; hasChecklists: boolean; geoAgent?: DeliveredGeoAgent }> {
     const query = new URLSearchParams({ url: location.href, anonymousId: this.session.getAnonymousId(), sessionId: this.session.getSessionId() });
     const userId = this.session.getIdentifiedUserId(); if (userId) query.set("trackedUserId", userId); if (trigger) query.set("trigger", trigger);
     const stored = this.state.getGuideProgress();
     if (stored) { query.set("activeGuideId", stored.experienceId); query.set("activeGuideVersionId", stored.versionId); }
     const response = await fetch(`${this.apiBase}/public/sites/${encodeURIComponent(this.siteId)}/experiences?${query}`, { credentials: "omit", signal });
     if (!response.ok) return { experiences: [], checklists: [], hasChecklists: this.hasChecklistCandidates };
-    const manifest = await response.json() as { experiences?: DeliveredExperience[]; checklists?: DeliveredChecklist[]; hasChecklists?: boolean };
-    return { experiences: Array.isArray(manifest.experiences) ? manifest.experiences : [], checklists: Array.isArray(manifest.checklists) ? manifest.checklists : [], hasChecklists: manifest.hasChecklists === true };
+    const manifest = await response.json() as { experiences?: DeliveredExperience[]; checklists?: DeliveredChecklist[]; hasChecklists?: boolean; geoAgent?: DeliveredGeoAgent };
+    return { experiences: Array.isArray(manifest.experiences) ? manifest.experiences : [], checklists: Array.isArray(manifest.checklists) ? manifest.checklists : [], hasChecklists: manifest.hasChecklists === true, geoAgent: manifest.geoAgent };
   }
 
   private show(experience: DeliveredExperience, requestedStepId?: string, progress?: GuideProgress): void {

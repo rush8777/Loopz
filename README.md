@@ -173,3 +173,7 @@ Further documentation: see `docs/ARCHITECTURE.md`, `docs/EVENT_SCHEMA.md`,
 `docs/PRIVACY.md`, and `docs/PERFORMANCE.md`.
 
 Retired capture options in existing configurations are ignored. See the [release availability](https://www.movcues.com/docs/reference/availability/) reference for the supported SDK surface.
+
+### Geo Agent
+
+Published Geo Agent widgets are loaded separately as `sdk-geo-agent.js` or `sdk-geo-agent.min.js` in the CDN build. Keep those files alongside the matching experience runtime. ESM integrations load a separate generated chunk. The normal SDK installation needs no additional call for an anonymous assistant. For verified segment audiences, provide a customer-issued visitor token through the optional `geoAgent.identityToken` callback, and call the existing SDK identify and reset methods when users sign in or out. The backend's `docs/geo-agent.md` describes signing and the visitor API.

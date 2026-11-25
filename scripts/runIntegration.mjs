@@ -10,7 +10,9 @@ const specs = readdirSync(new URL('../tests/integration/', import.meta.url)).fil
 for (const browser of ['chromium', 'firefox', 'webkit']) for (const spec of specs) {
   const env = spec === 'guide-capture-workflow.spec.ts'
     ? { ...process.env, GUIDE_CAPTURE_ENABLED: 'true' }
-    : process.env;
+    : spec === "geo-agent.spec.ts"
+      ? { ...process.env, GEO_AGENT_INTEGRATION: "true", KNOWLEDGE_WORKER_ENABLED: "true" }
+      : process.env;
   const result = spawnSync(process.execPath, [cli, 'test', '--config', config, `--project=${browser}`, `tests/integration/${spec}`, ...process.argv.slice(2)], { cwd: root, env, stdio: 'inherit' });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);

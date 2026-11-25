@@ -323,7 +323,8 @@ export class Analytics {
         this.config.endpoint,
         this.config.siteId,
         this.session,
-        (name) => this.event(name)
+        (name) => this.event(name),
+        this.config.geoAgent
       );
       await this.experiences.evaluate();
       for (const id of this.pendingExperienceLaunches.splice(0)) void this.experiences.launchExperience?.(id);

@@ -9,6 +9,7 @@ export function resolveConfig(input: AnalyticsConfig): ResolvedAnalyticsConfig {
     siteId: input.siteId,
     endpoint: input.endpoint || "https://api.movcues.com",
     experienceRuntimeBundleUrl: input.experienceRuntimeBundleUrl ?? "",
+    geoAgent: input.geoAgent,
     editorRuntimeBundleUrl: input.editorRuntimeBundleUrl ?? "",
     debug: input.debug ?? true,
     sessionInactivityMs: input.sessionInactivityMs ?? 30 * 60 * 1000,

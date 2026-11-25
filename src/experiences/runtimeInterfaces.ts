@@ -1,3 +1,5 @@
+import type { GeoAgentBundle, GeoAgentOptions } from "./geoAgent/types";
+
 export interface ExperienceSession {
   getAnonymousId(): string;
   getSessionId(): string;
@@ -48,7 +50,8 @@ export interface ExperienceRuntime {
     apiBase: string,
     siteId: string,
     session: ExperienceSession,
-    trackEvent?: (name: string) => void
+    trackEvent?: (name: string) => void,
+    geoAgent?: GeoAgentOptions
   ): ExperienceLoaderRuntime;
 }
 
@@ -64,6 +67,7 @@ export interface AnalyticsRuntimeProviders {
 
 declare global {
   interface Window {
+    __movcuesGeoAgentRuntime__?: GeoAgentBundle;
     __movcuesExperienceRuntime__?: ExperienceRuntime;
     __movcuesEditorRuntime__?: EditorRuntime;
   }

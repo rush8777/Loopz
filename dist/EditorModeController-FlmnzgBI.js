@@ -1,4 +1,4 @@
-import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, S as SensitiveElementDetector, j as findTarget, R as RouteObserver, E as ExperienceRenderer, k as sanitizeBuilderHtml, l as getGuideStepPattern, m as guideStepRequiresTarget, n as guideStepConfigurationErrors, p as exchangeEditorSession, q as clearEditorContinuation, r as isChecklistDefinition, t as isGuideDefinition, u as guideInteractionTarget, v as matchesGuideTargetPage, w as matchesGuideRoute, x as storeEditorContinuation } from "./module-CPcmCKe5.js";
+import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, S as SensitiveElementDetector, j as findTarget, R as RouteObserver, E as ExperienceRenderer, k as sanitizeBuilderHtml, l as getGuideStepPattern, m as guideStepRequiresTarget, n as guideStepConfigurationErrors, p as exchangeEditorSession, q as clearEditorContinuation, r as isChecklistDefinition, t as isGuideDefinition, u as guideInteractionTarget, v as matchesGuideTargetPage, w as matchesGuideRoute, x as storeEditorContinuation } from "./module-CAypg_kN.js";
 function panelIcon(name) {
   const paths = {
     properties: '<path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
@@ -13801,4 +13801,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-CjaKsg7T.js.map
+//# sourceMappingURL=EditorModeController-FlmnzgBI.js.map
