@@ -389,9 +389,11 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
         if (number === this.line) {
           if (line.length > 160) {
             let padding = 20;
-            let endColumn = typeof this.endColumn === "number" ? this.endColumn : this.column;
             let subLineStart = Math.max(0, this.column - padding);
-            let subLineEnd = Math.max(this.column + padding, endColumn + padding);
+            let subLineEnd = Math.max(
+              this.column + padding,
+              this.endColumn + padding
+            );
             let subLine = line.slice(subLineStart, subLineEnd);
             let spacing2 = aside(gutter.replace(/\d/g, " ")) + line.slice(0, Math.min(this.column - 1, padding - 1)).replace(/[^\t]/g, " ");
             return mark(">") + aside(gutter) + highlight(subLine) + "\n " + spacing2 + mark("^");
@@ -2417,10 +2419,8 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
         while ((startIndex = this.css.indexOf(annotation, cursor)) !== -1) {
           let endIndex = this.css.indexOf("*/", startIndex + annotation.length);
           if (endIndex === -1) break;
-          if (endIndex + 2 === this.css.length || /[\t\n\f\r ]/.test(this.css[endIndex + 2])) {
-            while (startIndex > cursor && (this.css[startIndex - 1] === "\n" || this.css[startIndex - 1] === "\r")) {
-              startIndex--;
-            }
+          while (startIndex > cursor && this.css[startIndex - 1] === "\n") {
+            startIndex--;
           }
           css += this.css.slice(cursor, startIndex);
           cursor = endIndex + 2;
@@ -2696,15 +2696,14 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
   const RE_WORD_END = /[\t\n\f\r !"#'():;@[\\\]{}]|\/(?=\*)/g;
   const RE_BAD_BRACKET = /.[\r\n"'(/\\]/;
   const RE_HEX_ESCAPE = /[\da-f]/i;
-  const RE_URL_NAME = /(^|[\t\n\f\r "'(),/:;[\]{}])url$/i;
-  const RE_QUOTED = /[\t\n\f\r ]*["']/y;
   var tokenize = function tokenizer2(input2, options = {}) {
     let css = input2.css.valueOf();
     let ignore = options.ignoreErrors;
     let code, content, escape2, next, quote;
-    let currentToken, escaped, escapePos;
+    let currentToken, escaped, escapePos, n, prev;
     let length = css.length;
     let pos = 0;
+    let buffer = [];
     let returned = [];
     let lastBadParen = -1;
     function position() {
@@ -2748,8 +2747,9 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
           break;
         }
         case OPEN_PARENTHESES: {
-          RE_QUOTED.lastIndex = pos + 1;
-          if (RE_URL_NAME.test(css.substring(pos - 4, pos)) && !RE_QUOTED.test(css)) {
+          prev = buffer.length ? buffer.pop()[1] : "";
+          n = css.charCodeAt(pos + 1);
+          if (prev === "url" && n !== SINGLE_QUOTE && n !== DOUBLE_QUOTE && n !== SPACE && n !== NEWLINE && n !== TAB && n !== FEED && n !== CR) {
             next = pos;
             do {
               escaped = false;
@@ -2866,6 +2866,7 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
               next = RE_WORD_END.lastIndex - 2;
             }
             currentToken = ["word", css.slice(pos, next + 1), pos, next];
+            buffer.push(currentToken);
             pos = next;
           }
           break;
@@ -4156,7 +4157,7 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
   let Root$1 = root;
   let Processor$1 = class Processor {
     constructor(plugins = []) {
-      this.version = "8.5.33";
+      this.version = "8.5.32";
       this.plugins = this.normalize(plugins);
     }
     normalize(plugins) {
@@ -8418,7 +8419,7 @@ ${ISOLATION_CSS}`;
         <button type="button" data-mode="navigate">Navigate</button>
       </div>
       <p class="muted" data-instructions role="status"></p>
-      <p class="muted">Shift + Tab to switch modes. Use Shift + F8 when a website control uses Shift + Tab.</p>
+      <p class="muted">Shift + F8 switches modes without moving focus. Shift + Tab also works inside menus and listboxes.</p>
       <ol data-targets aria-label="Captured elements"></ol>
       <form data-prompt-form>
         <label>What should this guide help users do?
@@ -8459,9 +8460,9 @@ ${ISOLATION_CSS}`;
   const explicitlyPrivate = "[data-movcues-private],input[type=password],input[type=hidden],[autocomplete=current-password],[autocomplete=new-password],[autocomplete=one-time-code]";
   const menuItem = "[role=menuitem],[role=menuitemcheckbox],[role=menuitemradio],[role=option]";
   const interactive = `button,input,select,textarea,a[href],[role=button],[role=link],[role=checkbox],[role=combobox],[role=tab],[role=switch],${menuItem},${editable}`;
-  const nonTextInput = 'input:is([type="button"],[type="submit"],[type="reset"],[type="image"],[type="checkbox"],[type="radio"],[type="range"],[type="color"],[type="file"])';
+  const nonTextInputTypes = /* @__PURE__ */ new Set(["button", "submit", "reset", "image", "checkbox", "radio", "range", "color", "file"]);
   function isCaptureTextInput(path) {
-    return path.some((node2) => node2 instanceof Element && (node2.matches(`textarea,[role=textbox],[role=searchbox],input:not(${nonTextInput})`) || node2 instanceof HTMLElement && node2.isContentEditable));
+    return path.some((node2) => node2 instanceof Element && (node2.matches("textarea,[role=textbox],[role=searchbox]") || node2 instanceof HTMLInputElement && !nonTextInputTypes.has(node2.type) || node2 instanceof HTMLElement && node2.isContentEditable));
   }
   function captureTargetFor(node2) {
     if (!(node2 instanceof Element) || isMovcuesSurface(node2) || node2.closest(explicitlyPrivate) || privateElement.isWithinPrivateSubtree(node2)) return null;
@@ -8773,13 +8774,20 @@ ${ISOLATION_CSS}`;
         if (this.state !== "loading") this.writeLocal();
         void this.syncCheckpoint();
       };
+      this.preserveModeButtonFocus = (event) => {
+        if (this.state !== "capture" || this.busy || event.button !== 0) return;
+        const modeButton = event.composedPath().some((node2) => node2 instanceof HTMLButtonElement && node2.getRootNode() === this.root && node2.hasAttribute("data-mode"));
+        if (!modeButton) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      };
       this.handleModeShortcut = (event) => {
         if (this.state !== "capture" || this.busy || !event.cancelable || event.defaultPrevented || event.isComposing || !event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.key !== "Tab" && event.key !== "F8") return;
         const path = event.composedPath();
         if (path.some((node2) => node2 instanceof Element && isMovcuesSurface(node2))) return;
         if (event.key === "Tab") {
           const matches2 = (selector2) => path.some((node2) => node2 instanceof Element && node2.matches(selector2));
-          if (isCaptureTextInput(path) || matches2('select,[role="grid"],[role="tree"],[role="toolbar"],[role="tablist"],[aria-keyshortcuts~="Shift+Tab" i]') || matches2('dialog[open],[role="dialog"],[role="alertdialog"]') && !matches2('[role="menu"],[role="listbox"]')) return;
+          if (isCaptureTextInput(path) || matches2('select,[role="grid"],[role="tree"],[role="toolbar"],[role="tablist"],[aria-keyshortcuts~="Shift+Tab" i]') || !matches2('[role="menu"],[role="listbox"]')) return;
         }
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -8930,13 +8938,15 @@ ${ISOLATION_CSS}`;
       });
       window.addEventListener("pagehide", this.flushCheckpoint);
       window.addEventListener("keydown", this.handleModeShortcut, true);
+      window.addEventListener("pointerdown", this.preserveModeButtonFocus, true);
+      window.addEventListener("mousedown", this.preserveModeButtonFocus, true);
       this.route.start();
       void this.restore();
     }
     expire() {
       var _a, _b, _c;
       if (this.state === "expired") return;
-      window.removeEventListener("keydown", this.handleModeShortcut, true);
+      this.removeModeListeners();
       (_a = this.request) == null ? void 0 : _a.abort();
       this.journey.stop();
       clearTimeout(this.saveTimer);
@@ -8953,7 +8963,7 @@ ${ISOLATION_CSS}`;
     destroy() {
       var _a, _b, _c;
       window.removeEventListener("pagehide", this.flushCheckpoint);
-      window.removeEventListener("keydown", this.handleModeShortcut, true);
+      this.removeModeListeners();
       this.journey.stop();
       clearTimeout(this.saveTimer);
       this.destroyed = true;
@@ -9195,6 +9205,11 @@ ${ISOLATION_CSS}`;
       if (mode === "navigate") this.replacement = void 0;
       else this.journey.routeChanged();
       this.checkpointChanged({ ...this.checkpoint, mode });
+    }
+    removeModeListeners() {
+      window.removeEventListener("keydown", this.handleModeShortcut, true);
+      window.removeEventListener("pointerdown", this.preserveModeButtonFocus, true);
+      window.removeEventListener("mousedown", this.preserveModeButtonFocus, true);
     }
     async planGuide() {
       if (this.busy || this.state !== "capture" || !this.checkpoint.targets.length || !this.prompt.trim()) return;

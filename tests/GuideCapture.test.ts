@@ -31,13 +31,14 @@ describe("Guided Capture", () => {
     } as unknown as CaptureBridge;
     const controller = new GuidedCaptureController(bridge, session, draft, vi.fn(), vi.fn());
     const key = (type: string, options: KeyboardEventInit = {}) => document.activeElement!.dispatchEvent(new KeyboardEvent(type, {
-      key: "Tab", shiftKey: true, bubbles: true, cancelable: true, composed: true, ...options,
+      key: "F8", shiftKey: true, bubbles: true, cancelable: true, composed: true, ...options,
     }));
     controller.mount();
     try {
       await vi.waitFor(() => expect(button("[data-mode=navigate]")?.getAttribute("aria-pressed")).toBe("true"));
       (target() as HTMLElement).focus();
       expect(key("keydown", { ctrlKey: true })).toBe(true);
+      expect(key("keydown", { key: "Tab" })).toBe(true);
       expect(key("keydown")).toBe(false);
       expect(key("keydown", { repeat: true })).toBe(false);
       expect(key("keyup")).toBe(true);
@@ -46,7 +47,7 @@ describe("Guided Capture", () => {
       expect(document.activeElement).toBe(target());
       expect(button("[data-mode=select]")?.getAttribute("aria-pressed")).toBe("true");
       document.querySelector<HTMLInputElement>("#field")!.focus();
-      expect(key("keydown")).toBe(true);
+      expect(key("keydown", { key: "Tab" })).toBe(true);
       checkpoint()!.querySelector("textarea")!.focus();
       expect(key("keydown")).toBe(true);
       button("[data-mode=navigate]")!.click();

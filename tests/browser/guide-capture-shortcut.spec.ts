@@ -11,11 +11,11 @@ test.beforeEach(async ({ page }) => {
 });
 
 for (const { trigger, surface, options, shortcut, topLayer } of [
-  { trigger: "#custom-trigger", surface: "#custom-menu", options: ["#custom-one", "#custom-two"] },
+  { trigger: "#custom-trigger", surface: "#custom-menu", options: ["#custom-one", "#custom-two"], shortcut: "Shift+F8" },
   { trigger: "#menu-trigger", surface: "#radix-menu", options: ["#menu-one", "#menu-two"] },
   { trigger: "#menu-trigger", surface: "#submenu", options: ["#sub-one", "#sub-two"] },
   { trigger: "#select-trigger", surface: "#radix-select", options: ["#select-one", "#select-two"] },
-  { trigger: "#popover-trigger", surface: "#web-popover", options: ["#pop-one", "#pop-two"], topLayer: true },
+  { trigger: "#popover-trigger", surface: "#web-popover", options: ["#pop-one", "#pop-two"], shortcut: "Shift+F8", topLayer: true },
   { trigger: "#dialog-trigger", surface: "#dialog", options: ["#dialog-one", "#dialog-two"], shortcut: "Shift+F8" },
 ]) {
   test(`captures two elements in ${surface} without a focus or website action`, async ({ page }) => {
@@ -59,6 +59,24 @@ for (const { trigger, surface, options, shortcut, topLayer } of [
   });
 }
 
+test("switches capture mode with the panel while a host dropdown keeps focus", async ({ page }) => {
+  const trigger = page.locator("#custom-trigger");
+  const popup = page.locator("#custom-menu");
+  await trigger.click();
+  await mode(page, "select").click();
+  await expect(mode(page, "select")).toHaveAttribute("aria-pressed", "true");
+  await expect(trigger).toBeFocused();
+  await expect(popup).toBeVisible();
+  await page.locator("#custom-one").click();
+  await expect(selections(page)).toHaveCount(1);
+  await mode(page, "navigate").click();
+  await expect(mode(page, "navigate")).toHaveAttribute("aria-pressed", "true");
+  await expect(trigger).toBeFocused();
+  await expect(popup).toBeVisible();
+  await page.locator("#custom-one").click();
+  await expect(page.locator("#actions")).toHaveText("1");
+});
+
 test("keeps focus navigation, typing and modifier chords available in selection", async ({ page }) => {
   await mode(page, "select").click();
   const field = page.locator("#host-input");
@@ -87,6 +105,9 @@ test("keeps focus navigation, typing and modifier chords available in selection"
   await page.keyboard.press("Shift+Tab");
   await expect(editable).toBeFocused();
   await page.locator("#before-input").focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(page.locator("#dialog-trigger")).toBeFocused();
+  await expect(mode(page, "select")).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("Alt+Shift+Tab");
   await expect(mode(page, "select")).toHaveAttribute("aria-pressed", "true");
   await mode(page, "navigate").click();
@@ -95,9 +116,9 @@ test("keeps focus navigation, typing and modifier chords available in selection"
 
 test("retains mode on blur and reload and releases interception on expiry and close", async ({ page, context }) => {
   await page.keyboard.down("Shift");
-  await page.keyboard.down("Tab");
-  await page.keyboard.down("Tab");
-  await page.keyboard.up("Tab");
+  await page.keyboard.down("F8");
+  await page.keyboard.down("F8");
+  await page.keyboard.up("F8");
   await page.keyboard.up("Shift");
   await expect(mode(page, "select")).toHaveAttribute("aria-pressed", "true");
   const otherTab = await context.newPage();
@@ -107,11 +128,11 @@ test("retains mode on blur and reload and releases interception on expiry and cl
   await expect(mode(page, "select")).toHaveAttribute("aria-pressed", "true");
   await page.reload();
   await expect(mode(page, "select")).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Shift+F8");
   await page.locator("#next-page").click();
   await expect(page).toHaveURL(/\?page=next#\/next$/);
   await expect(mode(page, "navigate")).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Shift+F8");
   await page.evaluate(() => (window as any).fixture.expire());
   await page.locator("#custom-trigger").click();
   await expect(page.locator("#custom-menu")).toBeVisible();

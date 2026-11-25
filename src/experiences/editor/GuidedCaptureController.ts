@@ -90,13 +90,15 @@ export class GuidedCaptureController {
     });
     window.addEventListener("pagehide", this.flushCheckpoint);
     window.addEventListener("keydown", this.handleModeShortcut, true);
+    window.addEventListener("pointerdown", this.preserveModeButtonFocus, true);
+    window.addEventListener("mousedown", this.preserveModeButtonFocus, true);
     this.route.start();
     void this.restore();
   }
 
   expire(): void {
     if (this.state === "expired") return;
-    window.removeEventListener("keydown", this.handleModeShortcut, true);
+    this.removeModeListeners();
     this.request?.abort();
     this.journey.stop();
     clearTimeout(this.saveTimer);
@@ -113,7 +115,7 @@ export class GuidedCaptureController {
 
   destroy(): void {
     window.removeEventListener("pagehide", this.flushCheckpoint);
-    window.removeEventListener("keydown", this.handleModeShortcut, true);
+    this.removeModeListeners();
     this.journey.stop();
     clearTimeout(this.saveTimer);
     this.destroyed = true;
@@ -346,6 +348,22 @@ export class GuidedCaptureController {
     this.checkpointChanged({ ...this.checkpoint, mode });
   }
 
+  private removeModeListeners(): void {
+    window.removeEventListener("keydown", this.handleModeShortcut, true);
+    window.removeEventListener("pointerdown", this.preserveModeButtonFocus, true);
+    window.removeEventListener("mousedown", this.preserveModeButtonFocus, true);
+  }
+
+  private preserveModeButtonFocus = (event: MouseEvent): void => {
+    if (this.state !== "capture" || this.busy || event.button !== 0) return;
+    const modeButton = event.composedPath().some(node => node instanceof HTMLButtonElement
+      && node.getRootNode() === this.root && node.hasAttribute("data-mode"));
+    if (!modeButton) return;
+    // Leave the mode button's click intact without focusing it or notifying host outside-press handlers.
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+
   private handleModeShortcut = (event: KeyboardEvent): void => {
     if (this.state !== "capture" || this.busy || !event.cancelable || event.defaultPrevented || event.isComposing
       || !event.shiftKey || event.altKey || event.ctrlKey || event.metaKey
@@ -354,11 +372,10 @@ export class GuidedCaptureController {
     if (path.some(node => node instanceof Element && isMovcuesSurface(node))) return;
     if (event.key === "Tab") {
       const matches = (selector: string) => path.some(node => node instanceof Element && node.matches(selector));
-      // Leave backward Tab to focus-managed controls. Menus and listboxes can use
-      // the shortcut even when embedded in a dialog.
+      // Keep backward Tab available across the host page and its focus-managed controls.
       if (isCaptureTextInput(path)
         || matches('select,[role="grid"],[role="tree"],[role="toolbar"],[role="tablist"],[aria-keyshortcuts~="Shift+Tab" i]')
-        || (matches('dialog[open],[role="dialog"],[role="alertdialog"]') && !matches('[role="menu"],[role="listbox"]'))) return;
+        || !matches('[role="menu"],[role="listbox"]')) return;
     }
     event.preventDefault();
     event.stopImmediatePropagation();

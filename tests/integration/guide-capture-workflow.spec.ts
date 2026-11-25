@@ -50,7 +50,7 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   const timeline = panel.getByRole("list", { name: "Captured elements" });
   const rows = timeline.locator("[data-remove]");
   await expect(panel.getByRole("button", { name: "Navigate", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await editor.keyboard.press("Shift+Tab");
+  await editor.keyboard.press("Shift+F8");
   await expect(panel.getByRole("button", { name: "Select Elements" })).toHaveAttribute("aria-pressed", "true");
   await expect(widget(editor)).toHaveCount(0);
   const started = await editor.evaluate(() => performance.now());

@@ -10,11 +10,12 @@ const editable = "[contenteditable]:not([contenteditable=false])";
 const explicitlyPrivate = "[data-movcues-private],input[type=password],input[type=hidden],[autocomplete=current-password],[autocomplete=new-password],[autocomplete=one-time-code]";
 const menuItem = "[role=menuitem],[role=menuitemcheckbox],[role=menuitemradio],[role=option]";
 const interactive = `button,input,select,textarea,a[href],[role=button],[role=link],[role=checkbox],[role=combobox],[role=tab],[role=switch],${menuItem},${editable}`;
-const nonTextInput = 'input:is([type="button"],[type="submit"],[type="reset"],[type="image"],[type="checkbox"],[type="radio"],[type="range"],[type="color"],[type="file"])';
+const nonTextInputTypes = new Set(["button", "submit", "reset", "image", "checkbox", "radio", "range", "color", "file"]);
 
 export function isCaptureTextInput(path: EventTarget[]): boolean {
   return path.some(node => node instanceof Element && (
-    node.matches(`textarea,[role=textbox],[role=searchbox],input:not(${nonTextInput})`)
+    node.matches("textarea,[role=textbox],[role=searchbox]")
+    || node instanceof HTMLInputElement && !nonTextInputTypes.has(node.type)
     || node instanceof HTMLElement && node.isContentEditable
   ));
 }
