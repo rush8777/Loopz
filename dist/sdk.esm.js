@@ -1,4 +1,4 @@
-import { A, y } from "./module-CAypg_kN.js";
+import { A, y } from "./module-DBjfCImA.js";
 export {
   A as Analytics,
   y as createAnalytics

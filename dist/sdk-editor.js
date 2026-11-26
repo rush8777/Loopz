@@ -389,11 +389,9 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
         if (number === this.line) {
           if (line.length > 160) {
             let padding = 20;
+            let endColumn = typeof this.endColumn === "number" ? this.endColumn : this.column;
             let subLineStart = Math.max(0, this.column - padding);
-            let subLineEnd = Math.max(
-              this.column + padding,
-              this.endColumn + padding
-            );
+            let subLineEnd = Math.max(this.column + padding, endColumn + padding);
             let subLine = line.slice(subLineStart, subLineEnd);
             let spacing2 = aside(gutter.replace(/\d/g, " ")) + line.slice(0, Math.min(this.column - 1, padding - 1)).replace(/[^\t]/g, " ");
             return mark(">") + aside(gutter) + highlight(subLine) + "\n " + spacing2 + mark("^");
@@ -2419,8 +2417,10 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
         while ((startIndex = this.css.indexOf(annotation, cursor)) !== -1) {
           let endIndex = this.css.indexOf("*/", startIndex + annotation.length);
           if (endIndex === -1) break;
-          while (startIndex > cursor && this.css[startIndex - 1] === "\n") {
-            startIndex--;
+          if (endIndex + 2 === this.css.length || /[\t\n\f\r ]/.test(this.css[endIndex + 2])) {
+            while (startIndex > cursor && (this.css[startIndex - 1] === "\n" || this.css[startIndex - 1] === "\r")) {
+              startIndex--;
+            }
           }
           css += this.css.slice(cursor, startIndex);
           cursor = endIndex + 2;
@@ -2696,14 +2696,15 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
   const RE_WORD_END = /[\t\n\f\r !"#'():;@[\\\]{}]|\/(?=\*)/g;
   const RE_BAD_BRACKET = /.[\r\n"'(/\\]/;
   const RE_HEX_ESCAPE = /[\da-f]/i;
+  const RE_URL_NAME = /(^|[\t\n\f\r "'(),/:;[\]{}])url$/i;
+  const RE_QUOTED = /[\t\n\f\r ]*["']/y;
   var tokenize = function tokenizer2(input2, options = {}) {
     let css = input2.css.valueOf();
     let ignore = options.ignoreErrors;
     let code, content, escape2, next, quote;
-    let currentToken, escaped, escapePos, n, prev;
+    let currentToken, escaped, escapePos;
     let length = css.length;
     let pos = 0;
-    let buffer = [];
     let returned = [];
     let lastBadParen = -1;
     function position() {
@@ -2747,9 +2748,8 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
           break;
         }
         case OPEN_PARENTHESES: {
-          prev = buffer.length ? buffer.pop()[1] : "";
-          n = css.charCodeAt(pos + 1);
-          if (prev === "url" && n !== SINGLE_QUOTE && n !== DOUBLE_QUOTE && n !== SPACE && n !== NEWLINE && n !== TAB && n !== FEED && n !== CR) {
+          RE_QUOTED.lastIndex = pos + 1;
+          if (RE_URL_NAME.test(css.substring(pos - 4, pos)) && !RE_QUOTED.test(css)) {
             next = pos;
             do {
               escaped = false;
@@ -2866,7 +2866,6 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
               next = RE_WORD_END.lastIndex - 2;
             }
             currentToken = ["word", css.slice(pos, next + 1), pos, next];
-            buffer.push(currentToken);
             pos = next;
           }
           break;
@@ -4157,7 +4156,7 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
   let Root$1 = root;
   let Processor$1 = class Processor {
     constructor(plugins = []) {
-      this.version = "8.5.32";
+      this.version = "8.5.33";
       this.plugins = this.normalize(plugins);
     }
     normalize(plugins) {

@@ -44,22 +44,36 @@ test("indexes knowledge, configures and publishes Geo Agent, and chats on the cu
   await expect(page.getByText("Ready", { exact: true })).toBeVisible({ timeout: 15_000 });
 
   await page.goto("/experiences/geo-agents");
-  await page.getByRole("button", { name: "Create Geo Agent", exact: true }).first().click();
-  const creation = page.getByRole("dialog", { name: "Create Geo Agent" });
-  await creation.getByLabel("Name", { exact: true }).fill("Billing assistant");
-  await creation.getByRole("button", { name: "Create Geo Agent" }).click();
-  await expect(page).toHaveURL(/\/experiences\/[^/]+\/edit$/);
+  await page.getByLabel("Agent name", { exact: true }).fill("Billing assistant");
+  const creation = page.waitForResponse(response => response.url().endsWith(`/sites/${site.id}/experiences`) && response.request().method() === "POST");
+  await page.getByRole("button", { name: "Set up Geo Agent" }).click();
+  const created = await creation;
+  expect(created.status()).toBe(201);
+  const { id } = await created.json();
+  await expect(page).toHaveURL(/\/experiences\/geo-agents$/);
+  await expect(page.getByRole("heading", { name: "Billing assistant" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Set up Geo Agent" })).toHaveCount(0);
+  const navigateAgent = async (name: string) => {
+    const adoption = page.getByText("AI Adoption", { exact: true }).locator("..");
+    await adoption.getByRole("link", { name, exact: true }).click();
+  };
+  await navigateAgent("Appearance");
   await page.getByRole("textbox", { name: "Assistant name" }).fill("Invoice assistant");
-  await page.getByRole("tab", { name: "Knowledge" }).click();
+  await navigateAgent("Knowledge");
+  await expect(page.getByRole("heading", { name: "Knowledge", exact: true })).toBeVisible();
   await page.getByRole("checkbox", { name: /Invoice help/ }).check();
+  await navigateAgent("Overview");
   await page.getByRole("textbox", { name: "Preview question" }).fill("How do I create an invoice?");
   await page.getByRole("button", { name: "Ask", exact: true }).click();
   await expect(page.getByText("Open Billing and choose New invoice.")).toBeVisible();
-  await page.getByRole("tab", { name: "Behavior" }).click();
+  await navigateAgent("Behaviour");
   await page.getByLabel("Page paths, one per line").fill("/integration");
   await page.getByRole("button", { name: "Review & publish" }).click();
   await page.getByRole("button", { name: "Publish now" }).click();
   await expect(page.getByText("Geo Agent published.")).toBeVisible();
+  await navigateAgent("Conversations");
+  await expect(page.getByRole("heading", { name: "Conversation activity" })).toBeVisible();
+  await navigateAgent("Overview");
 
   await visitor.reload();
   const launcher = visitor.getByRole("button", { name: "Chat with Invoice assistant" });
@@ -74,6 +88,7 @@ test("indexes knowledge, configures and publishes Geo Agent, and chats on the cu
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(320);
   await composer.fill("How do I create an invoice?");
+  await expect(panel.getByRole("button", { name: "Send", exact: true })).toBeEnabled();
   await composer.press("Enter");
   await expect(panel.getByText("Open Billing and choose New invoice.", { exact: true }).first()).toBeVisible();
   await expect(panel.getByRole("link", { name: "Creating invoices" })).toHaveAttribute("href", "https://docs.example.com/invoices");
@@ -89,6 +104,7 @@ test("indexes knowledge, configures and publishes Geo Agent, and chats on the cu
   await launcher.click();
   await expect(panel.getByRole("link", { name: "Creating invoices" })).toBeVisible();
   await composer.fill("slow invoice question");
+  await expect(panel.getByRole("button", { name: "Send", exact: true })).toBeEnabled();
   const started = visitor.waitForResponse(response => response.url().includes("/messages?") && response.request().method() === "POST");
   await composer.press("Enter");
   await started;
@@ -106,10 +122,28 @@ test("indexes knowledge, configures and publishes Geo Agent, and chats on the cu
   await expect(page.getByText("Geo Agent paused.")).toBeVisible();
   await visitor.evaluate(() => history.pushState({}, "", "/integration/start"));
   await expect(visitor.locator("[data-movcues-geo-agent]")).toHaveCount(0);
-  const id = page.url().match(/experiences\/([^/]+)\/edit/)![1];
   const metrics = await request.get(`${api}/orgs/${organization.id}/sites/${site.id}/experiences/${id}/geo-agent/metrics`, { headers });
   expect(metrics.status()).toBe(200);
   const activity = await metrics.json();
   expect(activity).toMatchObject({ conversations: 1, responses: 1, helpful: 1, tokens: 60 });
+
+  await page.getByRole("button", { name: "Select site" }).click();
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("button", { name: "+ Add site" }).click();
+  await settings.getByLabel("Site name").fill("Second host");
+  await settings.getByLabel("Primary domain (optional)").fill("https://second.example.test");
+  await settings.getByRole("button", { name: "Create site" }).click();
+  await expect(settings.getByRole("button", { name: /Second host/, pressed: true })).toBeVisible();
+  await settings.getByRole("button", { name: "Close settings" }).click();
+  await expect(page.getByRole("button", { name: "Set up Geo Agent" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Billing assistant" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Select site" }).click();
+  await settings.getByRole("button", { name: /Test host/ }).click();
+  await settings.getByRole("button", { name: "Close settings" }).click();
+  await expect(page.getByRole("heading", { name: "Billing assistant" })).toBeVisible();
+  await navigateAgent("Appearance");
+  await expect(page.getByRole("textbox", { name: "Assistant name" })).toHaveValue("Invoice assistant");
+  await expect(page.getByText("paused", { exact: true })).toBeVisible();
   console.log(`Local mock provider: ${activity.averageFirstDeltaMs} ms to first delta, 60 AI tokens for the completed answer`);
 });
