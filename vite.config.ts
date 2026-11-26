@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import { resolve } from "path";
 
-type BundleKind = "core" | "experiences" | "editor" | "module" | "v1" | "geo-agent";
+type BundleKind = "core" | "experiences" | "editor" | "module" | "v1" | "geo-agent" | "theme-preview";
 
 /**
  * Every CDN target is built as its own single-entry IIFE. The first
@@ -12,6 +12,7 @@ export default defineConfig(({ mode }) => {
   const kind: BundleKind =
     mode === "module" ? "module" :
     mode === "v1" ? "v1" :
+    mode === "theme-preview-minify" ? "theme-preview" :
     mode.startsWith("geo-agent") ? "geo-agent" :
     mode.startsWith("experiences") ? "experiences" :
     mode.startsWith("editor") ? "editor" :
@@ -24,6 +25,7 @@ export default defineConfig(({ mode }) => {
     experiences: "src/experiences/runtimeBundleEntry.ts",
     editor: "src/experiences/editorBundleEntry.ts",
     "geo-agent": "src/experiences/geoAgentBundleEntry.ts",
+    "theme-preview": "src/experiences/themePreviewEntry.ts",
     module: "src/module.ts",
   };
   const globalName: Record<Exclude<BundleKind, "module">, string> = {
@@ -32,12 +34,14 @@ export default defineConfig(({ mode }) => {
     experiences: "MovcuesExperienceRuntimeBundle",
     editor: "MovcuesEditorRuntimeBundle",
     "geo-agent": "MovcuesGeoAgentRuntimeBundle",
+    "theme-preview": "MovcuesThemePreview",
   };
   const baseName: Record<Exclude<BundleKind, "module" | "v1">, string> = {
     core: "sdk",
     experiences: "sdk-experiences",
     editor: "sdk-editor",
     "geo-agent": "sdk-geo-agent",
+    "theme-preview": "sdk-theme-preview",
   };
 
   const fileName = kind === "module"

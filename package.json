@@ -35,7 +35,7 @@
     "dist/sdk-editor.min.js"
   ],
   "scripts": {
-    "build": "vite build && vite build --mode minify && vite build --mode experiences && vite build --mode experiences-minify && vite build --mode editor && vite build --mode editor-minify && vite build --mode geo-agent && vite build --mode geo-agent-minify && vite build --mode v1 && vite build --mode module && tsc -p tsconfig.build.json",
+    "build": "vite build && vite build --mode minify && vite build --mode experiences && vite build --mode experiences-minify && vite build --mode editor && vite build --mode editor-minify && vite build --mode geo-agent && vite build --mode geo-agent-minify && vite build --mode v1 && vite build --mode module && vite build --mode theme-preview-minify && tsc -p tsconfig.build.json",
     "test": "vitest run",
     "dev": "vite",
     "test:browser": "playwright test",
