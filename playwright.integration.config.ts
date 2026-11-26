@@ -15,7 +15,7 @@ export default defineConfig({
     },
     {
       command:
-        "VITE_API_URL=http://127.0.0.1:4310 npm run dev --workspace=@movcues/dashboard -- --host 127.0.0.1 --port 5173",
+        "VITE_API_URL=http://127.0.0.1:4310 VITE_THEME_PREVIEW_URL=http://127.0.0.1:4179/dist/sdk-theme-preview.min.js npm run dev --workspace=@movcues/dashboard -- --host 127.0.0.1 --port 5173",
       cwd: process.env.MOVCUES_INTEGRATION_FRONTEND ?? "../Loopz-Frontend",
       url: "http://127.0.0.1:5173",
       reuseExistingServer: false,

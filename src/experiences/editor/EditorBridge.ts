@@ -1,6 +1,7 @@
 import type { CapturePlan, CapturePreview, GuideCaptureCheckpoint, GuideCaptureRevision, StoredGuideCapture } from "./GuideCaptureTypes";
 import type { EditorDraft } from "../types";
 import type { SiteThemeTokens } from "../../themes/types";
+import type { OnsiteDocument } from "../onsite/OnsiteDocument";
 import type { EditorAiProposal } from "./AiEditing";
 import { EDITOR_AI_STREAM_MEDIA_TYPE, parseEditorAiStreamEvent, type EditorAiStreamEvent } from "./EditorAiProgress";
 
@@ -30,6 +31,12 @@ export class EditorBridge {
     const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/draft`, { headers: this.headers(), credentials: "omit" });
     if ([401, 403, 404, 410].includes(response.status)) throw new EditorSessionExpiredError();
     if (!response.ok) throw new Error("Draft could not be loaded"); return response.json() as Promise<EditorDraft>;
+  }
+  async loadLayoutTemplate(id: string): Promise<{ id: string; version: 1; document: OnsiteDocument }> {
+    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/layout-templates/${encodeURIComponent(id)}`,
+      { headers: this.headers(), credentials: "omit" });
+    if (!response.ok) throw new Error("The template is unavailable. Reload the editor to refresh the library.");
+    return (await response.json()).template;
   }
   /** Validate session liveness without downloading a full guide every 15 seconds.
    * A 404 falls back to the old draft endpoint during a staggered deployment. */

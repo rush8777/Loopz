@@ -42,8 +42,10 @@ test("icon navigation is accessible and the single-step progress card fits a nar
   await page.goto("/tests/browser/ai-progress.html");
   const editor = page.locator("[data-movcues-editor]");
   const nav = editor.getByRole("navigation", { name: "Inspector mode" });
-  await nav.getByRole("button", { name: "Theme", exact: true }).click();
-  await expect(nav.getByRole("button", { name: "Theme", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(nav.getByRole("button", { name: "Theme", exact: true })).toHaveCount(0);
+  await expect(editor.getByRole("region", { name: "Appearance" }).getByLabel("Theme", { exact: true })).toBeVisible();
+  await expect(editor.locator("[data-theme-primary]")).toBeHidden();
+  await editor.getByText("Advanced customization", { exact: true }).click();
   await expect(editor.locator("[data-theme-primary]")).toBeVisible();
   await nav.getByRole("button", { name: "Properties", exact: true }).click();
   await expect(nav.getByRole("button", { name: "Properties", exact: true })).toHaveAttribute("aria-pressed", "true");

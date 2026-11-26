@@ -33,10 +33,10 @@ import { GuidedCaptureController } from "./GuidedCaptureController";
 import { ElementPicker } from "./ElementPicker";
 import { OnsiteContentEditor, type OnsiteComponentSelection } from "./OnsiteContentEditor";
 import { OnsiteCompositionEditor, type CompositionSelection } from "./OnsiteCompositionEditor";
-import { applyOnsiteDocument, cloneOnsite, createOnsiteDocument, duplicateDocument, onsiteDocumentFromBuilder, type OnsiteBlock, type OnsiteCell } from "../onsite/OnsiteDocument";
+import { applyOnsiteDocument, cloneOnsite, createOnsiteDocument, duplicateDocument, listBlocks, onsiteDocumentFromBuilder, type OnsiteBlock, type OnsiteCell } from "../onsite/OnsiteDocument";
 import { guideInteractionTarget, guideStepConfigurationErrors, matchesGuideRoute, matchesGuideTargetPage } from "../runtime/GuideStepLogic";
 import type { SiteThemeTokens, VisualPresetId, VisualThemeState } from "../../themes/types";
-import { EXPERIENCE_PRESETS, resolvedTheme } from "../../themes/ExperienceTheme";
+import { EXPERIENCE_PRESETS, resolvedTheme, snapshotTheme } from "../../themes/ExperienceTheme";
 import { applyEditorAiProposal, applyGuideAiProposal, editorAiContext, guideAiContext, type EditorAiProposal } from "./AiEditing";
 import { applySurveyAiProposal, surveyAiContext, type SurveyAiProposal } from "./SurveyAiEditing";
 import { applyChecklistAiProposal, checklistAiContext, type ChecklistAiProposal } from "./ChecklistAiEditing";
@@ -257,7 +257,7 @@ export class EditorModeController {
       </div>
       ${guideMarkup}
       <aside aria-label="Contextual inspector"><main>
-        <nav class="inspector-tabs" aria-label="Inspector mode"><span class="panel-wordmark"><span class="panel-mark">${panelIcon("ai")}</span>movcues</span>${([['properties','Properties'],['theme','Theme'],['ai','AI assistant']] as const).map(([tab,label]) => `<button type="button" class="${tab === 'properties' ? 'active' : ''}" data-inspector-tab="${tab}" aria-label="${label}" title="${label}" aria-pressed="${tab === 'properties'}"${tab === 'ai' && !aiEligible ? ' disabled' : ''}>${panelIcon(tab)}</button>`).join('')}</nav>
+        <nav class="inspector-tabs" aria-label="Inspector mode"><span class="panel-wordmark"><span class="panel-mark">${panelIcon("ai")}</span>movcues</span>${([['properties','Properties'],['ai','AI assistant']] as const).map(([tab,label]) => `<button type="button" class="${tab === 'properties' ? 'active' : ''}" data-inspector-tab="${tab}" aria-label="${label}" title="${label}" aria-pressed="${tab === 'properties'}"${tab === 'ai' && !aiEligible ? ' disabled' : ''}>${panelIcon(tab)}</button>`).join('')}</nav>
         <section class="section ai-panel" data-ai-panel hidden>
           <p class="muted" data-ai-context>Choose an element or ask about the whole widget.</p>
           <div class="ai-chat-history" data-ai-history aria-label="AI chat history" aria-live="polite"><div class="ai-empty-state"><span class="ai-empty-state__icon">${panelIcon("zap")}</span><p>Describe the change you want to make.</p></div><article class="ai-proposal" data-ai-proposal hidden><span class="ai-chat-message__role">Geo</span><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Review the update, then apply it when you’re ready.</p></article></div>
@@ -275,12 +275,12 @@ export class EditorModeController {
             <label>Align<select data-cell-align><option value="stretch">Stretch</option><option value="start">Start</option><option value="center">Center</option><option value="end">End</option></select></label>
             <label>Gap<div class="number"><input data-cell-gap type="number" min="0" max="96"><span>px</span></div></label>
             <label>Padding<div class="number"><input data-cell-padding type="number" min="0" max="128"><span>px</span></div></label>
-            <label>Background<input data-cell-background type="color" value="#ffffff"></label><label>Border<div class="number"><input data-cell-border type="number" min="0" max="16"><span>px</span></div></label><label>Radius<div class="number"><input data-cell-radius type="number" min="0" max="100"><span>px</span></div></label>
+            <details class="visual-overrides"><summary>Advanced cell styles</summary><label>Background<input data-cell-background type="color" value="#ffffff"></label><label>Border<div class="number"><input data-cell-border type="number" min="0" max="16"><span>px</span></div></label><label>Radius<div class="number"><input data-cell-radius type="number" min="0" max="100"><span>px</span></div></label></details>
             <label class="check"><input data-cell-stack type="checkbox"> Stack on narrow screens</label>
           </div>
           <div data-inspector="block" hidden>
-            <div data-block="heading,text"><div class="formatbar"><button type="button" data-v2-format="strong"><b>B</b></button><button type="button" data-v2-format="em"><i>I</i></button><button type="button" data-v2-format="u"><u>U</u></button><button type="button" data-v2-list="ul">• List</button><button type="button" data-v2-list="ol">1. List</button></div><div class="link-row"><input data-v2-link-url aria-label="Link URL" type="text" inputmode="url" placeholder="https://… or /path"><button type="button" class="secondary-button compact" data-v2-apply-link>Link</button></div><label>Font size<div class="number"><input data-block-font-size type="number" min="10" max="72"><span>px</span></div></label><label>Line height<input data-block-line-height type="number" min="0.9" max="3" step="0.05"></label><label>Weight<select data-block-weight><option value="400">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label><label>Text color<input data-block-color type="color"></label></div>
-            <div data-block="button"><label>Label<input data-button-label type="text" maxlength="80"></label><label>Variant<select data-button-variant><option value="primary">Primary</option><option value="secondary">Secondary</option><option value="outline">Outline</option></select></label><label>Action<select data-button-action>${ordinaryButtonActionsFor(this.guide ? "guide" : "widget").map(action => `<option value="${action.type}">${action.label}</option>`).join("")}</select></label><label data-action-url hidden>URL<input data-button-url type="url" placeholder="https://example.com/path"></label><label data-action-event hidden>Event<input data-button-event type="text" maxlength="200" placeholder="feature_clicked"></label><p class="muted" data-action-status role="status" aria-live="polite"></p><label>Background<input data-button-background type="color"></label><label>Text color<input data-button-color type="color"></label><label>Width<select data-button-width><option value="hug">Hug content</option><option value="full">Full width</option></select></label><label>Horizontal pad<div class="number"><input data-button-padding-x type="number" min="4" max="48"><span>px</span></div></label><label>Vertical pad<div class="number"><input data-button-padding-y type="number" min="4" max="32"><span>px</span></div></label><label>Radius<div class="number"><input data-button-radius type="number" min="0" max="48"><span>px</span></div></label></div>
+            <div data-block="heading,text"><div class="formatbar"><button type="button" data-v2-format="strong"><b>B</b></button><button type="button" data-v2-format="em"><i>I</i></button><button type="button" data-v2-format="u"><u>U</u></button><button type="button" data-v2-list="ul">• List</button><button type="button" data-v2-list="ol">1. List</button></div><div class="link-row"><input data-v2-link-url aria-label="Link URL" type="text" inputmode="url" placeholder="https://… or /path"><button type="button" class="secondary-button compact" data-v2-apply-link>Link</button></div><details class="visual-overrides"><summary>Advanced text styles</summary><label>Font size<div class="number"><input data-block-font-size type="number" min="10" max="72"><span>px</span></div></label><label>Line height<input data-block-line-height type="number" min="0.9" max="3" step="0.05"></label><label>Weight<select data-block-weight><option value="400">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label><label>Text color<input data-block-color type="color"></label></details></div>
+            <div data-block="button"><label>Label<input data-button-label type="text" maxlength="80"></label><label>Variant<select data-button-variant><option value="primary">Primary</option><option value="secondary">Secondary</option><option value="outline">Outline</option></select></label><label>Action<select data-button-action>${ordinaryButtonActionsFor(this.guide ? "guide" : "widget").map(action => `<option value="${action.type}">${action.label}</option>`).join("")}</select></label><label data-action-url hidden>URL<input data-button-url type="url" placeholder="https://example.com/path"></label><label data-action-event hidden>Event<input data-button-event type="text" maxlength="200" placeholder="feature_clicked"></label><p class="muted" data-action-status role="status" aria-live="polite"></p><details class="visual-overrides"><summary>Button colors</summary><label>Background<input data-button-background type="color"></label><label>Text color<input data-button-color type="color"></label></details><label>Width<select data-button-width><option value="hug">Hug content</option><option value="full">Full width</option></select></label><details class="visual-overrides"><summary>Button spacing and radius</summary><label>Horizontal pad<div class="number"><input data-button-padding-x type="number" min="4" max="48"><span>px</span></div></label><label>Vertical pad<div class="number"><input data-button-padding-y type="number" min="4" max="32"><span>px</span></div></label><label>Radius<div class="number"><input data-button-radius type="number" min="0" max="48"><span>px</span></div></label></details></div>
             <div data-block="image"><button type="button" class="secondary-button" data-choose-image>Choose image</button><p class="muted">PNG, JPG or WebP · up to 10 MB. You can also drop a file onto the image.</p><p class="muted" data-image-status role="status" aria-live="polite"></p><label>Image URL<input data-v2-image-src type="url" placeholder="https://… (optional)"></label><label>Alt text<input data-v2-image-alt type="text" maxlength="500"></label><label>Fit<select data-image-fit><option value="cover">Cover</option><option value="contain">Contain</option></select></label><label>Width<div class="number"><input data-image-width type="number" min="1" max="100"><span>%</span></div></label><label>Radius<div class="number"><input data-image-radius type="number" min="0" max="100"><span>px</span></div></label></div>
             <div data-block="divider"><label>Thickness<div class="number"><input data-divider-thickness type="number" min="1" max="16"><span>px</span></div></label><label>Color<input data-divider-color type="color"></label></div>
             <div data-block="spacer"><label>Space<div class="number"><input data-spacer-size type="number" min="4" max="240"><span>px</span></div></label></div>
@@ -326,15 +326,18 @@ export class EditorModeController {
         </section>
         <section class="section" data-step-only data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
         <section class="section" data-step-only><div class="eyebrow">Configured</div><dl data-configured></dl></section>
-        <section class="section theme-panel" data-theme-section hidden>
-          <div class="content-heading"><div><div class="eyebrow">Design system</div><strong>Experience theme</strong></div><button type="button" class="secondary-button compact" data-theme-reset>Reset to theme</button></div>
-          <label>Base style<select data-theme-source><option value="template">Template defaults</option><option value="site">Match my website</option><option value="preset" disabled>Saved style</option><option value="minimal">Minimal</option><option value="modern">Modern</option><option value="soft">Soft</option><option value="dark">Dark</option></select></label>
-          <label>Saved style<select data-saved-style><option value="">Choose saved style…</option>${(draft.references?.stylePresets??[]).map(style=>`<option value="${escapeText(style.id)}">${escapeText(style.name)}</option>`).join("")}</select></label>
+        <section class="section theme-panel" data-theme-section aria-label="Appearance">
+          <div class="appearance-heading"><strong>Appearance</strong><a data-manage-themes target="_blank" rel="noopener noreferrer" hidden>Manage themes</a></div>
+          <label>Theme<select data-theme-source aria-label="Theme"><option value="template">Template defaults</option><option value="site"${draft.references?.siteTheme ? "" : " disabled"}>Site default</option><option value="snapshot" disabled>Saved snapshot</option><optgroup label="Built-in presets"><option value="minimal">Minimal</option><option value="modern">Modern</option><option value="soft">Soft</option><option value="dark">Dark</option></optgroup>${draft.references?.stylePresets?.length ? `<optgroup label="Saved themes">${draft.references.stylePresets.map(style => `<option value="saved:${escapeText(style.id)}">${escapeText(style.name)}</option>`).join("")}</optgroup>` : ""}</select></label>
+          <div class="appearance-heading"><div class="theme-swatches" aria-label="Theme colors"><i data-theme-swatch="background"></i><i data-theme-swatch="text"></i><i data-theme-swatch="primary"></i></div><button type="button" class="secondary-button compact" data-theme-reset>Reset overrides</button></div>
+          ${draft.references?.layoutTemplates?.length ? `<div data-layout-controls class="appearance-template" hidden><label>Template<select data-layout-template aria-label="Template"><option value="">Current layout</option>${draft.references.layoutTemplates.map(template => `<option value="${escapeText(template.id)}">${escapeText(template.name)}</option>`).join("")}</select></label><button type="button" class="secondary-button compact" data-apply-layout>Apply layout</button><p class="muted" data-layout-status role="status" aria-live="polite"></p></div>` : ""}
+          <details class="visual-overrides"><summary>Advanced customization</summary>
           <div class="theme-group-title">Color palette</div><label>Primary<input type="color" data-theme-primary></label><label>Secondary / surface<input type="color" data-theme-secondary></label><label>Background<input type="color" data-theme-background></label><label>Text<input type="color" data-theme-text></label>
           <div class="theme-group-title">Typography</div><label>Body font<input type="text" maxlength="200" data-theme-body-font></label><label>Heading font<input type="text" maxlength="200" data-theme-heading-font></label>
           <label>Body size<div class="number"><input type="number" min="8" max="72" data-theme-body-size><span>px</span></div></label><label>Heading size<div class="number"><input type="number" min="10" max="72" data-theme-heading-size><span>px</span></div></label>
           <div class="theme-group-title">Shape & spacing</div><label>Radius<div class="number"><input type="number" min="0" max="48" data-theme-radius><span>px</span></div></label><label>Button radius<div class="number"><input type="number" min="0" max="48" data-theme-button-radius><span>px</span></div></label><label>Shadow<select data-theme-shadow><option value="theme">Theme shadow</option><option value="none">None</option><option value="soft">Soft</option><option value="strong">Strong</option></select></label><label>Spacing<div class="number"><input type="number" min="0" max="64" data-theme-spacing><span>px</span></div></label>
-          <div class="theme-group-title">Your style library</div><label>Style name<input type="text" maxlength="80" placeholder="My product style" data-style-name></label><div class="history-row"><button type="button" class="secondary-button compact" data-style-save>Save style</button><button type="button" class="secondary-button compact" data-style-rename>Rename</button><button type="button" class="secondary-button compact" data-style-delete>Delete</button></div><p class="muted" data-style-status role="status"></p>
+          </details>
+          <p class="muted" data-style-status role="status" hidden></p>
         </section>
         <details class="section live"><summary>Connection & target status</summary><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></details>
         <p class="hint status-error" role="alert" data-content-error hidden></p>
@@ -350,7 +353,7 @@ export class EditorModeController {
 
   private bindPanel(): void {
     const root = this.root!;
-    root.querySelectorAll<HTMLButtonElement>("[data-inspector-tab]").forEach(button => button.addEventListener("click", () => this.setInspectorTab(button.dataset.inspectorTab as "properties" | "theme" | "ai")));
+    root.querySelectorAll<HTMLButtonElement>("[data-inspector-tab]").forEach(button => button.addEventListener("click", () => this.setInspectorTab(button.dataset.inspectorTab as "properties" | "ai")));
     root.querySelector<HTMLFormElement>("[data-ai-form]")?.addEventListener("submit", event => { event.preventDefault(); void this.sendAiPrompt(); });
     root.querySelector<HTMLButtonElement>("[data-ai-cancel]")?.addEventListener("click", () => this.cancelAiRequest());
     root.querySelector<HTMLButtonElement>("[data-ai-target]")?.addEventListener("click", () => this.resolveAiGuideTarget());
@@ -447,9 +450,9 @@ export class EditorModeController {
     change("[data-cell-radius]", value => { const cell = this.compositionEditor?.getSelectedCell(); this.compositionEditor?.updateCell({ style: { ...cell?.style, borderRadius: Math.max(0, Math.min(100, number(value, 0))) } }); });
     root.querySelector<HTMLInputElement>("[data-cell-stack]")?.addEventListener("change", event => this.compositionEditor?.updateCell({ responsiveStack: (event.currentTarget as HTMLInputElement).checked }));
     change("[data-block-align]", value => this.compositionEditor?.updateBlock({ align: value as "left" | "center" | "right" } as Partial<OnsiteBlock>));
-    change("[data-block-font-size]", value => this.compositionEditor?.updateBlock({ fontSize: Math.max(10, Math.min(72, number(value, 15))) } as Partial<OnsiteBlock>));
-    change("[data-block-line-height]", value => this.compositionEditor?.updateBlock({ lineHeight: Math.max(.9, Math.min(3, number(value, 1.5))) } as Partial<OnsiteBlock>));
-    change("[data-block-weight]", value => this.compositionEditor?.updateBlock({ weight: number(value, 400) as 400 | 500 | 600 | 700 } as Partial<OnsiteBlock>));
+    change("[data-block-font-size]", value => this.compositionEditor?.updateBlock({ inheritTypography: false, fontSize: Math.max(10, Math.min(72, number(value, 15))) } as Partial<OnsiteBlock>));
+    change("[data-block-line-height]", value => this.compositionEditor?.updateBlock({ inheritTypography: false, lineHeight: Math.max(.9, Math.min(3, number(value, 1.5))) } as Partial<OnsiteBlock>));
+    change("[data-block-weight]", value => this.compositionEditor?.updateBlock({ inheritTypography: false, weight: number(value, 400) as 400 | 500 | 600 | 700 } as Partial<OnsiteBlock>));
     change("[data-block-color]", value => this.compositionEditor?.updateBlock({ color: value } as Partial<OnsiteBlock>));
     change("[data-button-label]", value => this.compositionEditor?.updateBlock({ label: value.trim().slice(0, 80) || "Button" } as Partial<OnsiteBlock>));
     change("[data-button-variant]", value => this.compositionEditor?.updateBlock({ variant: value as "primary" | "secondary" | "outline" } as Partial<OnsiteBlock>));
@@ -458,7 +461,7 @@ export class EditorModeController {
     change("[data-button-color]", value => this.compositionEditor?.updateBlock({ color: value } as Partial<OnsiteBlock>));
     input("[data-button-padding-x]", value => this.compositionEditor?.updateBlock({ paddingX: Math.max(4, Math.min(48, number(value, 16))) } as Partial<OnsiteBlock>));
     change("[data-button-padding-y]", value => this.compositionEditor?.updateBlock({ paddingY: Math.max(4, Math.min(32, number(value, 9))) } as Partial<OnsiteBlock>));
-    change("[data-button-radius]", value => this.compositionEditor?.updateBlock({ radius: Math.max(0, Math.min(48, number(value, 8))) } as Partial<OnsiteBlock>));
+    change("[data-button-radius]", value => this.compositionEditor?.updateBlock({ inheritRadius: false, radius: Math.max(0, Math.min(48, number(value, 8))) } as Partial<OnsiteBlock>));
     change("[data-button-action]", value => {
       if (value === "open_url" || value === "track_event") {
         this.root?.querySelectorAll<HTMLElement>("[data-action-url],[data-action-event]").forEach(group => { group.hidden = true; });
@@ -489,13 +492,21 @@ export class EditorModeController {
     root.querySelector<HTMLButtonElement>("[data-v2-redo]")?.addEventListener("click", () => this.compositionEditor?.redo());
   }
 
-  private ensureThemeState(): VisualThemeState {
-    const owner = (this.checklist ?? this.definition!) as EditorChecklistDefinition | EditorDefinition;
+  private themeState(): VisualThemeState {
+    const owner = this.checklist ?? this.definition!;
     if (owner.visualTheme) return owner.visualTheme;
     const design = this.checklist?.design ?? this.definition!.design;
     const base = cloneOnsite(design.theme.siteTheme ?? EXPERIENCE_PRESETS.modern);
-    base.colors.background = design.theme.background; base.colors.text = design.theme.foreground; base.colors.primary = design.theme.primary;
-    owner.visualTheme = { source: "template", templateTokens: cloneOnsite(base), baseTokens: cloneOnsite(base), overrides: {} };
+    base.colors.background = design.theme.background;
+    base.colors.text = design.theme.foreground;
+    base.colors.primary = design.theme.primary;
+    base.spacing = design.theme.spacing ?? base.spacing;
+    return { source: "template", templateTokens: cloneOnsite(base), baseTokens: base, overrides: {} };
+  }
+
+  private ensureThemeState(): VisualThemeState {
+    const owner = this.checklist ?? this.definition!;
+    owner.visualTheme ??= this.themeState();
     if (this.checklist) this.definition!.visualTheme = owner.visualTheme;
     return owner.visualTheme;
   }
@@ -503,31 +514,140 @@ export class EditorModeController {
   private applyVisualTheme(render = true): void {
     const state=this.ensureThemeState(),tokens=resolvedTheme(state),radius=tokens.radii.md<=6?"sm":tokens.radii.md>=18?"lg":"md";
     const design=this.checklist?.design??this.definition!.design;
-    design.theme={background:tokens.colors.background,foreground:tokens.colors.text,primary:tokens.colors.primary,borderRadius:radius,...(state.overrides.spacing!==undefined?{spacing:state.overrides.spacing}:{}),siteTheme:tokens};
+    design.theme={background:tokens.colors.background,foreground:tokens.colors.text,primary:tokens.colors.primary,borderRadius:radius,spacing:state.overrides.spacing??tokens.spacing,siteTheme:tokens};
     if(this.checklist){this.checklist.design=design;this.checklist.visualTheme=state;this.definition!.design=design;this.definition!.visualTheme=state;}
     if(render)this.changed();
   }
 
   private bindThemeControls():void{
-    const root=this.root!;const state=this.ensureThemeState();this.applyVisualTheme(false);
-    root.querySelector<HTMLSelectElement>('[data-theme-source]')?.addEventListener('change',event=>{const value=(event.currentTarget as HTMLSelectElement).value,state=this.ensureThemeState();if(value==='template'){state.source='template';state.baseTokens=cloneOnsite(state.templateTokens);delete state.preset;}else if(value==='site'){const site=this.draft?.references?.siteTheme;if(!site){this.setText('[data-style-status]','No captured website theme is available.');return;}state.source='site';state.baseTokens=cloneOnsite(site);delete state.preset;}else{state.source='preset';state.preset=value as VisualPresetId;state.baseTokens=cloneOnsite(EXPERIENCE_PRESETS[state.preset]);}this.applyVisualTheme();});
+    const root = this.root!;
+    const manage = root.querySelector<HTMLAnchorElement>("[data-manage-themes]");
+    const studioUrl = this.draft?.references?.themeStudioUrl;
+    if (manage && studioUrl && /^https?:\/\//i.test(studioUrl)) { manage.href = studioUrl; manage.hidden = false; }
+    // Keep the snapshot on open. Only an explicit selection applies the current library tokens.
+    root.querySelector<HTMLSelectElement>("[data-theme-source]")?.addEventListener("change", event => {
+      const value = (event.currentTarget as HTMLSelectElement).value;
+      const state = this.ensureThemeState();
+      const component = this.checklist ? "checklist" : this.guide ? "guide" : this.draft?.experience.widgetType ?? "modal";
+      const style = this.draft?.references?.stylePresets?.find(item => `saved:${item.id}` === value);
+      const site = this.draft?.references?.siteTheme;
+      delete state.preset;
+      delete state.savedStyleId;
+      if (style) {
+        state.source = "preset";
+        state.savedStyleId = style.id;
+        state.baseTokens = snapshotTheme(style.tokens, component);
+      } else if (value === "site" && site) {
+        state.source = "site";
+        state.baseTokens = snapshotTheme(site, component);
+      } else if (Object.prototype.hasOwnProperty.call(EXPERIENCE_PRESETS, value)) {
+        state.source = "preset";
+        state.preset = value as VisualPresetId;
+        state.baseTokens = cloneOnsite(EXPERIENCE_PRESETS[state.preset]);
+      } else {
+        state.source = "template";
+        state.baseTokens = cloneOnsite(state.templateTokens);
+      }
+      this.applyVisualTheme();
+    });
+    root.querySelector<HTMLButtonElement>("[data-apply-layout]")?.addEventListener("click", event => {
+      const id = root.querySelector<HTMLSelectElement>("[data-layout-template]")?.value;
+      if (id) void this.applyLayoutTemplate(id, event.currentTarget as HTMLButtonElement);
+    });
     const override=(key:keyof VisualThemeState['overrides'],value:string|number|undefined)=>{const next=this.ensureThemeState();if(value===''||value===undefined)delete next.overrides[key];else (next.overrides as Record<string,unknown>)[key]=value;this.applyVisualTheme();};
     const color=(selector:string,key:keyof VisualThemeState['overrides'])=>root.querySelector<HTMLInputElement>(selector)?.addEventListener('change',event=>override(key,(event.currentTarget as HTMLInputElement).value));
     const textInput=(selector:string,key:keyof VisualThemeState['overrides'])=>root.querySelector<HTMLInputElement>(selector)?.addEventListener('change',event=>override(key,(event.currentTarget as HTMLInputElement).value.trim()));
     const number=(selector:string,key:keyof VisualThemeState['overrides'],min:number,max:number)=>root.querySelector<HTMLInputElement>(selector)?.addEventListener('change',event=>{const value=Number((event.currentTarget as HTMLInputElement).value);override(key,Number.isFinite(value)?Math.max(min,Math.min(max,value)):undefined);});
     color('[data-theme-primary]','primary');color('[data-theme-secondary]','secondary');color('[data-theme-background]','background');color('[data-theme-text]','text');textInput('[data-theme-body-font]','bodyFontFamily');textInput('[data-theme-heading-font]','headingFontFamily');number('[data-theme-body-size]','bodyFontSize',8,72);number('[data-theme-heading-size]','headingFontSize',10,72);number('[data-theme-radius]','radius',0,48);number('[data-theme-button-radius]','buttonRadius',0,48);number('[data-theme-spacing]','spacing',0,64);
     root.querySelector<HTMLSelectElement>('[data-theme-shadow]')?.addEventListener('change',event=>{const mode=(event.currentTarget as HTMLSelectElement).value;if(mode==='theme')return override('shadow',undefined);if(mode==='none')return override('shadow',{x:0,y:0,blur:0,spread:0,color:'transparent'} as never);const source=this.ensureThemeState().baseTokens.shadows.md;override('shadow',{...source,y:mode==='soft'?Math.min(source.y,10):Math.max(source.y,20),blur:mode==='soft'?Math.min(source.blur,28):Math.max(source.blur,56)} as never);});
-    root.querySelector('[data-theme-reset]')?.addEventListener('click',()=>{this.ensureThemeState().overrides={};this.applyVisualTheme();this.setText('[data-style-status]','Experience overrides reset. Block and cell customizations were preserved.');});
-    root.querySelector<HTMLSelectElement>('[data-saved-style]')?.addEventListener('change',event=>{const style=this.draft?.references?.stylePresets?.find(item=>item.id===(event.currentTarget as HTMLSelectElement).value);if(!style)return;const next=this.ensureThemeState();next.source='preset';delete next.preset;next.baseTokens=cloneOnsite(style.tokens);this.applyVisualTheme();this.setText('[data-style-status]',`Applied ${style.name}.`);});
-    root.querySelector('[data-style-save]')?.addEventListener('click',()=>void this.saveCurrentStyle());root.querySelector('[data-style-rename]')?.addEventListener('click',()=>void this.renameCurrentStyle());root.querySelector('[data-style-delete]')?.addEventListener('click',()=>void this.deleteCurrentStyle());
+    root.querySelector("[data-theme-reset]")?.addEventListener("click", () => {
+      this.ensureThemeState().overrides = {};
+      this.applyVisualTheme();
+      const status = root.querySelector<HTMLElement>("[data-style-status]");
+      if (status) { status.hidden = false; status.textContent = "Theme defaults restored. Block and cell styles were kept."; }
+    });
   }
 
-  private async saveCurrentStyle():Promise<void>{const name=this.root?.querySelector<HTMLInputElement>('[data-style-name]')?.value.trim();if(!name||!this.bridge)return this.setText('[data-style-status]','Enter a style name.');try{const preset=await this.bridge.saveStyle(name,resolvedTheme(this.ensureThemeState()));const list=this.draft!.references!.stylePresets??(this.draft!.references!.stylePresets=[]);list.unshift(preset);this.refreshStyleOptions(preset.id);this.setText('[data-style-status]','Style saved for this site.');}catch(error){this.setText('[data-style-status]',error instanceof Error?error.message:'Style could not be saved.');}}
-  private async renameCurrentStyle():Promise<void>{const select=this.root?.querySelector<HTMLSelectElement>('[data-saved-style]'),name=this.root?.querySelector<HTMLInputElement>('[data-style-name]')?.value.trim();if(!select?.value||!name||!this.bridge)return this.setText('[data-style-status]','Choose a saved style and enter a new name.');try{const updated=await this.bridge.renameStyle(select.value,name),style=this.draft!.references!.stylePresets?.find(item=>item.id===updated.id);if(style)style.name=updated.name;this.refreshStyleOptions(updated.id);this.setText('[data-style-status]','Style renamed.');}catch{this.setText('[data-style-status]','Style could not be renamed.');}}
-  private async deleteCurrentStyle():Promise<void>{const select=this.root?.querySelector<HTMLSelectElement>('[data-saved-style]');if(!select?.value||!this.bridge)return this.setText('[data-style-status]','Choose a saved style first.');try{await this.bridge.deleteStyle(select.value);this.draft!.references!.stylePresets=this.draft!.references!.stylePresets?.filter(item=>item.id!==select.value)??[];this.refreshStyleOptions();this.setText('[data-style-status]','Style deleted.');}catch{this.setText('[data-style-status]','Style could not be deleted.');}}
-  private refreshStyleOptions(selected=''):void{const select=this.root?.querySelector<HTMLSelectElement>('[data-saved-style]');if(!select)return;select.innerHTML='<option value="">Choose saved style…</option>'+((this.draft?.references?.stylePresets??[]).map(style=>`<option value="${escapeText(style.id)}">${escapeText(style.name)}</option>`).join(''));select.value=selected;}
+  private async applyLayoutTemplate(id: string, button: HTMLButtonElement): Promise<void> {
+    const definition = this.definition;
+    const widgetType = this.draft?.experience.widgetType;
+    const bridge = this.bridge;
+    if (!definition || !("content" in definition) || !widgetType || !bridge || this.mode !== "design" || !this.flushContent()) return;
+    const builder = definition.builder;
+    const current = onsiteDocumentFromBuilder(builder);
+    if (!builder || !current || current.schemaVersion !== 2 || isSourceAuthored(builder)) return;
+    const generation = this.editGeneration;
+    button.disabled = true;
+    try {
+      const template = await bridge.loadLayoutTemplate(id);
+      if (this.definition !== definition || this.editGeneration !== generation || this.mode !== "design") {
+        throw new Error("The design changed. Choose the template again to apply it.");
+      }
+      if (template.version !== 1 || template.document.schemaVersion !== 2) throw new Error("This template version is unavailable.");
+      const next = duplicateDocument(template.document);
+      const slots = new Map<OnsiteBlock["type"], OnsiteBlock[]>();
+      for (const block of listBlocks(current.root)) {
+        const sameType = slots.get(block.type) ?? [];
+        sameType.push(block);
+        slots.set(block.type, sameType);
+      }
+      function fill(cell: OnsiteCell): void {
+        if (cell.block) {
+          const original = slots.get(cell.block.type)?.shift();
+          if (!original) throw new Error("This layout needs a different set of blocks. Choose it when creating a new experience.");
+          cell.block = cloneOnsite(original);
+        }
+        cell.children?.forEach(fill);
+      }
+      fill(next.root);
+      if ([...slots.values()].some(blocks => blocks.length)) throw new Error("This layout would leave out existing content. Choose it when creating a new experience.");
+      const candidate = cloneOnsite(builder);
+      const { content } = applyOnsiteDocument(candidate, next, widgetType);
+      definition.builder = candidate;
+      definition.content = content;
+      definition.template = { id: template.id, version: 1 };
+      this.compositionEditor?.destroy();
+      this.compositionEditor = null;
+      this.compositionSelection = { kind: "step", label: "Step" };
+      this.changed();
+      this.setText("[data-layout-status]", "Layout applied. Content and actions were kept.");
+    } catch (error) {
+      this.setText("[data-layout-status]", error instanceof Error ? error.message : "The layout could not be applied.");
+    } finally { button.disabled = false; }
+  }
 
-  private syncThemeInspector():void{if(!this.root||!this.definition)return;const state=this.ensureThemeState(),tokens=resolvedTheme(state);this.setValue('[data-theme-source]',state.source==='preset'&&state.preset?state.preset:state.source);this.setValue('[data-theme-primary]',tokens.colors.primary);this.setValue('[data-theme-secondary]',tokens.colors.surface);this.setValue('[data-theme-background]',tokens.colors.background);this.setValue('[data-theme-text]',tokens.colors.text);this.setValue('[data-theme-body-font]',tokens.typography.bodyFontFamily);this.setValue('[data-theme-heading-font]',tokens.typography.headingFontFamily);this.setValue('[data-theme-body-size]',String(tokens.typography.bodyFontSize));this.setValue('[data-theme-heading-size]',String(tokens.typography.headingFontSize));this.setValue('[data-theme-radius]',String(state.overrides.radius??tokens.radii.md));this.setValue('[data-theme-button-radius]',String(state.overrides.buttonRadius??tokens.radii.md));this.setValue('[data-theme-shadow]',state.overrides.shadow?.color==='transparent'?'none':state.overrides.shadow?'strong':'theme');this.setValue('[data-theme-spacing]',String(state.overrides.spacing??16));this.root.querySelectorAll<HTMLButtonElement>('[data-device]').forEach(button=>button.classList.toggle('active',button.dataset.device===this.previewDevice));}
+  private syncThemeInspector(): void {
+    if (!this.root || !this.definition) return;
+    const layoutControls = this.root.querySelector<HTMLElement>("[data-layout-controls]");
+    if (layoutControls) {
+      const builder = this.currentBuilder();
+      layoutControls.hidden = this.mode !== "design" || isSourceAuthored(builder) || onsiteDocumentFromBuilder(builder)?.schemaVersion !== 2;
+      const template = (this.definition as RuntimeWidgetDefinition).template;
+      this.setValue("[data-layout-template]", this.draft?.references?.layoutTemplates?.some(item => item.id === template?.id) ? template!.id : "");
+    }
+    const state = this.themeState();
+    const tokens = resolvedTheme(state);
+    const saved = this.draft?.references?.stylePresets?.some(style => style.id === state.savedStyleId);
+    const source = state.source === "preset" ? state.preset ?? (saved ? `saved:${state.savedStyleId}` : "snapshot")
+      : state.source === "site" && !this.draft?.references?.siteTheme ? "snapshot" : state.source;
+    this.setValue("[data-theme-source]", source);
+    for (const color of ["background", "primary", "text"] as const) {
+      const swatch = this.root.querySelector<HTMLElement>(`[data-theme-swatch="${color}"]`);
+      if (swatch) { swatch.style.background = tokens.colors[color]; swatch.title = tokens.colors[color]; }
+    }
+    this.setValue("[data-theme-primary]", tokens.colors.primary);
+    this.setValue("[data-theme-secondary]", tokens.colors.surface);
+    this.setValue("[data-theme-background]", tokens.colors.background);
+    this.setValue("[data-theme-text]", tokens.colors.text);
+    this.setValue("[data-theme-body-font]", tokens.typography.bodyFontFamily);
+    this.setValue("[data-theme-heading-font]", tokens.typography.headingFontFamily);
+    this.setValue("[data-theme-body-size]", String(tokens.typography.bodyFontSize));
+    this.setValue("[data-theme-heading-size]", String(tokens.typography.headingFontSize));
+    this.setValue("[data-theme-radius]", String(state.overrides.radius ?? tokens.radii.md));
+    this.setValue("[data-theme-button-radius]", String(tokens.radii.md));
+    this.setValue("[data-theme-shadow]", state.overrides.shadow?.color === "transparent" ? "none" : state.overrides.shadow ? "strong" : "theme");
+    this.setValue("[data-theme-spacing]", String(state.overrides.spacing ?? tokens.spacing ?? 0));
+  }
 
   private guideBehaviorMarkup(): string {
     return `<div class="guide-behavior"><div class="eyebrow">Step behavior</div>
@@ -1068,14 +1188,12 @@ export class EditorModeController {
     if (globalUndo) globalUndo.disabled = !editor.canUndo(); if (globalRedo) globalRedo.disabled = !editor.canRedo();
   }
 
-  private setInspectorTab(tab: "properties" | "theme" | "ai"): void {
+  private setInspectorTab(tab: "properties" | "ai"): void {
     if (!this.root || (tab === "ai" && this.draft?.experience.builderMode !== "onsite")) return;
     const main = this.root.querySelector("main");
     main?.classList.toggle("ai-mode", tab === "ai");
-    main?.classList.toggle("theme-mode", tab === "theme");
     this.root.querySelectorAll<HTMLButtonElement>("[data-inspector-tab]").forEach(button => { const active = button.dataset.inspectorTab === tab; button.classList.toggle("active", active); button.setAttribute("aria-pressed", String(active)); });
     const panel = this.root.querySelector<HTMLElement>("[data-ai-panel]"); if (panel) panel.hidden = tab !== "ai";
-    const themePanel = this.root.querySelector<HTMLElement>("[data-theme-section]"); if (themePanel) themePanel.hidden = tab !== "theme";
     if (tab === "ai") this.syncAiPanel();
     this.fitPanel();
   }
@@ -1173,7 +1291,7 @@ export class EditorModeController {
       if (generation !== this.aiRequestGeneration || abort.signal.aborted) return;
       this.setText("[data-ai-status]", "");
       const document = onsiteDocumentFromBuilder(builder); if (!document) throw new Error("This draft has no recoverable on-site document.");
-      const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting }, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.ensureThemeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : this.survey ? surveyAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, definition: this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }, currentStepId: this.survey.steps[this.stepIndex].id, selection: this.compositionSelection, scope: this.compositionSelection.kind === "step" ? "survey" : "step" }) : this.checklist ? checklistAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, checklist: this.checklist, references: this.draft.references ?? { guides: [], segments: [] }, selection: this.compositionSelection, currentView: this.checklistEditor?.getView() ?? "expanded", theme: resolvedTheme(this.ensureThemeState()) }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document, builder });
+      const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide as RuntimeGuideDefinition & { targeting: ExperienceTargeting }, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.themeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : this.survey ? surveyAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, definition: this.definition as RuntimeWidgetDefinition & { targeting: ExperienceTargeting }, currentStepId: this.survey.steps[this.stepIndex].id, selection: this.compositionSelection, scope: this.compositionSelection.kind === "step" ? "survey" : "step" }) : this.checklist ? checklistAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, checklist: this.checklist, references: this.draft.references ?? { guides: [], segments: [] }, selection: this.compositionSelection, currentView: this.checklistEditor?.getView() ?? "expanded", theme: resolvedTheme(this.themeState()) }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document, builder });
       const requestEditGeneration = this.editGeneration, requestSelectionKey = this.aiSelectionKey();
       const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context }, abort.signal, event => { if (generation === this.aiRequestGeneration && !abort.signal.aborted) this.updateAiProgress(messageId, event); });
       if (generation !== this.aiRequestGeneration) return;
@@ -1670,7 +1788,7 @@ const STYLE = `${BASE_STYLE}
 .editor-toolbar{position:fixed;left:50%;transform:translateX(-50%);top:12px;width:min(410px,calc(100vw - 8px));z-index:2147483647;border:1px solid #d7dce3;border-radius:10px;background:#fff;color:#111827;box-shadow:0 8px 24px rgba(15,23,42,.16);font:12px/1.3 ui-sans-serif,system-ui,sans-serif;overflow:hidden}
 .editor-toolbar header{padding:7px 8px;gap:4px;align-items:center}.header-copy>span{display:none}.header-copy strong{font-size:11px}.header-copy small{margin-top:1px;font-size:10px}.header-actions{flex-wrap:wrap;justify-content:flex-end;gap:1px}.header-actions button{width:25px;height:28px;font-size:14px}.header-actions [data-save]{width:38px;font-size:11px}.header-actions button:disabled{opacity:.4;cursor:default}
 .editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-drag-handle{flex:none;padding:2px 1px;color:#94a3b8;font-size:16px;line-height:1;cursor:move;touch-action:none;user-select:none}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .step-bar-actions{display:flex;flex:none;align-items:center;gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .step-bar-action{width:24px;height:24px;padding:0;font-size:15px;line-height:1}.step-navigator .step-bar-action svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.step-navigator .step-bar-delete{border-color:#fecaca;background:#fff1f2;color:#dc2626}.step-navigator .step-bar-delete:hover{border-color:#fca5a5;background:#fee2e2;color:#b91c1c}.step-navigator .step-bar-action:disabled{cursor:not-allowed;opacity:.4}
-.inspector-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.inspector-tabs button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#475569;padding:6px;font:600 11px inherit;cursor:pointer}.inspector-tabs button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.inspector-tabs button:disabled{opacity:.4;cursor:not-allowed}main.ai-mode>:not(.inspector-tabs):not(.ai-panel),main.theme-mode>:not(.inspector-tabs):not(.theme-panel){display:none!important}.ai-panel{min-height:min(580px,calc(100dvh - 130px));display:flex;flex-direction:column;gap:10px;background:#fcfcfd}.ai-panel .content-heading{flex:none}.ai-panel .muted{margin:0}.ai-chat-history{display:grid;align-content:start;gap:8px;flex:1;min-height:260px;overflow:auto;padding:2px}.ai-chat-message{display:grid;gap:3px;max-width:92%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#334155}.ai-chat-message--user{justify-self:end;border-color:#dbeafe;background:#eff6ff;color:#1e3a8a}.ai-chat-message__role{font-size:10px;font-weight:700;color:#64748b}.ai-chat-message--user .ai-chat-message__role{color:#2563eb}.ai-chat-message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45}.ai-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:7px;padding-top:8px;border-top:1px solid #eef0f3}.ai-panel textarea{min-height:72px;width:100%;resize:vertical;padding:8px;border:1px solid #d7dce3;border-radius:8px;font:12px/1.4 inherit}.ai-composer button{padding:8px 10px}.ai-status{min-height:16px;margin:0;white-space:pre-wrap;color:#64748b;font-size:11px}.ai-proposal{display:grid;gap:6px;padding:8px;border:1px solid #bfdbfe;border-radius:8px;background:#f8fbff}.ai-proposal ul{margin:0;padding-left:18px;color:#475569;font-size:11px}
+.inspector-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.inspector-tabs button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#475569;padding:6px;font:600 11px inherit;cursor:pointer}.inspector-tabs button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.inspector-tabs button:disabled{opacity:.4;cursor:not-allowed}main.ai-mode>:not(.inspector-tabs):not(.ai-panel){display:none!important}.ai-panel{min-height:min(580px,calc(100dvh - 130px));display:flex;flex-direction:column;gap:10px;background:#fcfcfd}.ai-panel .content-heading{flex:none}.ai-panel .muted{margin:0}.ai-chat-history{display:grid;align-content:start;gap:8px;flex:1;min-height:260px;overflow:auto;padding:2px}.ai-chat-message{display:grid;gap:3px;max-width:92%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#334155}.ai-chat-message--user{justify-self:end;border-color:#dbeafe;background:#eff6ff;color:#1e3a8a}.ai-chat-message__role{font-size:10px;font-weight:700;color:#64748b}.ai-chat-message--user .ai-chat-message__role{color:#2563eb}.ai-chat-message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45}.ai-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:7px;padding-top:8px;border-top:1px solid #eef0f3}.ai-panel textarea{min-height:72px;width:100%;resize:vertical;padding:8px;border:1px solid #d7dce3;border-radius:8px;font:12px/1.4 inherit}.ai-composer button{padding:8px 10px}.ai-status{min-height:16px;margin:0;white-space:pre-wrap;color:#64748b;font-size:11px}.ai-proposal{display:grid;gap:6px;padding:8px;border:1px solid #bfdbfe;border-radius:8px;background:#f8fbff}.ai-proposal ul{margin:0;padding-left:18px;color:#475569;font-size:11px}
 .ai-composer{grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:7px;border:1px solid #d9e1ec;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgb(15 23 42 / .04);transition:border-color .16s ease,box-shadow .16s ease}.ai-composer:focus-within{border-color:#93c5fd;box-shadow:0 0 0 3px rgb(59 130 246 / .12)}.ai-composer textarea{min-height:54px;padding:5px 3px;border:0;border-radius:0;background:transparent;outline:0;box-shadow:none;line-height:1.45}.ai-composer textarea:focus{outline:0}.ai-composer textarea::placeholder{color:#94a3b8}.ai-composer button{min-width:58px;min-height:34px;margin-bottom:2px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;box-shadow:0 1px 2px rgb(37 99 235 / .25);transition:background .16s ease,transform .16s ease,box-shadow .16s ease}.ai-composer button:hover:not(:disabled){background:#1d4ed8;box-shadow:0 4px 10px rgb(37 99 235 / .24);transform:translateY(-1px)}.ai-composer button:active:not(:disabled){transform:translateY(0);box-shadow:none}.ai-composer button:disabled{opacity:.5;cursor:not-allowed}
 .ai-chat-message [data-ai-progress]{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;padding-top:5px;border-top:1px solid #eef2f7;color:#64748b;font-size:10px}.ai-progress-current{font-weight:700;color:#475569}.ai-progress-elapsed{font-variant-numeric:tabular-nums}.ai-chat-message [data-ai-progress] details{grid-column:1/-1}.ai-chat-message [data-ai-progress] summary{cursor:pointer;color:#2563eb;font-weight:600}.ai-chat-message [data-ai-progress] ol{display:grid;gap:5px;margin:6px 0 0;padding-left:18px}.ai-chat-message [data-ai-progress] li{color:#94a3b8}.ai-chat-message [data-ai-progress] li[data-status=active]{color:#1d4ed8}.ai-chat-message [data-ai-progress] li[data-status=error],.ai-chat-message [data-ai-progress] li[data-status=cancelled]{color:#b91c1c}.ai-chat-message [data-ai-progress] li strong,.ai-chat-message [data-ai-progress] li span{display:block}.ai-chat-message [data-ai-progress] li span{margin-top:1px;font-weight:400;color:#64748b}@media(prefers-reduced-motion:reduce){.ai-composer,.ai-composer button{transition:none!important}}
 .step-navigator .step-bar-action{transition:border-color .16s ease,background .16s ease,color .16s ease,transform .16s ease}.step-navigator .step-bar-action:hover:not(:disabled){border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8;transform:translateY(-1px)}.step-navigator .step-bar-delete:hover:not(:disabled){color:#b91c1c}

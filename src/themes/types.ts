@@ -5,7 +5,10 @@ export interface SiteThemeTokens {
   typography: { bodyFontFamily: string; headingFontFamily: string; bodyFontSize: number; headingFontSize: number; bodyFontWeight: number; headingFontWeight: number; bodyLineHeight: number; headingLineHeight: number };
   radii: { sm: number; md: number; lg: number };
   shadows: { sm: ThemeShadow; md: ThemeShadow };
+  spacing?: number;
+  components?: Partial<Record<ThemeComponent, { spacing?: number; radius?: number; buttonRadius?: number }>>;
 }
+export type ThemeComponent = "modal" | "anchored_card" | "survey" | "checklist" | "banner" | "slideout" | "toast" | "hotspot" | "cursor_follow" | "guide";
 
 export interface ThemeCapturePayload {
   tokens: SiteThemeTokens;
@@ -16,6 +19,7 @@ export type VisualPresetId = "minimal" | "modern" | "soft" | "dark";
 export interface VisualThemeState {
   source: "template" | "site" | "preset";
   preset?: VisualPresetId;
+  savedStyleId?: string;
   templateId?: string;
   templateTokens: SiteThemeTokens;
   baseTokens: SiteThemeTokens;

@@ -51,6 +51,10 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
     card.style.setProperty("--movcues-font-heading", theme.typography.headingFontFamily);
     card.style.setProperty("--movcues-font-body-size", `${theme.typography.bodyFontSize}px`);
     card.style.setProperty("--movcues-font-heading-size", `${theme.typography.headingFontSize}px`);
+    card.style.setProperty("--movcues-font-body-weight", String(theme.typography.bodyFontWeight));
+    card.style.setProperty("--movcues-font-heading-weight", String(theme.typography.headingFontWeight));
+    card.style.setProperty("--movcues-font-body-line-height", String(theme.typography.bodyLineHeight));
+    card.style.setProperty("--movcues-font-heading-line-height", String(theme.typography.headingLineHeight));
     card.style.setProperty("--movcues-theme-radius", `${theme.radii.lg}px`);
     card.style.setProperty("--movcues-button-radius", `${theme.radii.md}px`);
     const shadow = theme.shadows.md;

@@ -38,6 +38,8 @@ const plainText = (value: string) => sanitizeRichText(value.replace(/[&<>"']/g, 
 
 function patchBlock(block: OnsiteBlock, patch: Record<string, unknown>): void {
   for (const key of Object.keys(patch)) if (!BLOCK_PATCH_KEYS.has(key)) throw new Error(`Unsupported block property: ${key}`);
+  if ((block.type === "heading" || block.type === "text") && ("fontSize" in patch || "lineHeight" in patch || "weight" in patch)) block.inheritTypography = false;
+  if (block.type === "button" && "radius" in patch) block.inheritRadius = false;
   Object.assign(block, cloneOnsite(patch));
 }
 

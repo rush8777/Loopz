@@ -46,6 +46,7 @@ test("AI redesign → live edits → save/reopen → second AI redesign retains 
   await editor.locator('[data-mode="design"]').click(); await expect.poll(() => saves).toBeGreaterThan(0);
   await widget.locator(".hero-title").dblclick(); await widget.locator(".hero-title").press("ControlOrMeta+a"); await widget.locator(".hero-title").pressSequentially("Manual welcome");
   await widget.locator(".hero-title").press("Enter"); await widget.locator(".hero-title").pressSequentially("Second line"); await expect(widget.locator(".hero-title br")).toHaveCount(1);
+  await editor.getByText("Advanced text styles", { exact: true }).click();
   await editor.locator("[data-block-font-size]").fill("40"); await editor.locator("[data-block-font-size]").dispatchEvent("change");
   await expect(widget.locator(".hero-title")).toHaveCSS("font-size", "40px");
   await widget.locator('[data-command="parent"]').click();
@@ -69,7 +70,9 @@ test("AI redesign → live edits → save/reopen → second AI redesign retains 
   await requestAi("Refine the welcome copy");
   expect(latestSource?.html).toContain("Manual welcome"); expect(latestSource?.css).toContain("40px");
   await expect(widget.locator(".hero-title")).toContainText("AI refined welcome");
-  await widget.locator(".hero-title").click(); await editor.locator("[data-block-font-size]").fill("44"); await editor.locator("[data-block-font-size]").dispatchEvent("change");
+  await widget.locator(".hero-title").click();
+  await editor.getByText("Advanced text styles", { exact: true }).click();
+  await editor.locator("[data-block-font-size]").fill("44"); await editor.locator("[data-block-font-size]").dispatchEvent("change");
   await expect(widget.locator(".hero-title")).toHaveCSS("font-size", "44px");
   await editor.locator("[data-global-undo]").click(); await expect(widget.locator(".hero-title")).toHaveCSS("font-size", "40px");
   await editor.locator("[data-global-undo]").click(); await expect(widget.locator(".hero-title")).toContainText("Manual welcome");

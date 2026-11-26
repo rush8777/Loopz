@@ -62,7 +62,7 @@ describe("live placement editor", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("keeps theme controls in their own inspector tab and removes viewport controls", async () => {
+  it("shows theme selection in Properties and keeps local styling collapsed", async () => {
     vi.stubGlobal("fetch", editorFetch(widgetDraft("toast")));
     controller = new EditorModeController("https://api.example.com");
     expect(await controller.start("one-time-token")).toBe(true);
@@ -70,14 +70,11 @@ describe("live placement editor", () => {
     const root = editorRoot();
     expect(root.querySelector("[data-device]")).toBeNull();
     expect(root.querySelector(".devicebar")).toBeNull();
-    expect(root.querySelector<HTMLElement>("[data-theme-section]")?.hidden).toBe(true);
-    const themeTab = root.querySelector<HTMLButtonElement>('[data-inspector-tab="theme"]')!;
-    themeTab.click();
-    expect(themeTab.classList.contains("active")).toBe(true);
-    expect(root.querySelector("main")?.classList.contains("theme-mode")).toBe(true);
+    expect(root.querySelector('[data-inspector-tab="theme"]')).toBeNull();
     expect(root.querySelector<HTMLElement>("[data-theme-section]")?.hidden).toBe(false);
-    root.querySelector<HTMLButtonElement>('[data-inspector-tab="properties"]')!.click();
-    expect(root.querySelector<HTMLElement>("[data-theme-section]")?.hidden).toBe(true);
+    expect(root.querySelector("[data-theme-source]")).not.toBeNull();
+    expect(root.querySelector<HTMLDetailsElement>("[data-theme-section] details")?.open).toBe(false);
+    expect(root.querySelector("[data-style-save]")).toBeNull();
   });
 
   it("intercepts customer clicks in Select mode and passes them through in Navigate mode", async () => {

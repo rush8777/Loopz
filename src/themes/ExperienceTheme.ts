@@ -1,4 +1,4 @@
-import type { SiteThemeTokens, VisualPresetId, VisualThemeState } from "./types";
+import type { SiteThemeTokens, ThemeComponent, VisualPresetId, VisualThemeState } from "./types";
 
 const shadow=(y:number,blur:number,color:string)=>({x:0,y,blur,spread:0,color});
 export const EXPERIENCE_PRESETS:Record<VisualPresetId,SiteThemeTokens>={
@@ -15,4 +15,15 @@ export function resolvedTheme(state:VisualThemeState):SiteThemeTokens{
  if(o.bodyFontSize)value.typography.bodyFontSize=o.bodyFontSize;if(o.headingFontSize)value.typography.headingFontSize=o.headingFontSize;
  if(o.radius!==undefined)value.radii={sm:Math.max(0,o.radius/2),md:o.radius,lg:Math.min(100,o.radius*1.5)};if(o.buttonRadius!==undefined)value.radii.md=o.buttonRadius;
  if(o.shadow)value.shadows={sm:o.shadow,md:o.shadow};return value;
+}
+
+export function snapshotTheme(tokens: SiteThemeTokens, component: ThemeComponent): SiteThemeTokens {
+  const { components, ...base } = structuredClone(tokens);
+  const defaults = components?.[component];
+  if (defaults) {
+    base.spacing = defaults.spacing ?? base.spacing;
+    base.radii.lg = defaults.radius ?? base.radii.lg;
+    base.radii.md = defaults.buttonRadius ?? base.radii.md;
+  }
+  return base;
 }
