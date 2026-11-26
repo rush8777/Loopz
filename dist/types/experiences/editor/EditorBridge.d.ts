@@ -1,6 +1,5 @@
 import type { CapturePlan, CapturePreview, GuideCaptureCheckpoint, GuideCaptureRevision, StoredGuideCapture } from "./GuideCaptureTypes";
 import type { EditorDraft } from "../types";
-import type { SiteThemeTokens } from "../../themes/types";
 import type { OnsiteDocument } from "../onsite/OnsiteDocument";
 import type { EditorAiProposal } from "./AiEditing";
 import { type EditorAiStreamEvent } from "./EditorAiProgress";
@@ -51,17 +50,6 @@ export declare class EditorBridge {
         revision: number;
         context: unknown;
     }, signal?: AbortSignal, onEvent?: (event: EditorAiStreamEvent) => void): Promise<EditorAiResponse>;
-    saveStyle(name: string, tokens: SiteThemeTokens): Promise<{
-        id: string;
-        name: string;
-        tokens: SiteThemeTokens;
-    }>;
-    renameStyle(id: string, name: string): Promise<{
-        id: string;
-        name: string;
-        tokens: SiteThemeTokens;
-    }>;
-    deleteStyle(id: string): Promise<void>;
 }
 export declare class DraftConflictError extends Error {
     readonly currentRevision?: number | undefined;

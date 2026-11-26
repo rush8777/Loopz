@@ -4057,9 +4057,11 @@ class ChecklistManager {
   async clickItem(itemId) {
     const current = this.current;
     if (!current) return;
+    const pageViewId = this.session.getPageViewId();
     const response = await this.action("item_click", itemId);
-    if (!response || this.current !== current) return;
-    if (response.progress) current.progress = response.progress;
+    const latest = this.current;
+    if (!response || (latest == null ? void 0 : latest.id) !== current.id || latest.versionId !== current.versionId || this.session.getPageViewId() !== pageViewId) return;
+    if (response.progress) latest.progress = response.progress;
     this.render();
     const item = response.item;
     if (!item) return;
@@ -4725,7 +4727,7 @@ const bundledRuntimeProviders = {
     })
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-C0OJhTgv.js");
+    const { EditorModeController } = await import("./EditorModeController-DPOSDPI3.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -4782,4 +4784,4 @@ export {
   storeEditorContinuation as x,
   createAnalytics as y
 };
-//# sourceMappingURL=module-BgToxdof.js.map
+//# sourceMappingURL=module-BZ8vv_U_.js.map

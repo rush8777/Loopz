@@ -131,6 +131,7 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   await expect(currentHeading(editor)).toHaveText("Project details");
   await rename(editor, "Review project details");
   await currentHeading(editor).click();
+  await editor.getByText("Advanced text styles", { exact: true }).click();
   await editor.locator("[data-block-font-size]").fill("22");
   await editor.locator("[data-block-font-size]").press("Tab");
   await editor.locator("[data-block-weight]").selectOption("700");

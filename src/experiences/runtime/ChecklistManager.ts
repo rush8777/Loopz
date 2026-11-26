@@ -55,8 +55,13 @@ export class ChecklistManager {
 
   private async clickItem(itemId: string) {
     const current = this.current; if (!current) return;
-    const response = await this.action("item_click", itemId); if (!response || this.current !== current) return;
-    if (response.progress) current.progress = response.progress; this.render();
+    const pageViewId = this.session.getPageViewId();
+    const response = await this.action("item_click", itemId);
+    const latest = this.current;
+    // A manifest refresh replaces the object for the same published Checklist.
+    // Accept its pending action on the same page and reject a different version.
+    if (!response || latest?.id !== current.id || latest.versionId !== current.versionId || this.session.getPageViewId() !== pageViewId) return;
+    if (response.progress) latest.progress = response.progress; this.render();
     const item = response.item; if (!item) return;
     if (item.action.type === "launch_guide") await this.launchGuide(item.action.experienceId, { source: "checklist", checklistExperienceId: current.id, itemId });
     else if (item.action.type === "navigate") { try { const url = new URL(item.action.url, location.href); if (url.origin === location.origin) location.assign(url.href); } catch { /* invalid saved URLs fail closed */ } }

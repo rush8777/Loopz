@@ -2097,9 +2097,11 @@ ${ISOLATION_CSS}`;
     async clickItem(itemId) {
       const current = this.current;
       if (!current) return;
+      const pageViewId = this.session.getPageViewId();
       const response = await this.action("item_click", itemId);
-      if (!response || this.current !== current) return;
-      if (response.progress) current.progress = response.progress;
+      const latest = this.current;
+      if (!response || (latest == null ? void 0 : latest.id) !== current.id || latest.versionId !== current.versionId || this.session.getPageViewId() !== pageViewId) return;
+      if (response.progress) latest.progress = response.progress;
       this.render();
       const item = response.item;
       if (!item) return;

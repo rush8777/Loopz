@@ -1,8 +1,7 @@
-import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, S as SensitiveElementDetector, j as findTarget, R as RouteObserver, E as ExperienceRenderer, k as sanitizeBuilderHtml, l as getGuideStepPattern, m as guideStepRequiresTarget, n as guideStepConfigurationErrors, p as exchangeEditorSession, q as clearEditorContinuation, r as isChecklistDefinition, t as isGuideDefinition, u as guideInteractionTarget, v as matchesGuideTargetPage, w as matchesGuideRoute, x as storeEditorContinuation } from "./module-BgToxdof.js";
+import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, S as SensitiveElementDetector, j as findTarget, R as RouteObserver, E as ExperienceRenderer, k as sanitizeBuilderHtml, l as getGuideStepPattern, m as guideStepRequiresTarget, n as guideStepConfigurationErrors, p as exchangeEditorSession, q as clearEditorContinuation, r as isChecklistDefinition, t as isGuideDefinition, u as guideInteractionTarget, v as matchesGuideTargetPage, w as matchesGuideRoute, x as storeEditorContinuation } from "./module-BZ8vv_U_.js";
 function panelIcon(name) {
   const paths = {
     properties: '<path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
-    theme: '<path d="M12 3a9 9 0 1 0 0 18h1.5a2.5 2.5 0 0 0 1.8-4.2 1.3 1.3 0 0 1 .9-2.3H18a3 3 0 0 0 3-3A8.5 8.5 0 0 0 12 3Z"/><circle cx="7.5" cy="10" r=".6"/><circle cx="10" cy="6.8" r=".6"/><circle cx="14.5" cy="7" r=".6"/><circle cx="17.3" cy="10.5" r=".6"/>',
     ai: '<path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3Zm7-1 .8 2.2L22 5l-2.2.8L19 8l-.8-2.2L16 5l2.2-.8L19 2Z"/>',
     send: '<path d="M12 19V5m-6 6 6-6 6 6"/>',
     zap: '<path d="m13 2-9 12h8l-1 8 9-12h-8z"/>'
@@ -11,7 +10,7 @@ function panelIcon(name) {
 }
 const EDITOR_PANEL_DESIGN = `
 :host{--ep-ink:#202e44;--ep-muted:#62718a;--ep-line:rgba(111,135,174,.18);--ep-blue:#3269ee;--ep-surface:rgba(249,251,255,.93)}
-aside{width:min(330px,calc(100vw - 24px));border:1px solid rgba(255,255,255,.86);border-radius:18px;background:var(--ep-surface);color:var(--ep-ink);box-shadow:0 18px 52px rgba(27,47,88,.18),0 2px 7px rgba(27,47,88,.07),inset 0 0 0 4px rgba(221,231,249,.32);overflow:hidden;-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px)}
+aside{z-index:2147483646;width:min(330px,calc(100vw - 24px));border:1px solid rgba(255,255,255,.86);border-radius:18px;background:var(--ep-surface);color:var(--ep-ink);box-shadow:0 18px 52px rgba(27,47,88,.18),0 2px 7px rgba(27,47,88,.07),inset 0 0 0 4px rgba(221,231,249,.32);overflow:hidden;-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px)}
 aside main{background:transparent;border-radius:17px;padding:4px;scrollbar-width:thin;scrollbar-color:#c5d1e5 transparent}
 .inspector-tabs{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:3px;padding:8px 10px 9px;background:rgba(245,248,254,.96);border-bottom:1px solid var(--ep-line)}
 .panel-wordmark{display:flex;align-items:center;gap:7px;margin-right:auto;font-size:12px;font-weight:700;letter-spacing:-.3px;color:var(--ep-ink)}
@@ -5967,21 +5966,6 @@ class EditorBridge {
     if ([401, 403, 404, 410].includes(response.status) && (body == null ? void 0 : body.error) !== "conversation_not_found") throw new EditorSessionExpiredError();
     if (!response.ok) throw new EditorAiRequestError(editorAiErrorMessage(body), body == null ? void 0 : body.conversationId);
     return body;
-  }
-  async saveStyle(name, tokens) {
-    var _a;
-    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/style-presets`, { method: "POST", headers: this.headers(), credentials: "omit", body: JSON.stringify({ name, tokens }) });
-    if (!response.ok) throw new Error(((_a = await response.json().catch(() => null)) == null ? void 0 : _a.error) ?? "Style could not be saved");
-    return (await response.json()).preset;
-  }
-  async renameStyle(id, name) {
-    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/style-presets/${encodeURIComponent(id)}`, { method: "PATCH", headers: this.headers(), credentials: "omit", body: JSON.stringify({ name }) });
-    if (!response.ok) throw new Error("Style could not be renamed");
-    return (await response.json()).preset;
-  }
-  async deleteStyle(id) {
-    const response = await fetch(`${this.apiBase}/public/experience-editor/${encodeURIComponent(this.sessionId)}/style-presets/${encodeURIComponent(id)}`, { method: "DELETE", headers: this.headers(), credentials: "omit" });
-    if (!response.ok) throw new Error("Style could not be deleted");
   }
 }
 async function consumeEditorAiStream(response, onEvent) {
@@ -13858,4 +13842,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-C0OJhTgv.js.map
+//# sourceMappingURL=EditorModeController-DPOSDPI3.js.map

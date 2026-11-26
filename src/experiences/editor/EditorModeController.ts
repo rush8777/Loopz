@@ -35,7 +35,7 @@ import { OnsiteContentEditor, type OnsiteComponentSelection } from "./OnsiteCont
 import { OnsiteCompositionEditor, type CompositionSelection } from "./OnsiteCompositionEditor";
 import { applyOnsiteDocument, cloneOnsite, createOnsiteDocument, duplicateDocument, listBlocks, onsiteDocumentFromBuilder, type OnsiteBlock, type OnsiteCell } from "../onsite/OnsiteDocument";
 import { guideInteractionTarget, guideStepConfigurationErrors, matchesGuideRoute, matchesGuideTargetPage } from "../runtime/GuideStepLogic";
-import type { SiteThemeTokens, VisualPresetId, VisualThemeState } from "../../themes/types";
+import type { VisualPresetId, VisualThemeState } from "../../themes/types";
 import { EXPERIENCE_PRESETS, resolvedTheme, snapshotTheme } from "../../themes/ExperienceTheme";
 import { applyEditorAiProposal, applyGuideAiProposal, editorAiContext, guideAiContext, type EditorAiProposal } from "./AiEditing";
 import { applySurveyAiProposal, surveyAiContext, type SurveyAiProposal } from "./SurveyAiEditing";

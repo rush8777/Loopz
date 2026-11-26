@@ -1,4 +1,4 @@
-import { A, y } from "./module-BgToxdof.js";
+import { A, y } from "./module-BZ8vv_U_.js";
 export {
   A as Analytics,
   y as createAnalytics
