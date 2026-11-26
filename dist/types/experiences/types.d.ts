@@ -395,6 +395,11 @@ export interface EditorDraft {
             tokens: SiteThemeTokens;
         }>;
         siteTheme?: SiteThemeTokens | null;
+        themeStudioUrl?: string;
+        layoutTemplates?: Array<{
+            id: string;
+            name: string;
+        }>;
     };
     experience: {
         id: string;

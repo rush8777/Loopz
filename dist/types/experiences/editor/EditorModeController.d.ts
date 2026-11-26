@@ -81,13 +81,11 @@ export declare class EditorModeController {
     private stepButtons;
     private bindPanel;
     private bindCompositionInspector;
+    private themeState;
     private ensureThemeState;
     private applyVisualTheme;
     private bindThemeControls;
-    private saveCurrentStyle;
-    private renameCurrentStyle;
-    private deleteCurrentStyle;
-    private refreshStyleOptions;
+    private applyLayoutTemplate;
     private syncThemeInspector;
     private guideBehaviorMarkup;
     private bindGuideBehavior;

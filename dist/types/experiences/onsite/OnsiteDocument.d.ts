@@ -104,6 +104,7 @@ export type OnsiteBlock = (BlockBase & {
     weight: 400 | 500 | 600 | 700;
     color?: string;
     lineHeight?: number;
+    inheritTypography?: boolean;
 }) | (BlockBase & {
     type: "text";
     html: string;
@@ -111,6 +112,7 @@ export type OnsiteBlock = (BlockBase & {
     weight: 400 | 500 | 600 | 700;
     color?: string;
     lineHeight?: number;
+    inheritTypography?: boolean;
 }) | (BlockBase & {
     type: "button";
     label: string;
@@ -119,6 +121,7 @@ export type OnsiteBlock = (BlockBase & {
     background?: string;
     color?: string;
     radius: number;
+    inheritRadius?: boolean;
     paddingX: number;
     paddingY: number;
     width: "hug" | "full";

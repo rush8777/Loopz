@@ -35,7 +35,14 @@ export interface SiteThemeTokens {
         sm: ThemeShadow;
         md: ThemeShadow;
     };
+    spacing?: number;
+    components?: Partial<Record<ThemeComponent, {
+        spacing?: number;
+        radius?: number;
+        buttonRadius?: number;
+    }>>;
 }
+export type ThemeComponent = "modal" | "anchored_card" | "survey" | "checklist" | "banner" | "slideout" | "toast" | "hotspot" | "cursor_follow" | "guide";
 export interface ThemeCapturePayload {
     tokens: SiteThemeTokens;
     evidence: {
@@ -48,6 +55,7 @@ export type VisualPresetId = "minimal" | "modern" | "soft" | "dark";
 export interface VisualThemeState {
     source: "template" | "site" | "preset";
     preset?: VisualPresetId;
+    savedStyleId?: string;
     templateId?: string;
     templateTokens: SiteThemeTokens;
     baseTokens: SiteThemeTokens;

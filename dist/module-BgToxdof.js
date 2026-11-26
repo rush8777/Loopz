@@ -2380,6 +2380,10 @@ function buildCard(root, content, design, behavior, callbacks, builder, widgetTy
     card.style.setProperty("--movcues-font-heading", theme.typography.headingFontFamily);
     card.style.setProperty("--movcues-font-body-size", `${theme.typography.bodyFontSize}px`);
     card.style.setProperty("--movcues-font-heading-size", `${theme.typography.headingFontSize}px`);
+    card.style.setProperty("--movcues-font-body-weight", String(theme.typography.bodyFontWeight));
+    card.style.setProperty("--movcues-font-heading-weight", String(theme.typography.headingFontWeight));
+    card.style.setProperty("--movcues-font-body-line-height", String(theme.typography.bodyLineHeight));
+    card.style.setProperty("--movcues-font-heading-line-height", String(theme.typography.headingLineHeight));
     card.style.setProperty("--movcues-theme-radius", `${theme.radii.lg}px`);
     card.style.setProperty("--movcues-button-radius", `${theme.radii.md}px`);
     const shadow2 = theme.shadows.md;
@@ -4716,12 +4720,12 @@ function currentPagePath() {
 const bundledRuntimeProviders = {
   experiences: {
     createLoader: (apiBase, siteId, session, trackEvent, geoAgent) => new ExperienceLoader(apiBase, siteId, session, trackEvent, geoAgent, async () => {
-      const { mountGeoAgent } = await import("./widget-Cw5CvE7p.js");
+      const { mountGeoAgent } = await import("./widget-BECBPZJl.js");
       return { mount: mountGeoAgent };
     })
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-B52RtsHV.js");
+    const { EditorModeController } = await import("./EditorModeController-C0OJhTgv.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -4778,4 +4782,4 @@ export {
   storeEditorContinuation as x,
   createAnalytics as y
 };
-//# sourceMappingURL=module-DBjfCImA.js.map
+//# sourceMappingURL=module-BgToxdof.js.map
