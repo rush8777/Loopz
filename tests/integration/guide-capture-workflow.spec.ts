@@ -28,7 +28,13 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   const setup = await request.post(`${api}/auth/onboarding`, { headers, data: { workspaceName: "Guide Capture QA", siteName: "React test host", domain: host } });
   expect(setup.status()).toBe(201);
   const { organization, site } = await setup.json();
-  const endpoint = `${api}/orgs/${organization.id}/sites/${site.id}/experiences`;
+  const siteApi = `${api}/orgs/${organization.id}/sites/${site.id}`;
+  const endpoint = `${siteApi}/experiences`;
+  const { builtIn } = await (await request.get(`${siteApi}/theme`, { headers })).json();
+  const tokens = { ...builtIn.modern, colors: { ...builtIn.modern.colors, primary: "#007788" } };
+  const theme = await request.post(`${siteApi}/style-presets`, { headers, data: { name: "Ocean guide", tokens } });
+  expect(theme.status(), await theme.text()).toBe(201);
+  const { preset } = await theme.json();
   const launch = `${host}/integration/start?site=${site.siteId}`;
   await request.post(`${api}/auth/onboarding/skip`, { headers });
 
@@ -42,6 +48,8 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("button", { name: /^Guided Capture/ })).toHaveAttribute("aria-pressed", "true");
   await dialog.getByLabel("Name", { exact: true }).fill("Guided Capture project tour");
+  await dialog.getByRole("combobox", { name: "Saved theme" }).selectOption({ label: "Ocean guide" });
+  await dialog.getByRole("combobox", { name: "Template" }).selectOption({ label: "Feature discovery" });
   await dialog.getByLabel("Page URL").fill(launch);
   const opened = context.waitForEvent("page");
   await dialog.getByRole("button", { name: "Begin Guided Capture" }).click();
@@ -108,6 +116,7 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   await expect(completion.getByLabel("Verified event name")).toHaveValue("project_created");
   await panel.getByRole("button", { name: "Generate preview" }).click();
   await expect(currentHeading(editor)).toHaveText("Welcome to your project tour, edited");
+  await expect(widget(editor).locator(".movcues-button").first()).toHaveCSS("background-color", "rgb(0, 119, 136)");
   await panel.getByRole("button", { name: "Next step", exact: true }).click();
   await expect(panel.locator("[data-preview-position]")).toContainText("2 of 6");
   await editor.reload();
@@ -118,6 +127,8 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   const saved = async () => (await request.get(`${endpoint}/${id}`, { headers })).json();
   let draft = (await saved()).draftVersion;
   expect(draft.revision).toBe(1);
+  expect(draft.definition.visualTheme.savedStyleId).toBe(preset.id);
+  expect(draft.definition.template).toEqual({ id: "guide-feature-discovery", version: 1 });
   await panel.getByRole("button", { name: "Apply to draft" }).click();
   await expect(editor.locator("[data-editor-toolbar]")).toBeVisible();
   await expect(panel).toHaveCount(0);
