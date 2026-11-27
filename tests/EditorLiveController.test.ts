@@ -62,6 +62,78 @@ describe("live placement editor", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("asks before leaving the current route and starts from step one after consent", async () => {
+    history.replaceState({}, "", "/dashboard#/start");
+    const draft = guideDraft();
+    if (!("steps" in draft.version.definition)) throw new Error("Expected Guide");
+    const guide = draft.version.definition;
+    guide.targeting = { ...targeting, pageRules: [] };
+    guide.steps[0].pattern = "modal";
+    guide.steps[0].advance = { type: "route", pageRules: [{ id: "away", kind: "include", operator: "equals", value: "/dashboard#/away" }] };
+    const session = { sessionId: "guide-start", accessToken: "test-access", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+    controller = new EditorModeController("https://api.example.com");
+    expect(await controller.startAuthenticatedSession(session, draft)).toBe(true);
+    editorRoot().querySelector<HTMLButtonElement>('[data-mode="navigate"]')!.click();
+    editorRoot().querySelector<HTMLButtonElement>('[data-step="1"]')!.click();
+    history.pushState({}, "", "/dashboard#/away");
+
+    const preview = editorRoot().querySelector<HTMLButtonElement>('[data-mode="preview"]')!;
+    const consent = editorRoot().querySelector<HTMLElement>('[data-dock-popup="preview-start"]')!;
+    const cancel = consent.querySelector<HTMLButtonElement>("[data-preview-cancel]")!;
+    preview.click();
+    expect(consent.getAttribute("aria-hidden")).toBe("false");
+    expect(consent.querySelector("[data-preview-destination]")?.textContent).toBe("/dashboard#/start");
+    expect(activePreviewText()).toBe("");
+    expect(location.hash).toBe("#/away");
+    cancel.click();
+    expect(consent.getAttribute("aria-hidden")).toBe("true");
+    expect(location.hash).toBe("#/away");
+
+    preview.click();
+    consent.querySelector<HTMLButtonElement>("[data-preview-confirm]")!.click();
+    await vi.waitFor(() => expect(location.hash).toBe("#/start"));
+    await vi.waitFor(() => expect(activePreviewText()).toContain("First step"));
+    expect(editorRoot().querySelector("[data-preview-step]")?.textContent).toBe("1/2");
+  });
+
+  it("resumes a confirmed start on the intended page without counting arrival as a Guide trigger", async () => {
+    history.replaceState({}, "", "/dashboard");
+    const draft = guideDraft();
+    if (!("steps" in draft.version.definition)) throw new Error("Expected Guide");
+    draft.version.definition.steps[0].pattern = "modal";
+    draft.version.definition.steps[0].advance = { type: "route", pageRules: targeting.pageRules };
+    const session = { sessionId: "guide-start", accessToken: "test-access", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+    controller = new EditorModeController("https://api.example.com");
+    expect(await controller.resumeWithDraft({
+      session, editorState: {
+        experienceId: draft.experience.id, selectedStepId: "one", mode: "preview",
+        guidePreview: { versionId: "v1", completed: false, entryPath: "/dashboard", starting: true, returnMode: "navigate" },
+      },
+    }, draft)).toBe(true);
+    expect(activePreviewText()).toContain("First step");
+    expect(editorRoot().querySelector("[data-preview-step]")?.textContent).toBe("1/2");
+    editorRoot().querySelector<HTMLButtonElement>("[data-exit-preview]")!.click();
+    expect(activePreviewText()).toBe("");
+  });
+
+  it("uses the first anchored step’s configured page before checking its target", async () => {
+    history.replaceState({}, "", "/dashboard#/away");
+    document.body.innerHTML = '<button id="first">Target</button>';
+    const draft = guideDraft();
+    if (!("steps" in draft.version.definition)) throw new Error("Expected Guide");
+    draft.version.definition.steps[0].target!.targetContext = { pagePath: "/dashboard#/anchor-page" };
+    const session = { sessionId: "guide-anchor", accessToken: "test-access", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+    controller = new EditorModeController("https://api.example.com");
+    expect(await controller.startAuthenticatedSession(session, draft)).toBe(true);
+    editorRoot().querySelector<HTMLButtonElement>('[data-mode="navigate"]')!.click();
+    editorRoot().querySelector<HTMLButtonElement>('[data-mode="preview"]')!.click();
+    expect(editorRoot().querySelector("[data-preview-destination]")?.textContent).toBe("/dashboard#/anchor-page");
+    expect(activePreviewText()).toBe("");
+    editorRoot().querySelector<HTMLButtonElement>("[data-preview-confirm]")!.click();
+    await vi.waitFor(() => expect(location.hash).toBe("#/anchor-page"));
+    await vi.waitFor(() => expect(activePreviewText()).toContain("First step"));
+  });
+
   it("shows theme selection in Properties and keeps local styling collapsed", async () => {
     vi.stubGlobal("fetch", editorFetch(widgetDraft("toast")));
     controller = new EditorModeController("https://api.example.com");
@@ -260,9 +332,9 @@ describe("live placement editor", () => {
 
     expect(
       Array.from(editorRoot().querySelectorAll<HTMLButtonElement>("[data-mode]")).map(
-        button => button.textContent,
+        button => button.getAttribute("aria-label"),
       ),
-    ).toEqual(["Design", "Target", "Navigate", "Preview"]);
+    ).toEqual(["Edit", "Target", "Navigate", "Preview"]);
     expect(editorRoot().querySelector('[data-mode="design"]')?.classList.contains("active")).toBe(true);
     const previewHost = document.querySelector<HTMLElement>('[data-movcues-experience="exp_onsite"]')!;
     const heading = previewHost.shadowRoot!.querySelector<HTMLElement>('[data-movcues-content="heading"]')!;
@@ -388,7 +460,7 @@ describe("live placement editor", () => {
     heading.textContent = "Unsaved local copy";
     heading.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
 
-    await vi.waitFor(() => expect(editorRoot().querySelector("[data-save-state]")?.textContent).toContain("Conflict"));
+    await vi.waitFor(() => expect(editorRoot().querySelector("[data-save-state]")?.textContent).toMatch(/conflict/i));
     expect(heading.textContent).toBe("Unsaved local copy");
     expect(editorRoot().querySelector<HTMLButtonElement>("[data-reload-draft]")?.hidden).toBe(false);
     expect(editorRoot().querySelector<HTMLButtonElement>("[data-retry-save]")?.hidden).toBe(true);
@@ -587,6 +659,8 @@ describe("live placement editor", () => {
     expect(editorRoot().querySelector("[data-ai-history]")?.textContent).toContain("Guide proposal ready.");
     editorRoot().querySelector<HTMLButtonElement>("[data-ai-preview]")!.click(); expect({ count: editorRoot().querySelectorAll("[data-step]").length, status: editorRoot().querySelector("[data-ai-status]")?.textContent }).toEqual({ count: 3, status: "Previewing the complete proposed Guide. Apply or Discard to finish." });
     editorRoot().querySelector<HTMLButtonElement>("[data-ai-discard]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(2);
+    await vi.waitFor(() => expect(editorRoot().querySelector<HTMLElement>("[data-composition-inspector]")?.hidden).toBe(false));
+    editorRoot().querySelector<HTMLButtonElement>('[data-inspector-tab="ai"]')!.click();
     prompt.value = "Add it"; editorRoot().querySelector<HTMLFormElement>("[data-ai-form]")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await vi.waitFor(() => { expect(turns).toBe(2); expect(editorRoot().querySelector<HTMLElement>("[data-ai-proposal]")?.hidden).toBe(false); }); editorRoot().querySelector<HTMLButtonElement>("[data-ai-apply]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(3);
     editorRoot().querySelector<HTMLButtonElement>("[data-global-undo]")!.click(); expect(editorRoot().querySelectorAll("[data-step]")).toHaveLength(2);

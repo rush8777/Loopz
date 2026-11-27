@@ -1,3 +1,4 @@
+import { closeDockPopup, openDockPopup } from "../fixtures/openDockPopup";
 import { test, expect, type Page } from "@playwright/test";
 import { selectStepProperties } from "../fixtures/selectStepProperties";
 const api = "http://127.0.0.1:4310";
@@ -71,20 +72,24 @@ test("real dashboard → SDK editor → database → reviewed publish → visito
     .click();
   const editor = await popupPromise;
   await editor.waitForLoadState("domcontentloaded");
-  await expect(editor.locator("[data-editor-toolbar]")).toBeVisible();
+  await expect(editor.locator("[data-editor-dock]")).toBeVisible();
   await expect(editor).not.toHaveURL(/movcues_editor_token/);
   const id = page.url().match(/experiences\/([^/]+)\/edit/)![1];
   await rename(editor, "Welcome to projects");
+  await closeDockPopup(editor);
   // Real nested authoring and independent action configuration, through the existing controls.
   await widget(editor).locator("h2").click();
   await editor.locator("[data-command=columns]").click();
   await editor.locator("[data-movcues-empty-cell]").click();
   await editor.locator("[data-insert-block=icon]").click();
   await widget(editor).locator(".movcues-button").click();
+  await openDockPopup(editor, "settings");
   await editor.locator("[data-button-label]").fill("Get Started");
   await editor.locator("[data-button-label]").press("Tab");
   await editor.locator("[data-button-action]").selectOption("next_step");
+  await openDockPopup(editor, "steps");
   await editor.locator("[data-add-step=anchored_card]").click();
+  await closeDockPopup(editor);
   // New anchored steps use the existing website picker.
   await editor.locator("[data-mode=target]").click();
   await expect(editor.locator("#feature-card")).toBeVisible();
@@ -92,13 +97,18 @@ test("real dashboard → SDK editor → database → reviewed publish → visito
   await editor.locator("[data-mode=design]").click();
   await expect(widget(editor)).toBeVisible();
   await rename(editor, "Create a project");
+  await openDockPopup(editor, "settings");
   await editor.locator("[data-guide-trigger]").selectOption("element_click");
   await editor.locator("[data-guide-pick-interaction]").click();
   await editor.locator("#use-feature").click();
+  await openDockPopup(editor, "settings");
   await editor.locator("[data-guide-delay]").fill("50");
   await editor.locator("[data-guide-delay]").press("Tab");
+  await openDockPopup(editor, "steps");
   await editor.locator("[data-add-step=modal]").click();
+  await closeDockPopup(editor);
   await rename(editor, "Project created");
+  await openDockPopup(editor, "settings");
   await editor.locator("[data-guide-trigger]").selectOption("custom_event");
   await editor.locator("[data-guide-event]").fill("project_created");
   await editor.locator("[data-guide-event]").press("Tab");
@@ -145,7 +155,7 @@ test("real dashboard → SDK editor → database → reviewed publish → visito
   await expect(editor.locator("[data-preview-limit]")).toContainText(
     "site's JavaScript",
   );
-  await editor.locator("[data-mode=design]").click();
+  await editor.locator("[data-exit-preview]").click();
   await editor.locator("[data-close]").click();
   // Reload the actual dashboard so review uses the backend's saved revision.
   await page.reload();

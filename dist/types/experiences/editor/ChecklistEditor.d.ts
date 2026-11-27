@@ -28,7 +28,6 @@ export declare class ChecklistEditor {
     render(id: string, versionId: string, preview: boolean): boolean;
     applyDesign(id: string): void;
     private host;
-    private closeMobileInspector;
     private transition;
     getView(): ChecklistView;
     setDefinition(value: RuntimeChecklistDefinition): void;

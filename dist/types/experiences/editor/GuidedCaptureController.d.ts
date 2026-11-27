@@ -1,13 +1,15 @@
 import type { EditorSession } from "../runtimeInterfaces";
 import type { EditorDraft } from "../types";
+import { EditorDock } from "./EditorDock";
 import type { CaptureBridge } from "./GuideCaptureTypes";
 export declare class GuidedCaptureController {
     private readonly bridge;
     private readonly draft;
     private readonly applied;
     private readonly closed;
-    private readonly host;
+    private readonly dock;
     private readonly root;
+    private readonly listeners;
     private readonly route;
     private readonly preview;
     private readonly key;
@@ -34,11 +36,13 @@ export declare class GuidedCaptureController {
     private request;
     private state;
     private busy;
+    private reconnecting;
     private destroyed;
-    constructor(bridge: CaptureBridge, session: EditorSession, draft: EditorDraft, applied: (version: EditorDraft["version"]) => void, closed: () => void);
+    constructor(bridge: CaptureBridge, session: EditorSession, draft: EditorDraft, applied: (version: EditorDraft["version"]) => void, closed: () => void, dock?: EditorDock);
     mount(): void;
     expire(): void;
-    destroy(): void;
+    setReconnecting(reconnecting: boolean): void;
+    destroy(keepDock?: boolean): void;
     private restore;
     private adopt;
     private readLocal;
@@ -58,6 +62,9 @@ export declare class GuidedCaptureController {
     private preserveModeButtonFocus;
     private handleModeShortcut;
     private handleClick;
+    private removeTarget;
+    private restart;
+    private discard;
     private handleInput;
     private handleChange;
     private planGuide;
@@ -76,4 +83,5 @@ export declare class GuidedCaptureController {
     private toggle;
     private message;
     private update;
+    private updateDockStatus;
 }

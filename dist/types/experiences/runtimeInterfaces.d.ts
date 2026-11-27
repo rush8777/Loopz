@@ -23,11 +23,14 @@ export interface EditorSession {
 export interface EditorAuthoringState {
     experienceId: string;
     selectedStepId?: string;
+    guideLaunchPath?: string;
     guidePreview?: {
         versionId: string;
         entryPath: string;
         completed: boolean;
         clickPending?: boolean;
+        starting?: boolean;
+        returnMode?: "design" | "target" | "navigate";
     };
     mode: "design" | "target" | "navigate" | "preview" | "select";
 }

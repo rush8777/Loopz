@@ -1,11 +1,10 @@
-export const guideCapturePanel = `
-<style>
+import { dockIcon, dockPopup, dockTrigger, geoDockMark } from "./EditorDock";
+
+export const captureStyles = `
   :host{all:initial;font:14px/1.45 system-ui,sans-serif;color:#17233b}
   *{box-sizing:border-box}
-  aside{position:fixed;top:12px;right:12px;width:min(390px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;pointer-events:auto;background:white;border:1px solid #dce3ed;border-radius:14px;box-shadow:0 8px 26px #15274626}
-  header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 15px;border-bottom:1px solid #e7edf5}
-  header .row{flex-wrap:nowrap}
-  main{display:grid;gap:12px;padding:14px}
+  [data-dock-popup] .dock-pop-body{display:grid;gap:10px}
+  [data-dock-popup] .row:last-child:empty{display:none}
   h2,p,ol{margin:0} h2{font-size:15px}
   label{display:grid;gap:5px;font-size:12px;font-weight:600}
   button,input,select,textarea{font:inherit}
@@ -28,19 +27,40 @@ export const guideCapturePanel = `
   input,select,textarea{width:100%;min-width:0;padding:6px 7px;border-radius:6px;border:1px solid #ccd6e4;color:#17233b;background:white}
   textarea{resize:vertical}
   [hidden]{display:none!important}
-</style>
-<aside aria-label="Guided Capture">
-  <header><h2>Guided Capture</h2><div class="row"><button type="button" data-collapse aria-expanded="true" aria-controls="movcues-capture-content">Minimize</button><button type="button" data-close aria-label="Close Guided Capture">Close</button></div></header>
-  <main id="movcues-capture-content">
-    <p class="muted" data-message role="status" aria-live="polite">Restoring capture…</p>
+`;
+
+export const captureControls = `
+  <div class="dock-group">${dockTrigger("generate", "Plan a guide with Geo", geoDockMark + '<span>Geo</span>', 'data-capture-geo')}</div>
+  <div class="dock-group dock-modes" data-capture-modes role="group" aria-label="Capture mode">
+    <button type="button" data-mode="select" title="Select elements ? Shift + F8">${dockIcon("select")} Select</button>
+    <button type="button" data-mode="navigate" title="Navigate ? Shift + F8">${dockIcon("navigate")} Navigate</button>
+  </div>
+  <div class="dock-group" data-capture-actions>
+    ${dockTrigger("targets", "Captured elements", '<span class="dock-chip" data-capture-count>0 elements</span>')}
+    <button type="button" data-undo-target aria-label="Undo last selection" title="Undo last selection">${dockIcon("undo")}</button>
+    ${dockTrigger("generate", "Generate guide", dockIcon("spark") + " Generate", 'data-generate data-primary')}
+  </div>
+  <div class="dock-group" data-capture-review hidden>
+    <span class="dock-indicator" data-capture-stage></span>
+    <button type="button" data-previous aria-label="Previous step" title="Previous step" hidden>${dockIcon("left")}</button>
+    <span class="dock-chip" data-preview-position hidden></span>
+    <button type="button" data-next aria-label="Next step" title="Next step" hidden>${dockIcon("right")}</button>
+    ${dockTrigger("generate", "Review guide generation", 'Review')}
+  </div>
+  <div class="dock-group">
+    ${dockTrigger("capture-status", "Capture status", '<span class="dock-status-text" data-checkpoint>Restoring?</span>', 'data-capture-status')}
+    <button type="button" data-close aria-label="Close Guided Capture" title="Close Guided Capture">${dockIcon("close")}</button>
+  </div>`;
+
+export const capturePopups =
+  dockPopup("targets", "Captured elements", `<div class="dock-pop-body">
+    <p class="muted" data-instructions role="status"></p>
+    <ol data-targets aria-label="Captured elements"></ol>
+    <div class="row"><button type="button" data-restart>Restart capture</button><button type="button" data-discard>Discard and close</button></div>
+    <small>Shift + F8 switches modes. Shift + Tab also works in menus and listboxes.</small>
+  </div>`) +
+  dockPopup("generate", "Generate a guide", `<div class="dock-pop-body">
     <section data-capture hidden>
-      <div class="row" role="group" aria-label="Capture mode">
-        <button type="button" data-mode="select">Select Elements</button>
-        <button type="button" data-mode="navigate">Navigate</button>
-      </div>
-      <p class="muted" data-instructions role="status"></p>
-      <p class="muted">Shift + F8 switches modes without moving focus. Shift + Tab also works inside menus and listboxes.</p>
-      <ol data-targets aria-label="Captured elements"></ol>
       <form data-prompt-form>
         <label>What should this guide help users do?
           <textarea data-prompt rows="3" maxlength="2000" required placeholder="Help new customers create their first invoice."></textarea>
@@ -56,21 +76,22 @@ export const guideCapturePanel = `
     <section data-preview hidden>
       <h2>Design preview</h2>
       <p class="muted">Inspect layouts here. Apply the draft to test the full journey in the editor.</p>
-      <p data-preview-position class="muted"></p>
       <p data-preview-details class="muted"></p>
       <p data-preview-target class="muted" role="status"></p>
-      <div class="row"><button type="button" data-previous>Previous step</button><button type="button" data-next>Next step</button></div>
       <div class="row"><button type="button" data-apply data-primary>Apply to draft</button><button type="button" data-edit-plan>Edit plan</button></div>
     </section>
-    <p class="muted" data-checkpoint role="status" aria-live="polite"></p>
+    <p class="muted" data-workflow-message role="status" aria-live="polite" hidden></p>
+    <div class="row"><button type="button" data-cancel hidden>Stop</button></div>
+  </div>`, geoDockMark) +
+  dockPopup("capture-status", "Capture status", `<div class="dock-pop-body">
+    <p class="muted" data-message role="status" aria-live="polite">Restoring capture?</p>
+    <p class="muted" data-checkpoint-details role="status"></p>
     <div class="row">
-      <button type="button" data-cancel hidden>Cancel request</button>
       <button type="button" data-retry hidden>Retry checkpoint</button>
       <button type="button" data-refresh hidden>Load latest checkpoint</button>
+      <button type="button" data-reload hidden>Retry loading capture</button>
     </div>
-    <button type="button" data-reload hidden>Retry loading capture</button>
-  </main>
-</aside>`;
+  </div>`);
 
 export function captureHtml(text: string): string {
   return text.replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);

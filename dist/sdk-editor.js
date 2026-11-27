@@ -1,5 +1,234 @@
 (function() {
   "use strict";
+  class EditorDock {
+    constructor() {
+      this.host = document.createElement("div");
+      this.root = this.host.attachShadow({ mode: "open" });
+      this.frame = null;
+      this.bar = null;
+      this.popup = null;
+      this.opener = null;
+      this.onClick = (event) => {
+        var _a;
+        if (!(event.target instanceof Element)) return;
+        const trigger = event.target.closest("[data-open-popup],[data-dismiss-popup]");
+        if (!trigger) return;
+        const id = trigger.dataset.openPopup;
+        const next = !id || this.popup === id ? null : id;
+        this.show(next, id ? trigger : void 0);
+        if (next && event instanceof MouseEvent && event.detail === 0) {
+          (_a = this.root.querySelector("[data-dock-popup][data-open] [data-dismiss-popup]")) == null ? void 0 : _a.focus({ preventScroll: true });
+        }
+      };
+      this.onKeyDown = (event) => {
+        if (event.key !== "Escape" || !this.popup) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this.show(null);
+      };
+      this.onOutsidePress = (event) => {
+        const path = event.composedPath();
+        if (path.includes(this.host)) return;
+        if (this.popup === "settings" && path.some((node2) => node2 instanceof HTMLElement && node2.matches("[data-movcues-experience],[data-movcues-checklist]"))) return;
+        this.show(null);
+      };
+      this.fit = () => {
+        if (!this.frame) return;
+        const viewport = window.visualViewport;
+        const width = (viewport == null ? void 0 : viewport.width) ?? window.innerWidth;
+        const height = (viewport == null ? void 0 : viewport.height) ?? window.innerHeight;
+        const offset = (viewport == null ? void 0 : viewport.offsetTop) ?? 0;
+        this.frame.style.setProperty("--dock-center", `${((viewport == null ? void 0 : viewport.offsetLeft) ?? 0) + width / 2}px`);
+        this.frame.style.setProperty("--dock-offset", `${Math.max(0, window.innerHeight - offset - height)}px`);
+        this.frame.style.setProperty("--dock-width", `${Math.max(0, width - 16)}px`);
+        this.frame.style.setProperty("--dock-height", `${height}px`);
+        this.measure();
+      };
+      this.host.dataset.movcuesEditor = "";
+      this.host.style.cssText = "position:fixed;inset:0;z-index:2147483647;pointer-events:none";
+    }
+    mount(styles, controls, popups) {
+      var _a, _b, _c;
+      const existing = this.frame;
+      const start = existing == null ? void 0 : existing.getBoundingClientRect();
+      (_a = this.observer) == null ? void 0 : _a.disconnect();
+      this.popup = null;
+      this.opener = null;
+      if (!existing) {
+        this.root.innerHTML = '<style data-dock-styles></style><div class="dock-frame" data-editor-dock><div class="dock-bar" role="region" aria-label="Movcues Live Editor"></div><div data-dock-popups></div></div>';
+        this.frame = this.root.querySelector("[data-editor-dock]");
+        this.bar = this.root.querySelector(".dock-bar");
+        this.root.addEventListener("click", this.onClick);
+        this.root.addEventListener("keydown", this.onKeyDown);
+        document.addEventListener("pointerdown", this.onOutsidePress, true);
+        window.addEventListener("resize", this.fit);
+        (_b = window.visualViewport) == null ? void 0 : _b.addEventListener("resize", this.fit);
+        (_c = window.visualViewport) == null ? void 0 : _c.addEventListener("scroll", this.fit);
+      }
+      this.root.querySelector("style").textContent = styles + DOCK_CSS;
+      this.bar.innerHTML = controls;
+      this.root.querySelector("[data-dock-popups]").innerHTML = popups;
+      if (start && this.frame) {
+        this.frame.style.width = start.width + "px";
+        this.frame.style.height = start.height + "px";
+      }
+      if (!this.host.isConnected) (document.body ?? document.documentElement).append(this.host);
+      this.fit();
+      if (typeof ResizeObserver !== "undefined") {
+        this.observer = new ResizeObserver(() => this.measure());
+        this.observer.observe(this.bar);
+      }
+    }
+    get activePopup() {
+      return this.popup;
+    }
+    setMode(mode) {
+      var _a, _b;
+      if (!this.frame || this.frame.dataset.dockMode === mode) return;
+      const hadMode = Boolean(this.frame.dataset.dockMode);
+      this.frame.dataset.dockMode = mode;
+      (_a = this.modeMotion) == null ? void 0 : _a.cancel();
+      if (hadMode && ((_b = this.bar) == null ? void 0 : _b.animate) && !this.reducedMotion()) {
+        this.modeMotion = this.bar.animate([{ opacity: 0.72, translate: "0 2px" }, { opacity: 1, translate: "none" }], {
+          duration: 200,
+          easing: "cubic-bezier(.22,.75,.24,1)"
+        });
+      }
+    }
+    show(id, opener) {
+      var _a;
+      if (id === this.popup) return;
+      const previous = this.root.querySelector("[data-dock-popup][data-open]");
+      const focusedInside = (previous == null ? void 0 : previous.contains(this.root.activeElement)) ?? false;
+      if (focusedInside && id === null) (_a = this.opener) == null ? void 0 : _a.focus({ preventScroll: true });
+      this.popup = id;
+      this.opener = opener ?? (id ? this.root.querySelector(`[data-open-popup="${id}"]:not([hidden])`) : null);
+      this.root.querySelectorAll("[data-dock-popup]").forEach((panel) => {
+        const active = panel.dataset.dockPopup === id;
+        panel.toggleAttribute("data-open", active);
+        panel.inert = !active;
+        panel.setAttribute("aria-hidden", String(!active));
+      });
+      this.root.querySelectorAll("[data-open-popup]").forEach((button) => {
+        button.setAttribute("aria-expanded", String(button.dataset.openPopup === id));
+      });
+      if (this.opener && focusedInside) this.opener.focus({ preventScroll: true });
+    }
+    measure() {
+      if (!this.bar || !this.frame) return;
+      const { width, height } = this.bar.getBoundingClientRect();
+      if (!width || !height) return;
+      this.frame.style.width = width + "px";
+      this.frame.style.height = height + "px";
+    }
+    reducedMotion() {
+      return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    }
+    destroy(animate = false) {
+      var _a, _b, _c, _d, _e, _f;
+      (_a = this.observer) == null ? void 0 : _a.disconnect();
+      this.root.removeEventListener("click", this.onClick);
+      this.root.removeEventListener("keydown", this.onKeyDown);
+      document.removeEventListener("pointerdown", this.onOutsidePress, true);
+      window.removeEventListener("resize", this.fit);
+      (_b = window.visualViewport) == null ? void 0 : _b.removeEventListener("resize", this.fit);
+      (_c = window.visualViewport) == null ? void 0 : _c.removeEventListener("scroll", this.fit);
+      (_d = this.exit) == null ? void 0 : _d.cancel();
+      (_e = this.modeMotion) == null ? void 0 : _e.cancel();
+      if (animate && ((_f = this.frame) == null ? void 0 : _f.animate) && !this.reducedMotion()) {
+        this.frame.inert = true;
+        this.exit = this.frame.animate([{ opacity: 1 }, { opacity: 0, translate: "0 6px" }], { duration: 180, easing: "ease-in", fill: "forwards" });
+        this.exit.finished.then(() => this.host.remove(), () => this.host.remove());
+      } else this.host.remove();
+    }
+  }
+  function dockPopup(id, label, body, mark = "", role = "region") {
+    return `<section class="dock-popup" id="movcues-dock-${id}" data-dock-popup="${id}" role="${role}" aria-label="${label}" aria-hidden="true" inert>
+    <div class="dock-popup-heading"><strong>${mark}${label}</strong><button type="button" class="dock-button dock-icon" data-dismiss-popup aria-label="Close ${label}" title="Close">${dockIcon("close")}</button></div>
+    ${body}
+  </section>`;
+  }
+  function dockTrigger(id, label, content, attrs = "") {
+    return `<button type="button" class="dock-button" data-open-popup="${id}" aria-controls="movcues-dock-${id}" aria-expanded="false" aria-label="${label}" title="${label}" ${attrs}>${content}</button>`;
+  }
+  const glyphs = {
+    close: '<path d="m6 6 8 8m0-8-8 8"/>',
+    more: '<circle cx="4" cy="10" r=".9"/><circle cx="10" cy="10" r=".9"/><circle cx="16" cy="10" r=".9"/>',
+    left: '<path d="m12 5-5 5 5 5"/>',
+    right: '<path d="m8 5 5 5-5 5"/>',
+    plus: '<path d="M10 5v10m-5-5h10"/>',
+    edit: '<path d="m4 13-1 4 4-1L16 7l-3-3-9 9Zm7-7 3 3"/>',
+    select: '<path d="m4 3 11 7-5 1.5L8 16 4 3Z"/>',
+    navigate: '<path d="M6 10V5a1 1 0 0 1 2 0v4-6a1 1 0 1 1 2 0v6-5a1 1 0 0 1 2 0v5-3a1 1 0 0 1 2 0v6a5 5 0 0 1-5 5h-1c-2 0-3-2-5-5L2 10a1 1 0 0 1 1.5-1.2L6 11"/>',
+    play: '<path d="M7 4.5 15 10l-8 5.5z"/>',
+    undo: '<path d="M7 4 3 8l4 4M3 8h9a4 4 0 0 1 0 8"/>',
+    restart: '<path d="M3 4v5h5M3.4 9a6.5 6.5 0 1 1 .4 4.5"/>',
+    target: '<circle cx="10" cy="10" r="5.5"/><path d="M10 2v4m0 8v4M2 10h4m8 0h4"/>',
+    layers: '<path d="m3 7 7-4 7 4-7 4-7-4Zm0 4 7 4 7-4M3 15l7 4 7-4"/>',
+    check: '<path d="m4 10 4 4 8-8"/>',
+    spark: '<path d="M10 2a8 8 0 0 0 8 8 8 8 0 0 0-8 8 8 8 0 0 0-8-8 8 8 0 0 0 8-8Z"/>'
+  };
+  function dockIcon(name) {
+    return `<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${glyphs[name]}</svg>`;
+  }
+  const geoDockMark = `<span class="dock-brand-mark" aria-hidden="true">
+  <svg class="dock-geo-cube" viewBox="0 0 64 64" focusable="false">
+    <path fill="#add8f5" d="M4.5 21c0-4 2-7 5.5-9l16.5-9.3a11 11 0 0 1 10.7 0L54 12c3.5 2 5.5 5 5.5 9v21.5c0 3.7-1.9 7-5.2 9l-16.9 9.7a11 11 0 0 1-10.8 0l-17-9.8a10.3 10.3 0 0 1-5.1-8.9Z"/>
+    <path fill="#f8fbff" d="M7 16.2c.8-1.6 2-2.9 3.7-3.8l15.8-9.7a11 11 0 0 1 10.7 0L54 12c1.8 1 3.2 2.3 4.1 4L33.6 30.2a3.2 3.2 0 0 1-3.2 0Z"/>
+    <path fill="#fff" d="M34.8 29.5 58 16.2c1 1.5 1.5 3 1.5 4.8v21.5c0 3.7-1.9 7-5.2 9l-16.9 9.7c-2.4 1.4-5.4-.3-5.4-3.1V34.4c0-2 1.1-3.9 2.8-4.9Z"/>
+    <path fill="none" stroke="#0b365f" stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round" d="M4.5 21c0-4 2-7 5.5-9l16.5-9.3a11 11 0 0 1 10.7 0L54 12c3.5 2 5.5 5 5.5 9v21.5c0 3.7-1.9 7-5.2 9l-16.9 9.7a11 11 0 0 1-10.8 0l-17-9.8a10.3 10.3 0 0 1-5.1-8.9ZM6.1 16l23.4 13.7c1.5.9 3.4.9 5 0L57.9 16M32 31v26.1c0 2.6 1.2 4.4 3.1 4.7"/>
+    <g class="dock-geo-gaze" fill="#0b365f">
+      <ellipse cx="40" cy="39.4" rx="2.1" ry="2.8" transform="rotate(23 40 39.4)"/>
+      <ellipse cx="50.8" cy="34.1" rx="2.1" ry="2.8" transform="rotate(23 50.8 34.1)"/>
+    </g>
+  </svg>
+</span>`;
+  const DOCK_CSS = `
+.dock-frame{--dock-ink:#172640;--dock-muted:#526480;--dock-accent:#275cdd;--dock-line:#e3eaf5;--dock-ease:cubic-bezier(.22,.75,.24,1);--dock-gap:10px;position:fixed;left:var(--dock-center,50%);bottom:calc(var(--dock-offset,0px) + max(16px,env(safe-area-inset-bottom)));transform:translateX(-50%);max-width:var(--dock-width,calc(100vw - 16px));border:1px solid #dce5f1;border-radius:15px;background:#fff;color:var(--dock-ink);box-shadow:0 12px 38px #13295120,0 2px 6px #13295114;box-sizing:content-box;pointer-events:none;font:500 12px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif;transition:width 230ms var(--dock-ease),height 230ms var(--dock-ease);animation:dock-enter 230ms var(--dock-ease)}
+.dock-frame *{box-sizing:border-box}
+.dock-bar{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:5px;width:max-content;max-width:calc(var(--dock-width,100vw - 16px) - 2px);padding:6px;pointer-events:auto;border-radius:inherit}
+.dock-group{display:flex;align-items:center;gap:2px;min-width:0}
+.dock-group+.dock-group{border-inline-start:1px solid var(--dock-line);padding-inline-start:5px}
+.dock-bar .dock-modes{gap:2px;padding:2px;border-radius:10px;background:#f1f5fb}
+.dock-bar button,.dock-popup-heading button{display:inline-flex;justify-content:center;align-items:center;gap:5px;min-width:30px;height:33px;padding:0 7px;border:0;border-radius:8px;background:transparent;color:var(--dock-muted);font:inherit;font-weight:650;white-space:nowrap;cursor:pointer;transition:background 190ms ease,color 190ms ease,box-shadow 190ms ease,transform 100ms ease}
+.dock-bar button:hover:not(:disabled),.dock-popup-heading button:hover{background:#edf3fe;color:#1d51bc}
+.dock-bar button:active:not(:disabled),.dock-popup-heading button:active{transform:scale(.96)}
+.dock-bar button:is([aria-pressed=true],[aria-expanded=true]){background:#e8f0ff;color:#1d51bc}
+.dock-bar .dock-modes button{height:29px}
+.dock-bar .dock-modes button[aria-pressed=true]{background:#fff;color:#204eb8;box-shadow:0 1px 4px #182d5026}
+.dock-bar button[data-primary]{background:#2458d3;color:#fff;padding-inline:11px}
+.dock-bar button[data-primary]:hover:not(:disabled){background:#1948ba;color:#fff}
+.dock-bar button:disabled{opacity:.42;cursor:default}
+.dock-bar button:focus-visible,.dock-popup-heading button:focus-visible{outline:2px solid #3674ff;outline-offset:1px}
+.dock-frame svg{flex:none}
+.dock-bar svg,.dock-popup-heading svg{width:16px;height:16px}
+.dock-bar .dock-brand{color:#234caa;letter-spacing:-.02em;font-weight:750;gap:6px}
+.dock-brand-mark{display:inline-grid;place-items:center;width:24px;height:24px;border:1px solid #d4e3ff;border-radius:8px;background:linear-gradient(145deg,#f0f5ff,#dce9ff);color:#275cdd}
+.dock-frame[data-geo-thinking] .dock-geo-cube{animation:dock-geo-think 2.8s ease-in-out infinite}
+.dock-frame[data-geo-thinking] .dock-geo-gaze{animation:dock-geo-scan 2.8s ease-in-out infinite}
+.dock-chip{font-variant-numeric:tabular-nums}
+.dock-bar .dock-status{padding-inline:7px;font:600 11px/1.2 ui-sans-serif,system-ui}
+.dock-status::before,.dock-indicator::before{content:"";width:7px;height:7px;flex:none;border-radius:50%;background:#239166}
+.dock-status[data-tone=busy]::before{animation:dock-pulse 1s ease-in-out infinite}
+.dock-status[data-tone=busy]::before,.dock-indicator::before{background:#4076ed}
+.dock-status[data-tone=warn]::before{background:#bf720c}
+.dock-status[data-tone=error]::before{background:#c52d49}
+.dock-indicator{display:inline-flex;gap:6px;align-items:center;padding-inline:6px;font-weight:680}
+.dock-pop-body{min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;padding:10px 12px}
+.dock-popup{position:absolute;z-index:1;left:50%;bottom:calc(100% + var(--dock-gap));transform:translate(-50%,6px) scale(.985);transform-origin:bottom center;display:flex;flex-direction:column;width:min(360px,var(--dock-width,calc(100vw - 16px)));max-height:min(435px,calc(var(--dock-height,100dvh) - 100% - 46px));border:1px solid #dce5f1;border-radius:15px;background:#fff;overflow:hidden;box-shadow:0 14px 38px #13295124,0 2px 7px #13295110;opacity:0;visibility:hidden;pointer-events:none;transition:opacity 190ms ease,transform 220ms var(--dock-ease),visibility 0s linear 220ms}
+.dock-popup[data-open]{opacity:1;visibility:visible;transform:translate(-50%,0) scale(1);pointer-events:auto;transition-delay:0s}
+.dock-popup-heading{display:flex;flex:none;align-items:center;justify-content:space-between;gap:8px;min-height:42px;padding:4px 8px 4px 13px;border-bottom:1px solid var(--dock-line)}
+.dock-popup-heading strong{display:flex;align-items:center;gap:7px;font-size:13px;letter-spacing:-.015em}
+.dock-popup-heading button{height:28px;min-width:28px;padding:0}
+.dock-pop-body>p:first-child{margin-top:0}
+.dock-frame [hidden]{display:none!important}
+@keyframes dock-enter{from{opacity:0;translate:0 8px}}
+@keyframes dock-pulse{50%{opacity:.48}}
+@keyframes dock-geo-think{0%,100%{transform:none}24%{transform:perspective(90px) translateY(-1px) rotate(-8deg) rotateY(-13deg)}50%{transform:translateY(-2px) rotate(-2deg)}76%{transform:perspective(90px) translateY(-1px) rotate(6deg) rotateY(12deg)}}
+@keyframes dock-geo-scan{0%,100%{transform:none}24%,34%{transform:translate(-2px,0)}65%,76%{transform:translate(1.5px,-1px)}}
+@media(max-width:550px){.dock-frame{bottom:calc(var(--dock-offset,0px) + max(8px,env(safe-area-inset-bottom)));--dock-gap:7px}.dock-bar{gap:3px;padding:5px}.dock-bar button{min-width:29px;padding-inline:5px}.dock-wide-label{display:none}.dock-status-text{max-width:80px;overflow:hidden;text-overflow:ellipsis}.dock-bar .dock-brand{gap:3px}}
+@media(prefers-reduced-motion:reduce){.dock-frame,.dock-frame *{animation:none!important;transition:none!important}}
+`;
   function panelIcon(name) {
     const paths = {
       properties: '<path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
@@ -11,35 +240,23 @@
   }
   const EDITOR_PANEL_DESIGN = `
 :host{--ep-ink:#202e44;--ep-muted:#62718a;--ep-line:rgba(111,135,174,.18);--ep-blue:#3269ee;--ep-surface:rgba(249,251,255,.93)}
-aside{z-index:2147483646;width:min(330px,calc(100vw - 24px));border:1px solid rgba(255,255,255,.86);border-radius:18px;background:var(--ep-surface);color:var(--ep-ink);box-shadow:0 18px 52px rgba(27,47,88,.18),0 2px 7px rgba(27,47,88,.07),inset 0 0 0 4px rgba(221,231,249,.32);overflow:hidden;-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px)}
-aside main{background:transparent;border-radius:17px;padding:4px;scrollbar-width:thin;scrollbar-color:#c5d1e5 transparent}
-.inspector-tabs{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:3px;padding:8px 10px 9px;background:rgba(245,248,254,.96);border-bottom:1px solid var(--ep-line)}
-.panel-wordmark{display:flex;align-items:center;gap:7px;margin-right:auto;font-size:12px;font-weight:700;letter-spacing:-.3px;color:var(--ep-ink)}
-.panel-mark{display:grid;place-items:center;width:25px;height:25px;border-radius:8px;color:white;background:linear-gradient(145deg,#427cf8,#2454d8);box-shadow:0 2px 6px #3269ee26}
-.panel-mark svg{width:15px;height:15px}
-.inspector-tabs button{position:relative;display:grid;place-items:center;flex:none;width:33px;height:32px;padding:0;border:1px solid transparent;border-radius:9px;background:transparent;color:#74839c;cursor:pointer;transition:background .15s,color .15s,box-shadow .15s}
-.inspector-tabs button svg{width:17px;height:17px}
-.inspector-tabs button:hover{background:#e6edf9;color:#244a98}
-.inspector-tabs button.active{background:#fff;color:var(--ep-blue);border-color:#dce5f6;box-shadow:0 2px 5px #244a9810}
-.inspector-tabs button.active:after{content:'';position:absolute;bottom:3px;width:3px;height:3px;border-radius:50%;background:currentColor}
-.inspector-tabs button:disabled{opacity:.35;cursor:not-allowed}
-aside .section{gap:6px;padding:12px 12px;border-color:var(--ep-line);background:transparent}
-aside .content-heading{align-items:center;gap:8px;margin-bottom:9px}
-aside .content-heading strong{display:block;margin-top:3px;font-size:16px;font-weight:650;letter-spacing:-.45px;color:var(--ep-ink);line-height:1.25}
-aside .eyebrow{font-size:9px;font-weight:700;letter-spacing:1.65px;text-transform:uppercase;color:#7a89a2}
-aside label{grid-template-columns:88px minmax(0,1fr);gap:8px;margin:0;padding:5px 0;font-size:11px;color:#596981;align-items:center}
-aside input,aside select{min-width:0;min-height:32px;border:1px solid #dbe3f0;border-radius:8px;padding:6px 8px;background:rgba(255,255,255,.86);color:var(--ep-ink);font:11px/1.4 ui-sans-serif,system-ui,sans-serif;box-shadow:0 1px 2px #20386004}
-aside input:hover,aside select:hover{border-color:#b4c6e6}
-aside input[type=color]{width:100%;height:32px;padding:4px;cursor:pointer}
-aside input[type=color]::-webkit-color-swatch-wrapper{padding:0}
-aside input[type=color]::-webkit-color-swatch{border:0;border-radius:5px}
-aside .secondary-button{min-height:29px;padding:5px 9px;border:1px solid #d8e2f1;border-radius:8px;background:rgba(255,255,255,.75);color:#50627e;font-size:10px;box-shadow:0 1px 2px #263a5c05}
-aside .secondary-button:hover{border-color:#abc0e6;background:#fff;color:#245bd0}
-aside .secondary-button:disabled{opacity:.4;cursor:not-allowed}
-aside .muted,aside .hint{font-size:10px;line-height:1.5;color:var(--ep-muted)}
-aside .hint{padding:8px 12px;margin:0}
-aside .history-row{gap:6px;flex-wrap:wrap}
-aside .number{gap:7px}
+.editor-properties .section{gap:6px;padding:12px 12px;border-color:var(--ep-line);background:transparent}
+.editor-properties .content-heading{align-items:center;gap:8px;margin-bottom:9px}
+.editor-properties .content-heading strong{display:block;margin-top:3px;font-size:16px;font-weight:650;letter-spacing:-.45px;color:var(--ep-ink);line-height:1.25}
+.editor-properties .eyebrow{font-size:9px;font-weight:700;letter-spacing:1.65px;text-transform:uppercase;color:#7a89a2}
+.editor-properties label{grid-template-columns:88px minmax(0,1fr);gap:8px;margin:0;padding:5px 0;font-size:11px;color:#596981;align-items:center}
+.editor-properties input,.editor-properties select{min-width:0;min-height:32px;border:1px solid #dbe3f0;border-radius:8px;padding:6px 8px;background:rgba(255,255,255,.86);color:var(--ep-ink);font:11px/1.4 ui-sans-serif,system-ui,sans-serif;box-shadow:0 1px 2px #20386004}
+.editor-properties input:hover,.editor-properties select:hover{border-color:#b4c6e6}
+.editor-properties input[type=color]{width:100%;height:32px;padding:4px;cursor:pointer}
+.editor-properties input[type=color]::-webkit-color-swatch-wrapper{padding:0}
+.editor-properties input[type=color]::-webkit-color-swatch{border:0;border-radius:5px}
+.editor-properties .secondary-button{min-height:29px;padding:5px 9px;border:1px solid #d8e2f1;border-radius:8px;background:rgba(255,255,255,.75);color:#50627e;font-size:10px;box-shadow:0 1px 2px #263a5c05}
+.editor-properties .secondary-button:hover{border-color:#abc0e6;background:#fff;color:#245bd0}
+.editor-properties .secondary-button:disabled{opacity:.4;cursor:not-allowed}
+.editor-properties .muted,.editor-properties .hint{font-size:10px;line-height:1.5;color:var(--ep-muted)}
+.editor-properties .hint{padding:8px 12px;margin:0}
+.editor-properties .history-row{gap:6px;flex-wrap:wrap}
+.editor-properties .number{gap:7px}
 .theme-group-title{margin:14px 0 6px;padding-top:12px;border-top:1px solid var(--ep-line);font-size:9px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;color:#7a89a2}
 .appearance-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .appearance-heading a{color:var(--ep-blue);font-size:11px;text-decoration:underline;text-underline-offset:2px}
@@ -50,17 +267,14 @@ aside .number{gap:7px}
 .visual-overrides{margin-top:5px;font-size:11px;color:var(--ep-muted)}
 .visual-overrides summary{cursor:pointer;padding:5px 0}
 .visual-overrides label{margin-top:4px}
-aside .live summary{font-size:11px;color:#71809a}
-main.ai-mode{display:flex;flex-direction:column;height:min(760px,calc(100dvh - 40px));overflow:hidden}
-main.ai-mode .inspector-tabs{flex:none}
-aside .ai-panel{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:0;padding:18px 12px 10px;background:radial-gradient(ellipse at 5% 10%,#d9e7fc52,transparent 60%)}
+.editor-properties .live summary{font-size:11px;color:#71809a}
+[data-dock-popup=geo]{max-height:min(460px,calc(var(--dock-height,100dvh) - 100% - 46px))}
+[data-dock-popup=geo] .ai-panel{min-height:0;overflow:auto;display:flex;flex-direction:column;gap:0;padding:10px 11px;background:linear-gradient(#f7faff,#fff);border:0}
 .ai-panel .content-heading{margin:0 4px 10px}
 .ai-panel .content-heading strong{font-size:21px}
 .ai-panel [data-ai-context]{flex:none;max-width:100%;margin:0 4px 10px;padding:7px 10px;border:1px solid #dce5f2;border-radius:8px;background:#ffffff70;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ai-chat-history{display:flex;flex-direction:column;gap:14px;min-height:80px;padding:12px 5px 22px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#c4d1e6 transparent}
-.ai-empty-state{display:grid;place-items:center;gap:13px;flex:none;margin:188px auto 0;text-align:center}
-.ai-empty-state__icon{display:grid;place-items:center;width:54px;height:54px;border:1px solid #d6e2fb;border-radius:18px;background:radial-gradient(circle at 32% 25%,#fff,#e5edff 70%);color:#3269ee;box-shadow:0 10px 24px #3269ee1c,inset 0 1px 0 #fff}
-.ai-empty-state__icon svg{width:29px;height:29px;stroke-width:2}
+.ai-chat-history{display:flex;flex-direction:column;gap:9px;min-height:0;max-height:245px;padding:3px 3px 10px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#c4d1e6 transparent}
+.ai-empty-state{display:grid;place-items:center;gap:13px;flex:none;margin:3px auto 1px;text-align:center}
 .ai-empty-state p{max-width:220px;margin:0;font-size:12px;line-height:1.6;color:#7a89a1}
 .ai-chat-history:has([data-ai-message-id]) .ai-empty-state{display:none}
 .ai-chat-message{display:block;flex:none;max-width:100%;padding:0 2px;border:0;border-radius:0;background:transparent;color:var(--ep-ink)}
@@ -70,7 +284,7 @@ aside .ai-panel{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:
 .ai-chat-message p{font-size:12px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;letter-spacing:-.1px}
 .ai-composer{position:relative;flex:none;display:flex;flex-direction:column;align-items:stretch;gap:0;padding:11px;border:1px solid #ffffffd9;border-radius:15px;background:linear-gradient(140deg,#fff9,#e8edf8d9);box-shadow:0 3px 12px #3c5b8d0a,inset 0 1px 0 #fff}
 .ai-composer:focus-within{border-color:#a8bff3;box-shadow:0 0 0 3px #3269ee0d}
-.ai-panel textarea{display:block;flex:none;min-height:65px;max-height:160px;margin:0;width:100%;padding:3px 2px 10px;resize:vertical;border:0;border-radius:0;background:transparent;box-shadow:none;font:13px/1.7 ui-sans-serif,system-ui,sans-serif;color:#26384f}
+.ai-panel textarea{display:block;flex:none;min-height:35px;max-height:125px;margin:0;width:100%;padding:3px 2px 10px;resize:vertical;border:0;border-radius:0;background:transparent;box-shadow:none;font:13px/1.7 ui-sans-serif,system-ui,sans-serif;color:#26384f}
 .ai-panel textarea:focus-visible{outline:none}
 .ai-panel textarea::placeholder{color:#8a97ac}
 .ai-composer-footer{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -101,10 +315,14 @@ aside .ai-panel{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:
 .editor-toolbar .modebar{gap:3px;padding:6px;background:#edf2fa75}
 .editor-toolbar .modebar button{border-radius:8px;border-color:transparent;background:transparent;color:#697a95}
 .editor-toolbar .modebar button.active{background:#fff;border-color:#d9e3f4;color:#3269ee}
-aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;outline-offset:3px}
-@supports not (backdrop-filter:blur(1px)){aside{background:#f2f6fd}}
-@media(max-width:600px){aside{width:min(360px,calc(100vw - 16px));border-radius:18px}aside .section{padding:14px 12px}main.ai-mode{height:min(660px,calc(100dvh - 115px))}.ai-panel .content-heading strong{font-size:19px}}
-@media(prefers-reduced-motion:reduce){.inspector-tabs button{transition:none}.ai-progress-current{animation:none!important}}
+.editor-properties :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;outline-offset:3px}
+[data-dock-popup=geo] .ai-chat-message{padding:7px 8px;border-radius:8px;background:#fff;border:1px solid #e7edf7}
+[data-dock-popup=geo] .ai-chat-message--user{align-self:flex-end;background:#ebf2ff;border-color:#e2ecff}
+[data-dock-popup=geo] .ai-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:4px 8px;padding:7px 8px}
+[data-dock-popup=geo] .ai-composer textarea{min-height:44px;padding:2px 1px;line-height:1.42}
+[data-dock-popup=geo] .ai-composer-footer{grid-column:2;grid-row:1;justify-content:flex-end;align-self:end;gap:4px}
+[data-dock-popup=geo] .ai-proposal-actions{grid-column:1/-1}
+[data-dock-popup=geo] .ai-composer [data-ai-cancel],[data-dock-popup=geo] .ai-composer [data-ai-retry]{min-width:auto;min-height:28px;padding:4px 8px;color:#325483;background:#fff}
 `;
   class EditorHistory {
     constructor(keyOf = JSON.stringify) {
@@ -396,11 +614,9 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
         if (number === this.line) {
           if (line.length > 160) {
             let padding = 20;
+            let endColumn = typeof this.endColumn === "number" ? this.endColumn : this.column;
             let subLineStart = Math.max(0, this.column - padding);
-            let subLineEnd = Math.max(
-              this.column + padding,
-              this.endColumn + padding
-            );
+            let subLineEnd = Math.max(this.column + padding, endColumn + padding);
             let subLine = line.slice(subLineStart, subLineEnd);
             let spacing2 = aside(gutter.replace(/\d/g, " ")) + line.slice(0, Math.min(this.column - 1, padding - 1)).replace(/[^\t]/g, " ");
             return mark(">") + aside(gutter) + highlight(subLine) + "\n " + spacing2 + mark("^");
@@ -2426,8 +2642,10 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
         while ((startIndex = this.css.indexOf(annotation, cursor)) !== -1) {
           let endIndex = this.css.indexOf("*/", startIndex + annotation.length);
           if (endIndex === -1) break;
-          while (startIndex > cursor && this.css[startIndex - 1] === "\n") {
-            startIndex--;
+          if (endIndex + 2 === this.css.length || /[\t\n\f\r ]/.test(this.css[endIndex + 2])) {
+            while (startIndex > cursor && (this.css[startIndex - 1] === "\n" || this.css[startIndex - 1] === "\r")) {
+              startIndex--;
+            }
           }
           css += this.css.slice(cursor, startIndex);
           cursor = endIndex + 2;
@@ -2703,14 +2921,15 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
   const RE_WORD_END = /[\t\n\f\r !"#'():;@[\\\]{}]|\/(?=\*)/g;
   const RE_BAD_BRACKET = /.[\r\n"'(/\\]/;
   const RE_HEX_ESCAPE = /[\da-f]/i;
+  const RE_URL_NAME = /(^|[\t\n\f\r "'(),/:;[\]{}])url$/i;
+  const RE_QUOTED = /[\t\n\f\r ]*["']/y;
   var tokenize = function tokenizer2(input2, options = {}) {
     let css = input2.css.valueOf();
     let ignore = options.ignoreErrors;
     let code, content, escape2, next, quote;
-    let currentToken, escaped, escapePos, n, prev;
+    let currentToken, escaped, escapePos;
     let length = css.length;
     let pos = 0;
-    let buffer = [];
     let returned = [];
     let lastBadParen = -1;
     function position() {
@@ -2754,9 +2973,8 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
           break;
         }
         case OPEN_PARENTHESES: {
-          prev = buffer.length ? buffer.pop()[1] : "";
-          n = css.charCodeAt(pos + 1);
-          if (prev === "url" && n !== SINGLE_QUOTE && n !== DOUBLE_QUOTE && n !== SPACE && n !== NEWLINE && n !== TAB && n !== FEED && n !== CR) {
+          RE_QUOTED.lastIndex = pos + 1;
+          if (RE_URL_NAME.test(css.substring(pos - 4, pos)) && !RE_QUOTED.test(css)) {
             next = pos;
             do {
               escaped = false;
@@ -2873,7 +3091,6 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
               next = RE_WORD_END.lastIndex - 2;
             }
             currentToken = ["word", css.slice(pos, next + 1), pos, next];
-            buffer.push(currentToken);
             pos = next;
           }
           break;
@@ -4164,7 +4381,7 @@ aside :is(button,input,select,summary):focus-visible{outline:2px solid #3269ee;o
   let Root$1 = root;
   let Processor$1 = class Processor {
     constructor(plugins = []) {
-      this.version = "8.5.32";
+      this.version = "8.5.33";
       this.plugins = this.normalize(plugins);
     }
     normalize(plugins) {
@@ -4942,7 +5159,7 @@ ${ISOLATION_CSS}`;
   const esc = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   class ChecklistEditor {
     constructor(root2, definition, references, options) {
-      var _a, _b, _c, _d;
+      var _a, _b, _c;
       this.root = root2;
       this.definition = definition;
       this.references = references;
@@ -4957,13 +5174,12 @@ ${ISOLATION_CSS}`;
       this.completed = /* @__PURE__ */ new Set();
       this.sample = /* @__PURE__ */ new Map();
       this.onChange = (event) => {
-        var _a2, _b2, _c2, _d2;
+        var _a2, _b2, _c2, _d;
         const input2 = event.target;
         if (!input2.matches("[data-checklist-view]") && !this.options.canEdit()) return;
         if (input2.matches("[data-checklist-view]")) {
           if (this.options.flush()) {
             this.view = input2.value;
-            this.closeMobileInspector();
             this.options.render();
           }
           return;
@@ -5018,7 +5234,7 @@ ${ISOLATION_CSS}`;
         if (input2.matches("[data-checklist-action]")) next.action = input2.value === "none" ? { type: "none" } : input2.value === "launch_guide" ? { type: "launch_guide", experienceId: ((_b2 = this.references.guides[0]) == null ? void 0 : _b2.id) ?? "" } : { type: input2.value, url: input2.value === "navigate" ? "/" : location.origin };
         if (input2.matches("[data-checklist-action-guide]")) next.action = { type: "launch_guide", experienceId: input2.value };
         if (input2.matches("[data-checklist-url]") && "url" in next.action) next.action.url = input2.value;
-        if (input2.matches("[data-checklist-condition]")) next.completion = input2.value === "item_clicked" ? { type: "item_clicked" } : input2.value === "segment" ? { type: "segment", segmentId: ((_c2 = this.references.segments[0]) == null ? void 0 : _c2.id) ?? "" } : { type: "guide_completed", experienceId: ((_d2 = this.references.guides[0]) == null ? void 0 : _d2.id) ?? "" };
+        if (input2.matches("[data-checklist-condition]")) next.completion = input2.value === "item_clicked" ? { type: "item_clicked" } : input2.value === "segment" ? { type: "segment", segmentId: ((_c2 = this.references.segments[0]) == null ? void 0 : _c2.id) ?? "" } : { type: "guide_completed", experienceId: ((_d = this.references.guides[0]) == null ? void 0 : _d.id) ?? "" };
         if (input2.matches("[data-checklist-segment]")) next.completion = { type: "segment", segmentId: input2.value };
         if (input2.matches("[data-checklist-completion-guide]")) next.completion = { type: "guide_completed", experienceId: input2.value };
         if (next.action.type === "launch_guide" && !next.action.experienceId || next.completion.type === "segment" && !next.completion.segmentId || next.completion.type === "guide_completed" && !next.completion.experienceId) {
@@ -5057,7 +5273,7 @@ ${ISOLATION_CSS}`;
       this.tools.innerHTML = '<select aria-label="Checklist visual state" data-checklist-view><option value="expanded">Expanded</option><option value="launcher">Collapsed</option><option value="completion">Completed</option></select><button type="button" class="secondary-button compact" data-checklist-add aria-label="Add Checklist task">＋ Task</button><button type="button" class="secondary-button compact" data-checklist-reset>Reset simulation</button><span data-checklist-preview-note hidden>Simulated progress</span>';
       (_a = this.root.querySelector("[data-inspector=step]")) == null ? void 0 : _a.append(this.step);
       (_b = this.root.querySelector("[data-inspector=block]")) == null ? void 0 : _b.append(this.task);
-      (_c = this.root.querySelector("[data-editor-toolbar]")) == null ? void 0 : _c.append(this.tools);
+      (_c = this.root.querySelector("[data-checklist-settings]") ?? this.root.querySelector("[data-editor-toolbar]")) == null ? void 0 : _c.append(this.tools);
       const guideOptions = '<option value="">Select Guide</option>' + references.guides.map((g) => `<option value="${esc(g.id)}">${esc(g.name)}${g.status === "published" ? "" : " (not published)"}</option>`).join("");
       this.task.querySelectorAll("[data-checklist-action-guide],[data-checklist-completion-guide]").forEach((select) => select.innerHTML = guideOptions);
       this.task.querySelector("[data-checklist-segment]").innerHTML = '<option value="">Select Segment</option>' + references.segments.map((segment) => `<option value="${esc(segment.id)}">${esc(segment.name)}</option>`).join("");
@@ -5065,8 +5281,6 @@ ${ISOLATION_CSS}`;
       this.root.append(this.style);
       root2.addEventListener("change", this.onChange);
       root2.addEventListener("click", this.onClick);
-      if (innerWidth <= 480) this.closeMobileInspector();
-      else (_d = this.root.querySelector("aside")) == null ? void 0 : _d.classList.toggle("left-side", definition.behavior.position === "bottom-right");
     }
     sync() {
       var _a, _b, _c;
@@ -5165,12 +5379,6 @@ ${ISOLATION_CSS}`;
     }
     host(id) {
       return Array.from(document.querySelectorAll("[data-movcues-checklist]")).find((host) => host.dataset.movcuesChecklist === id) ?? null;
-    }
-    closeMobileInspector() {
-      var _a, _b;
-      if (innerWidth > 480) return;
-      (_a = this.root.querySelector("aside")) == null ? void 0 : _a.classList.add("minimized");
-      (_b = this.root.querySelector("[data-minimize]")) == null ? void 0 : _b.setAttribute("aria-expanded", "false");
     }
     transition(view) {
       this.view = view;
@@ -6227,7 +6435,7 @@ ${ISOLATION_CSS}`;
       this.stepHost.innerHTML = '<label>Survey step heading<input data-survey-step-heading maxlength="160"></label><label class="check"><input type="checkbox" data-survey-allow-back> Allow Back</label><label class="check"><input type="checkbox" data-survey-show-progress> Show progress</label><label>Submit label<input data-survey-submit-label maxlength="80"></label><details data-survey-branch-section><summary>After this step</summary><label>Default next step<select data-survey-default-next></select></label><div data-survey-rules></div><button type="button" class="secondary-button" data-survey-add-rule>Add answer rule</button><small>First matching rule wins. Destinations can only move forward.</small></details>';
       this.dock.dataset.surveyDock = "";
       this.dock.innerHTML = '<button type="button" class="secondary-button compact" data-survey-add-step aria-label="Add Survey step">＋</button><details><summary aria-label="Survey step actions">⋯</summary><div><button type="button" data-survey-duplicate-step>Duplicate step</button><button type="button" data-survey-move="-1">Move step earlier</button><button type="button" data-survey-move="1">Move step later</button><button type="button" data-survey-delete-step>Delete step</button></div></details>';
-      this.style.textContent = "[data-survey-step-inspector],[data-block=question]{display:grid;gap:8px}[data-survey-options]{box-sizing:border-box;width:100%;border:1px solid #d7dce3;border-radius:6px;padding:7px;font:12px/1.5 ui-sans-serif,system-ui}[data-survey-branch-section]>summary{cursor:pointer;font-weight:600;margin:4px 0 8px}[data-survey-rule]{display:grid;grid-template-columns:minmax(0,1fr);gap:5px;padding:8px 0;border-top:1px solid #e5e7eb}[data-survey-step-inspector] small{display:block;color:#64748b;font-size:11px;margin-top:6px}.step-navigator>[data-survey-dock]{display:flex;flex:none;gap:4px;align-items:center}[data-survey-dock][hidden]{display:none!important}[data-survey-dock] details>summary{list-style:none;cursor:pointer;border:1px solid #d7dce3;border-radius:6px;padding:3px 7px}[data-survey-dock] details>div{position:absolute;bottom:calc(100% + 6px);right:4px;display:grid;gap:4px;min-width:150px;padding:6px;background:#fff;border:1px solid #d7dce3;border-radius:8px;box-shadow:0 4px 18px #0f172a20}[data-survey-dock] details button{border:0;background:#fff;padding:7px;text-align:left;font:12px ui-sans-serif,system-ui;cursor:pointer}";
+      this.style.textContent = "[data-survey-step-inspector],[data-block=question]{display:grid;gap:8px}[data-survey-options]{box-sizing:border-box;width:100%;border:1px solid #d7dce3;border-radius:6px;padding:7px;font:12px/1.5 ui-sans-serif,system-ui}[data-survey-branch-section]>summary{cursor:pointer;font-weight:600;margin:4px 0 8px}[data-survey-rule]{display:grid;grid-template-columns:minmax(0,1fr);gap:5px;padding:8px 0;border-top:1px solid #e5e7eb}[data-survey-step-inspector] small{display:block;color:#64748b;font-size:11px;margin-top:6px}.step-navigator>[data-survey-dock]{display:flex;gap:5px;align-items:flex-start}[data-survey-dock][hidden]{display:none!important}[data-survey-dock] details>summary{list-style:none;cursor:pointer;border:1px solid #d7dce3;border-radius:6px;padding:3px 7px}[data-survey-dock] details>div{display:grid;gap:3px;padding:4px}[data-survey-dock] details button{border:0;background:#fff;padding:7px;text-align:left;font:12px ui-sans-serif,system-ui;cursor:pointer}";
       (_a = root2.querySelector("[data-inspector=block]")) == null ? void 0 : _a.append(this.questionHost);
       (_b = root2.querySelector("[data-inspector=step]")) == null ? void 0 : _b.append(this.stepHost);
       (_c = root2.querySelector("[data-guide]")) == null ? void 0 : _c.append(this.dock);
@@ -6338,6 +6546,20 @@ ${ISOLATION_CSS}`;
     return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
   const EDITOR_CONTINUATION_KEY = "__movcues_experience_editor_session__";
+  function readEditorContinuation() {
+    try {
+      const value = JSON.parse(sessionStorage.getItem(EDITOR_CONTINUATION_KEY) ?? "null");
+      const session = value && isSession(value.session) ? value.session : isSession(value) ? value : null;
+      if (!session || Date.parse(session.expiresAt) <= Date.now()) {
+        clearEditorContinuation();
+        return null;
+      }
+      return { session, editorState: isEditorState(value == null ? void 0 : value.editorState) ? value.editorState : void 0 };
+    } catch {
+      clearEditorContinuation();
+      return null;
+    }
+  }
   function storeEditorContinuation(continuation) {
     try {
       sessionStorage.setItem(EDITOR_CONTINUATION_KEY, JSON.stringify(continuation));
@@ -6349,6 +6571,17 @@ ${ISOLATION_CSS}`;
       sessionStorage.removeItem(EDITOR_CONTINUATION_KEY);
     } catch {
     }
+  }
+  function isSession(value) {
+    if (!value || typeof value !== "object") return false;
+    const session = value;
+    return typeof session.sessionId === "string" && !!session.sessionId && typeof session.accessToken === "string" && !!session.accessToken && typeof session.expiresAt === "string" && Number.isFinite(Date.parse(session.expiresAt));
+  }
+  function isEditorState(value) {
+    if (!value || typeof value !== "object") return false;
+    const state = value;
+    if (state.guidePreview !== void 0 && (!state.guidePreview || typeof state.guidePreview.versionId !== "string" || typeof state.guidePreview.entryPath !== "string" || typeof state.guidePreview.completed !== "boolean")) return false;
+    return typeof state.experienceId === "string" && !!state.experienceId && (state.selectedStepId === void 0 || typeof state.selectedStepId === "string") && (state.mode === "select" || state.mode === "design" || state.mode === "target" || state.mode === "navigate" || state.mode === "preview");
   }
   function isEditorSession(value) {
     if (!value || typeof value !== "object") return false;
@@ -8384,14 +8617,11 @@ ${ISOLATION_CSS}`;
     const root2 = element.getRootNode();
     return root2 instanceof ShadowRoot && isMovcuesSurface(root2.host);
   }
-  const guideCapturePanel = `
-<style>
+  const captureStyles = `
   :host{all:initial;font:14px/1.45 system-ui,sans-serif;color:#17233b}
   *{box-sizing:border-box}
-  aside{position:fixed;top:12px;right:12px;width:min(390px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;pointer-events:auto;background:white;border:1px solid #dce3ed;border-radius:14px;box-shadow:0 8px 26px #15274626}
-  header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 15px;border-bottom:1px solid #e7edf5}
-  header .row{flex-wrap:nowrap}
-  main{display:grid;gap:12px;padding:14px}
+  [data-dock-popup] .dock-pop-body{display:grid;gap:10px}
+  [data-dock-popup] .row:last-child:empty{display:none}
   h2,p,ol{margin:0} h2{font-size:15px}
   label{display:grid;gap:5px;font-size:12px;font-weight:600}
   button,input,select,textarea{font:inherit}
@@ -8414,19 +8644,36 @@ ${ISOLATION_CSS}`;
   input,select,textarea{width:100%;min-width:0;padding:6px 7px;border-radius:6px;border:1px solid #ccd6e4;color:#17233b;background:white}
   textarea{resize:vertical}
   [hidden]{display:none!important}
-</style>
-<aside aria-label="Guided Capture">
-  <header><h2>Guided Capture</h2><div class="row"><button type="button" data-collapse aria-expanded="true" aria-controls="movcues-capture-content">Minimize</button><button type="button" data-close aria-label="Close Guided Capture">Close</button></div></header>
-  <main id="movcues-capture-content">
-    <p class="muted" data-message role="status" aria-live="polite">Restoring capture…</p>
+`;
+  const captureControls = `
+  <div class="dock-group">${dockTrigger("generate", "Plan a guide with Geo", geoDockMark + "<span>Geo</span>", "data-capture-geo")}</div>
+  <div class="dock-group dock-modes" data-capture-modes role="group" aria-label="Capture mode">
+    <button type="button" data-mode="select" title="Select elements ? Shift + F8">${dockIcon("select")} Select</button>
+    <button type="button" data-mode="navigate" title="Navigate ? Shift + F8">${dockIcon("navigate")} Navigate</button>
+  </div>
+  <div class="dock-group" data-capture-actions>
+    ${dockTrigger("targets", "Captured elements", '<span class="dock-chip" data-capture-count>0 elements</span>')}
+    <button type="button" data-undo-target aria-label="Undo last selection" title="Undo last selection">${dockIcon("undo")}</button>
+    ${dockTrigger("generate", "Generate guide", dockIcon("spark") + " Generate", "data-generate data-primary")}
+  </div>
+  <div class="dock-group" data-capture-review hidden>
+    <span class="dock-indicator" data-capture-stage></span>
+    <button type="button" data-previous aria-label="Previous step" title="Previous step" hidden>${dockIcon("left")}</button>
+    <span class="dock-chip" data-preview-position hidden></span>
+    <button type="button" data-next aria-label="Next step" title="Next step" hidden>${dockIcon("right")}</button>
+    ${dockTrigger("generate", "Review guide generation", "Review")}
+  </div>
+  <div class="dock-group">
+    ${dockTrigger("capture-status", "Capture status", '<span class="dock-status-text" data-checkpoint>Restoring?</span>', "data-capture-status")}
+    <button type="button" data-close aria-label="Close Guided Capture" title="Close Guided Capture">${dockIcon("close")}</button>
+  </div>`;
+  const capturePopups = dockPopup("targets", "Captured elements", `<div class="dock-pop-body">
+    <p class="muted" data-instructions role="status"></p>
+    <ol data-targets aria-label="Captured elements"></ol>
+    <div class="row"><button type="button" data-restart>Restart capture</button><button type="button" data-discard>Discard and close</button></div>
+    <small>Shift + F8 switches modes. Shift + Tab also works in menus and listboxes.</small>
+  </div>`) + dockPopup("generate", "Generate a guide", `<div class="dock-pop-body">
     <section data-capture hidden>
-      <div class="row" role="group" aria-label="Capture mode">
-        <button type="button" data-mode="select">Select Elements</button>
-        <button type="button" data-mode="navigate">Navigate</button>
-      </div>
-      <p class="muted" data-instructions role="status"></p>
-      <p class="muted">Shift + F8 switches modes without moving focus. Shift + Tab also works inside menus and listboxes.</p>
-      <ol data-targets aria-label="Captured elements"></ol>
       <form data-prompt-form>
         <label>What should this guide help users do?
           <textarea data-prompt rows="3" maxlength="2000" required placeholder="Help new customers create their first invoice."></textarea>
@@ -8442,21 +8689,21 @@ ${ISOLATION_CSS}`;
     <section data-preview hidden>
       <h2>Design preview</h2>
       <p class="muted">Inspect layouts here. Apply the draft to test the full journey in the editor.</p>
-      <p data-preview-position class="muted"></p>
       <p data-preview-details class="muted"></p>
       <p data-preview-target class="muted" role="status"></p>
-      <div class="row"><button type="button" data-previous>Previous step</button><button type="button" data-next>Next step</button></div>
       <div class="row"><button type="button" data-apply data-primary>Apply to draft</button><button type="button" data-edit-plan>Edit plan</button></div>
     </section>
-    <p class="muted" data-checkpoint role="status" aria-live="polite"></p>
+    <p class="muted" data-workflow-message role="status" aria-live="polite" hidden></p>
+    <div class="row"><button type="button" data-cancel hidden>Stop</button></div>
+  </div>`, geoDockMark) + dockPopup("capture-status", "Capture status", `<div class="dock-pop-body">
+    <p class="muted" data-message role="status" aria-live="polite">Restoring capture?</p>
+    <p class="muted" data-checkpoint-details role="status"></p>
     <div class="row">
-      <button type="button" data-cancel hidden>Cancel request</button>
       <button type="button" data-retry hidden>Retry checkpoint</button>
       <button type="button" data-refresh hidden>Load latest checkpoint</button>
+      <button type="button" data-reload hidden>Retry loading capture</button>
     </div>
-    <button type="button" data-reload hidden>Retry loading capture</button>
-  </main>
-</aside>`;
+  </div>`);
   function captureHtml(text2) {
     return text2.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
   }
@@ -8754,13 +9001,13 @@ ${ISOLATION_CSS}`;
     custom_event: "Confirmed application event"
   };
   class GuidedCaptureController {
-    constructor(bridge, session, draft, applied, closed) {
+    constructor(bridge, session, draft, applied, closed, dock = new EditorDock()) {
       this.bridge = bridge;
       this.draft = draft;
       this.applied = applied;
       this.closed = closed;
-      this.host = document.createElement("div");
-      this.root = this.host.attachShadow({ mode: "open" });
+      this.dock = dock;
+      this.listeners = new AbortController();
       this.route = new RouteObserver();
       this.preview = new ExperienceRenderer();
       this.journey = new GuideCaptureJourney(() => this.checkpoint.targets, (observation) => this.recordObservation(observation));
@@ -8775,6 +9022,7 @@ ${ISOLATION_CSS}`;
       this.index = 0;
       this.state = "loading";
       this.busy = false;
+      this.reconnecting = false;
       this.destroyed = false;
       this.flushCheckpoint = () => {
         if (this.state !== "loading") this.writeLocal();
@@ -8811,13 +9059,6 @@ ${ISOLATION_CSS}`;
           }
           return;
         }
-        if ("collapse" in action) {
-          const expanded = button.getAttribute("aria-expanded") === "true";
-          button.setAttribute("aria-expanded", String(!expanded));
-          button.textContent = expanded ? "Expand" : "Minimize";
-          this.toggle("main", !expanded);
-          return;
-        }
         if ("cancel" in action) {
           (_a = this.request) == null ? void 0 : _a.abort();
           return;
@@ -8837,13 +9078,16 @@ ${ISOLATION_CSS}`;
           void this.retryCheckpoint();
           return;
         }
+        if ("undoTarget" in action) {
+          const last = this.checkpoint.targets[this.checkpoint.targets.length - 1];
+          if (last) this.removeTarget(last.id);
+        }
+        if ("restart" in action && window.confirm("Clear the captured elements and start again?")) this.restart();
+        if ("discard" in action && window.confirm("Discard this capture and close the editor?")) void this.discard();
         if (action.mode === "select" || action.mode === "navigate") this.setMode(action.mode);
         if (action.earlier) this.moveTarget(action.earlier, -1);
         if (action.later) this.moveTarget(action.later, 1);
-        if (action.remove) {
-          if (this.replacement === action.remove) this.replacement = void 0;
-          this.checkpointChanged({ ...this.checkpoint, targets: this.checkpoint.targets.filter((item) => item.id !== action.remove) });
-        }
+        if (action.remove) this.removeTarget(action.remove);
         if (action.replace) {
           this.replacement = action.replace;
           this.setMode("select");
@@ -8916,20 +9160,19 @@ ${ISOLATION_CSS}`;
         this.renderPlan();
         (_c = this.root.querySelector(`[data-plan-step="${index}"] [data-${Object.keys(select.dataset)[0].replace(/[A-Z]/g, (letter) => "-" + letter.toLowerCase())}]`)) == null ? void 0 : _c.focus();
       };
+      this.root = dock.root;
       this.previousKey = `movcues:guide-capture:${draft.experience.id}:${session.sessionId}`;
       this.key = `movcues:guide-capture:${draft.experience.id}`;
       this.revision = draft.version.revision;
     }
     mount() {
       var _a;
-      this.host.dataset.movcuesEditor = "";
-      this.host.dataset.movcuesGuideCapture = "";
-      this.host.style.cssText = "position:fixed;inset:0;z-index:2147483647;pointer-events:none";
-      this.root.innerHTML = guideCapturePanel;
-      document.documentElement.append(this.host);
-      this.root.addEventListener("click", this.handleClick);
-      this.root.addEventListener("input", this.handleInput);
-      this.root.addEventListener("change", this.handleChange);
+      this.dock.host.dataset.movcuesGuideCapture = "";
+      this.dock.mount(captureStyles, captureControls, capturePopups);
+      const signal = this.listeners.signal;
+      this.root.addEventListener("click", this.handleClick, { signal });
+      this.root.addEventListener("input", this.handleInput, { signal });
+      this.root.addEventListener("change", this.handleChange, { signal });
       (_a = this.root.querySelector("form")) == null ? void 0 : _a.addEventListener("submit", (event) => {
         event.preventDefault();
         void this.planGuide();
@@ -8947,6 +9190,7 @@ ${ISOLATION_CSS}`;
       window.addEventListener("pointerdown", this.preserveModeButtonFocus, true);
       window.addEventListener("mousedown", this.preserveModeButtonFocus, true);
       this.route.start();
+      this.update();
       void this.restore();
     }
     expire() {
@@ -8966,8 +9210,13 @@ ${ISOLATION_CSS}`;
       this.message("This editor session expired. Resume Guided Capture from the dashboard to continue with your saved selections.");
       this.update();
     }
-    destroy() {
+    setReconnecting(reconnecting) {
+      this.reconnecting = reconnecting;
+      this.updateDockStatus();
+    }
+    destroy(keepDock = false) {
       var _a, _b, _c;
+      this.listeners.abort();
       window.removeEventListener("pagehide", this.flushCheckpoint);
       this.removeModeListeners();
       this.journey.stop();
@@ -8978,7 +9227,8 @@ ${ISOLATION_CSS}`;
       this.preview.destroy();
       (_c = this.unsubscribe) == null ? void 0 : _c.call(this);
       this.route.stop();
-      this.host.remove();
+      delete this.dock.host.dataset.movcuesGuideCapture;
+      if (!keepDock) this.dock.destroy();
     }
     async restore(discardLocal = false) {
       this.toggle("[data-reload]", false);
@@ -9017,6 +9267,7 @@ ${ISOLATION_CSS}`;
         if (!this.checkpointError) this.message("");
         this.renderTargets();
         this.update();
+        if (this.plan) this.dock.show("generate");
         this.writeLocal();
         if (this.plan && (workflow == null ? void 0 : workflow.draftRevision) !== this.revision) {
           this.message("The guide draft changed. Review your restored plan before generating a fresh preview.");
@@ -9216,6 +9467,34 @@ ${ISOLATION_CSS}`;
       window.removeEventListener("keydown", this.handleModeShortcut, true);
       window.removeEventListener("pointerdown", this.preserveModeButtonFocus, true);
       window.removeEventListener("mousedown", this.preserveModeButtonFocus, true);
+    }
+    removeTarget(id) {
+      if (this.replacement === id) this.replacement = void 0;
+      this.checkpointChanged({ ...this.checkpoint, targets: this.checkpoint.targets.filter((item) => item.id !== id) });
+    }
+    restart() {
+      this.replacement = void 0;
+      this.plan = void 0;
+      this.prompt = "";
+      const field = this.root.querySelector("[data-prompt]");
+      if (field) field.value = "";
+      this.message("");
+      this.checkpointChanged({ mode: "navigate", targets: [] });
+    }
+    async discard() {
+      this.busy = true;
+      this.restart();
+      const saved = await this.syncCheckpoint();
+      if (this.destroyed) return;
+      this.busy = false;
+      this.update();
+      if (!saved) return;
+      try {
+        sessionStorage.removeItem(this.key);
+        sessionStorage.removeItem(this.previousKey);
+      } catch {
+      }
+      this.closed();
     }
     async planGuide() {
       if (this.busy || this.state !== "capture" || !this.checkpoint.targets.length || !this.prompt.trim()) return;
@@ -9439,12 +9718,33 @@ ${ISOLATION_CSS}`;
       if (element) element.hidden = !shown;
     }
     message(text2) {
-      const status = this.root.querySelector("[data-message]");
-      if (status) status.textContent = text2;
-      this.toggle("[data-message]", Boolean(text2));
+      for (const status of this.root.querySelectorAll("[data-message],[data-workflow-message]")) {
+        status.textContent = text2;
+        status.hidden = !text2;
+      }
+      this.updateDockStatus();
     }
     update() {
-      var _a, _b, _c;
+      var _a, _b, _c, _d;
+      this.toggle("[data-capture-modes]", this.state === "capture");
+      this.toggle("[data-capture-actions]", this.state === "capture");
+      this.toggle("[data-capture-review]", this.state === "plan" || this.state === "preview");
+      for (const selector2 of ["[data-previous]", "[data-next]", "[data-preview-position]"]) this.toggle(selector2, this.state === "preview");
+      const stage = this.root.querySelector("[data-capture-stage]");
+      const mode = this.state === "capture" ? this.checkpoint.mode : this.state;
+      this.dock.setMode(mode);
+      if (stage) stage.textContent = this.state === "preview" ? "Preview" : "Plan";
+      const count = this.root.querySelector("[data-capture-count]");
+      const total = this.checkpoint.targets.length;
+      const label = `${total} element${total === 1 ? "" : "s"}`;
+      if (count && count.textContent !== label) {
+        count.textContent = label;
+        (_a = count.animate) == null ? void 0 : _a.call(count, [{ opacity: 0.45 }, { opacity: 1 }], { duration: matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 200 });
+      }
+      const generate = this.root.querySelector("[data-generate]");
+      if (generate) generate.disabled = this.busy || !total || this.checkpointError;
+      const undo = this.root.querySelector("[data-undo-target]");
+      if (undo) undo.disabled = this.busy || !total;
       this.toggle("[data-capture]", this.state === "capture");
       this.toggle("[data-plan-panel]", this.state === "plan");
       this.toggle("[data-preview]", this.state === "preview");
@@ -9452,8 +9752,8 @@ ${ISOLATION_CSS}`;
       this.toggle("[data-refresh]", this.checkpointError);
       this.toggle("[data-cancel]", Boolean(this.request));
       const active = this.state === "capture" && this.checkpoint.mode === "select" && !this.busy;
-      (_a = this.selection) == null ? void 0 : _a.setEnabled(active);
-      (_b = this.selection) == null ? void 0 : _b.setTargets(this.state === "capture" ? this.checkpoint.targets : []);
+      (_b = this.selection) == null ? void 0 : _b.setEnabled(active);
+      (_c = this.selection) == null ? void 0 : _c.setTargets(this.state === "capture" ? this.checkpoint.targets : []);
       if (this.state === "capture" && this.checkpoint.mode === "navigate" && !this.busy) {
         const path = this.navigationPath;
         this.navigationPath = void 0;
@@ -9465,8 +9765,9 @@ ${ISOLATION_CSS}`;
         button.setAttribute("aria-pressed", String(button.dataset.mode === this.checkpoint.mode));
         button.disabled = this.busy;
       });
-      const checkpoint = this.root.querySelector("[data-checkpoint]");
+      const checkpoint = this.root.querySelector("[data-checkpoint-details]");
       if (checkpoint) checkpoint.textContent = this.checkpointError ? this.localSaved ? "Saved in this tab. The server checkpoint needs attention." : "The latest selection could not be saved. Keep this tab open and retry." : this.inFlight || this.pending ? "Saving capture…" : this.checkpoint.targets.length ? "Capture saved" : "";
+      this.updateDockStatus();
       const planButton = this.root.querySelector("[data-plan]");
       if (planButton) planButton.disabled = this.busy || !this.checkpoint.targets.length || this.checkpointError;
       this.root.querySelectorAll("[data-apply],[data-edit-plan],[data-compile],[data-edit-capture],[data-prompt],[data-plan-steps] input,[data-plan-steps] textarea,[data-plan-steps] select").forEach((control) => {
@@ -9475,7 +9776,22 @@ ${ISOLATION_CSS}`;
       const previous = this.root.querySelector("[data-previous]");
       const next = this.root.querySelector("[data-next]");
       if (previous) previous.disabled = this.busy || this.index === 0;
-      if (next) next.disabled = this.busy || this.index >= (((_c = this.candidate) == null ? void 0 : _c.definition.steps.length) ?? 0) - 1;
+      if (next) next.disabled = this.busy || this.index >= (((_d = this.candidate) == null ? void 0 : _d.definition.steps.length) ?? 0) - 1;
+    }
+    updateDockStatus() {
+      var _a, _b;
+      const status = this.root.querySelector("[data-capture-status]");
+      const label = this.root.querySelector("[data-checkpoint]");
+      if (!status || !label) return;
+      const message = (_a = this.root.querySelector("[data-message]")) == null ? void 0 : _a.textContent;
+      const working = this.busy || this.inFlight || this.pending && !this.checkpointError;
+      const attention = this.checkpointError || this.state === "expired" || Boolean(message && !working && message !== "Restoring capture…");
+      status.classList.add("dock-status");
+      const progress = this.busy && this.request ? this.state === "capture" ? "Planning…" : "Generating…" : "Saving…";
+      status.dataset.tone = attention ? "warn" : working || this.reconnecting ? "busy" : "ok";
+      label.textContent = this.state === "expired" ? "Expired" : attention ? "Review status" : working ? progress : this.reconnecting ? "Reconnecting…" : this.state === "loading" ? "Restoring…" : this.checkpoint.targets.length ? "Capture saved" : "Ready";
+      status.title = message || label.textContent;
+      (_b = this.root.querySelector("[data-editor-dock]")) == null ? void 0 : _b.toggleAttribute("data-geo-thinking", this.busy);
     }
   }
   function sameCheckpoint(left, right) {
@@ -12922,7 +13238,7 @@ ${ISOLATION_CSS}`;
   class EditorModeController {
     constructor(apiBase) {
       this.apiBase = apiBase;
-      this.host = null;
+      this.dock = null;
       this.root = null;
       this.picker = new ElementPicker();
       this.capture = null;
@@ -12934,7 +13250,6 @@ ${ISOLATION_CSS}`;
       this.routeObserver = new RouteObserver();
       this.routeUnsubscribe = null;
       this.mutationObserver = null;
-      this.dragCleanup = null;
       this.expiryTimer = 0;
       this.validationTimer = 0;
       this.saveTimer = 0;
@@ -12960,6 +13275,7 @@ ${ISOLATION_CSS}`;
       this.preferredSelection = null;
       this.aiPreviewLocation = null;
       this.saveState = "clean";
+      this.reconnecting = false;
       this.recoveryDraft = null;
       this.lifecycle = 0;
       this.previewRendered = false;
@@ -12968,7 +13284,11 @@ ${ISOLATION_CSS}`;
       this.guidePreviewComplete = false;
       this.guidePreviewEntryPath = "";
       this.guidePreviewClickPending = false;
+      this.guidePreviewDestination = null;
+      this.previewConsentVersion = 0;
       this.previewDevice = "desktop";
+      this.previewReturnMode = "design";
+      this.aiRetryPrompt = "";
       this.aiMessages = [];
       this.aiProposal = null;
       this.aiResolvedTargets = /* @__PURE__ */ new Map();
@@ -12986,44 +13306,26 @@ ${ISOLATION_CSS}`;
       this.aiMessageSequence = 0;
       this.aiProgressTimer = 0;
       this.persistBeforePageLeave = () => this.updateContinuation();
+      this.restoreAfterBackNavigation = (event) => {
+        var _a;
+        if (!event.persisted || !this.guidePreviewDestination) return;
+        this.clearGuidePreviewNavigation();
+        (_a = this.dock) == null ? void 0 : _a.show(null);
+        this.updateContinuation();
+      };
       this.protectUnsavedChanges = (event) => {
         var _a, _b;
         if (!this.dirty && !this.saveInFlight && !((_a = this.contentEditor) == null ? void 0 : _a.isComposing()) && !((_b = this.compositionEditor) == null ? void 0 : _b.isComposing())) return;
         event.preventDefault();
         event.returnValue = "";
       };
-      this.fitPanel = () => {
-        var _a, _b, _c;
-        const aside = (_a = this.root) == null ? void 0 : _a.querySelector("aside");
-        if (!aside) return;
-        const viewport = window.visualViewport;
-        const width = (viewport == null ? void 0 : viewport.width) ?? innerWidth;
-        const height = (viewport == null ? void 0 : viewport.height) ?? innerHeight;
-        const x2 = (viewport == null ? void 0 : viewport.offsetLeft) ?? 0;
-        const y = (viewport == null ? void 0 : viewport.offsetTop) ?? 0;
-        const toolbar = (_b = this.root) == null ? void 0 : _b.querySelector("[data-editor-toolbar]");
-        if (toolbar) {
-          toolbar.style.maxWidth = `${Math.max(0, width - 8)}px`;
-          const bounds = toolbar.getBoundingClientRect();
-          if (bounds.left < x2 + 4 || bounds.right > x2 + width - 4 || bounds.top < y + 4 || bounds.bottom > y + height - 4) {
-            toolbar.style.transform = "none";
-            toolbar.style.left = `${Math.max(x2 + 4, Math.min(x2 + width - bounds.width - 4, bounds.left))}px`;
-            toolbar.style.top = `${Math.max(y + 4, Math.min(y + height - bounds.height - 4, bounds.top))}px`;
-          }
-        }
-        aside.style.maxWidth = `${Math.max(0, width - 8)}px`;
-        aside.style.maxHeight = `${Math.max(48, height - 8)}px`;
-        const main = (_c = this.root) == null ? void 0 : _c.querySelector("main");
-        if (main) main.style.maxHeight = `${Math.max(0, width <= 480 ? height * (main.classList.contains("ai-mode") ? 0.76 : 0.38) : height - 32)}px`;
-        const rect = aside.getBoundingClientRect();
-        if (aside.style.left) aside.style.left = `${Math.max(x2 + 4, Math.min(x2 + width - rect.width - 4, rect.left))}px`;
-        if (width <= 480) {
-          aside.style.top = "auto";
-          aside.style.bottom = this.guide || this.survey ? "70px" : "8px";
-        } else {
-          aside.style.bottom = "auto";
-          aside.style.top = `${Math.max(y + 4, Math.min(y + height - 48, rect.top || y + 4))}px`;
-        }
+      this.completeGuidePreviewNavigation = () => {
+        var _a, _b;
+        if (((_a = this.guidePreviewDestination) == null ? void 0 : _a.href) !== location.href) return;
+        this.currentPath = currentPagePath();
+        this.clearGuidePreviewNavigation();
+        (_b = this.dock) == null ? void 0 : _b.show(null);
+        this.startGuidePreview();
       };
       this.protectPreviewSubmission = (event) => {
         if (this.mode !== "preview") return;
@@ -13059,7 +13361,7 @@ ${ISOLATION_CSS}`;
         clean2.searchParams.delete("movcues_editor_token");
         clean2.searchParams.delete("movcues_editor_step");
         history.replaceState(history.state, "", clean2.toString());
-        return await this.activate(session, { requestedStep }, draft);
+        return await this.activate(session, { requestedStep, launchPath: currentPagePath() }, draft);
       } catch {
         this.destroy();
         return false;
@@ -13081,9 +13383,9 @@ ${ISOLATION_CSS}`;
         return false;
       }
     }
-    async activate(session, options, prefetchedDraft) {
-      var _a, _b, _c, _d;
-      this.teardown(false);
+    async activate(session, options, prefetchedDraft, reuseDock = false) {
+      var _a, _b, _c, _d, _e;
+      this.teardown(false, reuseDock);
       const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
       let draft;
       try {
@@ -13105,54 +13407,67 @@ ${ISOLATION_CSS}`;
       this.survey = !this.guide && draft.experience.widgetType === "survey" ? this.definition.survey ?? null : null;
       const selectableSteps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
       const restored = ((_c = options.restoredState) == null ? void 0 : _c.experienceId) === draft.experience.id ? options.restoredState : void 0;
+      this.guideLaunchPath = this.guide ? options.launchPath ?? (restored == null ? void 0 : restored.guideLaunchPath) : void 0;
       const restoredIndex = selectableSteps && (restored == null ? void 0 : restored.selectedStepId) ? selectableSteps.findIndex((step) => step.id === restored.selectedStepId) : -1;
       this.stepIndex = selectableSteps ? restoredIndex >= 0 ? restoredIndex : clampStep(options.requestedStep ?? 0, selectableSteps.length) : 0;
       this.currentPath = currentPagePath();
       const restoredMode = restored == null ? void 0 : restored.mode;
       this.mode = restoredMode === "select" ? "target" : restoredMode === "design" || restoredMode === "target" || restoredMode === "navigate" || restoredMode === "preview" ? restoredMode : draft.experience.builderMode === "onsite" ? "design" : "target";
       const preview = this.mode === "preview" && restoredIndex >= 0 && ((_d = restored == null ? void 0 : restored.guidePreview) == null ? void 0 : _d.versionId) === draft.version.id ? restored.guidePreview : void 0;
+      this.previewReturnMode = (preview == null ? void 0 : preview.returnMode) === "design" || (preview == null ? void 0 : preview.returnMode) === "target" || (preview == null ? void 0 : preview.returnMode) === "navigate" ? preview.returnMode : draft.experience.builderMode === "onsite" ? "design" : "target";
+      if (((_e = restored == null ? void 0 : restored.guidePreview) == null ? void 0 : _e.starting) && (!preview || this.currentPath !== preview.entryPath)) this.mode = this.previewReturnMode;
       this.guidePreviewClickPending = false;
       this.guidePreviewEntryPath = (preview == null ? void 0 : preview.clickPending) ? this.currentPath : (preview == null ? void 0 : preview.entryPath) ?? this.currentPath;
       this.guidePreviewComplete = (preview == null ? void 0 : preview.completed) ?? false;
-      if (preview && this.guide && this.matchesPreviewRoute(this.currentPath)) {
+      if (preview && !preview.starting && this.guide && this.matchesPreviewRoute(this.currentPath)) {
         this.guidePreviewEntryPath = this.currentPath;
         if (this.stepIndex + 1 < this.guide.steps.length) this.stepIndex++;
         else this.guidePreviewComplete = true;
       }
       this.history.reset({ definition: cloneOnsite(this.checklist ?? this.definition), selection: null, stepIndex: this.stepIndex });
       this.updateContinuation();
+      this.dock ?? (this.dock = new EditorDock());
       if (draft.guidedCapture && this.guide && draft.experience.builderMode === "onsite") {
         this.capture = new GuidedCaptureController(bridge, session, draft, (version) => {
-          void this.activate(session, { requestedStep: 0 }, { ...draft, guidedCapture: false, version });
+          void this.activate(session, { requestedStep: 0, launchPath: this.guideLaunchPath }, { ...draft, guidedCapture: false, version }, true);
         }, () => {
           var _a2;
           (_a2 = window.opener) == null ? void 0 : _a2.focus();
-          this.destroy();
-        });
+          this.teardown(true, false, true);
+        }, this.dock);
         this.capture.mount();
       } else this.mount();
       this.expiryTimer = window.setTimeout(() => this.expireSession(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
       this.validationTimer = window.setInterval(() => {
-        void bridge.checkSession().catch((error) => {
-          if (this.bridge === bridge && error instanceof EditorSessionExpiredError) this.expireSession();
-        });
+        void this.validateSession(bridge);
       }, 15e3);
       return true;
     }
+    async validateSession(bridge) {
+      var _a;
+      try {
+        await bridge.checkSession();
+        if (this.bridge !== bridge || !this.reconnecting) return;
+        this.reconnecting = false;
+      } catch (error) {
+        if (this.bridge !== bridge) return;
+        if (error instanceof EditorSessionExpiredError) {
+          this.expireSession();
+          return;
+        }
+        this.reconnecting = true;
+      }
+      (_a = this.capture) == null ? void 0 : _a.setReconnecting(this.reconnecting);
+      this.showSaveState();
+    }
     mount() {
-      var _a, _b, _c;
+      var _a;
       if (!this.draft || !this.definition) return;
-      this.host = document.createElement("div");
-      this.host.dataset.movcuesEditor = "";
-      this.host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647";
-      this.root = this.host.attachShadow({ mode: "open" });
-      this.root.innerHTML = `<style>${STYLE}${GUIDE_STYLE}${EDITOR_PANEL_DESIGN}</style>${this.panelMarkup(this.draft)}`;
+      const dock = this.dock;
+      this.root = dock.root;
+      const { controls, popups } = this.panelMarkup(this.draft);
+      dock.mount(STYLE + GUIDE_STYLE + EDITOR_PANEL_DESIGN, controls, popups);
       if (this.guide) (_a = this.root.querySelector('[data-inspector="step"]')) == null ? void 0 : _a.insertAdjacentHTML("beforeend", this.guideBehaviorMarkup());
-      if (this.guide) this.root.querySelectorAll("[data-guide] .history-row:not([data-step-bar-actions])").forEach((actions) => {
-        var _a2;
-        return (_a2 = this.root.querySelector('[data-inspector="step"]')) == null ? void 0 : _a2.append(actions);
-      });
-      (document.body ?? document.documentElement).appendChild(this.host);
       if (this.survey && this.draft.experience.builderMode === "onsite") this.surveyEditor = new SurveyEditor(this.root, this.survey, {
         index: () => this.stepIndex,
         composer: () => this.compositionEditor,
@@ -13187,39 +13502,66 @@ ${ISOLATION_CSS}`;
       this.routeUnsubscribe = this.routeObserver.onChange(() => this.onRouteChange());
       this.routeObserver.start();
       window.addEventListener("pagehide", this.persistBeforePageLeave);
+      window.addEventListener("pageshow", this.restoreAfterBackNavigation);
       document.addEventListener("click", this.protectPreviewNavigation, true);
       document.addEventListener("submit", this.protectPreviewSubmission, true);
       window.addEventListener("beforeunload", this.protectUnsavedChanges);
       this.configureDiagnostics();
-      (_b = window.visualViewport) == null ? void 0 : _b.addEventListener("resize", this.fitPanel);
-      (_c = window.visualViewport) == null ? void 0 : _c.addEventListener("scroll", this.fitPanel);
-      window.addEventListener("resize", this.fitPanel);
-      this.fitPanel();
     }
     panelMarkup(draft) {
       var _a, _b, _c, _d, _e, _f, _g;
       const selectableSteps = ((_a = this.guide) == null ? void 0 : _a.steps) ?? ((_b = this.survey) == null ? void 0 : _b.steps);
       const aiEligible = draft.experience.builderMode === "onsite" && ["guide", "widget", "checklist"].includes(draft.experience.kind);
-      const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><span class="step-drag-handle" data-step-drag-handle title="Drag step bar" aria-hidden="true">⠿</span><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div></div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? `<div class="step-bar-actions" data-step-bar-actions><button type="button" class="secondary-button compact step-bar-action" data-add-step="modal" aria-label="Add modal step" title="Add modal step"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M12 8v8M8 12h8"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-add-step="anchored_card" aria-label="Add anchored step" title="Add anchored step"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M15 15l4 4"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-duplicate-step aria-label="Duplicate selected step" title="Duplicate selected step"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="11" height="11" rx="1"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-step-left aria-label="Move step earlier" title="Move step earlier"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6M8 12h10"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-step-right aria-label="Move step later" title="Move step later"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6M16 12H6"/></svg></button><button type="button" class="secondary-button compact step-bar-action step-bar-delete" data-delete-step aria-label="Delete selected step" title="Delete selected step"${this.guide.steps.length <= 1 ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13"/></svg></button></div>` : ""}</section>` : "";
+      const stepMarkup = selectableSteps ? `<section class="step-navigator dock-pop-body" data-guide><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? `<div class="step-bar-actions" data-step-bar-actions><button type="button" class="secondary-button compact step-bar-action" data-add-step="modal" aria-label="Add modal step" title="Add modal step"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M12 8v8M8 12h8"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-add-step="anchored_card" aria-label="Add anchored step" title="Add anchored step"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M15 15l4 4"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-duplicate-step aria-label="Duplicate selected step" title="Duplicate selected step"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="11" height="11" rx="1"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-step-left aria-label="Move step earlier" title="Move step earlier"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6M8 12h10"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-step-right aria-label="Move step later" title="Move step later"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6M16 12H6"/></svg></button><button type="button" class="secondary-button compact step-bar-action step-bar-delete" data-delete-step aria-label="Delete selected step" title="Delete selected step"${this.guide.steps.length <= 1 ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13"/></svg></button></div>` : ""}</section>` : "";
       const designDisabled = draft.experience.builderMode !== "onsite" ? ' disabled title="Content is edited in the GrapesJS Dashboard Builder"' : "";
-      return `<div class="editor-toolbar" data-editor-toolbar role="region" aria-label="Movcues editing controls">
-      <header data-drag-handle>
-        <div class="header-copy"><strong>Movcues Live Editor</strong><span>${escapeText(draft.experience.name)}</span><small><i></i> Connected · <span data-save-state>Draft saved</span></small></div>
-        <div class="header-actions"><button type="button" data-global-undo aria-label="Undo">↶</button><button type="button" data-global-redo aria-label="Redo">↷</button><button type="button" data-save aria-label="Save draft">Save</button><button type="button" data-move-side aria-label="Move inspector to other side">⇄</button><button type="button" data-return-dashboard aria-label="Return to dashboard">↗</button><button type="button" data-minimize aria-label="Toggle inspector" aria-expanded="true">☷</button><button type="button" data-close aria-label="Close editor">×</button></div>
-      </header>
-        <div class="modebar"><button type="button" data-mode="design"${designDisabled}>Design</button><button type="button" data-mode="target">Target</button><button type="button" data-mode="navigate">Navigate</button><button type="button" data-mode="preview">Preview</button></div>
-        <div class="guide-preview-controls" data-guide-preview hidden><button type="button" data-preview-start>Start Guide</button><button type="button" data-preview-back aria-label="Previous preview step">←</button><button type="button" data-preview-next aria-label="Next preview step">→</button><button type="button" data-preview-reset>Reset</button><button type="button" data-preview-test hidden>Test event</button><span data-preview-step></span><small data-trigger-status role="status" aria-live="polite"></small></div>
+      const geoMark = geoDockMark;
+      const settings = dockTrigger("settings", "Properties", panelIcon("properties") + '<span class="dock-wide-label">Settings</span>', 'data-inspector-tab="properties"');
+      const geo = aiEligible ? dockTrigger("geo", "AI assistant", geoMark + "Geo", 'data-inspector-tab="ai" data-geo') : `<span class="dock-brand-mark" title="Movcues">${panelIcon("ai")}</span>`;
+      const controls = `
+      <div class="dock-group" data-design-controls>${geo}</div>
+      <div class="dock-group dock-modes" data-design-controls role="group" aria-label="Editor mode">
+        <button type="button" data-mode="design" aria-label="Edit" title="Edit"${designDisabled}>${dockIcon("edit")}<span>Edit</span></button>
+        <button type="button" data-mode="target" aria-label="Target" title="Reselect page target">${dockIcon("target")}</button>
+        <button type="button" data-mode="navigate" aria-label="Navigate" title="Navigate">${dockIcon("navigate")}<span>Navigate</span></button>
       </div>
-      ${guideMarkup}
-      <aside aria-label="Contextual inspector"><main>
-        <nav class="inspector-tabs" aria-label="Inspector mode"><span class="panel-wordmark"><span class="panel-mark">${panelIcon("ai")}</span>movcues</span>${[["properties", "Properties"], ["ai", "AI assistant"]].map(([tab, label]) => `<button type="button" class="${tab === "properties" ? "active" : ""}" data-inspector-tab="${tab}" aria-label="${label}" title="${label}" aria-pressed="${tab === "properties"}"${tab === "ai" && !aiEligible ? " disabled" : ""}>${panelIcon(tab)}</button>`).join("")}</nav>
-        <section class="section ai-panel" data-ai-panel hidden>
+      ${selectableSteps ? `<div class="dock-group" data-design-controls>
+        <button type="button" data-dock-step="-1" aria-label="Previous step" title="Previous step">${dockIcon("left")}</button>
+        ${dockTrigger("steps", "Manage steps", '<span class="dock-chip" data-step-label></span>')}
+        <button type="button" data-dock-step="1" aria-label="Next step" title="Next step">${dockIcon("right")}</button>
+        ${dockTrigger("steps", "Add step", dockIcon("plus"), "data-open-add")}
+      </div>` : ""}
+      <div class="dock-group" data-design-controls>${settings}
+        <button type="button" data-mode="preview" aria-label="Preview" title="Preview">${dockIcon("play")}<span class="dock-wide-label">Preview</span></button>
+      </div>
+      <div class="dock-group" data-preview-dock hidden>
+        <span class="dock-indicator">Preview</span>
+        ${this.guide ? `<div class="dock-group" data-guide-preview hidden>
+          <button type="button" data-preview-back aria-label="Previous preview step" title="Previous preview step">${dockIcon("left")}</button>
+          <span class="dock-chip" data-preview-step></span>
+          <button type="button" data-preview-next aria-label="Next preview step" title="Next preview step">${dockIcon("right")}</button>
+          <button type="button" data-preview-start data-preview-reset data-reset-preview aria-label="Restart preview from the first step" title="Restart preview">${dockIcon("restart")}</button>
+          <button type="button" data-preview-test hidden>Test event</button>
+        </div>` : `<button type="button" data-reset-preview aria-label="Restart preview" title="Restart preview">${dockIcon("restart")}</button>`}
+        ${dockTrigger("preview", "Preview status", dockIcon("more"), "data-preview-status-button")}
+        ${aiEligible ? dockTrigger("geo", "Review Geo proposal", geoMark, "data-preview-geo hidden") : ""}
+        <button type="button" data-exit-preview>Exit preview</button>
+      </div>
+      <div class="dock-group">
+        ${dockTrigger("status", "Draft status", '<span class="dock-status-text" data-save-state role="status" aria-live="polite">Draft saved</span>', "data-dock-save-state")}
+        <button type="button" data-save data-primary aria-label="Save draft">Save</button>
+        ${dockTrigger("session", "Editor actions", dockIcon("more"), "data-session-actions")}
+        <button type="button" data-close aria-label="Close editor" title="Close editor">${dockIcon("close")}</button>
+      </div>`;
+      const geoMarkup = `
+        <section class="section ai-panel" data-ai-panel>
           <p class="muted" data-ai-context>Choose an element or ask about the whole widget.</p>
-          <div class="ai-chat-history" data-ai-history aria-label="AI chat history" aria-live="polite"><div class="ai-empty-state"><span class="ai-empty-state__icon">${panelIcon("zap")}</span><p>Describe the change you want to make.</p></div><article class="ai-proposal" data-ai-proposal hidden><span class="ai-chat-message__role">Geo</span><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Review the update, then apply it when you’re ready.</p></article></div>
-          <form class="ai-composer" data-ai-form><textarea data-ai-prompt aria-label="Describe your design change" maxlength="4000" rows="3" placeholder="What would you like to create?"></textarea><div class="ai-proposal-actions" data-ai-proposal-actions hidden><button type="button" class="secondary-button" data-ai-target hidden>Select target</button><button type="button" class="secondary-button" data-ai-preview hidden>Preview design</button><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div><div class="ai-composer-footer"><span class="ai-composer-note">${panelIcon("ai")} Design with Movcues</span><button type="button" class="secondary-button compact" data-ai-cancel hidden>Stop</button><button type="submit" class="secondary-button" data-ai-send aria-label="Send message" title="Send message">${panelIcon("send")}</button></div></form>
+          <div class="ai-chat-history" data-ai-history aria-label="AI chat history" aria-live="polite"><div class="ai-empty-state"><p>Ask Geo to change the copy, layout, or behavior.</p></div><article class="ai-proposal" data-ai-proposal hidden><span class="ai-chat-message__role">Geo</span><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Review the update, then apply it when you’re ready.</p></article></div>
+          <form class="ai-composer" data-ai-form><textarea data-ai-prompt aria-label="Describe your design change" maxlength="4000" rows="2" placeholder="Ask Geo…"></textarea><div class="ai-proposal-actions" data-ai-proposal-actions hidden><button type="button" class="secondary-button" data-ai-target hidden>Select target</button><button type="button" class="secondary-button" data-ai-preview hidden>Preview design</button><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div><div class="ai-composer-footer"><button type="button" class="secondary-button compact" data-ai-retry hidden>Retry</button><button type="button" class="secondary-button compact" data-ai-cancel hidden>Stop</button><button type="submit" class="secondary-button" data-ai-send aria-label="Send message" title="Send message">${panelIcon("send")}</button></div></form>
           <div class="ai-status" data-ai-status role="status" aria-live="polite"></div>
         </section>
-        <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : this.survey ? "Preview tests the full Survey. No responses, production events or progress are recorded. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
+      `;
+      const properties = `<main class="dock-pop-body editor-properties">
+        <div data-checklist-settings></div>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         <section class="section composition-inspector" data-composition-inspector hidden>
           <div data-inspector="step"><label>Step label<input data-step-name type="text" maxlength="80" placeholder="Step label"></label></div>
@@ -13252,24 +13594,21 @@ ${ISOLATION_CSS}`;
           <div class="image-controls" data-image-controls hidden><label>Source URL<input data-image-src type="text" inputmode="url"></label><label>Alt text<input data-image-alt type="text" maxlength="500"></label><button type="button" class="secondary-button" data-apply-image>Apply image</button></div>
           <div class="history-row"><button type="button" class="secondary-button compact" data-undo disabled>Undo</button><button type="button" class="secondary-button compact" data-redo disabled>Redo</button></div>
         </section>
-        <div class="section eyebrow" data-step-only data-step-appearance>Step appearance</div>
+
         <section class="section" data-step-only data-for="target">
           <div class="eyebrow">Target</div><strong class="truncate" data-target-label>Not selected</strong><div class="reliability" data-reliability></div>
           <button class="secondary-button" type="button" data-pick>Reselect target</button>
         </section>
-        <section class="section" data-step-only data-layering-section>
-          <div class="eyebrow">Layering</div>
+        <details class="section settings-disclosure" data-step-only data-layering-section><summary>Layering</summary><div>
           <label>Policy<select data-layer-mode><option value="auto">Automatic</option><option value="relative">Relative to an element</option><option value="always_on_top">Always on top</option><option value="custom">Advanced / Custom</option></select></label>
           <div class="muted" data-layer-description></div>
           <div data-layer-relative hidden><strong class="truncate" data-layer-target>Not selected</strong><button class="secondary-button" type="button" data-pick-layer>Select element from page</button><label>Relationship<select data-layer-relation><option value="above">Above</option><option value="below">Below</option></select></label></div>
           <label data-layer-custom hidden>Custom z-index<input data-layer-z-index type="number" min="1" max="2147483647"></label>
-        </section>
-        <section class="section" data-step-only data-close-button-section>
-          <div class="eyebrow">Behavior</div>
+        </div></details>
+        <details class="section settings-disclosure" data-step-only data-close-button-section><summary>Behavior</summary><div>
           <label class="check"><input data-show-close-button type="checkbox"> Show close button</label>
-        </section>
-        <section class="section" data-step-only data-placement-section>
-          <div class="eyebrow">Placement</div>
+        </div></details>
+        <details class="section settings-disclosure" data-step-only data-placement-section><summary>Placement</summary><div>
           <div data-for="anchored"><div class="placement-grid">${placementButton("top", "Top")}${placementButton("left", "Left")}${placementButton("auto", "Auto")}${placementButton("right", "Right")}${placementButton("bottom", "Bottom")}</div><label>Alignment<select data-alignment><option value="start">Start</option><option value="center">Center</option><option value="end">End</option></select></label><label>Offset<div class="number"><input data-offset type="number" min="0" max="100"><span>px</span></div></label></div>
           <div data-for="toast"><label>Position<select data-toast-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label><label>Auto-dismiss<div class="number"><input data-auto-dismiss type="number" min="500" placeholder="Disabled"><span>ms</span></div></label></div>
           <div data-for="modal"><label>Layout<select data-modal-layout><option value="center">Centered</option><option value="fullscreen">Fullscreen</option></select></label></div>
@@ -13278,9 +13617,9 @@ ${ISOLATION_CSS}`;
           <div data-for="banner"><label>Display<select data-banner-display-mode><option value="inline">Inline with page</option><option value="overlay">Overlay viewport</option></select></label><label>Position<select data-banner-position><option value="top">Top</option><option value="bottom">Bottom</option></select></label></div>
           <div data-for="cursor"><label>X offset<div class="number"><input data-cursor-x type="number"><span>px</span></div></label><label>Y offset<div class="number"><input data-cursor-y type="number"><span>px</span></div></label></div>
           <div data-for="hotspot"><label>Beacon style<select data-hotspot-style><option value="pulse">Pulse</option><option value="dot">Dot</option><option value="question">Question mark</option></select></label><label>Beacon color<input data-hotspot-color type="color"></label></div>
-        </section>
+        </div></details>
         <section class="section" data-step-only data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
-        <section class="section" data-step-only><div class="eyebrow">Configured</div><dl data-configured></dl></section>
+        <details class="section settings-disclosure" data-step-only><summary>Experience rules</summary><dl data-configured></dl></details>
         <section class="section theme-panel" data-theme-section aria-label="Appearance">
           <div class="appearance-heading"><strong>Appearance</strong><a data-manage-themes target="_blank" rel="noopener noreferrer" hidden>Manage themes</a></div>
           <label>Theme<select data-theme-source aria-label="Theme"><option value="template">Template defaults</option><option value="site"${((_c = draft.references) == null ? void 0 : _c.siteTheme) ? "" : " disabled"}>Site default</option><option value="snapshot" disabled>Saved snapshot</option><optgroup label="Built-in presets"><option value="minimal">Minimal</option><option value="modern">Modern</option><option value="soft">Soft</option><option value="dark">Dark</option></optgroup>${((_e = (_d = draft.references) == null ? void 0 : _d.stylePresets) == null ? void 0 : _e.length) ? `<optgroup label="Saved themes">${draft.references.stylePresets.map((style) => `<option value="saved:${escapeText(style.id)}">${escapeText(style.name)}</option>`).join("")}</optgroup>` : ""}</select></label>
@@ -13295,10 +13634,36 @@ ${ISOLATION_CSS}`;
           <p class="muted" data-style-status role="status" hidden></p>
         </section>
         <details class="section live"><summary>Connection & target status</summary><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></details>
+        <p class="hint" data-mode-hint></p>
+      </main>`;
+      const recovery = `<div class="dock-pop-body" data-status-content>
+      <p class="muted" data-connection-status>Editor connected</p>
         <p class="hint status-error" role="alert" data-content-error hidden></p>
-        <div class="save-recovery" data-save-recovery hidden><button type="button" class="secondary-button" data-retry-save>Retry save</button><button type="button" class="secondary-button" data-reload-draft hidden>Reload latest</button><button type="button" class="secondary-button" data-export-draft>Copy / Export unsaved draft</button><button type="button" class="secondary-button" data-discard-draft>Discard and close</button><span data-recovery-message>Local edits are preserved.</span></div><p class="hint" data-mode-hint></p>
-      </main>
-    </aside>`;
+        <div class="save-recovery" data-save-recovery hidden><button type="button" class="secondary-button" data-retry-save>Retry save</button><button type="button" class="secondary-button" data-reload-draft hidden>Reload latest</button><button type="button" class="secondary-button" data-export-draft>Copy / Export unsaved draft</button><button type="button" class="secondary-button" data-discard-draft>Discard and close</button><span data-recovery-message>Local edits are preserved.</span></div>
+      </div>`;
+      const preview = `<div class="dock-pop-body">
+      <p class="muted" data-trigger-status role="status" aria-live="polite"></p>
+      <p class="hint"data-preview-limit>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : this.survey ? "Preview tests the full Survey. No responses, production events or progress are recorded. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
+      <div data-preview-checklist></div>
+    </div>`;
+      const previewConsent = `<div class="dock-pop-body preview-consent">
+      <p>Open the Guide’s starting page in this tab and preview from step 1.</p>
+      <code data-preview-destination></code>
+      <p class="hint status-error" data-preview-consent-status role="status" hidden></p>
+      <div class="preview-consent-actions">
+        <button type="button" class="secondary-button" data-dismiss-popup data-preview-cancel>Cancel</button>
+        <button type="button" class="secondary-button" data-preview-confirm>Go to start &amp; preview</button>
+      </div>
+    </div>`;
+      const session = `<div class="dock-pop-body dock-session" aria-label="Editor actions">
+      <strong class="truncate">${escapeText(draft.experience.name)}</strong>
+      <div class="history-row"><button type="button" class="secondary-button" data-global-undo>Undo</button><button type="button" class="secondary-button" data-global-redo>Redo</button></div>
+      <button type="button" class="secondary-button" data-return-dashboard>Return to dashboard</button>
+    </div>`;
+      return {
+        controls,
+        popups: (aiEligible ? dockPopup("geo", "Geo", geoMarkup, geoMark) : "") + dockPopup("settings", "Properties", properties) + (selectableSteps ? dockPopup("steps", this.guide ? "Guide steps" : "Survey steps", stepMarkup) : "") + dockPopup("status", "Draft status", recovery) + dockPopup("preview", "Journey preview", preview) + (this.guide ? dockPopup("preview-start", "Start Guide preview", previewConsent, "", "dialog") : "") + dockPopup("session", "Movcues Live Editor", session)
+      };
     }
     stepButtons() {
       var _a, _b;
@@ -13306,70 +13671,77 @@ ${ISOLATION_CSS}`;
       return steps.map((step, index) => `<button class="step" type="button" data-step="${index}" aria-label="Open step ${index + 1}"><span>${index + 1}</span><small>${escapeText("label" in step && typeof step.label === "string" && step.label.trim() ? step.label : "content" in step && step.content.heading.trim() ? step.content.heading : `Step ${index + 1}`)}</small><i data-step-icon>○</i></button>`).join("");
     }
     bindPanel() {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E;
       const root2 = this.root;
-      root2.querySelectorAll("[data-inspector-tab]").forEach((button) => button.addEventListener("click", () => this.setInspectorTab(button.dataset.inspectorTab)));
-      (_a = root2.querySelector("[data-ai-form]")) == null ? void 0 : _a.addEventListener("submit", (event) => {
+      root2.querySelectorAll("[data-inspector-tab=ai],[data-preview-geo]").forEach((button) => button.addEventListener("click", () => this.syncAiPanel()));
+      root2.querySelectorAll("[data-dock-step]").forEach((button) => button.addEventListener("click", () => this.switchStep(this.stepIndex + Number(button.dataset.dockStep))));
+      (_a = root2.querySelector("[data-exit-preview]")) == null ? void 0 : _a.addEventListener("click", () => {
+        if (this.aiPreviewReturnMode) this.discardAiPreview();
+        else this.setMode(this.previewReturnMode);
+      });
+      (_b = root2.querySelector("[data-ai-form]")) == null ? void 0 : _b.addEventListener("submit", (event) => {
         event.preventDefault();
         void this.sendAiPrompt();
       });
-      (_b = root2.querySelector("[data-ai-cancel]")) == null ? void 0 : _b.addEventListener("click", () => this.cancelAiRequest());
-      (_c = root2.querySelector("[data-ai-target]")) == null ? void 0 : _c.addEventListener("click", () => this.resolveAiGuideTarget());
-      (_d = root2.querySelector("[data-ai-preview]")) == null ? void 0 : _d.addEventListener("click", () => this.checklist ? this.previewAiChecklistProposal() : this.survey ? this.previewAiSurveyProposal() : this.guide ? this.previewAiGuideProposal() : this.previewAiWidgetSourceProposal());
-      (_e = root2.querySelector("[data-ai-apply]")) == null ? void 0 : _e.addEventListener("click", () => this.applyAiProposal());
-      (_f = root2.querySelector("[data-ai-discard]")) == null ? void 0 : _f.addEventListener("click", () => this.discardAiProposal());
-      root2.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this.setMode(button.dataset.mode)));
+      (_c = root2.querySelector("[data-ai-retry]")) == null ? void 0 : _c.addEventListener("click", () => {
+        const field = root2.querySelector("[data-ai-prompt]");
+        if (field && !field.value.trim()) field.value = this.aiRetryPrompt;
+        void this.sendAiPrompt();
+      });
+      (_d = root2.querySelector("[data-ai-cancel]")) == null ? void 0 : _d.addEventListener("click", () => this.cancelAiRequest());
+      (_e = root2.querySelector("[data-ai-target]")) == null ? void 0 : _e.addEventListener("click", () => this.resolveAiGuideTarget());
+      (_f = root2.querySelector("[data-ai-preview]")) == null ? void 0 : _f.addEventListener("click", () => this.checklist ? this.previewAiChecklistProposal() : this.survey ? this.previewAiSurveyProposal() : this.guide ? this.previewAiGuideProposal() : this.previewAiWidgetSourceProposal());
+      (_g = root2.querySelector("[data-ai-apply]")) == null ? void 0 : _g.addEventListener("click", () => this.applyAiProposal());
+      (_h = root2.querySelector("[data-ai-discard]")) == null ? void 0 : _h.addEventListener("click", () => this.discardAiProposal());
+      root2.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => {
+        if (button.dataset.mode === "preview" && this.guide) this.requestGuidePreview(button);
+        else this.setMode(button.dataset.mode);
+      }));
+      (_i = root2.querySelector("[data-preview-confirm]")) == null ? void 0 : _i.addEventListener("click", (event) => {
+        void this.confirmGuidePreview(event.currentTarget);
+      });
       root2.querySelectorAll("[data-pick]").forEach((button) => button.addEventListener("click", () => {
         if (this.mode !== "target") this.setMode("target");
         else this.startPicker();
       }));
-      (_g = root2.querySelector("[data-pick-layer]")) == null ? void 0 : _g.addEventListener("click", () => this.startLayerPicker());
+      (_j = root2.querySelector("[data-pick-layer]")) == null ? void 0 : _j.addEventListener("click", () => this.startLayerPicker());
       root2.querySelectorAll("[data-step]").forEach((button) => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
-      (_h = root2.querySelector("[data-minimize]")) == null ? void 0 : _h.addEventListener("click", () => {
-        const aside = root2.querySelector("aside");
-        aside.classList.toggle("minimized");
-        root2.querySelector("[data-minimize]").setAttribute("aria-expanded", String(!aside.classList.contains("minimized")));
-      });
-      (_i = root2.querySelector("[data-save]")) == null ? void 0 : _i.addEventListener("click", () => void this.persist());
-      (_j = root2.querySelector("[data-close]")) == null ? void 0 : _j.addEventListener("click", () => void this.close());
-      (_k = root2.querySelector("[data-return-dashboard]")) == null ? void 0 : _k.addEventListener("click", () => {
+      (_k = root2.querySelector("[data-save]")) == null ? void 0 : _k.addEventListener("click", () => void this.persist());
+      (_l = root2.querySelector("[data-close]")) == null ? void 0 : _l.addEventListener("click", () => void this.close());
+      (_m = root2.querySelector("[data-return-dashboard]")) == null ? void 0 : _m.addEventListener("click", () => {
         var _a2;
         (_a2 = window.opener) == null ? void 0 : _a2.focus();
         void this.close();
       });
-      (_l = root2.querySelector("[data-retry-save]")) == null ? void 0 : _l.addEventListener("click", () => void this.persist());
-      (_m = root2.querySelector("[data-reload-draft]")) == null ? void 0 : _m.addEventListener("click", () => {
+      (_n = root2.querySelector("[data-retry-save]")) == null ? void 0 : _n.addEventListener("click", () => void this.persist());
+      (_o = root2.querySelector("[data-reload-draft]")) == null ? void 0 : _o.addEventListener("click", () => {
         if (window.confirm("Reloading discards local edits. Copy / Export them first if you need them. Reload latest?")) {
           this.recoveryDraft = null;
           window.location.reload();
         }
       });
-      (_n = root2.querySelector("[data-export-draft]")) == null ? void 0 : _n.addEventListener("click", () => this.exportRecovery());
-      (_o = root2.querySelector("[data-discard-draft]")) == null ? void 0 : _o.addEventListener("click", () => {
+      (_p = root2.querySelector("[data-export-draft]")) == null ? void 0 : _p.addEventListener("click", () => this.exportRecovery());
+      (_q = root2.querySelector("[data-discard-draft]")) == null ? void 0 : _q.addEventListener("click", () => {
         if (window.confirm("Discard unsaved edits and close?")) {
           this.recoveryDraft = null;
           this.destroy();
         }
       });
-      (_p = root2.querySelector("[data-reset-preview]")) == null ? void 0 : _p.addEventListener("click", () => this.guide ? this.startGuidePreview() : this.renderPreview());
-      (_q = root2.querySelector("[data-global-undo]")) == null ? void 0 : _q.addEventListener("click", () => this.globalUndo());
-      (_r = root2.querySelector("[data-global-redo]")) == null ? void 0 : _r.addEventListener("click", () => this.globalRedo());
-      (_s = root2.querySelector("[data-move-side]")) == null ? void 0 : _s.addEventListener("click", () => {
-        var _a2;
-        return (_a2 = root2.querySelector("aside")) == null ? void 0 : _a2.classList.toggle("left-side");
-      });
+      if (!this.guide) (_r = root2.querySelector("[data-reset-preview]")) == null ? void 0 : _r.addEventListener("click", () => this.renderPreview());
+      (_s = root2.querySelector("[data-global-undo]")) == null ? void 0 : _s.addEventListener("click", () => this.globalUndo());
+      (_t = root2.querySelector("[data-global-redo]")) == null ? void 0 : _t.addEventListener("click", () => this.globalRedo());
       root2.querySelectorAll("[data-add-step]").forEach((button) => button.addEventListener("click", () => this.addGuideStep(button.dataset.addStep)));
-      (_t = root2.querySelector("[data-duplicate-step]")) == null ? void 0 : _t.addEventListener("click", () => this.duplicateGuideStep());
-      (_u = root2.querySelector("[data-delete-step]")) == null ? void 0 : _u.addEventListener("click", () => this.deleteGuideStep());
-      (_v = root2.querySelector("[data-step-left]")) == null ? void 0 : _v.addEventListener("click", () => this.moveGuideStep(-1));
-      (_w = root2.querySelector("[data-step-right]")) == null ? void 0 : _w.addEventListener("click", () => this.moveGuideStep(1));
-      (_x = root2.querySelector("[data-step-name]")) == null ? void 0 : _x.addEventListener("change", (event) => {
+      (_u = root2.querySelector("[data-duplicate-step]")) == null ? void 0 : _u.addEventListener("click", () => this.duplicateGuideStep());
+      (_v = root2.querySelector("[data-delete-step]")) == null ? void 0 : _v.addEventListener("click", () => this.deleteGuideStep());
+      (_w = root2.querySelector("[data-step-left]")) == null ? void 0 : _w.addEventListener("click", () => this.moveGuideStep(-1));
+      (_x = root2.querySelector("[data-step-right]")) == null ? void 0 : _x.addEventListener("click", () => this.moveGuideStep(1));
+      (_y = root2.querySelector("[data-step-name]")) == null ? void 0 : _y.addEventListener("change", (event) => {
         if (!this.guide) return;
         this.guide.steps[this.stepIndex].label = event.currentTarget.value.trim().slice(0, 80) || void 0;
         this.changed();
         this.refreshStepBar();
       });
-      (_y = root2.querySelector("[data-edit-component]")) == null ? void 0 : _y.addEventListener("click", () => {
+      (_z = root2.querySelector("[data-edit-component]")) == null ? void 0 : _z.addEventListener("click", () => {
         var _a2, _b2;
         (_a2 = this.compositionEditor) == null ? void 0 : _a2.editSelected();
         (_b2 = this.contentEditor) == null ? void 0 : _b2.editSelected();
@@ -13386,14 +13758,14 @@ ${ISOLATION_CSS}`;
         (_b2 = this.contentEditor) == null ? void 0 : _b2.toggleList(button.dataset.list);
         this.syncContentInspector();
       }));
-      (_z = root2.querySelector("[data-text-align]")) == null ? void 0 : _z.addEventListener("change", (event) => {
+      (_A = root2.querySelector("[data-text-align]")) == null ? void 0 : _A.addEventListener("change", (event) => {
         var _a2, _b2;
         const value = event.currentTarget.value;
         (_a2 = this.compositionEditor) == null ? void 0 : _a2.setAlignment(value);
         (_b2 = this.contentEditor) == null ? void 0 : _b2.setAlignment(value);
         this.syncContentInspector();
       });
-      (_A = root2.querySelector("[data-apply-link]")) == null ? void 0 : _A.addEventListener("click", () => {
+      (_B = root2.querySelector("[data-apply-link]")) == null ? void 0 : _B.addEventListener("click", () => {
         var _a2, _b2;
         const input2 = root2.querySelector("[data-link-url]");
         const applied = input2 ? ((_a2 = this.compositionEditor) == null ? void 0 : _a2.applyLink(input2.value)) ?? ((_b2 = this.contentEditor) == null ? void 0 : _b2.applyLink(input2.value)) : false;
@@ -13403,7 +13775,7 @@ ${ISOLATION_CSS}`;
         } else input2 == null ? void 0 : input2.setCustomValidity("");
         this.syncContentInspector();
       });
-      (_B = root2.querySelector("[data-apply-image]")) == null ? void 0 : _B.addEventListener("click", () => {
+      (_C = root2.querySelector("[data-apply-image]")) == null ? void 0 : _C.addEventListener("click", () => {
         var _a2;
         const source = root2.querySelector("[data-image-src]");
         const alt = root2.querySelector("[data-image-alt]");
@@ -13411,21 +13783,25 @@ ${ISOLATION_CSS}`;
         else source == null ? void 0 : source.setCustomValidity("");
         this.syncContentInspector();
       });
-      (_C = root2.querySelector("[data-undo]")) == null ? void 0 : _C.addEventListener("click", () => {
+      (_D = root2.querySelector("[data-undo]")) == null ? void 0 : _D.addEventListener("click", () => {
         var _a2;
         (_a2 = this.contentEditor) == null ? void 0 : _a2.undo();
         this.syncContentInspector();
       });
-      (_D = root2.querySelector("[data-redo]")) == null ? void 0 : _D.addEventListener("click", () => {
+      (_E = root2.querySelector("[data-redo]")) == null ? void 0 : _E.addEventListener("click", () => {
         var _a2;
         (_a2 = this.contentEditor) == null ? void 0 : _a2.redo();
         this.syncContentInspector();
       });
       root2.addEventListener("pointerdown", (event) => {
-        var _a2, _b2;
+        var _a2, _b2, _c2, _d2;
         (_a2 = this.contentEditor) == null ? void 0 : _a2.rememberSelection();
         (_b2 = this.compositionEditor) == null ? void 0 : _b2.rememberSelection();
-        if (event.target instanceof Element && event.target.closest("[data-v2-format],[data-v2-list]")) event.preventDefault();
+        if (!(event.target instanceof Element)) return;
+        const active = (_d2 = (_c2 = document.activeElement) == null ? void 0 : _c2.shadowRoot) == null ? void 0 : _d2.activeElement;
+        if (event.target.closest("[data-v2-format],[data-v2-list]") || active instanceof HTMLElement && active.isContentEditable && event.target.closest('[data-open-popup="settings"]')) {
+          event.preventDefault();
+        }
       }, true);
       root2.addEventListener("focusin", () => {
         var _a2, _b2;
@@ -13449,8 +13825,6 @@ ${ISOLATION_CSS}`;
           else this.globalUndo();
         }
       });
-      this.bindDrag();
-      this.bindStepBarDrag();
       this.bindThemeControls();
       this.bindCompositionInspector();
       this.bindGuideBehavior();
@@ -13973,7 +14347,7 @@ ${ISOLATION_CSS}`;
     </div>`;
     }
     bindGuideBehavior() {
-      var _a, _b, _c, _d, _e, _f, _g, _h;
+      var _a, _b, _c, _d, _e, _f, _g;
       if (!this.guide || !this.root) return;
       const change = (selector2, run) => {
         var _a2;
@@ -14037,25 +14411,27 @@ ${ISOLATION_CSS}`;
         this.guide.steps[this.stepIndex].behavior.dismissible = event.currentTarget.checked;
         this.changed();
       });
-      (_d = this.root.querySelector("[data-preview-start]")) == null ? void 0 : _d.addEventListener("click", () => this.startGuidePreview());
-      (_e = this.root.querySelector("[data-preview-reset]")) == null ? void 0 : _e.addEventListener("click", () => this.startGuidePreview());
-      (_f = this.root.querySelector("[data-preview-next]")) == null ? void 0 : _f.addEventListener("click", () => this.advanceGuidePreview(1));
-      (_g = this.root.querySelector("[data-preview-back]")) == null ? void 0 : _g.addEventListener("click", () => this.advanceGuidePreview(-1));
-      (_h = this.root.querySelector("[data-preview-test]")) == null ? void 0 : _h.addEventListener("click", () => {
+      (_d = this.root.querySelector("[data-preview-reset]")) == null ? void 0 : _d.addEventListener("click", (event) => {
+        this.requestGuidePreview(event.currentTarget);
+      });
+      (_e = this.root.querySelector("[data-preview-next]")) == null ? void 0 : _e.addEventListener("click", () => this.advanceGuidePreview(1));
+      (_f = this.root.querySelector("[data-preview-back]")) == null ? void 0 : _f.addEventListener("click", () => this.advanceGuidePreview(-1));
+      (_g = this.root.querySelector("[data-preview-test]")) == null ? void 0 : _g.addEventListener("click", () => {
         var _a2;
         const advance = (_a2 = this.guide) == null ? void 0 : _a2.steps[this.stepIndex].advance;
         if (this.mode === "preview" && !this.guidePreviewComplete && ((advance == null ? void 0 : advance.type) === "custom_event" || (advance == null ? void 0 : advance.type) === "route")) this.advanceGuidePreview(1);
       });
     }
     pickGuideInteraction() {
-      var _a, _b, _c, _d, _e;
+      var _a, _b, _c, _d, _e, _f;
       const step = (_a = this.guide) == null ? void 0 : _a.steps[this.stepIndex];
       if (!step || !this.flushContent() || !(((_b = step.advance) == null ? void 0 : _b.type) === "element_click" || ((_c = step.advance) == null ? void 0 : _c.type) === "element_hover")) return;
       const generation = ++this.selectionGeneration;
       this.picker.cancel();
-      (_d = this.contentEditor) == null ? void 0 : _d.destroy();
+      (_d = this.dock) == null ? void 0 : _d.show(null);
+      (_e = this.contentEditor) == null ? void 0 : _e.destroy();
       this.contentEditor = null;
-      (_e = this.compositionEditor) == null ? void 0 : _e.destroy();
+      (_f = this.compositionEditor) == null ? void 0 : _f.destroy();
       this.compositionEditor = null;
       this.previewGeneration++;
       this.preview.destroy();
@@ -14074,7 +14450,7 @@ ${ISOLATION_CSS}`;
       });
     }
     syncGuideBehavior() {
-      var _a, _b, _c, _d, _e;
+      var _a, _b, _c, _d, _e, _f;
       if (!this.root) return;
       const controls = this.root.querySelector("[data-guide-preview]");
       if (controls) controls.hidden = !this.guide || this.mode !== "preview";
@@ -14114,6 +14490,10 @@ ${ISOLATION_CSS}`;
       this.root.querySelector("[data-guide-missing]").hidden = !anchored;
       this.setChecked("[data-guide-dismissible]", step.behavior.dismissible ?? true);
       this.setText("[data-preview-step]", `${this.guidePreviewComplete ? "Complete · " : ""}${this.stepIndex + 1}/${this.guide.steps.length}`);
+      (_f = this.root.querySelector("[data-preview-step]")) == null ? void 0 : _f.setAttribute(
+        "aria-label",
+        this.guidePreviewComplete ? "Journey complete" : `Step ${this.stepIndex + 1} of ${this.guide.steps.length}`
+      );
       this.root.querySelector("[data-preview-back]").disabled = this.stepIndex === 0;
       this.root.querySelector("[data-preview-next]").disabled = this.guidePreviewComplete;
       const test = this.root.querySelector("[data-preview-test]");
@@ -14124,6 +14504,94 @@ ${ISOLATION_CSS}`;
       var _a;
       const advance = (_a = this.guide) == null ? void 0 : _a.steps[this.stepIndex].advance;
       return this.guidePreviewComplete ? "Guide preview complete. Reset to start again." : (advance == null ? void 0 : advance.type) === "custom_event" ? `Waiting for “${advance.eventName}”. Test event is preview-only.` : (advance == null ? void 0 : advance.type) === "route" ? "Waiting for matching navigation. Simulate match does not navigate." : (advance == null ? void 0 : advance.type) === "element_click" ? "Click the configured website element." : (advance == null ? void 0 : advance.type) === "element_hover" ? "Hover over the configured website element." : "Click a Next step button.";
+    }
+    guidePreviewStartPage() {
+      var _a, _b, _c;
+      if (!this.guide) return null;
+      const first = this.guide.steps[0];
+      const context = first && guideStepRequiresTarget(first) ? (_a = first.target) == null ? void 0 : _a.targetContext : void 0;
+      const launch = sameOriginGuidePage(this.guideLaunchPath);
+      const targetPage = sameOriginGuidePage(context == null ? void 0 : context.pagePath);
+      if (targetPage) {
+        if (matchesGuideTargetPage(first.target, currentPagePath())) return null;
+        if (launch && matchesGuideTargetPage(first.target, launch.pathname + launch.search + launch.hash)) return launch;
+        return targetPage;
+      }
+      const exact = ((_b = this.definition) == null ? void 0 : _b.targeting.pageRules.filter((rule2) => rule2.kind === "include" && rule2.operator === "equals")) ?? [];
+      const buildRule = exact.find((rule2) => rule2.id === "build_page" || rule2.id === "build_page_exact");
+      const configured = sameOriginGuidePage((_c = buildRule ?? (exact.length === 1 ? exact[0] : void 0)) == null ? void 0 : _c.value);
+      const start = configured && (!launch || launch.pathname !== configured.pathname || configured.search && launch.search !== configured.search || configured.hash && launch.hash !== configured.hash) ? configured : launch ?? configured;
+      if (!start) return null;
+      if (start.pathname === location.pathname && (!start.search || start.search === location.search) && (!start.hash || start.hash === location.hash)) return null;
+      return start;
+    }
+    requestGuidePreview(opener) {
+      var _a, _b, _c;
+      if (this.guidePreviewDestination || this.mode !== "preview" && this.aiPreviewReturnMode) return;
+      this.previewConsentVersion++;
+      const destination = this.aiPreviewReturnMode ? null : this.guidePreviewStartPage();
+      if (!destination) {
+        this.startGuidePreview();
+        return;
+      }
+      this.setText("[data-preview-destination]", destination.pathname + destination.hash);
+      this.setGuidePreviewConsentStatus("");
+      (_a = this.dock) == null ? void 0 : _a.show("preview-start", opener);
+      (_c = (_b = this.root) == null ? void 0 : _b.querySelector("[data-preview-cancel]")) == null ? void 0 : _c.focus({ preventScroll: true });
+    }
+    setGuidePreviewConsentStatus(message) {
+      var _a;
+      const status = (_a = this.root) == null ? void 0 : _a.querySelector("[data-preview-consent-status]");
+      if (status) {
+        status.textContent = message;
+        status.hidden = !message;
+      }
+    }
+    async confirmGuidePreview(button) {
+      var _a, _b, _c, _d, _e;
+      if (((_a = this.dock) == null ? void 0 : _a.activePopup) !== "preview-start" || this.guidePreviewDestination) return;
+      const destination = this.guidePreviewStartPage();
+      if (!destination) {
+        (_b = this.dock) == null ? void 0 : _b.show(null);
+        this.startGuidePreview();
+        return;
+      }
+      const lifecycle = this.lifecycle;
+      const consent = this.previewConsentVersion;
+      button.disabled = true;
+      this.setGuidePreviewConsentStatus(this.dirty || this.saveInFlight ? "Saving your changes before opening the starting page…" : "");
+      try {
+        if (!await this.persist() || this.dirty) {
+          this.setGuidePreviewConsentStatus("Resolve the draft’s save or validation issue before starting preview.");
+          return;
+        }
+        if (lifecycle !== this.lifecycle || consent !== this.previewConsentVersion || ((_c = this.dock) == null ? void 0 : _c.activePopup) !== "preview-start" || !this.session) return;
+        this.guidePreviewDestination = destination;
+        this.updateContinuation();
+        const next = readEditorContinuation();
+        if ((next == null ? void 0 : next.session.sessionId) !== this.session.sessionId || !((_e = (_d = next.editorState) == null ? void 0 : _d.guidePreview) == null ? void 0 : _e.starting)) {
+          this.guidePreviewDestination = null;
+          this.setGuidePreviewConsentStatus("Preview couldn’t resume after navigation. Check this site’s storage settings and try again.");
+          return;
+        }
+        if (destination.pathname === location.pathname && destination.search === location.search && destination.hash !== location.hash) {
+          window.addEventListener("hashchange", this.completeGuidePreviewNavigation);
+        }
+        location.assign(destination.href);
+      } catch {
+        this.clearGuidePreviewNavigation();
+        this.updateContinuation();
+        this.setGuidePreviewConsentStatus("Couldn’t open the starting page. Try again.");
+      } finally {
+        if (!this.guidePreviewDestination && this.saveState !== "expired") button.disabled = false;
+      }
+    }
+    clearGuidePreviewNavigation() {
+      var _a;
+      this.guidePreviewDestination = null;
+      window.removeEventListener("hashchange", this.completeGuidePreviewNavigation);
+      const button = (_a = this.root) == null ? void 0 : _a.querySelector("[data-preview-confirm]");
+      if (button && this.saveState !== "expired") button.disabled = false;
     }
     startGuidePreview() {
       if (!this.guide || !this.flushContent()) return;
@@ -14213,76 +14681,6 @@ ${ISOLATION_CSS}`;
       if (remove) remove.disabled = !this.guide || this.guide.steps.length <= 1;
       this.syncPanel();
     }
-    bindDrag() {
-      var _a, _b;
-      const handle = (_a = this.root) == null ? void 0 : _a.querySelector("[data-drag-handle]");
-      const aside = (_b = this.root) == null ? void 0 : _b.querySelector("[data-editor-toolbar]");
-      if (!handle || !aside) return;
-      handle.addEventListener("pointerdown", (event) => {
-        var _a2;
-        if (event.target.closest("button")) return;
-        const rect = aside.getBoundingClientRect();
-        const startX = event.clientX;
-        const startY = event.clientY;
-        let frame = 0;
-        const move = (next) => {
-          cancelAnimationFrame(frame);
-          frame = requestAnimationFrame(() => {
-            aside.style.right = "auto";
-            aside.style.transform = "none";
-            aside.style.left = `${Math.max(4, Math.min(innerWidth - rect.width - 4, rect.left + next.clientX - startX))}px`;
-            aside.style.top = `${Math.max(4, Math.min(innerHeight - rect.height - 4, rect.top + next.clientY - startY))}px`;
-          });
-        };
-        const stop = () => {
-          cancelAnimationFrame(frame);
-          window.removeEventListener("pointermove", move);
-          window.removeEventListener("pointerup", stop);
-          window.removeEventListener("pointercancel", stop);
-          this.dragCleanup = null;
-        };
-        (_a2 = this.dragCleanup) == null ? void 0 : _a2.call(this);
-        this.dragCleanup = stop;
-        window.addEventListener("pointermove", move);
-        window.addEventListener("pointerup", stop);
-        window.addEventListener("pointercancel", stop);
-      });
-    }
-    bindStepBarDrag() {
-      var _a, _b;
-      const handle = (_a = this.root) == null ? void 0 : _a.querySelector("[data-step-drag-handle]");
-      const bar = (_b = this.root) == null ? void 0 : _b.querySelector("[data-guide]");
-      if (!handle || !bar) return;
-      handle.addEventListener("pointerdown", (event) => {
-        var _a2;
-        const rect = bar.getBoundingClientRect();
-        const startX = event.clientX;
-        const startY = event.clientY;
-        let frame = 0;
-        const move = (next) => {
-          cancelAnimationFrame(frame);
-          frame = requestAnimationFrame(() => {
-            bar.style.right = "auto";
-            bar.style.bottom = "auto";
-            bar.style.transform = "none";
-            bar.style.left = `${Math.max(4, Math.min(innerWidth - rect.width - 4, rect.left + next.clientX - startX))}px`;
-            bar.style.top = `${Math.max(4, Math.min(innerHeight - rect.height - 4, rect.top + next.clientY - startY))}px`;
-          });
-        };
-        const stop = () => {
-          cancelAnimationFrame(frame);
-          window.removeEventListener("pointermove", move);
-          window.removeEventListener("pointerup", stop);
-          window.removeEventListener("pointercancel", stop);
-          this.dragCleanup = null;
-        };
-        (_a2 = this.dragCleanup) == null ? void 0 : _a2.call(this);
-        this.dragCleanup = stop;
-        window.addEventListener("pointermove", move);
-        window.addEventListener("pointerup", stop);
-        window.addEventListener("pointercancel", stop);
-      });
-    }
     onSelect(selector2, update) {
       var _a, _b;
       (_b = (_a = this.root) == null ? void 0 : _a.querySelector(selector2)) == null ? void 0 : _b.addEventListener("change", (event) => {
@@ -14339,7 +14737,7 @@ ${ISOLATION_CSS}`;
       this.applyMode();
     }
     setMode(mode) {
-      var _a, _b, _c;
+      var _a, _b, _c, _d;
       if (mode === "design" && ((_a = this.draft) == null ? void 0 : _a.experience.builderMode) !== "onsite") return;
       if (this.mode === mode && (mode !== "target" || this.pickerIsSelecting())) return;
       if (!this.flushContent()) return;
@@ -14352,6 +14750,8 @@ ${ISOLATION_CSS}`;
       this.compositionEditor = null;
       this.compositionSelection = null;
       if (this.dirty) void this.persist();
+      if (mode === "preview" && this.mode !== "preview") this.previewReturnMode = this.mode;
+      (_d = this.dock) == null ? void 0 : _d.show(null);
       this.mode = mode;
       this.guidePreviewComplete = false;
       this.guidePreviewClickPending = false;
@@ -14386,8 +14786,10 @@ ${ISOLATION_CSS}`;
       });
     }
     startLayerPicker() {
+      var _a;
       if (this.mode === "navigate" || this.mode === "preview") this.mode = "target";
       const generation = ++this.selectionGeneration;
+      (_a = this.dock) == null ? void 0 : _a.show(null);
       this.picker.cancel();
       this.setText("[data-mode-hint]", "Select the page element this experience should appear above or below");
       void this.picker.pick().then((target) => {
@@ -14417,7 +14819,7 @@ ${ISOLATION_CSS}`;
       if (this.saveState !== "conflict" && this.saveState !== "failed") this.saveState = this.saveInFlight ? "saving" : "dirty";
       this.showSaveState();
       clearTimeout(this.saveTimer);
-      this.saveTimer = window.setTimeout(() => void this.persist(), 350);
+      this.saveTimer = this.saveState === "failed" || this.saveState === "conflict" ? 0 : window.setTimeout(() => void this.persist(), 350);
     }
     flushContent() {
       var _a, _b, _c;
@@ -14443,21 +14845,36 @@ ${ISOLATION_CSS}`;
         element.hidden = !errors.length;
         element.textContent = errors.join(" ");
       }
+      this.showSaveState();
     }
     showSaveState() {
-      var _a, _b, _c, _d;
-      const labels = { clean: "Draft saved", dirty: "Unsaved", saving: "Saving…", failed: "Save failed", conflict: "Conflict · reload required", expired: "Session expired · export unsaved edits" };
-      this.setText("[data-save-state]", labels[this.saveState]);
-      const save = (_a = this.root) == null ? void 0 : _a.querySelector("[data-save]");
-      if (save) save.disabled = !this.dirty || ["saving", "conflict", "expired"].includes(this.saveState);
+      var _a, _b, _c, _d, _e, _f, _g, _h;
+      const labels = { clean: "Draft saved", dirty: "Unsaved", saving: "Saving…", failed: "Save failed", conflict: "Draft conflict", expired: "Session expired" };
       const recovering = ["failed", "conflict", "expired"].includes(this.saveState);
-      const recovery = (_b = this.root) == null ? void 0 : _b.querySelector("[data-save-recovery]");
+      const invalid = (_a = this.root) == null ? void 0 : _a.querySelector("[data-content-error]:not([hidden])");
+      const state = (_b = this.root) == null ? void 0 : _b.querySelector("[data-dock-save-state]");
+      const label = recovering ? labels[this.saveState] : invalid ? "Review changes" : this.reconnecting && this.saveState === "clean" ? "Reconnecting…" : labels[this.saveState];
+      if (state) {
+        state.classList.add("dock-status");
+        state.dataset.tone = recovering ? "error" : invalid || this.saveState === "dirty" ? "warn" : this.saveState === "saving" || this.reconnecting ? "busy" : "ok";
+        state.title = label;
+        state.setAttribute("aria-label", `Draft status · ${label}`);
+      }
+      const previous = (_c = this.root) == null ? void 0 : _c.querySelector("[data-save-state]");
+      if (previous && previous.textContent !== label) {
+        previous.textContent = label;
+        (_d = previous.animate) == null ? void 0 : _d.call(previous, [{ opacity: 0.5 }, { opacity: 1 }], { duration: matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 200 });
+      }
+      const save = (_e = this.root) == null ? void 0 : _e.querySelector("[data-save]");
+      if (save) save.disabled = !this.dirty || recovering && this.saveState !== "failed" || this.saveState === "saving" || Boolean(this.aiPreviewReturnMode);
+      const recovery = (_f = this.root) == null ? void 0 : _f.querySelector("[data-save-recovery]");
       if (recovery) recovery.hidden = !recovering;
-      const retry = (_c = this.root) == null ? void 0 : _c.querySelector("[data-retry-save]");
+      const retry = (_g = this.root) == null ? void 0 : _g.querySelector("[data-retry-save]");
       if (retry) retry.hidden = this.saveState !== "failed";
-      const reload = (_d = this.root) == null ? void 0 : _d.querySelector("[data-reload-draft]");
+      const reload = (_h = this.root) == null ? void 0 : _h.querySelector("[data-reload-draft]");
       if (reload) reload.hidden = !["conflict", "expired"].includes(this.saveState);
       this.setText("[data-recovery-message]", "Local edits remain in memory in this tab. Export before reloading or leaving.");
+      this.setText("[data-connection-status]", this.saveState === "expired" ? "Reconnect from the dashboard to continue authoring." : this.saveState === "failed" ? "Retry to reconnect and save your edits." : this.reconnecting ? "Trying to reconnect to the editor service." : "Editor connected");
     }
     captureRecovery() {
       var _a, _b, _c, _d, _e, _f;
@@ -14482,7 +14899,7 @@ ${ISOLATION_CSS}`;
         output.dataset.recoveryExport = "";
         output.setAttribute("aria-label", "Unsaved draft JSON; copy and save before leaving");
         output.readOnly = true;
-        (_c = this.root.querySelector("main")) == null ? void 0 : _c.append(output);
+        (_c = this.root.querySelector("[data-status-content]")) == null ? void 0 : _c.append(output);
       }
       if (output) {
         output.value = this.recoveryDraft;
@@ -14518,7 +14935,7 @@ ${ISOLATION_CSS}`;
       this.session = null;
       clearEditorContinuation();
       (_j = this.root) == null ? void 0 : _j.querySelectorAll("button,input,select").forEach((control) => {
-        if (!control.matches("[data-export-draft],[data-discard-draft],[data-reload-draft],[data-minimize],[data-close]")) control.disabled = true;
+        if (!control.matches("[data-export-draft],[data-discard-draft],[data-reload-draft],[data-dock-save-state],[data-dismiss-popup],[data-close]")) control.disabled = true;
       });
       this.showSaveState();
     }
@@ -14527,7 +14944,7 @@ ${ISOLATION_CSS}`;
       clearTimeout(this.saveTimer);
       this.saveTimer = 0;
       if (!this.flushContent()) return false;
-      if (this.saveState === "conflict" || this.saveState === "expired") return false;
+      if (this.saveState === "conflict" || this.saveState === "expired" || this.aiPreviewReturnMode) return false;
       if (this.saveInFlight) {
         const saved2 = await this.saveInFlight;
         return saved2 && this.dirty ? this.persist() : saved2;
@@ -14556,6 +14973,8 @@ ${ISOLATION_CSS}`;
         if (lifecycle !== this.lifecycle) return false;
         this.dirty = true;
         this.captureRecovery();
+        clearTimeout(this.saveTimer);
+        this.saveTimer = 0;
         if (error instanceof EditorSessionExpiredError) {
           this.expireSession();
           return false;
@@ -14572,9 +14991,10 @@ ${ISOLATION_CSS}`;
       return saved;
     }
     async close() {
+      if (this.aiPreviewReturnMode) this.discardAiPreview();
       if (!this.flushContent()) return;
       if ((this.dirty || this.saveInFlight) && !await this.persist()) return;
-      this.destroy();
+      this.teardown(true, false, true);
     }
     renderPreview() {
       var _a, _b, _c, _d, _e, _f;
@@ -14725,12 +15145,7 @@ ${ISOLATION_CSS}`;
           onValidation: (errors) => this.showValidation(errors),
           onImageStatus: (message) => this.setText("[data-image-status]", message),
           onSelectionChange: (selection) => {
-            var _a2, _b2, _c2, _d;
             this.history.endGroup();
-            if (this.checklist && selection.kind !== "step") {
-              (_b2 = (_a2 = this.root) == null ? void 0 : _a2.querySelector("aside")) == null ? void 0 : _b2.classList.remove("minimized");
-              (_d = (_c2 = this.root) == null ? void 0 : _c2.querySelector("[data-minimize]")) == null ? void 0 : _d.setAttribute("aria-expanded", "true");
-            }
             this.compositionSelection = selection;
             this.recordHistory();
             this.syncCompositionInspector();
@@ -14931,24 +15346,10 @@ ${ISOLATION_CSS}`;
       if (globalUndo) globalUndo.disabled = !editor.canUndo();
       if (globalRedo) globalRedo.disabled = !editor.canRedo();
     }
-    setInspectorTab(tab) {
-      var _a;
-      if (!this.root || tab === "ai" && ((_a = this.draft) == null ? void 0 : _a.experience.builderMode) !== "onsite") return;
-      const main = this.root.querySelector("main");
-      main == null ? void 0 : main.classList.toggle("ai-mode", tab === "ai");
-      this.root.querySelectorAll("[data-inspector-tab]").forEach((button) => {
-        const active = button.dataset.inspectorTab === tab;
-        button.classList.toggle("active", active);
-        button.setAttribute("aria-pressed", String(active));
-      });
-      const panel = this.root.querySelector("[data-ai-panel]");
-      if (panel) panel.hidden = tab !== "ai";
-      if (tab === "ai") this.syncAiPanel();
-      this.fitPanel();
-    }
     syncAiPanel() {
       var _a, _b;
       if (!this.root) return;
+      this.syncDock();
       const selection = this.compositionSelection;
       this.setText("[data-ai-context]", this.guide ? `Guide · step ${this.stepIndex + 1} of ${this.guide.steps.length}${selection ? ` · ${selection.label}` : ""}` : this.survey ? `Survey · step ${this.stepIndex + 1} of ${this.survey.steps.length}${selection ? ` · ${selection.label}` : ""}` : this.checklist ? `Checklist · ${((_a = this.checklistEditor) == null ? void 0 : _a.getView()) ?? "expanded"}${selection ? ` · ${selection.label}` : ""}` : selection ? `Editing ${selection.label} · ${selection.kind}` : "Choose an element or ask about the whole widget.");
       const history2 = this.root.querySelector("[data-ai-history]");
@@ -15124,18 +15525,21 @@ ${ISOLATION_CSS}`;
       this.syncAiPanel();
     }
     async sendAiPrompt() {
-      var _a, _b, _c, _d;
+      var _a, _b, _c, _d, _e, _f, _g, _h;
       const input2 = (_a = this.root) == null ? void 0 : _a.querySelector("[data-ai-prompt]");
       const prompt = input2 == null ? void 0 : input2.value.trim();
       const builder = this.currentBuilder(), sourceMode = isSourceAuthored(builder);
       if (!prompt || this.aiAbort || !this.bridge || !this.draft || !builder || !this.compositionSelection || !this.compositionEditor && !sourceMode || !this.flushContent()) return;
+      this.aiRetryPrompt = prompt;
+      (_c = (_b = this.root) == null ? void 0 : _b.querySelector("[data-ai-retry]")) == null ? void 0 : _c.setAttribute("hidden", "");
       const generation = ++this.aiRequestGeneration;
       const abort = new AbortController();
       this.aiAbort = abort;
+      this.syncDock();
       const messageId = `ai_${++this.aiMessageSequence}`;
-      const send = (_b = this.root) == null ? void 0 : _b.querySelector("[data-ai-send]");
+      const send = (_d = this.root) == null ? void 0 : _d.querySelector("[data-ai-send]");
       if (send) send.disabled = true;
-      const cancel = (_c = this.root) == null ? void 0 : _c.querySelector("[data-ai-cancel]");
+      const cancel = (_e = this.root) == null ? void 0 : _e.querySelector("[data-ai-cancel]");
       if (cancel) cancel.hidden = false;
       this.aiMessages.push({ id: `user_${++this.aiMessageSequence}`, role: "user", text: prompt }, { id: messageId, role: "assistant", text: "Preparing your request...", progress: { startedAt: Date.now(), current: "Preparing your request.", finished: false, items: [{ key: "preparing", label: "Preparing your request.", detail: this.dirty || this.saveInFlight ? "Saving the current draft before generation starts." : "Building verified editor context locally.", status: "active" }] } });
       if (input2) input2.value = "";
@@ -15152,7 +15556,7 @@ ${ISOLATION_CSS}`;
         this.setText("[data-ai-status]", "");
         const document2 = onsiteDocumentFromBuilder(builder);
         if (!document2) throw new Error("This draft has no recoverable on-site document.");
-        const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.themeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : this.survey ? surveyAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, definition: this.definition, currentStepId: this.survey.steps[this.stepIndex].id, selection: this.compositionSelection, scope: this.compositionSelection.kind === "step" ? "survey" : "step" }) : this.checklist ? checklistAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, checklist: this.checklist, references: this.draft.references ?? { guides: [], segments: [] }, selection: this.compositionSelection, currentView: ((_d = this.checklistEditor) == null ? void 0 : _d.getView()) ?? "expanded", theme: resolvedTheme(this.themeState()) }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: document2, builder });
+        const context = this.guide ? guideAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, guide: this.guide, currentStepId: this.guide.steps[this.stepIndex].id, selection: this.compositionSelection, theme: resolvedTheme(this.themeState()), scope: this.compositionSelection.kind === "step" ? "guide" : "step" }) : this.survey ? surveyAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, definition: this.definition, currentStepId: this.survey.steps[this.stepIndex].id, selection: this.compositionSelection, scope: this.compositionSelection.kind === "step" ? "survey" : "step" }) : this.checklist ? checklistAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, builderMode: "onsite" }, revision: this.draft.version.revision, checklist: this.checklist, references: this.draft.references ?? { guides: [], segments: [] }, selection: this.compositionSelection, currentView: ((_f = this.checklistEditor) == null ? void 0 : _f.getView()) ?? "expanded", theme: resolvedTheme(this.themeState()) }) : editorAiContext({ experience: { id: this.draft.experience.id, name: this.draft.experience.name, widgetType: this.draft.experience.widgetType ?? null, builderMode: "onsite" }, selection: this.compositionSelection, document: document2, builder });
         const requestEditGeneration = this.editGeneration, requestSelectionKey = this.aiSelectionKey();
         const response = await this.bridge.chat({ conversationId: this.aiConversationId, prompt, revision: this.draft.version.revision, context }, abort.signal, (event) => {
           if (generation === this.aiRequestGeneration && !abort.signal.aborted) this.updateAiProgress(messageId, event);
@@ -15171,6 +15575,7 @@ ${ISOLATION_CSS}`;
           const detail = error instanceof Error ? error.message : "Geo could not complete this request.";
           if (message) message.text = detail;
           this.finishAiProgress(messageId, "error", detail);
+          (_h = (_g = this.root) == null ? void 0 : _g.querySelector("[data-ai-retry]")) == null ? void 0 : _h.removeAttribute("hidden");
           if (error instanceof DraftConflictError) this.saveState = "conflict";
           if (error instanceof EditorAiRequestError && error.conversationId) this.aiConversationId = error.conversationId;
           this.setText("[data-ai-status]", detail);
@@ -15181,6 +15586,7 @@ ${ISOLATION_CSS}`;
           clearInterval(this.aiProgressTimer);
           this.aiProgressTimer = 0;
           this.aiAbort = null;
+          this.syncDock();
           if (send) send.disabled = false;
           if (cancel) cancel.hidden = true;
         }
@@ -15191,6 +15597,7 @@ ${ISOLATION_CSS}`;
       if (!this.aiAbort) return;
       this.aiAbort.abort();
       this.aiAbort = null;
+      this.syncDock();
       this.aiRequestGeneration++;
       clearInterval(this.aiProgressTimer);
       this.aiProgressTimer = 0;
@@ -15304,7 +15711,7 @@ ${ISOLATION_CSS}`;
       }
     }
     resolveAiGuideTarget() {
-      var _a;
+      var _a, _b;
       if (!this.aiProposal || !this.guide) return;
       this.discardAiPreview();
       const operationIndex = this.aiProposal.value.operations.findIndex((operation2, index2) => operation2.type === "request_guide_target" && !this.aiResolvedTargets.has(index2));
@@ -15312,17 +15719,20 @@ ${ISOLATION_CSS}`;
       if (!operation || operation.type !== "request_guide_target") return;
       const index = this.guide.steps.findIndex((step) => step.id === operation.stepId);
       if (index < 0 || !this.flushContent()) return;
+      (_a = this.dock) == null ? void 0 : _a.show(null);
       this.stepIndex = index;
       const generation = ++this.selectionGeneration;
       this.picker.cancel();
-      (_a = this.compositionEditor) == null ? void 0 : _a.destroy();
+      (_b = this.compositionEditor) == null ? void 0 : _b.destroy();
       this.compositionEditor = null;
       this.compositionSelection = null;
       this.preview.destroy();
       this.previewRendered = false;
       this.setText("[data-ai-status]", `Select the website element for this step's ${operation.targetKind === "position" ? "position" : "advance trigger"}. Escape cancels.`);
       void this.picker.pick().then((target) => {
-        if (generation !== this.selectionGeneration || !target) {
+        var _a2;
+        if (generation !== this.selectionGeneration) return;
+        if (!target) {
           this.renderPreview();
           this.syncPanel();
           return;
@@ -15331,6 +15741,7 @@ ${ISOLATION_CSS}`;
         this.renderPreview();
         this.syncPanel();
         this.syncAiPanel();
+        (_a2 = this.dock) == null ? void 0 : _a2.show("geo");
       });
     }
     previewAiGuideProposal() {
@@ -15563,14 +15974,42 @@ ${ISOLATION_CSS}`;
         this.restoringHistory = false;
       }
     }
+    syncDock() {
+      var _a, _b, _c, _d, _e, _f;
+      const root2 = this.root;
+      if (!root2) return;
+      const preview = this.mode === "preview";
+      const frame = root2.querySelector("[data-editor-dock]");
+      (_a = this.dock) == null ? void 0 : _a.setMode(this.mode);
+      root2.querySelectorAll("[data-design-controls],[data-session-actions]").forEach((group) => group.hidden = preview);
+      (_b = root2.querySelector("[data-preview-dock]")) == null ? void 0 : _b.toggleAttribute("hidden", !preview);
+      (_c = root2.querySelector("[data-preview-geo]")) == null ? void 0 : _c.toggleAttribute("hidden", !this.aiPreviewReturnMode);
+      frame == null ? void 0 : frame.toggleAttribute("data-geo-thinking", Boolean(this.aiAbort));
+      (_d = root2.querySelector("[data-geo]")) == null ? void 0 : _d.toggleAttribute("data-proposal-ready", Boolean(this.aiProposal));
+      if (this.checklist) {
+        const tools = root2.querySelector("[data-checklist-tools]");
+        const target = root2.querySelector(preview ? "[data-preview-checklist]" : "[data-checklist-settings]");
+        if (tools && target && tools.parentElement !== target) target.append(tools);
+      }
+      root2.querySelectorAll("[data-mode]").forEach((button) => {
+        const active = button.dataset.mode === this.mode;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", String(active));
+      });
+      const steps = ((_e = this.guide) == null ? void 0 : _e.steps) ?? ((_f = this.survey) == null ? void 0 : _f.steps);
+      root2.querySelectorAll("[data-dock-step]").forEach((button) => {
+        const index = this.stepIndex + Number(button.dataset.dockStep);
+        button.disabled = !steps || index < 0 || index >= steps.length;
+      });
+      const targetButton = root2.querySelector("[data-mode=target]");
+      if (targetButton) targetButton.hidden = !this.isTargetedType() && this.mode !== "target";
+      this.showSaveState();
+    }
     syncPanel() {
       var _a, _b;
       if (!this.root || !this.definition || !this.draft) return;
       this.syncGuideBehavior();
-      const reset = this.root.querySelector("[data-reset-preview]");
-      if (reset) reset.hidden = this.mode !== "preview";
-      const limit = this.root.querySelector("[data-preview-limit]");
-      if (limit) limit.hidden = this.mode !== "preview";
+      this.syncDock();
       const behavior = this.currentBehavior();
       const widgetType = this.draft.experience.widgetType;
       const guidePattern = this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : null;
@@ -15578,15 +16017,14 @@ ${ISOLATION_CSS}`;
       this.root.querySelectorAll("[data-for]").forEach((group) => {
         group.hidden = !activeGroups.has(group.dataset.for);
       });
-      if (this.mode !== "design") this.root.querySelectorAll("[data-step-only]").forEach((group) => {
-        group.hidden = this.mode !== "target" || group.dataset.for !== "target" || !activeGroups.has("target");
+      this.root.querySelectorAll("[data-step-only]").forEach((group) => {
+        group.hidden = this.mode !== "design" && (this.mode !== "target" || group.dataset.for !== "target" || !activeGroups.has("target"));
       });
       const placementSection = this.root.querySelector("[data-placement-section]");
-      if (placementSection) placementSection.hidden = Boolean(this.guide && guidePattern === "modal");
+      if (placementSection) placementSection.hidden = this.mode !== "design" || Boolean(this.guide && guidePattern === "modal");
       const closeButtonSection = this.root.querySelector("[data-close-button-section]");
       if (closeButtonSection) closeButtonSection.hidden = Boolean(this.guide || !widgetType || !behavior.dismissible || this.mode !== "design" && this.mode !== "preview");
       this.root.querySelector("[data-step-summary]").hidden = !this.guide;
-      this.root.querySelectorAll("[data-mode]").forEach((button) => button.classList.toggle("active", button.dataset.mode === this.mode));
       this.root.querySelectorAll("[data-placement]").forEach((button) => button.classList.toggle("active", button.dataset.placement === (behavior.placement ?? "auto")));
       const layer = this.currentLayer();
       const layerMode = (layer == null ? void 0 : layer.mode) ?? "always_on_top";
@@ -15784,14 +16222,24 @@ ${ISOLATION_CSS}`;
     updateContinuation() {
       var _a, _b, _c, _d;
       if (!this.session || !this.draft || this.saveState === "expired") return;
+      const destination = this.guidePreviewDestination;
+      const returnMode = this.mode === "preview" ? this.previewReturnMode : this.mode;
+      const starting = destination && this.guide && {
+        versionId: this.draft.version.id,
+        entryPath: destination.pathname + destination.search + destination.hash,
+        completed: false,
+        starting: true,
+        returnMode
+      };
       storeEditorContinuation({
         session: this.session,
         editorState: {
           experienceId: this.draft.experience.id,
-          selectedStepId: ((_b = (_a = this.guide) == null ? void 0 : _a.steps[this.stepIndex]) == null ? void 0 : _b.id) ?? ((_d = (_c = this.survey) == null ? void 0 : _c.steps[this.stepIndex]) == null ? void 0 : _d.id),
-          mode: this.mode,
-          ...this.mode === "preview" && this.guide && !this.aiPreviewOriginal ? {
-            guidePreview: { versionId: this.draft.version.id, entryPath: this.guidePreviewEntryPath, completed: this.guidePreviewComplete, ...this.guidePreviewClickPending ? { clickPending: true } : {} }
+          selectedStepId: ((_b = (_a = this.guide) == null ? void 0 : _a.steps[starting ? 0 : this.stepIndex]) == null ? void 0 : _b.id) ?? ((_d = (_c = this.survey) == null ? void 0 : _c.steps[this.stepIndex]) == null ? void 0 : _d.id),
+          mode: starting ? "preview" : this.mode,
+          ...this.guideLaunchPath ? { guideLaunchPath: this.guideLaunchPath } : {},
+          ...starting ? { guidePreview: starting } : this.mode === "preview" && this.guide && !this.aiPreviewOriginal ? {
+            guidePreview: { versionId: this.draft.version.id, entryPath: this.guidePreviewEntryPath, completed: this.guidePreviewComplete, returnMode, ...this.guidePreviewClickPending ? { clickPending: true } : {} }
           } : {}
         }
       });
@@ -15819,9 +16267,9 @@ ${ISOLATION_CSS}`;
     destroy() {
       this.teardown(true);
     }
-    teardown(clearContinuation) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m;
-      (_a = this.capture) == null ? void 0 : _a.destroy();
+    teardown(clearContinuation, keepDock = false, animate = false) {
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+      (_a = this.capture) == null ? void 0 : _a.destroy(true);
       this.capture = null;
       this.lifecycle++;
       this.cancelAiRequest();
@@ -15849,34 +16297,32 @@ ${ISOLATION_CSS}`;
       this.routeUnsubscribe = null;
       this.routeObserver.stop();
       window.removeEventListener("pagehide", this.persistBeforePageLeave);
+      window.removeEventListener("pageshow", this.restoreAfterBackNavigation);
       document.removeEventListener("click", this.protectPreviewNavigation, true);
       document.removeEventListener("submit", this.protectPreviewSubmission, true);
       window.removeEventListener("beforeunload", this.protectUnsavedChanges);
-      window.removeEventListener("resize", this.fitPanel);
-      (_c = window.visualViewport) == null ? void 0 : _c.removeEventListener("resize", this.fitPanel);
-      (_d = window.visualViewport) == null ? void 0 : _d.removeEventListener("scroll", this.fitPanel);
-      (_e = this.mutationObserver) == null ? void 0 : _e.disconnect();
+      (_c = this.mutationObserver) == null ? void 0 : _c.disconnect();
       this.mutationObserver = null;
-      (_f = this.dragCleanup) == null ? void 0 : _f.call(this);
-      this.dragCleanup = null;
-      (_g = this.contentEditor) == null ? void 0 : _g.flush();
-      (_h = this.compositionEditor) == null ? void 0 : _h.flush();
+      (_d = this.contentEditor) == null ? void 0 : _d.flush();
+      (_e = this.compositionEditor) == null ? void 0 : _e.flush();
       this.previewGeneration++;
       this.preview.destroy();
-      (_i = this.contentEditor) == null ? void 0 : _i.destroy();
+      (_f = this.contentEditor) == null ? void 0 : _f.destroy();
       this.contentEditor = null;
       this.componentSelection = null;
-      (_j = this.compositionEditor) == null ? void 0 : _j.destroy();
+      (_g = this.compositionEditor) == null ? void 0 : _g.destroy();
       this.compositionEditor = null;
       this.compositionSelection = null;
       this.picker.cancel();
-      (_k = this.host) == null ? void 0 : _k.remove();
-      (_l = this.surveyEditor) == null ? void 0 : _l.destroy();
+      if (!keepDock) {
+        (_h = this.dock) == null ? void 0 : _h.destroy(animate);
+        this.dock = null;
+      }
+      (_i = this.surveyEditor) == null ? void 0 : _i.destroy();
       this.surveyEditor = null;
-      (_m = this.checklistEditor) == null ? void 0 : _m.destroy();
+      (_j = this.checklistEditor) == null ? void 0 : _j.destroy();
       this.checklistEditor = null;
       this.checklist = null;
-      this.host = null;
       this.root = null;
       this.bridge = null;
       this.session = null;
@@ -15884,6 +16330,11 @@ ${ISOLATION_CSS}`;
       this.definition = null;
       this.guide = null;
       this.survey = null;
+      this.previewReturnMode = "design";
+      this.aiRetryPrompt = "";
+      this.reconnecting = false;
+      this.guideLaunchPath = void 0;
+      this.clearGuidePreviewNavigation();
       this.saveState = "clean";
       this.editGeneration = 0;
       this.recoveryDraft = null;
@@ -15912,6 +16363,19 @@ ${ISOLATION_CSS}`;
   }
   function currentPagePath() {
     return `${location.pathname}${location.search}${location.hash}`;
+  }
+  function sameOriginGuidePage(path) {
+    if (!(path == null ? void 0 : path.startsWith("/")) || path.startsWith("//") || /[\\\u0000-\u001f\u007f]/.test(path)) return null;
+    try {
+      const url = new URL(path, location.origin);
+      if (url.origin !== location.origin) return null;
+      for (const name of ["movcues_editor_token", "movcues_editor_step"]) {
+        if (url.searchParams.has(name)) url.searchParams.delete(name);
+      }
+      return url;
+    } catch {
+      return null;
+    }
   }
   function formatAiElapsed(milliseconds) {
     const seconds = Math.max(0, Math.floor(milliseconds / 1e3));
@@ -15945,21 +16409,44 @@ ${ISOLATION_CSS}`;
     return span.innerHTML;
   }
   const BASE_STYLE = `
-:host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:min(326px,calc(100vw - 8px));max-height:calc(100dvh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}aside.left-side{left:12px;right:auto}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100dvh - 82px);overflow:auto}.minimized{width:min(260px,calc(100vw - 8px))}.minimized main{display:none}.modebar{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button,.formatbar button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{min-width:0;padding:7px 3px}.modebar button:disabled{cursor:not-allowed;opacity:.42}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-navigator{position:fixed;left:50%;bottom:10px;width:min(680px,calc(100vw - 16px));transform:translateX(-50%);z-index:2147483647;border:1px solid #d7dce3;border-radius:10px;background:#fff;box-shadow:0 10px 32px rgba(15,23,42,.18)}.step-flow{display:flex;align-items:stretch;gap:4px;overflow:auto}.step{display:grid;grid-template-columns:auto minmax(54px,1fr) auto;align-items:center;gap:4px;flex:none;max-width:130px;padding:5px 7px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step small{overflow:hidden;font:10px/1.2 inherit;text-overflow:ellipsis;white-space:nowrap}.step i{font-style:normal}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.secondary-button.compact{padding:5px 7px}.content-heading,.history-row,.link-row,.save-recovery{display:flex;align-items:center;justify-content:space-between;gap:6px}.content-heading>div{min-width:0}.formatbar{display:flex;flex-wrap:wrap;gap:4px}.formatbar button{padding:5px 7px}.link-row input{min-width:0}.history-row{justify-content:flex-start;flex-wrap:wrap}.save-recovery{flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid #fee2e2;background:#fff7ed;color:#9a3412;font-size:11px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #2563eb;outline-offset:2px}textarea[data-recovery-export]{box-sizing:border-box;width:100%;height:180px;font:11px monospace}[hidden]{display:none!important}@media(max-width:480px){.step-navigator{position:static;width:auto;transform:none;box-shadow:none}}@media(max-width:420px){aside{right:4px;top:4px;max-height:calc(100dvh - 8px)}aside.left-side{left:4px}main{max-height:calc(100dvh - 66px)}header{padding:9px}.section{padding:8px 10px}.modebar{padding:6px}.modebar button{font-size:10px}}
+:host{all:initial}*{box-sizing:border-box}.secondary-button,.placement-grid button,.formatbar button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-flow{display:grid;gap:4px}.step{display:grid;grid-template-columns:auto minmax(54px,1fr) auto;align-items:center;gap:4px;flex:none;max-width:130px;padding:5px 7px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step small{overflow:hidden;font:10px/1.2 inherit;text-overflow:ellipsis;white-space:nowrap}.step i{font-style:normal}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.secondary-button.compact{padding:5px 7px}.content-heading,.history-row,.link-row,.save-recovery{display:flex;align-items:center;justify-content:space-between;gap:6px}.content-heading>div{min-width:0}.formatbar{display:flex;flex-wrap:wrap;gap:4px}.formatbar button{padding:5px 7px}.link-row input{min-width:0}.history-row{justify-content:flex-start;flex-wrap:wrap}.save-recovery{flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid #fee2e2;background:#fff7ed;color:#9a3412;font-size:11px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #2563eb;outline-offset:2px}textarea[data-recovery-export]{box-sizing:border-box;width:100%;height:180px;font:11px monospace}[hidden]{display:none!important}
 `;
   const STYLE = `${BASE_STYLE}
-.editor-toolbar{position:fixed;left:50%;transform:translateX(-50%);top:12px;width:min(410px,calc(100vw - 8px));z-index:2147483647;border:1px solid #d7dce3;border-radius:10px;background:#fff;color:#111827;box-shadow:0 8px 24px rgba(15,23,42,.16);font:12px/1.3 ui-sans-serif,system-ui,sans-serif;overflow:hidden}
-.editor-toolbar header{padding:7px 8px;gap:4px;align-items:center}.header-copy>span{display:none}.header-copy strong{font-size:11px}.header-copy small{margin-top:1px;font-size:10px}.header-actions{flex-wrap:wrap;justify-content:flex-end;gap:1px}.header-actions button{width:25px;height:28px;font-size:14px}.header-actions [data-save]{width:38px;font-size:11px}.header-actions button:disabled{opacity:.4;cursor:default}
-.editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-drag-handle{flex:none;padding:2px 1px;color:#94a3b8;font-size:16px;line-height:1;cursor:move;touch-action:none;user-select:none}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .step-bar-actions{display:flex;flex:none;align-items:center;gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .step-bar-action{width:24px;height:24px;padding:0;font-size:15px;line-height:1}.step-navigator .step-bar-action svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.step-navigator .step-bar-delete{border-color:#fecaca;background:#fff1f2;color:#dc2626}.step-navigator .step-bar-delete:hover{border-color:#fca5a5;background:#fee2e2;color:#b91c1c}.step-navigator .step-bar-action:disabled{cursor:not-allowed;opacity:.4}
-.inspector-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.inspector-tabs button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#475569;padding:6px;font:600 11px inherit;cursor:pointer}.inspector-tabs button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.inspector-tabs button:disabled{opacity:.4;cursor:not-allowed}main.ai-mode>:not(.inspector-tabs):not(.ai-panel){display:none!important}.ai-panel{min-height:min(580px,calc(100dvh - 130px));display:flex;flex-direction:column;gap:10px;background:#fcfcfd}.ai-panel .content-heading{flex:none}.ai-panel .muted{margin:0}.ai-chat-history{display:grid;align-content:start;gap:8px;flex:1;min-height:260px;overflow:auto;padding:2px}.ai-chat-message{display:grid;gap:3px;max-width:92%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#334155}.ai-chat-message--user{justify-self:end;border-color:#dbeafe;background:#eff6ff;color:#1e3a8a}.ai-chat-message__role{font-size:10px;font-weight:700;color:#64748b}.ai-chat-message--user .ai-chat-message__role{color:#2563eb}.ai-chat-message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45}.ai-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:7px;padding-top:8px;border-top:1px solid #eef0f3}.ai-panel textarea{min-height:72px;width:100%;resize:vertical;padding:8px;border:1px solid #d7dce3;border-radius:8px;font:12px/1.4 inherit}.ai-composer button{padding:8px 10px}.ai-status{min-height:16px;margin:0;white-space:pre-wrap;color:#64748b;font-size:11px}.ai-proposal{display:grid;gap:6px;padding:8px;border:1px solid #bfdbfe;border-radius:8px;background:#f8fbff}.ai-proposal ul{margin:0;padding-left:18px;color:#475569;font-size:11px}
+
+main{overscroll-behavior:contain}
+.settings-disclosure>summary,.live>summary{cursor:pointer;font-size:12px;font-weight:650;color:#334764}
+.settings-disclosure[open]>div,.settings-disclosure[open]>dl,.live[open]>div{margin-top:7px}
+.step-navigator,.dock-session{display:grid;gap:8px}
+.step-flow .step{max-width:none;min-height:32px;text-align:start;background:#f6f8fc;padding:6px 8px}
+.step-flow .step.active{background:#eaf1ff}
+.step-flow .step small{font-size:12px}
+.step-bar-actions{display:flex;flex-wrap:wrap;gap:4px;border-top:1px solid #e3eaf5;padding-top:8px}
+.step-bar-action{width:32px;height:29px;padding:0!important}
+.step-bar-action svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.7}
+.step-bar-delete{color:#b42342}
+.secondary-button:hover:not(:disabled),.step-bar-action:hover:not(:disabled){background:#eff5ff;color:#2455ba}
+.dock-bar [data-geo]{color:#224fac;font-weight:750}
+.dock-bar [data-proposal-ready]::after{content:"";width:6px;height:6px;border-radius:50%;background:#2c68da}
+[data-guide-preview]{min-width:0;flex-wrap:wrap}
+[data-status-content] .save-recovery{border-radius:8px}
+[data-status-content] .hint{padding:0 0 8px}
+[data-dock-popup=settings]{max-height:min(340px,41dvh,calc(var(--dock-height,100dvh) - 100% - 46px))}
+.preview-consent{display:grid;gap:9px;color:#334764}
+.preview-consent p{margin:0}
+.preview-consent code{background:#f1f5fb;border-radius:7px;padding:6px 8px;overflow-wrap:anywhere}
+.preview-consent .hint{padding:0}
+.preview-consent-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:6px}
+.preview-consent-actions [data-preview-confirm]{background:#2458d3;color:#fff;border-color:#2458d3}
+.preview-consent-actions [data-preview-confirm]:hover:not(:disabled){background:#1948ba;color:#fff}
+.preview-consent-actions [data-preview-confirm]:disabled{opacity:.55;cursor:wait}
+@media(max-width:550px){[data-dock-popup=settings]{max-height:min(250px,36dvh,calc(var(--dock-height,100dvh) - 100% - 30px))}}
+.ai-panel{min-height:0;display:flex;flex-direction:column;gap:10px;background:#fcfcfd}.ai-panel .content-heading{flex:none}.ai-panel .muted{margin:0}.ai-chat-history{display:grid;align-content:start;gap:8px;flex:1;min-height:260px;overflow:auto;padding:2px}.ai-chat-message{display:grid;gap:3px;max-width:92%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#334155}.ai-chat-message--user{justify-self:end;border-color:#dbeafe;background:#eff6ff;color:#1e3a8a}.ai-chat-message__role{font-size:10px;font-weight:700;color:#64748b}.ai-chat-message--user .ai-chat-message__role{color:#2563eb}.ai-chat-message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45}.ai-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:7px;padding-top:8px;border-top:1px solid #eef0f3}.ai-panel textarea{min-height:72px;width:100%;resize:vertical;padding:8px;border:1px solid #d7dce3;border-radius:8px;font:12px/1.4 inherit}.ai-composer button{padding:8px 10px}.ai-status{min-height:16px;margin:0;white-space:pre-wrap;color:#64748b;font-size:11px}.ai-proposal{display:grid;gap:6px;padding:8px;border:1px solid #bfdbfe;border-radius:8px;background:#f8fbff}.ai-proposal ul{margin:0;padding-left:18px;color:#475569;font-size:11px}
 .ai-composer{grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:7px;border:1px solid #d9e1ec;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgb(15 23 42 / .04);transition:border-color .16s ease,box-shadow .16s ease}.ai-composer:focus-within{border-color:#93c5fd;box-shadow:0 0 0 3px rgb(59 130 246 / .12)}.ai-composer textarea{min-height:54px;padding:5px 3px;border:0;border-radius:0;background:transparent;outline:0;box-shadow:none;line-height:1.45}.ai-composer textarea:focus{outline:0}.ai-composer textarea::placeholder{color:#94a3b8}.ai-composer button{min-width:58px;min-height:34px;margin-bottom:2px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;box-shadow:0 1px 2px rgb(37 99 235 / .25);transition:background .16s ease,transform .16s ease,box-shadow .16s ease}.ai-composer button:hover:not(:disabled){background:#1d4ed8;box-shadow:0 4px 10px rgb(37 99 235 / .24);transform:translateY(-1px)}.ai-composer button:active:not(:disabled){transform:translateY(0);box-shadow:none}.ai-composer button:disabled{opacity:.5;cursor:not-allowed}
 .ai-chat-message [data-ai-progress]{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;padding-top:5px;border-top:1px solid #eef2f7;color:#64748b;font-size:10px}.ai-progress-current{font-weight:700;color:#475569}.ai-progress-elapsed{font-variant-numeric:tabular-nums}.ai-chat-message [data-ai-progress] details{grid-column:1/-1}.ai-chat-message [data-ai-progress] summary{cursor:pointer;color:#2563eb;font-weight:600}.ai-chat-message [data-ai-progress] ol{display:grid;gap:5px;margin:6px 0 0;padding-left:18px}.ai-chat-message [data-ai-progress] li{color:#94a3b8}.ai-chat-message [data-ai-progress] li[data-status=active]{color:#1d4ed8}.ai-chat-message [data-ai-progress] li[data-status=error],.ai-chat-message [data-ai-progress] li[data-status=cancelled]{color:#b91c1c}.ai-chat-message [data-ai-progress] li strong,.ai-chat-message [data-ai-progress] li span{display:block}.ai-chat-message [data-ai-progress] li span{margin-top:1px;font-weight:400;color:#64748b}@media(prefers-reduced-motion:reduce){.ai-composer,.ai-composer button{transition:none!important}}
 .step-navigator .step-bar-action{transition:border-color .16s ease,background .16s ease,color .16s ease,transform .16s ease}.step-navigator .step-bar-action:hover:not(:disabled){border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8;transform:translateY(-1px)}.step-navigator .step-bar-delete:hover:not(:disabled){color:#b91c1c}
 [data-composition-inspector]>.history-row{display:none}
-@media(max-width:800px){.editor-toolbar{width:min(350px,calc(100vw - 8px))}aside{width:min(300px,calc(100vw - 8px))}}
-@media(max-width:480px){.editor-toolbar{left:4px;top:4px;transform:none}.header-copy strong{font-size:10px}.header-copy small{font-size:9px}.header-actions [data-return-dashboard],.header-actions [data-move-side]{display:none}aside{width:calc(100vw - 8px)}.step-navigator{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:calc(100vw - 8px);box-shadow:0 4px 14px rgba(15,23,42,.12)}.step-navigator>.history-row:not([data-step-bar-actions]){display:none}.step-navigator .content-heading{display:none}}
 `;
-  const GUIDE_STYLE = `.guide-behavior{display:grid;gap:8px;border-top:1px solid #eef0f3;padding-top:10px;margin-top:8px}.guide-behavior [data-guide-config],.guide-behavior [data-guide-missing]{display:grid;gap:7px}.guide-behavior .muted{margin:0;overflow-wrap:anywhere}.guide-preview-controls{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:5px 7px;border-top:1px solid #eef0f3}.guide-preview-controls button{border:1px solid #d7dce3;border-radius:5px;background:#fff;color:#334155;padding:4px 6px;font:11px ui-sans-serif,system-ui;cursor:pointer}.guide-preview-controls small{flex-basis:100%;color:#64748b;font-size:10px}.guide-preview-controls button:disabled{opacity:.4}.guide-preview-controls span{font-size:10px;margin-left:auto}`;
+  const GUIDE_STYLE = `.guide-behavior{display:grid;gap:8px;border-top:1px solid #eef0f3;padding-top:10px;margin-top:8px}.guide-behavior [data-guide-config],.guide-behavior [data-guide-missing]{display:grid;gap:7px}.guide-behavior .muted{margin:0;overflow-wrap:anywhere}`;
   function checklistEditorAdapter(value) {
     return { content: { heading: value.title, body: value.description ?? "" }, builder: value.builder, design: value.design ?? { width: "sm", theme: { background: "#fff", foreground: "#111827", primary: "#2563eb", borderRadius: "md" } }, behavior: { dismissible: false }, targeting: { ...value.targeting, trigger: { type: "page_load" }, frequency: { mode: "once" } }, visualTheme: value.visualTheme, template: value.template };
   }

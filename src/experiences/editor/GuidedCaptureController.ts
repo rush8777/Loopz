@@ -4,7 +4,8 @@ import { ExperienceRenderer } from "../runtime/ExperienceRenderer";
 import type { EditorDraft } from "../types";
 import { CaptureRequestError, EditorSessionExpiredError } from "./EditorBridge";
 import { isMovcuesSurface } from "./ElementPicker";
-import { captureHtml, guideCapturePanel } from "./GuideCapturePanel";
+import { captureControls, captureHtml, capturePopups, captureStyles } from "./GuideCapturePanel";
+import { EditorDock } from "./EditorDock";
 import { GuideCaptureJourney, type NewCaptureObservation } from "./GuideCaptureJourney";
 import { GuideCaptureSelection } from "./GuideCaptureSelection";
 import { describeCaptureTarget, guideCapturePath, isCaptureTextInput } from "./GuideCaptureTargets";
@@ -29,8 +30,8 @@ const advanceLabels: Record<CaptureAdvance["type"], string> = {
 };
 
 export class GuidedCaptureController {
-  private readonly host = document.createElement("div");
-  private readonly root = this.host.attachShadow({ mode: "open" });
+  private readonly root: ShadowRoot;
+  private readonly listeners = new AbortController();
   private readonly route = new RouteObserver();
   private readonly preview = new ExperienceRenderer();
   private readonly key: string;
@@ -57,6 +58,7 @@ export class GuidedCaptureController {
   private request: AbortController | undefined;
   private state: "loading" | "capture" | "plan" | "preview" | "expired" = "loading";
   private busy = false;
+  private reconnecting = false;
   private destroyed = false;
 
   constructor(
@@ -65,21 +67,21 @@ export class GuidedCaptureController {
     private readonly draft: EditorDraft,
     private readonly applied: (version: EditorDraft["version"]) => void,
     private readonly closed: () => void,
+    private readonly dock = new EditorDock(),
   ) {
+    this.root = dock.root;
     this.previousKey = `movcues:guide-capture:${draft.experience.id}:${session.sessionId}`;
     this.key = `movcues:guide-capture:${draft.experience.id}`;
     this.revision = draft.version.revision;
   }
 
   mount(): void {
-    this.host.dataset.movcuesEditor = "";
-    this.host.dataset.movcuesGuideCapture = "";
-    this.host.style.cssText = "position:fixed;inset:0;z-index:2147483647;pointer-events:none";
-    this.root.innerHTML = guideCapturePanel;
-    document.documentElement.append(this.host);
-    this.root.addEventListener("click", this.handleClick);
-    this.root.addEventListener("input", this.handleInput);
-    this.root.addEventListener("change", this.handleChange);
+    this.dock.host.dataset.movcuesGuideCapture = "";
+    this.dock.mount(captureStyles, captureControls, capturePopups);
+    const signal = this.listeners.signal;
+    this.root.addEventListener("click", this.handleClick, { signal });
+    this.root.addEventListener("input", this.handleInput, { signal });
+    this.root.addEventListener("change", this.handleChange, { signal });
     this.root.querySelector("form")?.addEventListener("submit", event => { event.preventDefault(); void this.planGuide(); });
     this.selection = new GuideCaptureSelection(element => this.select(element));
     this.unsubscribe = this.route.onChange(() => {
@@ -93,6 +95,7 @@ export class GuidedCaptureController {
     window.addEventListener("pointerdown", this.preserveModeButtonFocus, true);
     window.addEventListener("mousedown", this.preserveModeButtonFocus, true);
     this.route.start();
+    this.update();
     void this.restore();
   }
 
@@ -113,7 +116,13 @@ export class GuidedCaptureController {
     this.update();
   }
 
-  destroy(): void {
+  setReconnecting(reconnecting: boolean): void {
+    this.reconnecting = reconnecting;
+    this.updateDockStatus();
+  }
+
+  destroy(keepDock = false): void {
+    this.listeners.abort();
     window.removeEventListener("pagehide", this.flushCheckpoint);
     this.removeModeListeners();
     this.journey.stop();
@@ -124,7 +133,8 @@ export class GuidedCaptureController {
     this.preview.destroy();
     this.unsubscribe?.();
     this.route.stop();
-    this.host.remove();
+    delete this.dock.host.dataset.movcuesGuideCapture;
+    if (!keepDock) this.dock.destroy();
   }
 
   private async restore(discardLocal = false): Promise<void> {
@@ -164,6 +174,7 @@ export class GuidedCaptureController {
       if (!this.checkpointError) this.message("");
       this.renderTargets();
       this.update();
+      if (this.plan) this.dock.show("generate");
       this.writeLocal();
       if (this.plan && workflow?.draftRevision !== this.revision) {
         this.message("The guide draft changed. Review your restored plan before generating a fresh preview.");
@@ -387,25 +398,21 @@ export class GuidedCaptureController {
     if (!button) return;
     const action = button.dataset;
     if ("close" in action) { if (!this.busy || this.request) { this.flushCheckpoint(); this.closed(); } return; }
-    if ("collapse" in action) {
-      const expanded = button.getAttribute("aria-expanded") === "true";
-      button.setAttribute("aria-expanded", String(!expanded));
-      button.textContent = expanded ? "Expand" : "Minimize";
-      this.toggle("main", !expanded);
-      return;
-    }
     if ("cancel" in action) { this.request?.abort(); return; }
     if (this.busy) return;
     if ("reload" in action) { void this.restore(); return; }
     if ("refresh" in action) { this.plan = undefined; this.candidate = undefined; void this.restore(true); return; }
     if ("retry" in action) { void this.retryCheckpoint(); return; }
+    if ("undoTarget" in action) {
+      const last = this.checkpoint.targets[this.checkpoint.targets.length - 1];
+      if (last) this.removeTarget(last.id);
+    }
+    if ("restart" in action && window.confirm("Clear the captured elements and start again?")) this.restart();
+    if ("discard" in action && window.confirm("Discard this capture and close the editor?")) void this.discard();
     if (action.mode === "select" || action.mode === "navigate") this.setMode(action.mode);
     if (action.earlier) this.moveTarget(action.earlier, -1);
     if (action.later) this.moveTarget(action.later, 1);
-    if (action.remove) {
-      if (this.replacement === action.remove) this.replacement = undefined;
-      this.checkpointChanged({ ...this.checkpoint, targets: this.checkpoint.targets.filter(item => item.id !== action.remove) });
-    }
+    if (action.remove) this.removeTarget(action.remove);
     if (action.replace) {
       this.replacement = action.replace;
       this.setMode("select");
@@ -418,6 +425,33 @@ export class GuidedCaptureController {
     if ("next" in action) this.previewStep(1);
     if ("apply" in action) void this.apply();
   };
+
+  private removeTarget(id: string): void {
+    if (this.replacement === id) this.replacement = undefined;
+    this.checkpointChanged({ ...this.checkpoint, targets: this.checkpoint.targets.filter(item => item.id !== id) });
+  }
+
+  private restart(): void {
+    this.replacement = undefined;
+    this.plan = undefined;
+    this.prompt = "";
+    const field = this.root.querySelector<HTMLTextAreaElement>("[data-prompt]");
+    if (field) field.value = "";
+    this.message("");
+    this.checkpointChanged({ mode: "navigate", targets: [] });
+  }
+
+  private async discard(): Promise<void> {
+    this.busy = true;
+    this.restart();
+    const saved = await this.syncCheckpoint();
+    if (this.destroyed) return;
+    this.busy = false;
+    this.update();
+    if (!saved) return;
+    try { sessionStorage.removeItem(this.key); sessionStorage.removeItem(this.previousKey); } catch { /* The server checkpoint is clear. */ }
+    this.closed();
+  }
 
   private handleInput = (event: Event) => {
     const input = event.target as HTMLInputElement | HTMLTextAreaElement;
@@ -675,12 +709,33 @@ export class GuidedCaptureController {
   }
 
   private message(text: string): void {
-    const status = this.root.querySelector("[data-message]");
-    if (status) status.textContent = text;
-    this.toggle("[data-message]", Boolean(text));
+    for (const status of this.root.querySelectorAll<HTMLElement>("[data-message],[data-workflow-message]")) {
+      status.textContent = text;
+      status.hidden = !text;
+    }
+    this.updateDockStatus();
   }
 
   private update(): void {
+    this.toggle("[data-capture-modes]", this.state === "capture");
+    this.toggle("[data-capture-actions]", this.state === "capture");
+    this.toggle("[data-capture-review]", this.state === "plan" || this.state === "preview");
+    for (const selector of ["[data-previous]", "[data-next]", "[data-preview-position]"]) this.toggle(selector, this.state === "preview");
+    const stage = this.root.querySelector("[data-capture-stage]");
+    const mode = this.state === "capture" ? this.checkpoint.mode : this.state;
+    this.dock.setMode(mode);
+    if (stage) stage.textContent = this.state === "preview" ? "Preview" : "Plan";
+    const count = this.root.querySelector<HTMLElement>("[data-capture-count]");
+    const total = this.checkpoint.targets.length;
+    const label = `${total} element${total === 1 ? "" : "s"}`;
+    if (count && count.textContent !== label) {
+      count.textContent = label;
+      count.animate?.([{ opacity: .45 }, { opacity: 1 }], { duration: matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 200 });
+    }
+    const generate = this.root.querySelector<HTMLButtonElement>("[data-generate]");
+    if (generate) generate.disabled = this.busy || !total || this.checkpointError;
+    const undo = this.root.querySelector<HTMLButtonElement>("[data-undo-target]");
+    if (undo) undo.disabled = this.busy || !total;
     this.toggle("[data-capture]", this.state === "capture");
     this.toggle("[data-plan-panel]", this.state === "plan");
     this.toggle("[data-preview]", this.state === "preview");
@@ -703,10 +758,11 @@ export class GuidedCaptureController {
       button.setAttribute("aria-pressed", String(button.dataset.mode === this.checkpoint.mode));
       button.disabled = this.busy;
     });
-    const checkpoint = this.root.querySelector("[data-checkpoint]");
+    const checkpoint = this.root.querySelector("[data-checkpoint-details]");
     if (checkpoint) checkpoint.textContent = this.checkpointError
       ? this.localSaved ? "Saved in this tab. The server checkpoint needs attention." : "The latest selection could not be saved. Keep this tab open and retry."
       : this.inFlight || this.pending ? "Saving capture…" : this.checkpoint.targets.length ? "Capture saved" : "";
+    this.updateDockStatus();
     const planButton = this.root.querySelector<HTMLButtonElement>("[data-plan]");
     if (planButton) planButton.disabled = this.busy || !this.checkpoint.targets.length || this.checkpointError;
     this.root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-apply],[data-edit-plan],[data-compile],[data-edit-capture],[data-prompt],[data-plan-steps] input,[data-plan-steps] textarea,[data-plan-steps] select").forEach(control => { control.disabled = this.busy || control.matches("[data-apply],[data-compile]") && this.checkpointError; });
@@ -714,6 +770,22 @@ export class GuidedCaptureController {
     const next = this.root.querySelector<HTMLButtonElement>("[data-next]");
     if (previous) previous.disabled = this.busy || this.index === 0;
     if (next) next.disabled = this.busy || this.index >= (this.candidate?.definition.steps.length ?? 0) - 1;
+  }
+
+  private updateDockStatus(): void {
+    const status = this.root.querySelector<HTMLElement>("[data-capture-status]");
+    const label = this.root.querySelector("[data-checkpoint]");
+    if (!status || !label) return;
+    const message = this.root.querySelector("[data-message]")?.textContent;
+    const working = this.busy || this.inFlight || this.pending && !this.checkpointError;
+    const attention = this.checkpointError || this.state === "expired" || Boolean(message && !working && message !== "Restoring capture…");
+    status.classList.add("dock-status");
+    const progress = this.busy && this.request ? this.state === "capture" ? "Planning…" : "Generating…" : "Saving…";
+    status.dataset.tone = attention ? "warn" : working || this.reconnecting ? "busy" : "ok";
+    label.textContent = this.state === "expired" ? "Expired" : attention ? "Review status" : working ? progress :
+      this.reconnecting ? "Reconnecting…" : this.state === "loading" ? "Restoring…" : this.checkpoint.targets.length ? "Capture saved" : "Ready";
+    status.title = message || label.textContent;
+    this.root.querySelector("[data-editor-dock]")?.toggleAttribute("data-geo-thinking", this.busy);
   }
 }
 

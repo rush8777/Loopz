@@ -1,3 +1,4 @@
+import { EditorDock, dockIcon, dockPopup, dockTrigger, geoDockMark } from "./EditorDock";
 import { EDITOR_PANEL_DESIGN, panelIcon } from "./EditorPanelDesign";
 import { EditorHistory } from "./EditorHistory";
 import { ChecklistEditor } from "./ChecklistEditor";
@@ -22,7 +23,7 @@ import type {
 } from "../types";
 import { getGuideStepPattern, guideStepRequiresTarget, isGuideDefinition } from "../types";
 import type { EditorAuthoringState, EditorContinuation, EditorSession } from "../runtimeInterfaces";
-import { clearEditorContinuation, storeEditorContinuation } from "../editorContinuation";
+import { clearEditorContinuation, readEditorContinuation, storeEditorContinuation } from "../editorContinuation";
 import { exchangeEditorSession } from "../editorFastStart";
 import { RouteObserver } from "../../dom/RouteObserver";
 import { ExperienceRenderer } from "../runtime/ExperienceRenderer";
@@ -49,7 +50,7 @@ type AiProgressItem = { key: "preparing" | EditorAiProgressStage | "complete"; l
 type AiChatMessage = { id: string; role: "user" | "assistant"; text: string; progress?: { startedAt: number; current: string; finished: boolean; items: AiProgressItem[] } };
 
 export class EditorModeController {
-  private host: HTMLElement | null = null;
+  private dock: EditorDock | null = null;
   private root: ShadowRoot | null = null;
   private picker = new ElementPicker();
   private capture: GuidedCaptureController | null = null;
@@ -61,7 +62,6 @@ export class EditorModeController {
   private routeObserver = new RouteObserver();
   private routeUnsubscribe: (() => void) | null = null;
   private mutationObserver: MutationObserver | null = null;
-  private dragCleanup: (() => void) | null = null;
   private expiryTimer = 0;
   private validationTimer = 0;
   private saveTimer = 0;
@@ -87,6 +87,7 @@ export class EditorModeController {
   private preferredSelection: CompositionSelection | null = null;
   private aiPreviewLocation: { index: number; selection: CompositionSelection | null } | null = null;
   private saveState: "clean" | "dirty" | "saving" | "failed" | "conflict" | "expired" = "clean";
+  private reconnecting = false;
   private recoveryDraft: string | null = null;
   private lifecycle = 0;
   private previewRendered = false;
@@ -95,7 +96,12 @@ export class EditorModeController {
   private guidePreviewComplete = false;
   private guidePreviewEntryPath = "";
   private guidePreviewClickPending = false;
+  private guideLaunchPath: string | undefined;
+  private guidePreviewDestination: URL | null = null;
+  private previewConsentVersion = 0;
   private previewDevice: "desktop" | "tablet" | "mobile" = "desktop";
+  private previewReturnMode: Exclude<EditorMode, "preview"> = "design";
+  private aiRetryPrompt = "";
   private aiConversationId: string | undefined;
   private aiMessages: AiChatMessage[] = [];
   private aiProposal: { value: EditorAiProposal | SurveyAiProposal | ChecklistAiProposal; revision: number; generation: number; selectionKey: string } | null = null;
@@ -114,6 +120,12 @@ export class EditorModeController {
   private aiMessageSequence = 0;
   private aiProgressTimer = 0;
   private persistBeforePageLeave = () => this.updateContinuation();
+  private restoreAfterBackNavigation = (event: PageTransitionEvent) => {
+    if (!event.persisted || !this.guidePreviewDestination) return;
+    this.clearGuidePreviewNavigation();
+    this.dock?.show(null);
+    this.updateContinuation();
+  };
   private protectUnsavedChanges = (event: BeforeUnloadEvent) => { if (!this.dirty && !this.saveInFlight && !this.contentEditor?.isComposing() && !this.compositionEditor?.isComposing()) return; event.preventDefault(); event.returnValue = ""; };
 
   constructor(private apiBase: string) {}
@@ -133,7 +145,7 @@ export class EditorModeController {
       clean.searchParams.delete("movcues_editor_token");
       clean.searchParams.delete("movcues_editor_step");
       history.replaceState(history.state, "", clean.toString());
-      return await this.activate(session, { requestedStep }, draft);
+      return await this.activate(session, { requestedStep, launchPath: currentPagePath() }, draft);
     } catch {
       this.destroy();
       return false;
@@ -158,8 +170,8 @@ export class EditorModeController {
     }
   }
 
-  private async activate(session: EditorSession, options: { requestedStep?: number; restoredState?: EditorAuthoringState }, prefetchedDraft?: EditorDraft): Promise<boolean> {
-    this.teardown(false);
+  private async activate(session: EditorSession, options: { requestedStep?: number; restoredState?: EditorAuthoringState; launchPath?: string }, prefetchedDraft?: EditorDraft, reuseDock = false): Promise<boolean> {
+    this.teardown(false, reuseDock);
     const bridge = new EditorBridge(this.apiBase, session.sessionId, session.accessToken);
     let draft: EditorDraft;
     try { draft = prefetchedDraft ?? await bridge.load(); }
@@ -175,6 +187,7 @@ export class EditorModeController {
     this.survey = !this.guide && draft.experience.widgetType === "survey" ? (this.definition as RuntimeWidgetDefinition).survey ?? null : null;
     const selectableSteps = this.guide?.steps ?? this.survey?.steps;
     const restored = options.restoredState?.experienceId === draft.experience.id ? options.restoredState : undefined;
+    this.guideLaunchPath = this.guide ? options.launchPath ?? restored?.guideLaunchPath : undefined;
     const restoredIndex = selectableSteps && restored?.selectedStepId ? selectableSteps.findIndex(step => step.id === restored.selectedStepId) : -1;
     this.stepIndex = selectableSteps ? restoredIndex >= 0 ? restoredIndex : clampStep(options.requestedStep ?? 0, selectableSteps.length) : 0;
     this.currentPath = currentPagePath();
@@ -182,40 +195,55 @@ export class EditorModeController {
     this.mode = restoredMode === "select" ? "target" : restoredMode === "design" || restoredMode === "target" || restoredMode === "navigate" || restoredMode === "preview" ? restoredMode : draft.experience.builderMode === "onsite" ? "design" : "target";
     const preview = this.mode === "preview" && restoredIndex >= 0 && restored?.guidePreview?.versionId === draft.version.id
       ? restored.guidePreview : undefined;
+    this.previewReturnMode = preview?.returnMode === "design" || preview?.returnMode === "target" || preview?.returnMode === "navigate"
+      ? preview.returnMode : draft.experience.builderMode === "onsite" ? "design" : "target";
+    if (restored?.guidePreview?.starting && (!preview || this.currentPath !== preview.entryPath)) this.mode = this.previewReturnMode;
     this.guidePreviewClickPending = false;
     this.guidePreviewEntryPath = preview?.clickPending ? this.currentPath : preview?.entryPath ?? this.currentPath;
     this.guidePreviewComplete = preview?.completed ?? false;
-    if (preview && this.guide && this.matchesPreviewRoute(this.currentPath)) {
+    if (preview && !preview.starting && this.guide && this.matchesPreviewRoute(this.currentPath)) {
       this.guidePreviewEntryPath = this.currentPath;
       if (this.stepIndex + 1 < this.guide.steps.length) this.stepIndex++;
       else this.guidePreviewComplete = true;
     }
     this.history.reset({ definition: cloneOnsite(this.checklist ?? this.definition), selection: null, stepIndex: this.stepIndex });
     this.updateContinuation();
+    this.dock ??= new EditorDock();
     if (draft.guidedCapture && this.guide && draft.experience.builderMode === "onsite") {
       this.capture = new GuidedCaptureController(bridge, session, draft, version => {
-        void this.activate(session, { requestedStep: 0 }, { ...draft, guidedCapture: false, version });
+        void this.activate(session, { requestedStep: 0, launchPath: this.guideLaunchPath }, { ...draft, guidedCapture: false, version }, true);
       }, () => {
         window.opener?.focus();
-        this.destroy();
-      });
+        this.teardown(true, false, true);
+      }, this.dock);
       this.capture.mount();
     } else this.mount();
     this.expiryTimer = window.setTimeout(() => this.expireSession(), Math.max(0, Date.parse(session.expiresAt) - Date.now()));
-    this.validationTimer = window.setInterval(() => { void bridge.checkSession().catch(error => { if (this.bridge === bridge && error instanceof EditorSessionExpiredError) this.expireSession(); }); }, 15_000);
+    this.validationTimer = window.setInterval(() => { void this.validateSession(bridge); }, 15_000);
     return true;
+  }
+
+  private async validateSession(bridge: EditorBridge): Promise<void> {
+    try {
+      await bridge.checkSession();
+      if (this.bridge !== bridge || !this.reconnecting) return;
+      this.reconnecting = false;
+    } catch (error) {
+      if (this.bridge !== bridge) return;
+      if (error instanceof EditorSessionExpiredError) { this.expireSession(); return; }
+      this.reconnecting = true;
+    }
+    this.capture?.setReconnecting(this.reconnecting);
+    this.showSaveState();
   }
 
   private mount(): void {
     if (!this.draft || !this.definition) return;
-    this.host = document.createElement("div");
-    this.host.dataset.movcuesEditor = "";
-    this.host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647";
-    this.root = this.host.attachShadow({ mode: "open" });
-    this.root.innerHTML = `<style>${STYLE}${GUIDE_STYLE}${EDITOR_PANEL_DESIGN}</style>${this.panelMarkup(this.draft)}`;
+    const dock = this.dock!;
+    this.root = dock.root;
+    const { controls, popups } = this.panelMarkup(this.draft);
+    dock.mount(STYLE + GUIDE_STYLE + EDITOR_PANEL_DESIGN, controls, popups);
     if (this.guide) this.root.querySelector('[data-inspector="step"]')?.insertAdjacentHTML("beforeend", this.guideBehaviorMarkup());
-    if (this.guide) this.root.querySelectorAll("[data-guide] .history-row:not([data-step-bar-actions])").forEach(actions => this.root!.querySelector('[data-inspector="step"]')?.append(actions));
-    (document.body ?? document.documentElement).appendChild(this.host);
 
     if (this.survey && this.draft.experience.builderMode === "onsite") this.surveyEditor = new SurveyEditor(this.root, this.survey, {
       index: () => this.stepIndex, composer: () => this.compositionEditor, canEdit: () => this.mode === "design" && this.saveState !== "expired",
@@ -232,39 +260,69 @@ export class EditorModeController {
     this.routeUnsubscribe = this.routeObserver.onChange(() => this.onRouteChange());
     this.routeObserver.start();
     window.addEventListener("pagehide", this.persistBeforePageLeave);
+    window.addEventListener("pageshow", this.restoreAfterBackNavigation);
     document.addEventListener("click", this.protectPreviewNavigation, true);
     document.addEventListener("submit", this.protectPreviewSubmission, true);
     window.addEventListener("beforeunload", this.protectUnsavedChanges);
     this.configureDiagnostics();
-    window.visualViewport?.addEventListener("resize", this.fitPanel);
-    window.visualViewport?.addEventListener("scroll", this.fitPanel);
-    window.addEventListener("resize", this.fitPanel);
-    this.fitPanel();
   }
 
-  private panelMarkup(draft: EditorDraft): string {
+  private panelMarkup(draft: EditorDraft): { controls: string; popups: string } {
     const selectableSteps = this.guide?.steps ?? this.survey?.steps;
     const aiEligible = draft.experience.builderMode === "onsite" && ["guide", "widget", "checklist"].includes(draft.experience.kind);
-    const guideMarkup = selectableSteps ? `<section class="section step-navigator" data-guide><span class="step-drag-handle" data-step-drag-handle title="Drag step bar" aria-hidden="true">⠿</span><div class="content-heading"><div><div class="eyebrow">${this.guide ? "Guide steps" : "Survey steps"}</div><div class="muted" data-step-label></div></div></div><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? `<div class="step-bar-actions" data-step-bar-actions><button type="button" class="secondary-button compact step-bar-action" data-add-step="modal" aria-label="Add modal step" title="Add modal step"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M12 8v8M8 12h8"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-add-step="anchored_card" aria-label="Add anchored step" title="Add anchored step"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M15 15l4 4"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-duplicate-step aria-label="Duplicate selected step" title="Duplicate selected step"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="11" height="11" rx="1"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-step-left aria-label="Move step earlier" title="Move step earlier"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6M8 12h10"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-step-right aria-label="Move step later" title="Move step later"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6M16 12H6"/></svg></button><button type="button" class="secondary-button compact step-bar-action step-bar-delete" data-delete-step aria-label="Delete selected step" title="Delete selected step"${this.guide.steps.length <= 1 ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13"/></svg></button></div>` : ""}</section>` : "";
+    const stepMarkup = selectableSteps ? `<section class="step-navigator dock-pop-body" data-guide><div class="step-flow" data-step-flow>${this.stepButtons()}</div>${this.guide ? `<div class="step-bar-actions" data-step-bar-actions><button type="button" class="secondary-button compact step-bar-action" data-add-step="modal" aria-label="Add modal step" title="Add modal step"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M12 8v8M8 12h8"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-add-step="anchored_card" aria-label="Add anchored step" title="Add anchored step"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M15 15l4 4"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-duplicate-step aria-label="Duplicate selected step" title="Duplicate selected step"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="11" height="11" rx="1"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-step-left aria-label="Move step earlier" title="Move step earlier"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6M8 12h10"/></svg></button><button type="button" class="secondary-button compact step-bar-action" data-step-right aria-label="Move step later" title="Move step later"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6M16 12H6"/></svg></button><button type="button" class="secondary-button compact step-bar-action step-bar-delete" data-delete-step aria-label="Delete selected step" title="Delete selected step"${this.guide.steps.length <= 1 ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13"/></svg></button></div>` : ""}</section>` : "";
     const designDisabled = draft.experience.builderMode !== "onsite" ? " disabled title=\"Content is edited in the GrapesJS Dashboard Builder\"" : "";
-    return `<div class="editor-toolbar" data-editor-toolbar role="region" aria-label="Movcues editing controls">
-      <header data-drag-handle>
-        <div class="header-copy"><strong>Movcues Live Editor</strong><span>${escapeText(draft.experience.name)}</span><small><i></i> Connected · <span data-save-state>Draft saved</span></small></div>
-        <div class="header-actions"><button type="button" data-global-undo aria-label="Undo">↶</button><button type="button" data-global-redo aria-label="Redo">↷</button><button type="button" data-save aria-label="Save draft">Save</button><button type="button" data-move-side aria-label="Move inspector to other side">⇄</button><button type="button" data-return-dashboard aria-label="Return to dashboard">↗</button><button type="button" data-minimize aria-label="Toggle inspector" aria-expanded="true">☷</button><button type="button" data-close aria-label="Close editor">×</button></div>
-      </header>
-        <div class="modebar"><button type="button" data-mode="design"${designDisabled}>Design</button><button type="button" data-mode="target">Target</button><button type="button" data-mode="navigate">Navigate</button><button type="button" data-mode="preview">Preview</button></div>
-        <div class="guide-preview-controls" data-guide-preview hidden><button type="button" data-preview-start>Start Guide</button><button type="button" data-preview-back aria-label="Previous preview step">←</button><button type="button" data-preview-next aria-label="Next preview step">→</button><button type="button" data-preview-reset>Reset</button><button type="button" data-preview-test hidden>Test event</button><span data-preview-step></span><small data-trigger-status role="status" aria-live="polite"></small></div>
+    const geoMark = geoDockMark;
+    const settings = dockTrigger("settings", "Properties", panelIcon("properties") + '<span class="dock-wide-label">Settings</span>', 'data-inspector-tab="properties"');
+    const geo = aiEligible
+      ? dockTrigger("geo", "AI assistant", geoMark + 'Geo', 'data-inspector-tab="ai" data-geo')
+      : `<span class="dock-brand-mark" title="Movcues">${panelIcon("ai")}</span>`;
+    const controls = `
+      <div class="dock-group" data-design-controls>${geo}</div>
+      <div class="dock-group dock-modes" data-design-controls role="group" aria-label="Editor mode">
+        <button type="button" data-mode="design" aria-label="Edit" title="Edit"${designDisabled}>${dockIcon("edit")}<span>Edit</span></button>
+        <button type="button" data-mode="target" aria-label="Target" title="Reselect page target">${dockIcon("target")}</button>
+        <button type="button" data-mode="navigate" aria-label="Navigate" title="Navigate">${dockIcon("navigate")}<span>Navigate</span></button>
       </div>
-      ${guideMarkup}
-      <aside aria-label="Contextual inspector"><main>
-        <nav class="inspector-tabs" aria-label="Inspector mode"><span class="panel-wordmark"><span class="panel-mark">${panelIcon("ai")}</span>movcues</span>${([['properties','Properties'],['ai','AI assistant']] as const).map(([tab,label]) => `<button type="button" class="${tab === 'properties' ? 'active' : ''}" data-inspector-tab="${tab}" aria-label="${label}" title="${label}" aria-pressed="${tab === 'properties'}"${tab === 'ai' && !aiEligible ? ' disabled' : ''}>${panelIcon(tab)}</button>`).join('')}</nav>
-        <section class="section ai-panel" data-ai-panel hidden>
+      ${selectableSteps ? `<div class="dock-group" data-design-controls>
+        <button type="button" data-dock-step="-1" aria-label="Previous step" title="Previous step">${dockIcon("left")}</button>
+        ${dockTrigger("steps", "Manage steps", '<span class="dock-chip" data-step-label></span>')}
+        <button type="button" data-dock-step="1" aria-label="Next step" title="Next step">${dockIcon("right")}</button>
+        ${dockTrigger("steps", "Add step", dockIcon("plus"), 'data-open-add')}
+      </div>` : ""}
+      <div class="dock-group" data-design-controls>${settings}
+        <button type="button" data-mode="preview" aria-label="Preview" title="Preview">${dockIcon("play")}<span class="dock-wide-label">Preview</span></button>
+      </div>
+      <div class="dock-group" data-preview-dock hidden>
+        <span class="dock-indicator">Preview</span>
+        ${this.guide ? `<div class="dock-group" data-guide-preview hidden>
+          <button type="button" data-preview-back aria-label="Previous preview step" title="Previous preview step">${dockIcon("left")}</button>
+          <span class="dock-chip" data-preview-step></span>
+          <button type="button" data-preview-next aria-label="Next preview step" title="Next preview step">${dockIcon("right")}</button>
+          <button type="button" data-preview-start data-preview-reset data-reset-preview aria-label="Restart preview from the first step" title="Restart preview">${dockIcon("restart")}</button>
+          <button type="button" data-preview-test hidden>Test event</button>
+        </div>` : `<button type="button" data-reset-preview aria-label="Restart preview" title="Restart preview">${dockIcon("restart")}</button>`}
+        ${dockTrigger("preview", "Preview status", dockIcon("more"), 'data-preview-status-button')}
+        ${aiEligible ? dockTrigger("geo", "Review Geo proposal", geoMark, 'data-preview-geo hidden') : ""}
+        <button type="button" data-exit-preview>Exit preview</button>
+      </div>
+      <div class="dock-group">
+        ${dockTrigger("status", "Draft status", '<span class="dock-status-text" data-save-state role="status" aria-live="polite">Draft saved</span>', 'data-dock-save-state')}
+        <button type="button" data-save data-primary aria-label="Save draft">Save</button>
+        ${dockTrigger("session", "Editor actions", dockIcon("more"), 'data-session-actions')}
+        <button type="button" data-close aria-label="Close editor" title="Close editor">${dockIcon("close")}</button>
+      </div>`;
+
+    const geoMarkup = `
+        <section class="section ai-panel" data-ai-panel>
           <p class="muted" data-ai-context>Choose an element or ask about the whole widget.</p>
-          <div class="ai-chat-history" data-ai-history aria-label="AI chat history" aria-live="polite"><div class="ai-empty-state"><span class="ai-empty-state__icon">${panelIcon("zap")}</span><p>Describe the change you want to make.</p></div><article class="ai-proposal" data-ai-proposal hidden><span class="ai-chat-message__role">Geo</span><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Review the update, then apply it when you’re ready.</p></article></div>
-          <form class="ai-composer" data-ai-form><textarea data-ai-prompt aria-label="Describe your design change" maxlength="4000" rows="3" placeholder="What would you like to create?"></textarea><div class="ai-proposal-actions" data-ai-proposal-actions hidden><button type="button" class="secondary-button" data-ai-target hidden>Select target</button><button type="button" class="secondary-button" data-ai-preview hidden>Preview design</button><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div><div class="ai-composer-footer"><span class="ai-composer-note">${panelIcon("ai")} Design with Movcues</span><button type="button" class="secondary-button compact" data-ai-cancel hidden>Stop</button><button type="submit" class="secondary-button" data-ai-send aria-label="Send message" title="Send message">${panelIcon("send")}</button></div></form>
+          <div class="ai-chat-history" data-ai-history aria-label="AI chat history" aria-live="polite"><div class="ai-empty-state"><p>Ask Geo to change the copy, layout, or behavior.</p></div><article class="ai-proposal" data-ai-proposal hidden><span class="ai-chat-message__role">Geo</span><strong data-ai-summary></strong><ul data-ai-operations></ul><p class="muted">Review the update, then apply it when you’re ready.</p></article></div>
+          <form class="ai-composer" data-ai-form><textarea data-ai-prompt aria-label="Describe your design change" maxlength="4000" rows="2" placeholder="Ask Geo…"></textarea><div class="ai-proposal-actions" data-ai-proposal-actions hidden><button type="button" class="secondary-button" data-ai-target hidden>Select target</button><button type="button" class="secondary-button" data-ai-preview hidden>Preview design</button><button type="button" class="secondary-button" data-ai-apply>Apply</button><button type="button" class="secondary-button" data-ai-discard>Discard</button></div><div class="ai-composer-footer"><button type="button" class="secondary-button compact" data-ai-retry hidden>Retry</button><button type="button" class="secondary-button compact" data-ai-cancel hidden>Stop</button><button type="submit" class="secondary-button" data-ai-send aria-label="Send message" title="Send message">${panelIcon("send")}</button></div></form>
           <div class="ai-status" data-ai-status role="status" aria-live="polite"></div>
         </section>
-        <button type="button" class="secondary-button" data-reset-preview hidden>Reset Preview</button><p class="hint" data-preview-limit hidden>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : this.survey ? "Preview tests the full Survey. No responses, production events or progress are recorded. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
+      `;
+    const properties = `<main class="dock-pop-body editor-properties">
+        <div data-checklist-settings></div>
         <div class="notice" data-route-notice hidden><b>Page changed</b><span data-route-change></span></div>
         <section class="section composition-inspector" data-composition-inspector hidden>
           <div data-inspector="step"><label>Step label<input data-step-name type="text" maxlength="80" placeholder="Step label"></label></div>
@@ -297,24 +355,21 @@ export class EditorModeController {
           <div class="image-controls" data-image-controls hidden><label>Source URL<input data-image-src type="text" inputmode="url"></label><label>Alt text<input data-image-alt type="text" maxlength="500"></label><button type="button" class="secondary-button" data-apply-image>Apply image</button></div>
           <div class="history-row"><button type="button" class="secondary-button compact" data-undo disabled>Undo</button><button type="button" class="secondary-button compact" data-redo disabled>Redo</button></div>
         </section>
-        <div class="section eyebrow" data-step-only data-step-appearance>Step appearance</div>
+
         <section class="section" data-step-only data-for="target">
           <div class="eyebrow">Target</div><strong class="truncate" data-target-label>Not selected</strong><div class="reliability" data-reliability></div>
           <button class="secondary-button" type="button" data-pick>Reselect target</button>
         </section>
-        <section class="section" data-step-only data-layering-section>
-          <div class="eyebrow">Layering</div>
+        <details class="section settings-disclosure" data-step-only data-layering-section><summary>Layering</summary><div>
           <label>Policy<select data-layer-mode><option value="auto">Automatic</option><option value="relative">Relative to an element</option><option value="always_on_top">Always on top</option><option value="custom">Advanced / Custom</option></select></label>
           <div class="muted" data-layer-description></div>
           <div data-layer-relative hidden><strong class="truncate" data-layer-target>Not selected</strong><button class="secondary-button" type="button" data-pick-layer>Select element from page</button><label>Relationship<select data-layer-relation><option value="above">Above</option><option value="below">Below</option></select></label></div>
           <label data-layer-custom hidden>Custom z-index<input data-layer-z-index type="number" min="1" max="2147483647"></label>
-        </section>
-        <section class="section" data-step-only data-close-button-section>
-          <div class="eyebrow">Behavior</div>
+        </div></details>
+        <details class="section settings-disclosure" data-step-only data-close-button-section><summary>Behavior</summary><div>
           <label class="check"><input data-show-close-button type="checkbox"> Show close button</label>
-        </section>
-        <section class="section" data-step-only data-placement-section>
-          <div class="eyebrow">Placement</div>
+        </div></details>
+        <details class="section settings-disclosure" data-step-only data-placement-section><summary>Placement</summary><div>
           <div data-for="anchored"><div class="placement-grid">${placementButton("top", "Top")}${placementButton("left", "Left")}${placementButton("auto", "Auto")}${placementButton("right", "Right")}${placementButton("bottom", "Bottom")}</div><label>Alignment<select data-alignment><option value="start">Start</option><option value="center">Center</option><option value="end">End</option></select></label><label>Offset<div class="number"><input data-offset type="number" min="0" max="100"><span>px</span></div></label></div>
           <div data-for="toast"><label>Position<select data-toast-position><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label><label>Auto-dismiss<div class="number"><input data-auto-dismiss type="number" min="500" placeholder="Disabled"><span>ms</span></div></label></div>
           <div data-for="modal"><label>Layout<select data-modal-layout><option value="center">Centered</option><option value="fullscreen">Fullscreen</option></select></label></div>
@@ -323,9 +378,9 @@ export class EditorModeController {
           <div data-for="banner"><label>Display<select data-banner-display-mode><option value="inline">Inline with page</option><option value="overlay">Overlay viewport</option></select></label><label>Position<select data-banner-position><option value="top">Top</option><option value="bottom">Bottom</option></select></label></div>
           <div data-for="cursor"><label>X offset<div class="number"><input data-cursor-x type="number"><span>px</span></div></label><label>Y offset<div class="number"><input data-cursor-y type="number"><span>px</span></div></label></div>
           <div data-for="hotspot"><label>Beacon style<select data-hotspot-style><option value="pulse">Pulse</option><option value="dot">Dot</option><option value="question">Question mark</option></select></label><label>Beacon color<input data-hotspot-color type="color"></label></div>
-        </section>
+        </div></details>
         <section class="section" data-step-only data-step-summary hidden><div class="eyebrow">Step</div><dl><dt>Advances on</dt><dd data-advance></dd><dt>Dismissible</dt><dd data-dismissible></dd></dl></section>
-        <section class="section" data-step-only><div class="eyebrow">Configured</div><dl data-configured></dl></section>
+        <details class="section settings-disclosure" data-step-only><summary>Experience rules</summary><dl data-configured></dl></details>
         <section class="section theme-panel" data-theme-section aria-label="Appearance">
           <div class="appearance-heading"><strong>Appearance</strong><a data-manage-themes target="_blank" rel="noopener noreferrer" hidden>Manage themes</a></div>
           <label>Theme<select data-theme-source aria-label="Theme"><option value="template">Template defaults</option><option value="site"${draft.references?.siteTheme ? "" : " disabled"}>Site default</option><option value="snapshot" disabled>Saved snapshot</option><optgroup label="Built-in presets"><option value="minimal">Minimal</option><option value="modern">Modern</option><option value="soft">Soft</option><option value="dark">Dark</option></optgroup>${draft.references?.stylePresets?.length ? `<optgroup label="Saved themes">${draft.references.stylePresets.map(style => `<option value="saved:${escapeText(style.id)}">${escapeText(style.name)}</option>`).join("")}</optgroup>` : ""}</select></label>
@@ -340,10 +395,41 @@ export class EditorModeController {
           <p class="muted" data-style-status role="status" hidden></p>
         </section>
         <details class="section live"><summary>Connection & target status</summary><div class="status-ok">✓ SDK/editor connected</div><div data-preview-status></div><div data-live-target></div><div class="status-ok">✓ Current page available</div><code data-current-path></code><div data-missing-selector hidden><span>Target selector</span><code></code><button class="secondary-button" type="button" data-pick>Reselect target</button></div></details>
+        <p class="hint" data-mode-hint></p>
+      </main>`;
+    const recovery = `<div class="dock-pop-body" data-status-content>
+      <p class="muted" data-connection-status>Editor connected</p>
         <p class="hint status-error" role="alert" data-content-error hidden></p>
-        <div class="save-recovery" data-save-recovery hidden><button type="button" class="secondary-button" data-retry-save>Retry save</button><button type="button" class="secondary-button" data-reload-draft hidden>Reload latest</button><button type="button" class="secondary-button" data-export-draft>Copy / Export unsaved draft</button><button type="button" class="secondary-button" data-discard-draft>Discard and close</button><span data-recovery-message>Local edits are preserved.</span></div><p class="hint" data-mode-hint></p>
-      </main>
-    </aside>`;
+        <div class="save-recovery" data-save-recovery hidden><button type="button" class="secondary-button" data-retry-save>Retry save</button><button type="button" class="secondary-button" data-reload-draft hidden>Reload latest</button><button type="button" class="secondary-button" data-export-draft>Copy / Export unsaved draft</button><button type="button" class="secondary-button" data-discard-draft>Discard and close</button><span data-recovery-message>Local edits are preserved.</span></div>
+      </div>`;
+    const preview = `<div class="dock-pop-body">
+      <p class="muted" data-trigger-status role="status" aria-live="polite"></p>
+      <p class="hint"data-preview-limit>${this.guide ? "Test this Guide on the page. No production events or progress are recorded. External links are disabled. Website interactions can still run your site's JavaScript." : this.survey ? "Preview tests the full Survey. No responses, production events or progress are recorded. Website interactions can still run your site's JavaScript." : "Preview tests this step only. Links and external actions are disabled. Website interactions can still run your site's JavaScript."}</p>
+      <div data-preview-checklist></div>
+    </div>`;
+    const previewConsent = `<div class="dock-pop-body preview-consent">
+      <p>Open the Guide’s starting page in this tab and preview from step 1.</p>
+      <code data-preview-destination></code>
+      <p class="hint status-error" data-preview-consent-status role="status" hidden></p>
+      <div class="preview-consent-actions">
+        <button type="button" class="secondary-button" data-dismiss-popup data-preview-cancel>Cancel</button>
+        <button type="button" class="secondary-button" data-preview-confirm>Go to start &amp; preview</button>
+      </div>
+    </div>`;
+    const session = `<div class="dock-pop-body dock-session" aria-label="Editor actions">
+      <strong class="truncate">${escapeText(draft.experience.name)}</strong>
+      <div class="history-row"><button type="button" class="secondary-button" data-global-undo>Undo</button><button type="button" class="secondary-button" data-global-redo>Redo</button></div>
+      <button type="button" class="secondary-button" data-return-dashboard>Return to dashboard</button>
+    </div>`;
+    return {
+      controls,
+      popups: (aiEligible ? dockPopup("geo", "Geo", geoMarkup, geoMark) : "") +
+        dockPopup("settings", "Properties", properties) +
+        (selectableSteps ? dockPopup("steps", this.guide ? "Guide steps" : "Survey steps", stepMarkup) : "") +
+        dockPopup("status", "Draft status", recovery) + dockPopup("preview", "Journey preview", preview) +
+        (this.guide ? dockPopup("preview-start", "Start Guide preview", previewConsent, "", "dialog") : "") +
+        dockPopup("session", "Movcues Live Editor", session),
+    };
   }
 
   private stepButtons(): string {
@@ -353,21 +439,33 @@ export class EditorModeController {
 
   private bindPanel(): void {
     const root = this.root!;
-    root.querySelectorAll<HTMLButtonElement>("[data-inspector-tab]").forEach(button => button.addEventListener("click", () => this.setInspectorTab(button.dataset.inspectorTab as "properties" | "ai")));
+    root.querySelectorAll("[data-inspector-tab=ai],[data-preview-geo]").forEach(button => button.addEventListener("click", () => this.syncAiPanel()));
+    root.querySelectorAll<HTMLButtonElement>("[data-dock-step]").forEach(button => button.addEventListener("click", () => this.switchStep(this.stepIndex + Number(button.dataset.dockStep))));
+    root.querySelector("[data-exit-preview]")?.addEventListener("click", () => {
+      if (this.aiPreviewReturnMode) this.discardAiPreview();
+      else this.setMode(this.previewReturnMode);
+    });
     root.querySelector<HTMLFormElement>("[data-ai-form]")?.addEventListener("submit", event => { event.preventDefault(); void this.sendAiPrompt(); });
+    root.querySelector("[data-ai-retry]")?.addEventListener("click", () => {
+      const field = root.querySelector<HTMLTextAreaElement>("[data-ai-prompt]");
+      if (field && !field.value.trim()) field.value = this.aiRetryPrompt;
+      void this.sendAiPrompt();
+    });
     root.querySelector<HTMLButtonElement>("[data-ai-cancel]")?.addEventListener("click", () => this.cancelAiRequest());
     root.querySelector<HTMLButtonElement>("[data-ai-target]")?.addEventListener("click", () => this.resolveAiGuideTarget());
     root.querySelector<HTMLButtonElement>("[data-ai-preview]")?.addEventListener("click", () => this.checklist ? this.previewAiChecklistProposal() : this.survey ? this.previewAiSurveyProposal() : this.guide ? this.previewAiGuideProposal() : this.previewAiWidgetSourceProposal());
     root.querySelector<HTMLButtonElement>("[data-ai-apply]")?.addEventListener("click", () => this.applyAiProposal());
     root.querySelector<HTMLButtonElement>("[data-ai-discard]")?.addEventListener("click", () => this.discardAiProposal());
-    root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.addEventListener("click", () => this.setMode(button.dataset.mode as EditorMode)));
+    root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.addEventListener("click", () => {
+      if (button.dataset.mode === "preview" && this.guide) this.requestGuidePreview(button);
+      else this.setMode(button.dataset.mode as EditorMode);
+    }));
+    root.querySelector<HTMLButtonElement>("[data-preview-confirm]")?.addEventListener("click", event => {
+      void this.confirmGuidePreview(event.currentTarget as HTMLButtonElement);
+    });
     root.querySelectorAll<HTMLButtonElement>("[data-pick]").forEach(button => button.addEventListener("click", () => { if (this.mode !== "target") this.setMode("target"); else this.startPicker(); }));
     root.querySelector<HTMLButtonElement>("[data-pick-layer]")?.addEventListener("click", () => this.startLayerPicker());
     root.querySelectorAll<HTMLButtonElement>("[data-step]").forEach(button => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step))));
-    root.querySelector<HTMLButtonElement>("[data-minimize]")?.addEventListener("click", () => {
-      const aside = root.querySelector("aside")!; aside.classList.toggle("minimized");
-      root.querySelector<HTMLButtonElement>("[data-minimize]")!.setAttribute("aria-expanded", String(!aside.classList.contains("minimized")));
-    });
     root.querySelector<HTMLButtonElement>("[data-save]")?.addEventListener("click", () => void this.persist());
     root.querySelector<HTMLButtonElement>("[data-close]")?.addEventListener("click", () => void this.close());
     root.querySelector<HTMLButtonElement>("[data-return-dashboard]")?.addEventListener("click", () => { window.opener?.focus(); void this.close(); });
@@ -375,10 +473,9 @@ export class EditorModeController {
     root.querySelector<HTMLButtonElement>("[data-reload-draft]")?.addEventListener("click", () => { if (window.confirm("Reloading discards local edits. Copy / Export them first if you need them. Reload latest?")) { this.recoveryDraft = null; window.location.reload(); } });
     root.querySelector<HTMLButtonElement>("[data-export-draft]")?.addEventListener("click", () => this.exportRecovery());
     root.querySelector<HTMLButtonElement>("[data-discard-draft]")?.addEventListener("click", () => { if (window.confirm("Discard unsaved edits and close?")) { this.recoveryDraft = null; this.destroy(); } });
-    root.querySelector<HTMLButtonElement>("[data-reset-preview]")?.addEventListener("click", () => this.guide ? this.startGuidePreview() : this.renderPreview());
+    if (!this.guide) root.querySelector<HTMLButtonElement>("[data-reset-preview]")?.addEventListener("click", () => this.renderPreview());
     root.querySelector<HTMLButtonElement>("[data-global-undo]")?.addEventListener("click", () => this.globalUndo());
     root.querySelector<HTMLButtonElement>("[data-global-redo]")?.addEventListener("click", () => this.globalRedo());
-    root.querySelector<HTMLButtonElement>("[data-move-side]")?.addEventListener("click", () => root.querySelector("aside")?.classList.toggle("left-side"));
     root.querySelectorAll<HTMLButtonElement>("[data-add-step]").forEach(button => button.addEventListener("click", () => this.addGuideStep(button.dataset.addStep as "modal" | "anchored_card")));
     root.querySelector<HTMLButtonElement>("[data-duplicate-step]")?.addEventListener("click", () => this.duplicateGuideStep());
     root.querySelector<HTMLButtonElement>("[data-delete-step]")?.addEventListener("click", () => this.deleteGuideStep());
@@ -393,7 +490,16 @@ export class EditorModeController {
     root.querySelector<HTMLButtonElement>("[data-apply-image]")?.addEventListener("click", () => { const source = root.querySelector<HTMLInputElement>("[data-image-src]"); const alt = root.querySelector<HTMLInputElement>("[data-image-alt]"); if (source && alt && !this.contentEditor?.updateImage(source.value, alt.value)) source.setCustomValidity("Use an HTTP(S), relative, or supported data image URL."); else source?.setCustomValidity(""); this.syncContentInspector(); });
     root.querySelector<HTMLButtonElement>("[data-undo]")?.addEventListener("click", () => { this.contentEditor?.undo(); this.syncContentInspector(); });
     root.querySelector<HTMLButtonElement>("[data-redo]")?.addEventListener("click", () => { this.contentEditor?.redo(); this.syncContentInspector(); });
-    root.addEventListener("pointerdown", event => { this.contentEditor?.rememberSelection(); this.compositionEditor?.rememberSelection(); if (event.target instanceof Element && event.target.closest("[data-v2-format],[data-v2-list]")) event.preventDefault(); }, true);
+    root.addEventListener("pointerdown", event => {
+      this.contentEditor?.rememberSelection();
+      this.compositionEditor?.rememberSelection();
+      if (!(event.target instanceof Element)) return;
+      const active = document.activeElement?.shadowRoot?.activeElement;
+      if (event.target.closest("[data-v2-format],[data-v2-list]") ||
+        active instanceof HTMLElement && active.isContentEditable && event.target.closest('[data-open-popup="settings"]')) {
+        event.preventDefault();
+      }
+    }, true);
     root.addEventListener("focusin", () => { this.contentEditor?.rememberSelection(); this.compositionEditor?.rememberSelection(); }, true);
     root.addEventListener("keydown", rawEvent => {
       const event = rawEvent as KeyboardEvent;
@@ -401,8 +507,6 @@ export class EditorModeController {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void this.persist(); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); if (event.shiftKey) this.globalRedo(); else this.globalUndo(); }
     });
-    this.bindDrag();
-    this.bindStepBarDrag();
     this.bindThemeControls();
 
     this.bindCompositionInspector(); this.bindGuideBehavior();
@@ -684,8 +788,9 @@ export class EditorModeController {
     this.root.querySelector<HTMLInputElement>("[data-guide-use-position]")?.addEventListener("change", event => { const advance = this.guide!.steps[this.stepIndex].advance; if ((event.currentTarget as HTMLInputElement).checked && (advance?.type === "element_click" || advance?.type === "element_hover")) { delete advance.target; this.changed(); } else this.pickGuideInteraction(); });
     this.root.querySelector("[data-guide-pick-interaction]")?.addEventListener("click", () => this.pickGuideInteraction());
     this.root.querySelector<HTMLInputElement>("[data-guide-dismissible]")?.addEventListener("change", event => { this.guide!.steps[this.stepIndex].behavior.dismissible = (event.currentTarget as HTMLInputElement).checked; this.changed(); });
-    this.root.querySelector("[data-preview-start]")?.addEventListener("click", () => this.startGuidePreview());
-    this.root.querySelector("[data-preview-reset]")?.addEventListener("click", () => this.startGuidePreview());
+    this.root.querySelector<HTMLButtonElement>("[data-preview-reset]")?.addEventListener("click", event => {
+      this.requestGuidePreview(event.currentTarget as HTMLButtonElement);
+    });
     this.root.querySelector("[data-preview-next]")?.addEventListener("click", () => this.advanceGuidePreview(1));
     this.root.querySelector("[data-preview-back]")?.addEventListener("click", () => this.advanceGuidePreview(-1));
     this.root.querySelector("[data-preview-test]")?.addEventListener("click", () => { const advance = this.guide?.steps[this.stepIndex].advance; if (this.mode === "preview" && !this.guidePreviewComplete && (advance?.type === "custom_event" || advance?.type === "route")) this.advanceGuidePreview(1); });
@@ -694,6 +799,7 @@ export class EditorModeController {
   private pickGuideInteraction(): void {
     const step = this.guide?.steps[this.stepIndex]; if (!step || !this.flushContent() || !(step.advance?.type === "element_click" || step.advance?.type === "element_hover")) return;
     const generation = ++this.selectionGeneration; this.picker.cancel();
+    this.dock?.show(null);
     this.contentEditor?.destroy(); this.contentEditor = null; this.compositionEditor?.destroy(); this.compositionEditor = null; this.previewGeneration++; this.preview.destroy(); this.previewRendered = false;
     this.setText("[data-mode-hint]", "Select the website element that advances this step. Its positioning target stays unchanged. Escape cancels.");
     void this.picker.pick().then(target => {
@@ -723,6 +829,8 @@ export class EditorModeController {
     this.setValue("[data-guide-delay]", String(step.presentation?.delayMs ?? 0)); this.setValue("[data-guide-missing-action]", step.presentation?.missingTarget?.action ?? "wait"); this.setValue("[data-guide-timeout]", String(step.presentation?.missingTarget?.timeoutMs ?? 5000));
     this.root.querySelector<HTMLElement>("[data-guide-missing]")!.hidden = !anchored; this.setChecked("[data-guide-dismissible]", step.behavior.dismissible ?? true);
     this.setText("[data-preview-step]", `${this.guidePreviewComplete ? "Complete · " : ""}${this.stepIndex + 1}/${this.guide.steps.length}`);
+    this.root.querySelector("[data-preview-step]")?.setAttribute("aria-label",
+      this.guidePreviewComplete ? "Journey complete" : `Step ${this.stepIndex + 1} of ${this.guide.steps.length}`);
     this.root.querySelector<HTMLButtonElement>("[data-preview-back]")!.disabled = this.stepIndex === 0;
     this.root.querySelector<HTMLButtonElement>("[data-preview-next]")!.disabled = this.guidePreviewComplete;
     const test = this.root.querySelector<HTMLButtonElement>("[data-preview-test]")!; test.hidden = !["custom_event", "route"].includes(type) || this.guidePreviewComplete; test.textContent = type === "route" ? "Simulate match" : "Test event";
@@ -731,6 +839,98 @@ export class EditorModeController {
   private previewTriggerHint(): string {
     const advance = this.guide?.steps[this.stepIndex].advance;
     return this.guidePreviewComplete ? "Guide preview complete. Reset to start again." : advance?.type === "custom_event" ? `Waiting for “${advance.eventName}”. Test event is preview-only.` : advance?.type === "route" ? "Waiting for matching navigation. Simulate match does not navigate." : advance?.type === "element_click" ? "Click the configured website element." : advance?.type === "element_hover" ? "Hover over the configured website element." : "Click a Next step button.";
+  }
+
+  private guidePreviewStartPage(): URL | null {
+    if (!this.guide) return null;
+    const first = this.guide.steps[0];
+    const context = first && guideStepRequiresTarget(first) ? first.target?.targetContext : undefined;
+    const launch = sameOriginGuidePage(this.guideLaunchPath);
+    const targetPage = sameOriginGuidePage(context?.pagePath);
+    if (targetPage) {
+      if (matchesGuideTargetPage(first.target, currentPagePath())) return null;
+      if (launch && matchesGuideTargetPage(first.target, launch.pathname + launch.search + launch.hash)) return launch;
+      return targetPage;
+    }
+
+    const exact = this.definition?.targeting.pageRules.filter(rule => rule.kind === "include" && rule.operator === "equals") ?? [];
+    const buildRule = exact.find(rule => rule.id === "build_page" || rule.id === "build_page_exact");
+    const configured = sameOriginGuidePage((buildRule ?? (exact.length === 1 ? exact[0] : undefined))?.value);
+    // A build rule may record only the path. Retain app query parameters from the original launch.
+    const start = configured && (!launch || launch.pathname !== configured.pathname ||
+      configured.search && launch.search !== configured.search || configured.hash && launch.hash !== configured.hash)
+      ? configured : launch ?? configured;
+    if (!start) return null;
+    if (start.pathname === location.pathname && (!start.search || start.search === location.search) &&
+        (!start.hash || start.hash === location.hash)) return null;
+    return start;
+  }
+
+  private requestGuidePreview(opener: HTMLButtonElement): void {
+    if (this.guidePreviewDestination || (this.mode !== "preview" && this.aiPreviewReturnMode)) return;
+    this.previewConsentVersion++;
+    const destination = this.aiPreviewReturnMode ? null : this.guidePreviewStartPage();
+    if (!destination) { this.startGuidePreview(); return; }
+    this.setText("[data-preview-destination]", destination.pathname + destination.hash);
+    this.setGuidePreviewConsentStatus("");
+    this.dock?.show("preview-start", opener);
+    this.root?.querySelector<HTMLButtonElement>("[data-preview-cancel]")?.focus({ preventScroll: true });
+  }
+
+  private setGuidePreviewConsentStatus(message: string): void {
+    const status = this.root?.querySelector<HTMLElement>("[data-preview-consent-status]");
+    if (status) { status.textContent = message; status.hidden = !message; }
+  }
+
+  private async confirmGuidePreview(button: HTMLButtonElement): Promise<void> {
+    if (this.dock?.activePopup !== "preview-start" || this.guidePreviewDestination) return;
+    const destination = this.guidePreviewStartPage();
+    if (!destination) { this.dock?.show(null); this.startGuidePreview(); return; }
+    const lifecycle = this.lifecycle;
+    const consent = this.previewConsentVersion;
+    button.disabled = true;
+    this.setGuidePreviewConsentStatus(this.dirty || this.saveInFlight ? "Saving your changes before opening the starting page…" : "");
+    try {
+      if (!await this.persist() || this.dirty) {
+        this.setGuidePreviewConsentStatus("Resolve the draft’s save or validation issue before starting preview.");
+        return;
+      }
+      if (lifecycle !== this.lifecycle || consent !== this.previewConsentVersion ||
+          this.dock?.activePopup !== "preview-start" || !this.session) return;
+      this.guidePreviewDestination = destination;
+      this.updateContinuation();
+      const next = readEditorContinuation();
+      if (next?.session.sessionId !== this.session.sessionId || !next.editorState?.guidePreview?.starting) {
+        this.guidePreviewDestination = null;
+        this.setGuidePreviewConsentStatus("Preview couldn’t resume after navigation. Check this site’s storage settings and try again.");
+        return;
+      }
+      if (destination.pathname === location.pathname && destination.search === location.search && destination.hash !== location.hash) {
+        window.addEventListener("hashchange", this.completeGuidePreviewNavigation);
+      }
+      location.assign(destination.href);
+    } catch {
+      this.clearGuidePreviewNavigation();
+      this.updateContinuation();
+      this.setGuidePreviewConsentStatus("Couldn’t open the starting page. Try again.");
+    } finally {
+      if (!this.guidePreviewDestination && this.saveState !== "expired") button.disabled = false;
+    }
+  }
+
+  private completeGuidePreviewNavigation = (): void => {
+    if (this.guidePreviewDestination?.href !== location.href) return;
+    this.currentPath = currentPagePath();
+    this.clearGuidePreviewNavigation();
+    this.dock?.show(null);
+    this.startGuidePreview();
+  };
+
+  private clearGuidePreviewNavigation(): void {
+    this.guidePreviewDestination = null;
+    window.removeEventListener("hashchange", this.completeGuidePreviewNavigation);
+    const button = this.root?.querySelector<HTMLButtonElement>("[data-preview-confirm]");
+    if (button && this.saveState !== "expired") button.disabled = false;
   }
 
   private startGuidePreview(): void {
@@ -766,52 +966,6 @@ export class EditorModeController {
   private deleteGuideStep(): void { if (!this.guide || this.guide.steps.length <= 1 || !window.confirm("Delete this Guide step?")) return; if (!this.flushContent()) return; this.guide.steps.splice(this.stepIndex, 1); this.stepIndex = Math.min(this.stepIndex, this.guide.steps.length - 1); this.changed(); this.refreshStepBar(); }
   private moveGuideStep(delta: -1 | 1): void { if (!this.guide || !this.flushContent()) return; const next = this.stepIndex + delta; if (next < 0 || next >= this.guide.steps.length) return; const [step] = this.guide.steps.splice(this.stepIndex, 1); this.guide.steps.splice(next, 0, step); this.stepIndex = next; this.changed(); this.refreshStepBar(); }
   private refreshStepBar(): void { const flow = this.root?.querySelector<HTMLElement>("[data-step-flow]"); if (!flow) return; flow.innerHTML = this.stepButtons(); flow.querySelectorAll<HTMLButtonElement>("[data-step]").forEach(button => button.addEventListener("click", () => this.switchStep(Number(button.dataset.step)))); const remove = this.root?.querySelector<HTMLButtonElement>("[data-step-bar-actions] [data-delete-step]"); if (remove) remove.disabled = !this.guide || this.guide.steps.length <= 1; this.syncPanel(); }
-
-  private bindDrag(): void {
-    const handle = this.root?.querySelector<HTMLElement>("[data-drag-handle]");
-    const aside = this.root?.querySelector<HTMLElement>("[data-editor-toolbar]");
-    if (!handle || !aside) return;
-    handle.addEventListener("pointerdown", event => {
-      if ((event.target as Element).closest("button")) return;
-      const rect = aside.getBoundingClientRect();
-      const startX = event.clientX; const startY = event.clientY;
-      let frame = 0;
-      const move = (next: PointerEvent) => {
-        cancelAnimationFrame(frame); frame = requestAnimationFrame(() => {
-        aside.style.right = "auto";
-        aside.style.transform = "none";
-        aside.style.left = `${Math.max(4, Math.min(innerWidth - rect.width - 4, rect.left + next.clientX - startX))}px`;
-        aside.style.top = `${Math.max(4, Math.min(innerHeight - rect.height - 4, rect.top + next.clientY - startY))}px`;
-        });
-      };
-      const stop = () => { cancelAnimationFrame(frame); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop); window.removeEventListener("pointercancel", stop); this.dragCleanup = null; };
-      this.dragCleanup?.(); this.dragCleanup = stop;
-      window.addEventListener("pointermove", move); window.addEventListener("pointerup", stop); window.addEventListener("pointercancel", stop);
-    });
-  }
-
-  private bindStepBarDrag(): void {
-    const handle = this.root?.querySelector<HTMLElement>("[data-step-drag-handle]");
-    const bar = this.root?.querySelector<HTMLElement>("[data-guide]");
-    if (!handle || !bar) return;
-    handle.addEventListener("pointerdown", event => {
-      const rect = bar.getBoundingClientRect();
-      const startX = event.clientX; const startY = event.clientY;
-      let frame = 0;
-      const move = (next: PointerEvent) => {
-        cancelAnimationFrame(frame); frame = requestAnimationFrame(() => {
-          bar.style.right = "auto";
-          bar.style.bottom = "auto";
-          bar.style.transform = "none";
-          bar.style.left = `${Math.max(4, Math.min(innerWidth - rect.width - 4, rect.left + next.clientX - startX))}px`;
-          bar.style.top = `${Math.max(4, Math.min(innerHeight - rect.height - 4, rect.top + next.clientY - startY))}px`;
-        });
-      };
-      const stop = () => { cancelAnimationFrame(frame); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop); window.removeEventListener("pointercancel", stop); this.dragCleanup = null; };
-      this.dragCleanup?.(); this.dragCleanup = stop;
-      window.addEventListener("pointermove", move); window.addEventListener("pointerup", stop); window.addEventListener("pointercancel", stop);
-    });
-  }
 
   private onSelect(selector: string, update: (value: string) => void): void {
     this.root?.querySelector<HTMLSelectElement>(selector)?.addEventListener("change", event => { update((event.currentTarget as HTMLSelectElement).value); this.changed(); });
@@ -864,6 +1018,8 @@ export class EditorModeController {
     this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
     this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
     if (this.dirty) void this.persist();
+    if (mode === "preview" && this.mode !== "preview") this.previewReturnMode = this.mode;
+    this.dock?.show(null);
     this.mode = mode; this.guidePreviewComplete = false; this.guidePreviewClickPending = false;
     if (mode === "preview") this.guidePreviewEntryPath = currentPagePath();
     this.configureDiagnostics();
@@ -891,6 +1047,7 @@ export class EditorModeController {
   private startLayerPicker(): void {
     if (this.mode === "navigate" || this.mode === "preview") this.mode = "target";
     const generation = ++this.selectionGeneration;
+    this.dock?.show(null);
     this.picker.cancel();
     this.setText("[data-mode-hint]", "Select the page element this experience should appear above or below");
     void this.picker.pick().then(target => {
@@ -916,7 +1073,7 @@ export class EditorModeController {
     if (this.saveState !== "conflict" && this.saveState !== "failed") this.saveState = this.saveInFlight ? "saving" : "dirty";
     this.showSaveState();
     clearTimeout(this.saveTimer);
-    this.saveTimer = window.setTimeout(() => void this.persist(), 350);
+    this.saveTimer = this.saveState === "failed" || this.saveState === "conflict" ? 0 : window.setTimeout(() => void this.persist(), 350);
   }
 
   private flushContent(): boolean {
@@ -932,17 +1089,37 @@ export class EditorModeController {
   private showValidation(errors: string[]): void {
     const element = this.root?.querySelector<HTMLElement>("[data-content-error]");
     if (element) { element.hidden = !errors.length; element.textContent = errors.join(" "); }
+    this.showSaveState();
   }
 
   private showSaveState(): void {
-    const labels = { clean: "Draft saved", dirty: "Unsaved", saving: "Saving…", failed: "Save failed", conflict: "Conflict · reload required", expired: "Session expired · export unsaved edits" };
-    this.setText("[data-save-state]", labels[this.saveState]);
-    const save = this.root?.querySelector<HTMLButtonElement>("[data-save]"); if (save) save.disabled = !this.dirty || ["saving", "conflict", "expired"].includes(this.saveState);
+    const labels = { clean: "Draft saved", dirty: "Unsaved", saving: "Saving…", failed: "Save failed", conflict: "Draft conflict", expired: "Session expired" };
     const recovering = ["failed", "conflict", "expired"].includes(this.saveState);
+    const invalid = this.root?.querySelector("[data-content-error]:not([hidden])");
+    const state = this.root?.querySelector<HTMLElement>("[data-dock-save-state]");
+    const label = recovering ? labels[this.saveState] : invalid ? "Review changes" :
+      this.reconnecting && this.saveState === "clean" ? "Reconnecting…" : labels[this.saveState];
+    if (state) {
+      state.classList.add("dock-status");
+      state.dataset.tone = recovering ? "error" : invalid || this.saveState === "dirty" ? "warn" :
+        this.saveState === "saving" || this.reconnecting ? "busy" : "ok";
+      state.title = label;
+      state.setAttribute("aria-label", `Draft status · ${label}`);
+    }
+    const previous = this.root?.querySelector<HTMLElement>("[data-save-state]");
+    if (previous && previous.textContent !== label) {
+      previous.textContent = label;
+      previous.animate?.([{ opacity: .5 }, { opacity: 1 }], { duration: matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 200 });
+    }
+    const save = this.root?.querySelector<HTMLButtonElement>("[data-save]");
+    if (save) save.disabled = !this.dirty || recovering && this.saveState !== "failed" || this.saveState === "saving" || Boolean(this.aiPreviewReturnMode);
     const recovery = this.root?.querySelector<HTMLElement>("[data-save-recovery]"); if (recovery) recovery.hidden = !recovering;
     const retry = this.root?.querySelector<HTMLButtonElement>("[data-retry-save]"); if (retry) retry.hidden = this.saveState !== "failed";
     const reload = this.root?.querySelector<HTMLButtonElement>("[data-reload-draft]"); if (reload) reload.hidden = !["conflict", "expired"].includes(this.saveState);
     this.setText("[data-recovery-message]", "Local edits remain in memory in this tab. Export before reloading or leaving.");
+    this.setText("[data-connection-status]", this.saveState === "expired" ? "Reconnect from the dashboard to continue authoring." :
+      this.saveState === "failed" ? "Retry to reconnect and save your edits." :
+      this.reconnecting ? "Trying to reconnect to the editor service." : "Editor connected");
   }
 
   private captureRecovery(): void {
@@ -962,7 +1139,7 @@ export class EditorModeController {
     if (this.saveState !== "expired" || !this.recoveryDraft) this.captureRecovery();
     if (!this.recoveryDraft) return;
     let output = this.root?.querySelector<HTMLTextAreaElement>("[data-recovery-export]");
-    if (!output && this.root) { output = document.createElement("textarea"); output.dataset.recoveryExport = ""; output.setAttribute("aria-label", "Unsaved draft JSON; copy and save before leaving"); output.readOnly = true; this.root.querySelector("main")?.append(output); }
+    if (!output && this.root) { output = document.createElement("textarea"); output.dataset.recoveryExport = ""; output.setAttribute("aria-label", "Unsaved draft JSON; copy and save before leaving"); output.readOnly = true; this.root.querySelector("[data-status-content]")?.append(output); }
     if (output) { output.value = this.recoveryDraft; output.focus(); output.select(); }
   }
 
@@ -977,14 +1154,14 @@ export class EditorModeController {
     this.previewGeneration++; this.preview.destroy(); this.previewRendered = false; this.picker.cancel();
     this.mutationObserver?.disconnect(); this.routeUnsubscribe?.(); this.routeObserver.stop();
     this.bridge = null; this.session = null; clearEditorContinuation();
-    this.root?.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>("button,input,select").forEach(control => { if (!control.matches("[data-export-draft],[data-discard-draft],[data-reload-draft],[data-minimize],[data-close]")) control.disabled = true; });
+    this.root?.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>("button,input,select").forEach(control => { if (!control.matches("[data-export-draft],[data-discard-draft],[data-reload-draft],[data-dock-save-state],[data-dismiss-popup],[data-close]")) control.disabled = true; });
     this.showSaveState();
   }
 
   private async persist(): Promise<boolean> {
     clearTimeout(this.saveTimer); this.saveTimer = 0;
     if (!this.flushContent()) return false;
-    if (this.saveState === "conflict" || this.saveState === "expired") return false;
+    if (this.saveState === "conflict" || this.saveState === "expired" || this.aiPreviewReturnMode) return false;
     if (this.saveInFlight) {
       const saved = await this.saveInFlight;
       return saved && this.dirty ? this.persist() : saved;
@@ -1004,6 +1181,7 @@ export class EditorModeController {
     }).catch(error => {
       if (lifecycle !== this.lifecycle) return false;
       this.dirty = true; this.captureRecovery();
+      clearTimeout(this.saveTimer); this.saveTimer = 0;
       if (error instanceof EditorSessionExpiredError) { this.expireSession(); return false; }
       this.saveState = error instanceof DraftConflictError ? "conflict" : "failed";
       this.showSaveState();
@@ -1018,9 +1196,10 @@ export class EditorModeController {
   }
 
   private async close(): Promise<void> {
+    if (this.aiPreviewReturnMode) this.discardAiPreview();
     if (!this.flushContent()) return;
     if ((this.dirty || this.saveInFlight) && !await this.persist()) return;
-    this.destroy();
+    this.teardown(true, false, true);
   }
 
   private renderPreview(): void {
@@ -1107,7 +1286,7 @@ export class EditorModeController {
           onChange: typing => { this.historyTyping = Boolean(typing); try { this.syncOnsiteAnchoredPointer(host.shadowRoot!, builder); this.changed(false); } finally { this.historyTyping = false; } },
           onValidation: errors => this.showValidation(errors),
           onImageStatus: message => this.setText("[data-image-status]", message),
-          onSelectionChange: selection => { this.history.endGroup(); if(this.checklist && selection.kind !== "step"){this.root?.querySelector("aside")?.classList.remove("minimized");this.root?.querySelector("[data-minimize]")?.setAttribute("aria-expanded","true");} this.compositionSelection = selection; this.recordHistory(); this.syncCompositionInspector(); this.syncAiPanel(); },
+          onSelectionChange: selection => { this.history.endGroup(); this.compositionSelection = selection; this.recordHistory(); this.syncCompositionInspector(); this.syncAiPanel(); },
           onUndo: () => this.globalUndo(), onRedo: () => this.globalRedo(),
           canUndo: () => this.history.canUndo(), canRedo: () => this.history.canRedo(), onTransaction: () => this.recordHistory(),
         }, this.survey ? { config: this.survey, step: this.survey.steps[this.stepIndex] } : undefined, this.checklist ?? undefined);
@@ -1188,18 +1367,8 @@ export class EditorModeController {
     if (globalUndo) globalUndo.disabled = !editor.canUndo(); if (globalRedo) globalRedo.disabled = !editor.canRedo();
   }
 
-  private setInspectorTab(tab: "properties" | "ai"): void {
-    if (!this.root || (tab === "ai" && this.draft?.experience.builderMode !== "onsite")) return;
-    const main = this.root.querySelector("main");
-    main?.classList.toggle("ai-mode", tab === "ai");
-    this.root.querySelectorAll<HTMLButtonElement>("[data-inspector-tab]").forEach(button => { const active = button.dataset.inspectorTab === tab; button.classList.toggle("active", active); button.setAttribute("aria-pressed", String(active)); });
-    const panel = this.root.querySelector<HTMLElement>("[data-ai-panel]"); if (panel) panel.hidden = tab !== "ai";
-    if (tab === "ai") this.syncAiPanel();
-    this.fitPanel();
-  }
-
   private syncAiPanel(): void {
-    if (!this.root) return; const selection = this.compositionSelection;
+    if (!this.root) return; this.syncDock(); const selection = this.compositionSelection;
     this.setText("[data-ai-context]", this.guide ? `Guide · step ${this.stepIndex + 1} of ${this.guide.steps.length}${selection ? ` · ${selection.label}` : ""}` : this.survey ? `Survey · step ${this.stepIndex + 1} of ${this.survey.steps.length}${selection ? ` · ${selection.label}` : ""}` : this.checklist ? `Checklist · ${this.checklistEditor?.getView() ?? "expanded"}${selection ? ` · ${selection.label}` : ""}` : selection ? `Editing ${selection.label} · ${selection.kind}` : "Choose an element or ask about the whole widget.");
     const history = this.root.querySelector<HTMLElement>("[data-ai-history]");
     if (history) {
@@ -1280,7 +1449,9 @@ export class EditorModeController {
     const input = this.root?.querySelector<HTMLTextAreaElement>("[data-ai-prompt]"); const prompt = input?.value.trim();
     const builder = this.currentBuilder(), sourceMode = isSourceAuthored(builder);
     if (!prompt || this.aiAbort || !this.bridge || !this.draft || !builder || !this.compositionSelection || (!this.compositionEditor && !sourceMode) || !this.flushContent()) return;
-    const generation = ++this.aiRequestGeneration; const abort = new AbortController(); this.aiAbort = abort; const messageId = `ai_${++this.aiMessageSequence}`;
+    this.aiRetryPrompt = prompt;
+    this.root?.querySelector<HTMLElement>("[data-ai-retry]")?.setAttribute("hidden", "");
+    const generation = ++this.aiRequestGeneration; const abort = new AbortController(); this.aiAbort = abort; this.syncDock(); const messageId = `ai_${++this.aiMessageSequence}`;
     const send = this.root?.querySelector<HTMLButtonElement>("[data-ai-send]"); if (send) send.disabled = true;
     const cancel = this.root?.querySelector<HTMLButtonElement>("[data-ai-cancel]"); if (cancel) cancel.hidden = false;
     this.aiMessages.push({ id: `user_${++this.aiMessageSequence}`, role: "user", text: prompt }, { id: messageId, role: "assistant", text: "Preparing your request...", progress: { startedAt: Date.now(), current: "Preparing your request.", finished: false, items: [{ key: "preparing", label: "Preparing your request.", detail: this.dirty || this.saveInFlight ? "Saving the current draft before generation starts." : "Building verified editor context locally.", status: "active" }] } }); if (input) input.value = "";
@@ -1298,11 +1469,11 @@ export class EditorModeController {
       this.aiConversationId = response.conversationId; this.aiProposal = response.proposal ? { value: response.proposal as EditorAiProposal | SurveyAiProposal | ChecklistAiProposal, revision: response.revision, generation: requestEditGeneration, selectionKey: requestSelectionKey } : null;
       const message = this.aiMessages.find(value => value.id === messageId); if (message) message.text = response.markdown.trim() || (response.proposal ? "Proposal generated." : "Response complete."); this.finishAiProgress(messageId, response.proposal ? "proposal" : "response", response.proposal ? "The validated proposal is ready for Preview or Apply." : "No proposal was needed for this response."); this.setText("[data-ai-status]", ""); this.syncAiPanel();
     } catch (error) {
-      if (generation === this.aiRequestGeneration && !abort.signal.aborted) { const message = this.aiMessages.find(value => value.id === messageId); const detail = error instanceof Error ? error.message : "Geo could not complete this request."; if (message) message.text = detail; this.finishAiProgress(messageId, "error", detail); if (error instanceof DraftConflictError) this.saveState = "conflict"; if (error instanceof EditorAiRequestError && error.conversationId) this.aiConversationId = error.conversationId; this.setText("[data-ai-status]", detail); this.showSaveState(); }
-    } finally { if (generation === this.aiRequestGeneration) { clearInterval(this.aiProgressTimer); this.aiProgressTimer = 0; this.aiAbort = null; if (send) send.disabled = false; if (cancel) cancel.hidden = true; } }
+      if (generation === this.aiRequestGeneration && !abort.signal.aborted) { const message = this.aiMessages.find(value => value.id === messageId); const detail = error instanceof Error ? error.message : "Geo could not complete this request."; if (message) message.text = detail; this.finishAiProgress(messageId, "error", detail); this.root?.querySelector<HTMLElement>("[data-ai-retry]")?.removeAttribute("hidden"); if (error instanceof DraftConflictError) this.saveState = "conflict"; if (error instanceof EditorAiRequestError && error.conversationId) this.aiConversationId = error.conversationId; this.setText("[data-ai-status]", detail); this.showSaveState(); }
+    } finally { if (generation === this.aiRequestGeneration) { clearInterval(this.aiProgressTimer); this.aiProgressTimer = 0; this.aiAbort = null; this.syncDock(); if (send) send.disabled = false; if (cancel) cancel.hidden = true; } }
   }
 
-  private cancelAiRequest(): void { if (!this.aiAbort) return; this.aiAbort.abort(); this.aiAbort = null; this.aiRequestGeneration++; clearInterval(this.aiProgressTimer); this.aiProgressTimer = 0; const pending = [...this.aiMessages].reverse().find(message => message.progress && !message.progress.finished); if (pending) { pending.text = "Request canceled."; this.finishAiProgress(pending.id, "cancelled", "No proposal from this request can be applied."); } this.setText("[data-ai-status]", "Request canceled."); const send = this.root?.querySelector<HTMLButtonElement>("[data-ai-send]"); if (send) send.disabled = false; const cancel = this.root?.querySelector<HTMLButtonElement>("[data-ai-cancel]"); if (cancel) cancel.hidden = true; }
+  private cancelAiRequest(): void { if (!this.aiAbort) return; this.aiAbort.abort(); this.aiAbort = null; this.syncDock(); this.aiRequestGeneration++; clearInterval(this.aiProgressTimer); this.aiProgressTimer = 0; const pending = [...this.aiMessages].reverse().find(message => message.progress && !message.progress.finished); if (pending) { pending.text = "Request canceled."; this.finishAiProgress(pending.id, "cancelled", "No proposal from this request can be applied."); } this.setText("[data-ai-status]", "Request canceled."); const send = this.root?.querySelector<HTMLButtonElement>("[data-ai-send]"); if (send) send.disabled = false; const cancel = this.root?.querySelector<HTMLButtonElement>("[data-ai-cancel]"); if (cancel) cancel.hidden = true; }
 
   private applyAiProposal(): void {
     if (!this.aiProposal || !this.draft || this.aiProposalIsStale()) { this.syncAiPanel(); return; }
@@ -1340,11 +1511,14 @@ export class EditorModeController {
     const operationIndex = this.aiProposal.value.operations.findIndex((operation, index) => operation.type === "request_guide_target" && !this.aiResolvedTargets.has(index));
     const operation = this.aiProposal.value.operations[operationIndex]; if (!operation || operation.type !== "request_guide_target") return;
     const index = this.guide.steps.findIndex(step => step.id === operation.stepId); if (index < 0 || !this.flushContent()) return;
+    this.dock?.show(null);
     this.stepIndex = index; const generation = ++this.selectionGeneration; this.picker.cancel(); this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null; this.preview.destroy(); this.previewRendered = false;
     this.setText("[data-ai-status]", `Select the website element for this step's ${operation.targetKind === "position" ? "position" : "advance trigger"}. Escape cancels.`);
     void this.picker.pick().then(target => {
-      if (generation !== this.selectionGeneration || !target) { this.renderPreview(); this.syncPanel(); return; }
+      if (generation !== this.selectionGeneration) return;
+      if (!target) { this.renderPreview(); this.syncPanel(); return; }
       this.aiResolvedTargets.set(operationIndex, { ...target, targetContext: { pagePath: currentPagePath() } }); this.renderPreview(); this.syncPanel(); this.syncAiPanel();
+      this.dock?.show("geo");
     });
   }
 
@@ -1457,22 +1631,51 @@ export class EditorModeController {
     } finally { this.restoringHistory = false; }
   }
 
+  private syncDock(): void {
+    const root = this.root;
+    if (!root) return;
+    const preview = this.mode === "preview";
+    const frame = root.querySelector<HTMLElement>("[data-editor-dock]");
+    this.dock?.setMode(this.mode);
+    root.querySelectorAll<HTMLElement>("[data-design-controls],[data-session-actions]").forEach(group => group.hidden = preview);
+    root.querySelector("[data-preview-dock]")?.toggleAttribute("hidden", !preview);
+    root.querySelector("[data-preview-geo]")?.toggleAttribute("hidden", !this.aiPreviewReturnMode);
+    frame?.toggleAttribute("data-geo-thinking", Boolean(this.aiAbort));
+    root.querySelector("[data-geo]")?.toggleAttribute("data-proposal-ready", Boolean(this.aiProposal));
+    if (this.checklist) {
+      const tools = root.querySelector("[data-checklist-tools]");
+      const target = root.querySelector(preview ? "[data-preview-checklist]" : "[data-checklist-settings]");
+      if (tools && target && tools.parentElement !== target) target.append(tools);
+    }
+    root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => {
+      const active = button.dataset.mode === this.mode;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+    const steps = this.guide?.steps ?? this.survey?.steps;
+    root.querySelectorAll<HTMLButtonElement>("[data-dock-step]").forEach(button => {
+      const index = this.stepIndex + Number(button.dataset.dockStep);
+      button.disabled = !steps || index < 0 || index >= steps.length;
+    });
+    const targetButton = root.querySelector<HTMLButtonElement>("[data-mode=target]");
+    if (targetButton) targetButton.hidden = !this.isTargetedType() && this.mode !== "target";
+    this.showSaveState();
+  }
+
   private syncPanel(): void {
     if (!this.root || !this.definition || !this.draft) return;
     this.syncGuideBehavior();
-    const reset = this.root.querySelector<HTMLElement>("[data-reset-preview]"); if (reset) reset.hidden = this.mode !== "preview";
-    const limit = this.root.querySelector<HTMLElement>("[data-preview-limit]"); if (limit) limit.hidden = this.mode !== "preview";
+    this.syncDock();
     const behavior = this.currentBehavior();
     const widgetType = this.draft.experience.widgetType;
     const guidePattern = this.guide ? getGuideStepPattern(this.guide.steps[this.stepIndex]) : null;
     const activeGroups = new Set<string>(guidePattern === "anchored_card" ? ["target", "anchored", "backdrop"] : !this.guide && widgetType === "anchored_card" ? ["target", "anchored", "backdrop"] : guidePattern === "modal" ? [] : widgetType === "hotspot" ? ["target", "anchored", "hotspot"] : widgetType === "toast" ? ["toast"] : widgetType === "modal" || widgetType === "survey" ? ["modal", "backdrop"] : widgetType === "slideout" ? ["slideout", "backdrop"] : widgetType === "banner" ? ["banner"] : ["cursor"]);
     this.root.querySelectorAll<HTMLElement>("[data-for]").forEach(group => { group.hidden = !activeGroups.has(group.dataset.for!); });
-    if (this.mode !== "design") this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { group.hidden = this.mode !== "target" || group.dataset.for !== "target" || !activeGroups.has("target"); });
-    const placementSection = this.root.querySelector<HTMLElement>("[data-placement-section]"); if (placementSection) placementSection.hidden = Boolean(this.guide && guidePattern === "modal");
+    this.root.querySelectorAll<HTMLElement>("[data-step-only]").forEach(group => { group.hidden = this.mode !== "design" && (this.mode !== "target" || group.dataset.for !== "target" || !activeGroups.has("target")); });
+    const placementSection = this.root.querySelector<HTMLElement>("[data-placement-section]"); if (placementSection) placementSection.hidden = this.mode !== "design" || Boolean(this.guide && guidePattern === "modal");
     const closeButtonSection = this.root.querySelector<HTMLElement>("[data-close-button-section]");
     if (closeButtonSection) closeButtonSection.hidden = Boolean(this.guide || !widgetType || !behavior.dismissible || (this.mode !== "design" && this.mode !== "preview"));
     this.root.querySelector<HTMLElement>("[data-step-summary]")!.hidden = !this.guide;
-    this.root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.classList.toggle("active", button.dataset.mode === this.mode));
     this.root.querySelectorAll<HTMLButtonElement>("[data-placement]").forEach(button => button.classList.toggle("active", button.dataset.placement === (behavior.placement ?? "auto")));
 
     const layer = this.currentLayer();
@@ -1584,28 +1787,6 @@ export class EditorModeController {
     this.mutationObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["id", "class", "data-testid", "hidden"] });
   }
 
-  private fitPanel = (): void => {
-    const aside = this.root?.querySelector<HTMLElement>("aside"); if (!aside) return;
-    const viewport = window.visualViewport;
-    const width = viewport?.width ?? innerWidth; const height = viewport?.height ?? innerHeight;
-    const x = viewport?.offsetLeft ?? 0; const y = viewport?.offsetTop ?? 0;
-    const toolbar = this.root?.querySelector<HTMLElement>("[data-editor-toolbar]");
-    if (toolbar) {
-      toolbar.style.maxWidth = `${Math.max(0, width - 8)}px`;
-      const bounds = toolbar.getBoundingClientRect();
-      if (bounds.left < x + 4 || bounds.right > x + width - 4 || bounds.top < y + 4 || bounds.bottom > y + height - 4) {
-        toolbar.style.transform = "none"; toolbar.style.left = `${Math.max(x + 4, Math.min(x + width - bounds.width - 4, bounds.left))}px`;
-        toolbar.style.top = `${Math.max(y + 4, Math.min(y + height - bounds.height - 4, bounds.top))}px`;
-      }
-    }
-    aside.style.maxWidth = `${Math.max(0, width - 8)}px`; aside.style.maxHeight = `${Math.max(48, height - 8)}px`;
-    const main = this.root?.querySelector<HTMLElement>("main"); if (main) main.style.maxHeight = `${Math.max(0, width <= 480 ? height * (main.classList.contains("ai-mode") ? .76 : .38) : height - 32)}px`;
-    const rect = aside.getBoundingClientRect();
-    if (aside.style.left) aside.style.left = `${Math.max(x + 4, Math.min(x + width - rect.width - 4, rect.left))}px`;
-    if (width <= 480) { aside.style.top = "auto"; aside.style.bottom = this.guide || this.survey ? "70px" : "8px"; }
-    else { aside.style.bottom = "auto"; aside.style.top = `${Math.max(y + 4, Math.min(y + height - 48, rect.top || y + 4))}px`; }
-  };
-
   private scheduleTargetRefresh(): void {
     clearTimeout(this.targetRefreshTimer);
     this.targetRefreshTimer = window.setTimeout(() => this.updateDiagnostics(), 80);
@@ -1673,14 +1854,21 @@ export class EditorModeController {
 
   private updateContinuation(): void {
     if (!this.session || !this.draft || this.saveState === "expired") return;
+    const destination = this.guidePreviewDestination;
+    const returnMode = this.mode === "preview" ? this.previewReturnMode : this.mode;
+    const starting = destination && this.guide && {
+      versionId: this.draft.version.id, entryPath: destination.pathname + destination.search + destination.hash,
+      completed: false, starting: true, returnMode,
+    };
     storeEditorContinuation({
       session: this.session,
       editorState: {
         experienceId: this.draft.experience.id,
-        selectedStepId: this.guide?.steps[this.stepIndex]?.id ?? this.survey?.steps[this.stepIndex]?.id,
-        mode: this.mode,
-        ...(this.mode === "preview" && this.guide && !this.aiPreviewOriginal ? {
-          guidePreview: { versionId: this.draft.version.id, entryPath: this.guidePreviewEntryPath, completed: this.guidePreviewComplete, ...(this.guidePreviewClickPending ? { clickPending: true } : {}) },
+        selectedStepId: this.guide?.steps[starting ? 0 : this.stepIndex]?.id ?? this.survey?.steps[this.stepIndex]?.id,
+        mode: starting ? "preview" : this.mode,
+        ...(this.guideLaunchPath ? { guideLaunchPath: this.guideLaunchPath } : {}),
+        ...(starting ? { guidePreview: starting } : this.mode === "preview" && this.guide && !this.aiPreviewOriginal ? {
+          guidePreview: { versionId: this.draft.version.id, entryPath: this.guidePreviewEntryPath, completed: this.guidePreviewComplete, returnMode, ...(this.guidePreviewClickPending ? { clickPending: true } : {}) },
         } : {}),
       },
     });
@@ -1716,8 +1904,8 @@ export class EditorModeController {
 
   destroy(): void { this.teardown(true); }
 
-  private teardown(clearContinuation: boolean): void {
-    this.capture?.destroy();
+  private teardown(clearContinuation: boolean, keepDock = false, animate = false): void {
+    this.capture?.destroy(true);
     this.capture = null;
     this.lifecycle++;
     this.cancelAiRequest(); this.aiProposal = null; this.aiConversationId = undefined; this.aiMessages = []; this.aiResolvedTargets.clear(); this.aiPreviewOriginal = null; this.aiPreviewCandidate = null; this.surveyAiPreviewOriginal = null; this.surveyAiPreviewCandidate = null; this.checklistAiPreviewOriginal = null; this.checklistAiPreviewCandidate = null; this.widgetAiPreviewOriginal = null; this.widgetAiPreviewCandidate = null; this.aiPreviewReturnMode = null;
@@ -1730,23 +1918,23 @@ export class EditorModeController {
     this.routeUnsubscribe?.(); this.routeUnsubscribe = null;
     this.routeObserver.stop();
     window.removeEventListener("pagehide", this.persistBeforePageLeave);
+    window.removeEventListener("pageshow", this.restoreAfterBackNavigation);
     document.removeEventListener("click", this.protectPreviewNavigation, true);
     document.removeEventListener("submit", this.protectPreviewSubmission, true);
     window.removeEventListener("beforeunload", this.protectUnsavedChanges);
-    window.removeEventListener("resize", this.fitPanel);
-    window.visualViewport?.removeEventListener("resize", this.fitPanel);
-    window.visualViewport?.removeEventListener("scroll", this.fitPanel);
     this.mutationObserver?.disconnect(); this.mutationObserver = null;
-    this.dragCleanup?.(); this.dragCleanup = null;
     this.contentEditor?.flush(); this.compositionEditor?.flush();
     this.previewGeneration++; this.preview.destroy();
     this.contentEditor?.destroy(); this.contentEditor = null; this.componentSelection = null;
     this.compositionEditor?.destroy(); this.compositionEditor = null; this.compositionSelection = null;
     this.picker.cancel();
-    this.host?.remove();
+    if (!keepDock) { this.dock?.destroy(animate); this.dock = null; }
     this.surveyEditor?.destroy(); this.surveyEditor = null;
     this.checklistEditor?.destroy();this.checklistEditor=null;this.checklist=null;
-    this.host = null; this.root = null; this.bridge = null; this.session = null; this.draft = null; this.definition = null; this.guide = null; this.survey = null;
+    this.root = null; this.bridge = null; this.session = null; this.draft = null; this.definition = null; this.guide = null; this.survey = null;
+    this.previewReturnMode = "design"; this.aiRetryPrompt = ""; this.reconnecting = false;
+    this.guideLaunchPath = undefined;
+    this.clearGuidePreviewNavigation();
     this.saveState = "clean"; this.editGeneration = 0; this.recoveryDraft = null;
     this.dirty = false; this.previewRendered = false; this.saveInFlight = null;
     if (clearContinuation) clearEditorContinuation();
@@ -1759,6 +1947,17 @@ function clampStep(value: number, length: number): number { return Number.isFini
 function validSession(value: Partial<EditorSession> | null): value is EditorSession { return !!value && typeof value.sessionId === "string" && !!value.sessionId && typeof value.accessToken === "string" && !!value.accessToken && typeof value.expiresAt === "string" && Number.isFinite(Date.parse(value.expiresAt)) && Date.parse(value.expiresAt) > Date.now(); }
 function numberValue(value: string, fallback: number): number { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : fallback; }
 function currentPagePath(): string { return `${location.pathname}${location.search}${location.hash}`; }
+function sameOriginGuidePage(path: string | undefined): URL | null {
+  if (!path?.startsWith("/") || path.startsWith("//") || /[\\\u0000-\u001f\u007f]/.test(path)) return null;
+  try {
+    const url = new URL(path, location.origin);
+    if (url.origin !== location.origin) return null;
+    for (const name of ["movcues_editor_token", "movcues_editor_step"]) {
+      if (url.searchParams.has(name)) url.searchParams.delete(name);
+    }
+    return url;
+  } catch { return null; }
+}
 function formatAiElapsed(milliseconds: number): string { const seconds = Math.max(0, Math.floor(milliseconds / 1_000)); return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`; }
 function capitalize(value: string): string { return value.charAt(0).toUpperCase() + value.slice(1); }
 function reliabilityIcon(value: ExperienceTarget["reliability"]): string { return value === "reliable" ? "✓" : value === "moderate" ? "●" : "⚠"; }
@@ -1781,23 +1980,46 @@ function formatAdvance(advance?: GuideAdvance): string {
 function escapeText(value: string): string { const span = document.createElement("span"); span.textContent = value; return span.innerHTML; }
 
 const BASE_STYLE = `
-:host{all:initial}*{box-sizing:border-box}aside{position:fixed;right:12px;top:12px;width:min(326px,calc(100vw - 8px));max-height:calc(100dvh - 24px);z-index:2147483647;overflow:hidden;background:#fff;color:#111827;border:1px solid #d7dce3;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,.24);font:13px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}aside.left-side{left:12px;right:auto}header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid #e5e7eb;cursor:move;user-select:none}.header-copy{display:grid;min-width:0}.header-copy strong{font-size:13px}.header-copy>span{overflow:hidden;color:#4b5563;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.header-copy small{margin-top:3px;color:#6b7280;font-size:11px}.header-copy i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a}.header-actions{display:flex;gap:2px}.header-actions button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:#64748b;font:16px/1 inherit;cursor:pointer}.header-actions button:hover{background:#f1f5f9;color:#0f172a}main{max-height:calc(100dvh - 82px);overflow:auto}.minimized{width:min(260px,calc(100vw - 8px))}.minimized main{display:none}.modebar{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.modebar button,.secondary-button,.placement-grid button,.formatbar button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.modebar button{min-width:0;padding:7px 3px}.modebar button:disabled{cursor:not-allowed;opacity:.42}.modebar button.active,.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-navigator{position:fixed;left:50%;bottom:10px;width:min(680px,calc(100vw - 16px));transform:translateX(-50%);z-index:2147483647;border:1px solid #d7dce3;border-radius:10px;background:#fff;box-shadow:0 10px 32px rgba(15,23,42,.18)}.step-flow{display:flex;align-items:stretch;gap:4px;overflow:auto}.step{display:grid;grid-template-columns:auto minmax(54px,1fr) auto;align-items:center;gap:4px;flex:none;max-width:130px;padding:5px 7px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step small{overflow:hidden;font:10px/1.2 inherit;text-overflow:ellipsis;white-space:nowrap}.step i{font-style:normal}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.secondary-button.compact{padding:5px 7px}.content-heading,.history-row,.link-row,.save-recovery{display:flex;align-items:center;justify-content:space-between;gap:6px}.content-heading>div{min-width:0}.formatbar{display:flex;flex-wrap:wrap;gap:4px}.formatbar button{padding:5px 7px}.link-row input{min-width:0}.history-row{justify-content:flex-start;flex-wrap:wrap}.save-recovery{flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid #fee2e2;background:#fff7ed;color:#9a3412;font-size:11px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #2563eb;outline-offset:2px}textarea[data-recovery-export]{box-sizing:border-box;width:100%;height:180px;font:11px monospace}[hidden]{display:none!important}@media(max-width:480px){.step-navigator{position:static;width:auto;transform:none;box-shadow:none}}@media(max-width:420px){aside{right:4px;top:4px;max-height:calc(100dvh - 8px)}aside.left-side{left:4px}main{max-height:calc(100dvh - 66px)}header{padding:9px}.section{padding:8px 10px}.modebar{padding:6px}.modebar button{font-size:10px}}
+:host{all:initial}*{box-sizing:border-box}.secondary-button,.placement-grid button,.formatbar button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#334155;font:600 12px inherit;cursor:pointer}.placement-grid button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.notice{display:grid;gap:2px;margin:8px 10px 0;padding:8px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1e40af;font-size:11px}.section{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3}.eyebrow{color:#64748b;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.muted,.hint{color:#64748b;font-size:11px}.hint{margin:0;padding:9px 12px}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-flow{display:grid;gap:4px}.step{display:grid;grid-template-columns:auto minmax(54px,1fr) auto;align-items:center;gap:4px;flex:none;max-width:130px;padding:5px 7px;border:0;border-radius:6px;background:transparent;color:#64748b;font:600 11px inherit;cursor:pointer}.step small{overflow:hidden;font:10px/1.2 inherit;text-overflow:ellipsis;white-space:nowrap}.step i{font-style:normal}.step.active{background:#eff6ff;color:#1d4ed8}.step[data-step-status=found]{color:#15803d}.step[data-step-status=missing]{color:#b45309}.step.active{color:#1d4ed8}.reliability{color:#64748b;font-size:11px}.reliability[data-level=reliable]{color:#15803d}.reliability[data-level=fragile]{color:#b45309}.secondary-button{padding:7px 9px}.secondary-button.compact{padding:5px 7px}.content-heading,.history-row,.link-row,.save-recovery{display:flex;align-items:center;justify-content:space-between;gap:6px}.content-heading>div{min-width:0}.formatbar{display:flex;flex-wrap:wrap;gap:4px}.formatbar button{padding:5px 7px}.link-row input{min-width:0}.history-row{justify-content:flex-start;flex-wrap:wrap}.save-recovery{flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid #fee2e2;background:#fff7ed;color:#9a3412;font-size:11px}.placement-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.placement-grid button{padding:6px}.placement-grid button[data-placement=top]{grid-column:2}.placement-grid button[data-placement=left]{grid-column:1}.placement-grid button[data-placement=auto]{grid-column:2}.placement-grid button[data-placement=right]{grid-column:3}.placement-grid button[data-placement=bottom]{grid-column:2}label{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:8px;color:#475569;font-size:11px}label.check{display:flex}label.check input{width:auto}input,select{min-width:0;width:100%;padding:6px 7px;border:1px solid #d7dce3;border-radius:6px;background:#fff;color:#111827;font:12px inherit}.number{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}.number span{color:#64748b;font-size:11px}dl{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;margin:0;font-size:11px}dt{color:#64748b}dd{min-width:0;margin:0;overflow-wrap:anywhere;color:#1f2937}.live{font-size:11px}.status-ok{color:#15803d}.status-error{color:#b91c1c}.live code{display:block;overflow:hidden;padding:4px 6px;border-radius:5px;background:#f8fafc;color:#475569;font:11px/1.35 ui-monospace,SFMono-Regular,monospace;text-overflow:ellipsis;white-space:nowrap}[data-missing-selector]{display:grid;gap:5px;padding-top:4px;color:#b91c1c}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #2563eb;outline-offset:2px}textarea[data-recovery-export]{box-sizing:border-box;width:100%;height:180px;font:11px monospace}[hidden]{display:none!important}
 `;
 
 const STYLE = `${BASE_STYLE}
-.editor-toolbar{position:fixed;left:50%;transform:translateX(-50%);top:12px;width:min(410px,calc(100vw - 8px));z-index:2147483647;border:1px solid #d7dce3;border-radius:10px;background:#fff;color:#111827;box-shadow:0 8px 24px rgba(15,23,42,.16);font:12px/1.3 ui-sans-serif,system-ui,sans-serif;overflow:hidden}
-.editor-toolbar header{padding:7px 8px;gap:4px;align-items:center}.header-copy>span{display:none}.header-copy strong{font-size:11px}.header-copy small{margin-top:1px;font-size:10px}.header-actions{flex-wrap:wrap;justify-content:flex-end;gap:1px}.header-actions button{width:25px;height:28px;font-size:14px}.header-actions [data-save]{width:38px;font-size:11px}.header-actions button:disabled{opacity:.4;cursor:default}
-.editor-toolbar,aside,.step-navigator{pointer-events:auto}.editor-toolbar .modebar{padding:5px;border-bottom:0}.editor-toolbar .modebar button{padding:6px 3px;font-size:11px}.minimized{display:none}aside{box-shadow:0 8px 24px rgba(15,23,42,.14)}main{overscroll-behavior:contain}details.live{display:block}details.live summary{cursor:pointer;color:#64748b;font-size:11px}details.live[open]>div{margin-top:6px}.step-navigator{display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 16px));padding:6px 8px}.step-drag-handle{flex:none;padding:2px 1px;color:#94a3b8;font-size:16px;line-height:1;cursor:move;touch-action:none;user-select:none}.step-navigator .content-heading{flex:none}.step-navigator .content-heading .eyebrow{display:none}.step-navigator .step-flow{flex:1;min-width:0}.step-navigator .step-bar-actions{display:flex;flex:none;align-items:center;gap:3px}.step-navigator .secondary-button{padding:4px;font-size:10px}.step-navigator .step-bar-action{width:24px;height:24px;padding:0;font-size:15px;line-height:1}.step-navigator .step-bar-action svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.step-navigator .step-bar-delete{border-color:#fecaca;background:#fff1f2;color:#dc2626}.step-navigator .step-bar-delete:hover{border-color:#fca5a5;background:#fee2e2;color:#b91c1c}.step-navigator .step-bar-action:disabled{cursor:not-allowed;opacity:.4}
-.inspector-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:8px;border-bottom:1px solid #e5e7eb}.inspector-tabs button{border:1px solid #d7dce3;border-radius:7px;background:#fff;color:#475569;padding:6px;font:600 11px inherit;cursor:pointer}.inspector-tabs button.active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.inspector-tabs button:disabled{opacity:.4;cursor:not-allowed}main.ai-mode>:not(.inspector-tabs):not(.ai-panel){display:none!important}.ai-panel{min-height:min(580px,calc(100dvh - 130px));display:flex;flex-direction:column;gap:10px;background:#fcfcfd}.ai-panel .content-heading{flex:none}.ai-panel .muted{margin:0}.ai-chat-history{display:grid;align-content:start;gap:8px;flex:1;min-height:260px;overflow:auto;padding:2px}.ai-chat-message{display:grid;gap:3px;max-width:92%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#334155}.ai-chat-message--user{justify-self:end;border-color:#dbeafe;background:#eff6ff;color:#1e3a8a}.ai-chat-message__role{font-size:10px;font-weight:700;color:#64748b}.ai-chat-message--user .ai-chat-message__role{color:#2563eb}.ai-chat-message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45}.ai-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:7px;padding-top:8px;border-top:1px solid #eef0f3}.ai-panel textarea{min-height:72px;width:100%;resize:vertical;padding:8px;border:1px solid #d7dce3;border-radius:8px;font:12px/1.4 inherit}.ai-composer button{padding:8px 10px}.ai-status{min-height:16px;margin:0;white-space:pre-wrap;color:#64748b;font-size:11px}.ai-proposal{display:grid;gap:6px;padding:8px;border:1px solid #bfdbfe;border-radius:8px;background:#f8fbff}.ai-proposal ul{margin:0;padding-left:18px;color:#475569;font-size:11px}
+
+main{overscroll-behavior:contain}
+.settings-disclosure>summary,.live>summary{cursor:pointer;font-size:12px;font-weight:650;color:#334764}
+.settings-disclosure[open]>div,.settings-disclosure[open]>dl,.live[open]>div{margin-top:7px}
+.step-navigator,.dock-session{display:grid;gap:8px}
+.step-flow .step{max-width:none;min-height:32px;text-align:start;background:#f6f8fc;padding:6px 8px}
+.step-flow .step.active{background:#eaf1ff}
+.step-flow .step small{font-size:12px}
+.step-bar-actions{display:flex;flex-wrap:wrap;gap:4px;border-top:1px solid #e3eaf5;padding-top:8px}
+.step-bar-action{width:32px;height:29px;padding:0!important}
+.step-bar-action svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.7}
+.step-bar-delete{color:#b42342}
+.secondary-button:hover:not(:disabled),.step-bar-action:hover:not(:disabled){background:#eff5ff;color:#2455ba}
+.dock-bar [data-geo]{color:#224fac;font-weight:750}
+.dock-bar [data-proposal-ready]::after{content:"";width:6px;height:6px;border-radius:50%;background:#2c68da}
+[data-guide-preview]{min-width:0;flex-wrap:wrap}
+[data-status-content] .save-recovery{border-radius:8px}
+[data-status-content] .hint{padding:0 0 8px}
+[data-dock-popup=settings]{max-height:min(340px,41dvh,calc(var(--dock-height,100dvh) - 100% - 46px))}
+.preview-consent{display:grid;gap:9px;color:#334764}
+.preview-consent p{margin:0}
+.preview-consent code{background:#f1f5fb;border-radius:7px;padding:6px 8px;overflow-wrap:anywhere}
+.preview-consent .hint{padding:0}
+.preview-consent-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:6px}
+.preview-consent-actions [data-preview-confirm]{background:#2458d3;color:#fff;border-color:#2458d3}
+.preview-consent-actions [data-preview-confirm]:hover:not(:disabled){background:#1948ba;color:#fff}
+.preview-consent-actions [data-preview-confirm]:disabled{opacity:.55;cursor:wait}
+@media(max-width:550px){[data-dock-popup=settings]{max-height:min(250px,36dvh,calc(var(--dock-height,100dvh) - 100% - 30px))}}
+.ai-panel{min-height:0;display:flex;flex-direction:column;gap:10px;background:#fcfcfd}.ai-panel .content-heading{flex:none}.ai-panel .muted{margin:0}.ai-chat-history{display:grid;align-content:start;gap:8px;flex:1;min-height:260px;overflow:auto;padding:2px}.ai-chat-message{display:grid;gap:3px;max-width:92%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#334155}.ai-chat-message--user{justify-self:end;border-color:#dbeafe;background:#eff6ff;color:#1e3a8a}.ai-chat-message__role{font-size:10px;font-weight:700;color:#64748b}.ai-chat-message--user .ai-chat-message__role{color:#2563eb}.ai-chat-message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45}.ai-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:7px;padding-top:8px;border-top:1px solid #eef0f3}.ai-panel textarea{min-height:72px;width:100%;resize:vertical;padding:8px;border:1px solid #d7dce3;border-radius:8px;font:12px/1.4 inherit}.ai-composer button{padding:8px 10px}.ai-status{min-height:16px;margin:0;white-space:pre-wrap;color:#64748b;font-size:11px}.ai-proposal{display:grid;gap:6px;padding:8px;border:1px solid #bfdbfe;border-radius:8px;background:#f8fbff}.ai-proposal ul{margin:0;padding-left:18px;color:#475569;font-size:11px}
 .ai-composer{grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:7px;border:1px solid #d9e1ec;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgb(15 23 42 / .04);transition:border-color .16s ease,box-shadow .16s ease}.ai-composer:focus-within{border-color:#93c5fd;box-shadow:0 0 0 3px rgb(59 130 246 / .12)}.ai-composer textarea{min-height:54px;padding:5px 3px;border:0;border-radius:0;background:transparent;outline:0;box-shadow:none;line-height:1.45}.ai-composer textarea:focus{outline:0}.ai-composer textarea::placeholder{color:#94a3b8}.ai-composer button{min-width:58px;min-height:34px;margin-bottom:2px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;box-shadow:0 1px 2px rgb(37 99 235 / .25);transition:background .16s ease,transform .16s ease,box-shadow .16s ease}.ai-composer button:hover:not(:disabled){background:#1d4ed8;box-shadow:0 4px 10px rgb(37 99 235 / .24);transform:translateY(-1px)}.ai-composer button:active:not(:disabled){transform:translateY(0);box-shadow:none}.ai-composer button:disabled{opacity:.5;cursor:not-allowed}
 .ai-chat-message [data-ai-progress]{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;padding-top:5px;border-top:1px solid #eef2f7;color:#64748b;font-size:10px}.ai-progress-current{font-weight:700;color:#475569}.ai-progress-elapsed{font-variant-numeric:tabular-nums}.ai-chat-message [data-ai-progress] details{grid-column:1/-1}.ai-chat-message [data-ai-progress] summary{cursor:pointer;color:#2563eb;font-weight:600}.ai-chat-message [data-ai-progress] ol{display:grid;gap:5px;margin:6px 0 0;padding-left:18px}.ai-chat-message [data-ai-progress] li{color:#94a3b8}.ai-chat-message [data-ai-progress] li[data-status=active]{color:#1d4ed8}.ai-chat-message [data-ai-progress] li[data-status=error],.ai-chat-message [data-ai-progress] li[data-status=cancelled]{color:#b91c1c}.ai-chat-message [data-ai-progress] li strong,.ai-chat-message [data-ai-progress] li span{display:block}.ai-chat-message [data-ai-progress] li span{margin-top:1px;font-weight:400;color:#64748b}@media(prefers-reduced-motion:reduce){.ai-composer,.ai-composer button{transition:none!important}}
 .step-navigator .step-bar-action{transition:border-color .16s ease,background .16s ease,color .16s ease,transform .16s ease}.step-navigator .step-bar-action:hover:not(:disabled){border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8;transform:translateY(-1px)}.step-navigator .step-bar-delete:hover:not(:disabled){color:#b91c1c}
 [data-composition-inspector]>.history-row{display:none}
-@media(max-width:800px){.editor-toolbar{width:min(350px,calc(100vw - 8px))}aside{width:min(300px,calc(100vw - 8px))}}
-@media(max-width:480px){.editor-toolbar{left:4px;top:4px;transform:none}.header-copy strong{font-size:10px}.header-copy small{font-size:9px}.header-actions [data-return-dashboard],.header-actions [data-move-side]{display:none}aside{width:calc(100vw - 8px)}.step-navigator{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:calc(100vw - 8px);box-shadow:0 4px 14px rgba(15,23,42,.12)}.step-navigator>.history-row:not([data-step-bar-actions]){display:none}.step-navigator .content-heading{display:none}}
 `;
 
-const GUIDE_STYLE = `.guide-behavior{display:grid;gap:8px;border-top:1px solid #eef0f3;padding-top:10px;margin-top:8px}.guide-behavior [data-guide-config],.guide-behavior [data-guide-missing]{display:grid;gap:7px}.guide-behavior .muted{margin:0;overflow-wrap:anywhere}.guide-preview-controls{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:5px 7px;border-top:1px solid #eef0f3}.guide-preview-controls button{border:1px solid #d7dce3;border-radius:5px;background:#fff;color:#334155;padding:4px 6px;font:11px ui-sans-serif,system-ui;cursor:pointer}.guide-preview-controls small{flex-basis:100%;color:#64748b;font-size:10px}.guide-preview-controls button:disabled{opacity:.4}.guide-preview-controls span{font-size:10px;margin-left:auto}`;
+const GUIDE_STYLE = `.guide-behavior{display:grid;gap:8px;border-top:1px solid #eef0f3;padding-top:10px;margin-top:8px}.guide-behavior [data-guide-config],.guide-behavior [data-guide-missing]{display:grid;gap:7px}.guide-behavior .muted{margin:0;overflow-wrap:anywhere}`;
 
 function checklistEditorAdapter(value:EditorChecklistDefinition):EditorDefinition {
  return {content:{heading:value.title,body:value.description??""},builder:value.builder,design:value.design??{width:"sm",theme:{background:"#fff",foreground:"#111827",primary:"#2563eb",borderRadius:"md"}},behavior:{dismissible:false},targeting:{...value.targeting,trigger:{type:"page_load"},frequency:{mode:"once"}},visualTheme:value.visualTheme,template:value.template};

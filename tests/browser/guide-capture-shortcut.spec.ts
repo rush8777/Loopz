@@ -97,9 +97,10 @@ test("keeps focus navigation, typing and modifier chords available in selection"
   await expect(mode(page, "navigate")).toHaveAttribute("aria-pressed", "true");
   await expect(field).toBeFocused();
   await page.keyboard.press("Shift+F8");
+  await page.getByRole("button", { name: "Plan a guide with Geo" }).click();
   await page.locator("[data-prompt]").focus();
   await page.keyboard.press("Shift+Tab");
-  await expect(mode(page, "navigate")).toBeFocused();
+  await expect(page.getByRole("button", { name: "Close Generate a guide" })).toBeFocused();
   await expect(mode(page, "select")).toHaveAttribute("aria-pressed", "true");
   await page.locator("#native-select").focus();
   await page.keyboard.press("Shift+Tab");

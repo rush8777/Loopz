@@ -2,7 +2,7 @@ import type { EditorDraft } from "../types";
 import type { EditorContinuation, EditorSession } from "../runtimeInterfaces";
 export declare class EditorModeController {
     private apiBase;
-    private host;
+    private dock;
     private root;
     private picker;
     private capture;
@@ -14,7 +14,6 @@ export declare class EditorModeController {
     private routeObserver;
     private routeUnsubscribe;
     private mutationObserver;
-    private dragCleanup;
     private expiryTimer;
     private validationTimer;
     private saveTimer;
@@ -40,6 +39,7 @@ export declare class EditorModeController {
     private preferredSelection;
     private aiPreviewLocation;
     private saveState;
+    private reconnecting;
     private recoveryDraft;
     private lifecycle;
     private previewRendered;
@@ -48,7 +48,12 @@ export declare class EditorModeController {
     private guidePreviewComplete;
     private guidePreviewEntryPath;
     private guidePreviewClickPending;
+    private guideLaunchPath;
+    private guidePreviewDestination;
+    private previewConsentVersion;
     private previewDevice;
+    private previewReturnMode;
+    private aiRetryPrompt;
     private aiConversationId;
     private aiMessages;
     private aiProposal;
@@ -67,6 +72,7 @@ export declare class EditorModeController {
     private aiMessageSequence;
     private aiProgressTimer;
     private persistBeforePageLeave;
+    private restoreAfterBackNavigation;
     private protectUnsavedChanges;
     constructor(apiBase: string);
     start(rawToken: string): Promise<boolean>;
@@ -76,6 +82,7 @@ export declare class EditorModeController {
     /** Use a fresh server draft already fetched in parallel with the editor bundle. */
     resumeWithDraft(continuation: EditorContinuation, draft?: EditorDraft): Promise<boolean>;
     private activate;
+    private validateSession;
     private mount;
     private panelMarkup;
     private stepButtons;
@@ -92,6 +99,12 @@ export declare class EditorModeController {
     private pickGuideInteraction;
     private syncGuideBehavior;
     private previewTriggerHint;
+    private guidePreviewStartPage;
+    private requestGuidePreview;
+    private setGuidePreviewConsentStatus;
+    private confirmGuidePreview;
+    private completeGuidePreviewNavigation;
+    private clearGuidePreviewNavigation;
     private startGuidePreview;
     private advanceGuidePreview;
     private addGuideStep;
@@ -99,8 +112,6 @@ export declare class EditorModeController {
     private deleteGuideStep;
     private moveGuideStep;
     private refreshStepBar;
-    private bindDrag;
-    private bindStepBarDrag;
     private onSelect;
     private onInput;
     private onCheck;
@@ -127,7 +138,6 @@ export declare class EditorModeController {
     private currentContent;
     private syncContentInspector;
     private syncCompositionInspector;
-    private setInspectorTab;
     private syncAiPanel;
     private syncAiProgressItem;
     private updateAiProgress;
@@ -154,12 +164,12 @@ export declare class EditorModeController {
     private globalUndo;
     private globalRedo;
     private restoreHistory;
+    private syncDock;
     private syncPanel;
     private hideChecklistWidgetControls;
     private renderConfigured;
     private updateDiagnostics;
     private configureDiagnostics;
-    private fitPanel;
     private scheduleTargetRefresh;
     private onRouteChange;
     private matchesPreviewRoute;

@@ -1,10 +1,11 @@
+import { closeDockPopup, openDockPopup } from "../fixtures/openDockPopup";
 import { expect, test, type Page } from "@playwright/test";
 import { selectStepProperties } from "../fixtures/selectStepProperties";
 
 const api = "http://127.0.0.1:4310";
 const host = "http://127.0.0.1:4179";
 const widget = (page: Page) => page.locator("[data-movcues-experience]");
-const capture = (page: Page) => page.getByRole("complementary", { name: "Guided Capture" });
+const capture = (page: Page) => page.locator("[data-movcues-guide-capture]");
 const currentHeading = (page: Page) => widget(page).locator("h2");
 
 async function rename(page: Page, name: string) {
@@ -15,6 +16,7 @@ async function rename(page: Page, name: string) {
   await heading.pressSequentially(name);
   await expect(heading).toHaveText(name);
   await selectStepProperties(page);
+  await closeDockPopup(page);
 }
 
 test.skip(process.env.GUIDE_CAPTURE_ENABLED !== "true", "Enable the isolated Guided Capture provider for this workflow");
@@ -59,25 +61,31 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   const rows = timeline.locator("[data-remove]");
   await expect(panel.getByRole("button", { name: "Navigate", exact: true })).toHaveAttribute("aria-pressed", "true");
   await editor.keyboard.press("Shift+F8");
-  await expect(panel.getByRole("button", { name: "Select Elements" })).toHaveAttribute("aria-pressed", "true");
+  await expect(panel.getByRole("button", { name: "Select", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(widget(editor)).toHaveCount(0);
   const started = await editor.evaluate(() => performance.now());
   await editor.locator("#nav-feature").click();
+  await openDockPopup(editor, "targets");
   await expect(rows).toHaveCount(1);
   await expect(editor.locator("[data-movcues-capture-marker]:visible")).toHaveText("1");
   await expect(editor).toHaveURL(/\/integration\/start/);
+  await openDockPopup(editor, "targets");
   await panel.getByRole("button", { name: "Replace element 1" }).click();
   await editor.locator("#nav-start").click();
+  await openDockPopup(editor, "targets");
   await expect(timeline.getByRole("listitem").first()).toContainText("Home");
+  await openDockPopup(editor, "targets");
   await panel.getByRole("button", { name: "Replace element 1" }).click();
   await editor.locator("#nav-feature").click();
+  await openDockPopup(editor, "targets");
   await expect(timeline.getByRole("listitem").first()).toContainText("Features");
   await panel.getByRole("button", { name: "Navigate", exact: true }).click();
   await editor.locator("#nav-feature").click();
   await expect(editor).toHaveURL(/\/integration\/feature$/);
-  await panel.getByRole("button", { name: "Select Elements" }).click();
+  await panel.getByRole("button", { name: "Select", exact: true }).click();
   await editor.locator("#feature-card h2").click();
   await editor.locator("#use-feature").click();
+  await openDockPopup(editor, "targets");
   await expect(rows).toHaveCount(3);
   await expect(editor.locator("#site-clicks")).toHaveText("0");
   await expect(editor).toHaveURL(/\/integration\/feature$/);
@@ -87,25 +95,31 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   await panel.getByRole("button", { name: "Navigate", exact: true }).click();
   await editor.locator("#use-feature").click();
   await expect(editor).toHaveURL(/\/integration\/done$/);
-  await panel.getByRole("button", { name: "Select Elements" }).click();
+  await panel.getByRole("button", { name: "Select", exact: true }).click();
   await editor.locator("#finish-action").click();
+  await openDockPopup(editor, "targets");
   await expect(rows).toHaveCount(4);
-  await expect(panel.getByText("Capture saved", { exact: true })).toBeVisible();
+  await expect(panel.locator("[data-checkpoint]")).toHaveText("Capture saved");
   const timing = await editor.evaluate(() => ({
     now: performance.now(),
     startup: performance.getEntriesByName("movcues:editor:startup")[0]?.duration,
   }));
   console.log(`Guided Capture startup: ${Math.round(timing.startup ?? 0)} ms, scenario interactions: ${Math.round(timing.now - started)} ms`);
   await editor.reload();
+  await openDockPopup(editor, "targets");
   await expect(rows).toHaveCount(4);
-  await expect(panel.getByRole("button", { name: "Select Elements" })).toHaveAttribute("aria-pressed", "true");
+  await expect(panel.getByRole("button", { name: "Select", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(editor.locator("[data-movcues-capture-marker]:visible")).toHaveText("4");
 
+  await openDockPopup(editor, "generate");
   await panel.getByLabel("What should this guide help users do?").fill("Help a new user create a project");
   await panel.getByRole("button", { name: "Plan with Geo" }).click();
   await expect(panel.getByRole("heading", { name: "Review the plan" })).toBeVisible();
   await panel.getByRole("button", { name: "Generate preview" }).click();
   await expect(panel.getByText(/Choose how to advance each step marked/)).toBeVisible();
+  if (process.env.MOVCUES_DOCK_EVIDENCE) {
+    await editor.screenshot({ path: process.env.MOVCUES_DOCK_EVIDENCE + "/after-capture-plan.png", animations: "disabled" });
+  }
   const completion = panel.locator('[data-plan-step="4"]');
   await completion.getByLabel("Advance when").selectOption("custom_event");
   await completion.getByLabel("Verified event name").fill("project_created");
@@ -129,25 +143,34 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   expect(draft.revision).toBe(1);
   expect(draft.definition.visualTheme.savedStyleId).toBe(preset.id);
   expect(draft.definition.template).toEqual({ id: "guide-feature-discovery", version: 1 });
+  await openDockPopup(editor, "generate");
+  const originalDock = await editor.locator("[data-editor-dock]").elementHandle();
+  if (process.env.MOVCUES_DOCK_EVIDENCE) {
+    await editor.screenshot({ path: process.env.MOVCUES_DOCK_EVIDENCE + "/after-capture-preview.png", animations: "disabled" });
+  }
   await panel.getByRole("button", { name: "Apply to draft" }).click();
-  await expect(editor.locator("[data-editor-toolbar]")).toBeVisible();
+  await expect(editor.locator("[data-editor-dock]")).toHaveCount(1);
+  expect(await editor.locator("[data-editor-dock]").evaluate((node, original) => node === original, originalDock)).toBe(true);
   await expect(panel).toHaveCount(0);
   await expect(editor.locator("[data-step]")).toHaveCount(6);
   await rename(editor, "Create your first project");
 
   await editor.locator("[data-mode=navigate]").click();
   await editor.locator("#nav-feature").click();
+  await openDockPopup(editor, "steps");
   await editor.locator("[data-step]").nth(2).click();
   await editor.locator("[data-mode=design]").click();
   await expect(currentHeading(editor)).toHaveText("Project details");
   await rename(editor, "Review project details");
   await currentHeading(editor).click();
+  await openDockPopup(editor, "settings");
   await editor.getByText("Advanced text styles", { exact: true }).click();
   await editor.locator("[data-block-font-size]").fill("22");
   await editor.locator("[data-block-font-size]").press("Tab");
   await editor.locator("[data-block-weight]").selectOption("700");
   await editor.locator("[data-block-color]").fill("#3256aa");
   await editor.locator("[data-block-color]").dispatchEvent("change");
+  await closeDockPopup(editor);
   await currentHeading(editor).click();
   await editor.getByRole("button", { name: "Add to the left", exact: true }).click();
   await editor.locator("[data-insert-block=icon]").click();
@@ -159,21 +182,29 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   const row = currentHeading(editor).locator("../..");
   await expect(row.locator(":scope > .movcues-cell").first()).toContainText("Review project details");
   await widget(editor).locator(".movcues-button").click();
+  await openDockPopup(editor, "settings");
   await editor.locator("[data-button-label]").fill("Continue to creation");
   await editor.locator("[data-button-label]").press("Tab");
   await editor.locator("[data-button-action]").selectOption("previous_step");
   await expect(editor.locator("[data-button-action]")).toHaveValue("previous_step");
+  await openDockPopup(editor, "session");
   await editor.locator("[data-global-undo]").click();
   await widget(editor).locator(".movcues-button").click();
+  await openDockPopup(editor, "settings");
   await expect(editor.locator("[data-button-action]")).toHaveValue("next_step");
+  await openDockPopup(editor, "session");
   await editor.locator("[data-global-redo]").click();
   await widget(editor).locator(".movcues-button").click();
+  await openDockPopup(editor, "settings");
   await expect(editor.locator("[data-button-action]")).toHaveValue("previous_step");
+  await closeDockPopup(editor);
   await editor.locator("[data-command=add]").click();
   await editor.locator("[data-insert-block=button]").click();
   await expect(widget(editor).locator(".movcues-button")).toHaveCount(2);
+  await openDockPopup(editor, "steps");
   await editor.locator("[data-step]").first().click();
   await expect(currentHeading(editor)).toHaveText("Create your first project");
+  await openDockPopup(editor, "steps");
   await editor.locator("[data-step]").nth(2).click();
   await expect(currentHeading(editor)).toHaveText("Review project details");
   await expect(editor.locator("[data-save-state]")).toHaveText("Draft saved");

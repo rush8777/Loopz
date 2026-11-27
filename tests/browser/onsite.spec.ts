@@ -1,3 +1,4 @@
+import { closeDockPopup, openDockPopup } from "../fixtures/openDockPopup";
 import { test, expect } from "@playwright/test";
 import { selectStepProperties } from "../fixtures/selectStepProperties";
 import { Buffer } from "node:buffer";
@@ -86,24 +87,25 @@ test('slow save, newer edits, mode change and repeated close preserve the newest
 test('conflict preserves a token-free export until explicit reload',async({page})=>{
   const network=await startController(page);network.advanceRevision();
   const heading=page.locator('[data-movcues-experience] h2');await heading.dblclick();await heading.press('ControlOrMeta+a');await heading.pressSequentially('Unsaved conflict text');
-  await expect(page.locator('[data-save-state]')).toHaveText('Conflict · reload required');
-  await page.locator('[data-export-draft]').click();const data=await page.locator('[data-recovery-export]').inputValue();
+  await expect(page.locator('[data-save-state]')).toHaveText('Draft conflict');
+  await openDockPopup(page,'status');await page.locator('[data-export-draft]').click();const data=await page.locator('[data-recovery-export]').inputValue();
   expect(data).toContain('Unsaved conflict text');expect(data).not.toContain('never-export-this-token');
   await page.reload(); // deliberate user decision: this does not silently restore a website-storage draft
-  await expect(page.locator('[data-editor-toolbar]')).toHaveCount(0);
+  await expect(page.locator('[data-editor-dock]')).toHaveCount(0);
   await expect(page.locator('[data-movcues-editor]:not([data-fixture-toolbar])')).toHaveCount(0);
 });
 
 for(const width of [320,360,390])test(`editor controls stay reachable at ${width}px and a shrinking viewport`,async({page})=>{
   await startController(page,{width,widgetType:'toast'});
-  const panel=page.locator('[data-movcues-editor] aside');const box=await panel.boundingBox();expect(box!.x).toBeGreaterThanOrEqual(0);expect(box!.x+box!.width).toBeLessThanOrEqual(width);
-  await page.setViewportSize({width,height:300});await expect(page.locator('[data-close]')).toBeInViewport();await expect(page.locator('[data-minimize]')).toBeInViewport();
-  await page.locator('[data-minimize]').click();await expect(panel).toHaveClass(/minimized/);
+  const panel=page.locator('[data-editor-dock]');const box=await panel.boundingBox();expect(box!.x).toBeGreaterThanOrEqual(0);expect(box!.x+box!.width).toBeLessThanOrEqual(width);
+  await page.setViewportSize({width,height:300});await expect(page.locator('[data-close]')).toBeInViewport();await expect(page.locator('[data-inspector-tab=properties]')).toBeInViewport();
+  await openDockPopup(page,'settings');await expect(page.locator('[data-dock-popup=settings]')).toBeInViewport({ratio:1});
 });
 
 test('anchored authoring survives scroll with the production renderer and sticky header',async({page})=>{
   await startController(page,{widgetType:'anchored_card'});
   await expect(page.locator('[data-movcues-experience] [data-movcues-builder-surface]')).toBeVisible();
+  await openDockPopup(page,'settings'); await page.locator('[data-placement-section] summary').click();
   await page.locator('[data-backdrop]').check();
   await expect(page.locator('[data-movcues-experience] [data-movcues-target-backdrop]')).toHaveCount(4);
   const spotlight=await page.evaluate(()=>{
@@ -123,7 +125,7 @@ test('anchored authoring survives scroll with the production renderer and sticky
 
 test('Guide contextual inspector follows block, cell and step selection',async({page})=>{
   await startController(page, { guide: true });const heading=page.locator('[data-movcues-experience] h2');await heading.click();
-  await expect(page.locator('[data-composition-inspector]')).toBeVisible();await expect(page.locator('[data-inspector=block]')).toBeVisible();await expect(page.locator('[data-block="heading,text"]')).toBeVisible();
+  await openDockPopup(page,'settings');await expect(page.locator('[data-composition-inspector]')).toBeVisible();await openDockPopup(page,'settings');await expect(page.locator('[data-inspector=block]')).toBeVisible();await expect(page.locator('[data-block="heading,text"]')).toBeVisible();
   await page.locator('[data-command=parent]').click();await expect(page.locator('[data-inspector=cell]')).toBeVisible();await expect(page.locator('[data-inspector=block]')).toBeHidden();
   await selectStepProperties(page);
 });
@@ -167,15 +169,16 @@ test('image placeholder opens a file picker and the image persists through undo,
   await startController(page); const placeholder = await insertEmptyImage(page); await expect(placeholder).toContainText('Drop an image or click to browse');
   expect((await placeholder.boundingBox())!.height).toBeGreaterThanOrEqual(100);
   await page.screenshot({ path: test.info().outputPath('image-placeholder.png') });
-  await page.locator('[data-v2-image-alt]').fill('Feature preview'); await page.locator('[data-v2-image-alt]').press('Tab');
+  await openDockPopup(page,'settings');await page.locator('[data-v2-image-alt]').fill('Feature preview'); await page.locator('[data-v2-image-alt]').press('Tab');
+  await closeDockPopup(page);
   const png = await localPng(page); const picker = page.waitForEvent('filechooser'); await placeholder.click();
   await (await picker).setFiles({ name: 'preview.png', mimeType: 'image/png', buffer: Buffer.from(png.split(',')[1], 'base64') });
   const image = page.locator('[data-movcues-experience] img'); await expect(image).toBeVisible();
   const src = await image.getAttribute('src'); expect(src).toMatch(/^data:image\/webp;base64,/); expect(src!.length).toBeLessThanOrEqual(65536);
   await expect(image).toHaveAttribute('alt', 'Feature preview'); await expect(placeholder).toHaveCount(0);
   await expect(page.locator('[data-v2-image-src]')).toHaveValue(''); await expect(page.locator('[data-choose-image]')).toHaveText('Replace image');
-  await page.locator('[data-global-undo]').click(); await expect(placeholder).toBeVisible();
-  await page.locator('[data-global-redo]').click(); await expect(image).toHaveAttribute('src', src!);
+  await openDockPopup(page,'session');await page.locator('[data-global-undo]').click(); await expect(placeholder).toBeVisible();
+  await openDockPopup(page,'session');await page.locator('[data-global-redo]').click(); await expect(image).toHaveAttribute('src', src!);
   await expect(page.locator('[data-save-state]')).toHaveText('Draft saved');
   await page.evaluate(async () => { const f = (window as any).fixture; f.controller.destroy(); f.controller = new f.Controller(location.origin); await f.controller.start('reload-image'); });
   await expect(image).toHaveAttribute('src', src!); await expect(image).toHaveAttribute('alt', 'Feature preview');
@@ -217,8 +220,8 @@ test('edge insertion makes a local column, resizes, undoes and reloads the same 
   const [rowBox, bodyBox] = await Promise.all([row.boundingBox(), originalBody.boundingBox()]);
   expect(bodyBox!.y).toBeGreaterThanOrEqual(rowBox!.y + rowBox!.height);
   await page.screenshot({ path: test.info().outputPath('directional-insertion.png') });
-  await page.locator('[data-global-undo]').click(); await expect(widget.locator('.movcues-text')).toHaveCount(1);
-  await page.locator('[data-global-redo]').click(); await expect(widget.locator('.movcues-text')).toHaveCount(2);
+  await openDockPopup(page,'session');await page.locator('[data-global-undo]').click(); await expect(widget.locator('.movcues-text')).toHaveCount(1);
+  await openDockPopup(page,'session');await page.locator('[data-global-redo]').click(); await expect(widget.locator('.movcues-text')).toHaveCount(2);
   const handle = page.locator('[data-movcues-resize-handle=row]'); await handle.focus(); await handle.press('ArrowRight');
   const structure = await row.getAttribute('data-movcues-node-id');
   await expect.poll(network.getSaves).toBeGreaterThan(0); await expect(page.locator('[data-save-state]')).toHaveText('Draft saved');
@@ -238,7 +241,7 @@ test('edge chooser cancels from keyboard and the small toolbar stays outside an 
 });
 
 for (const width of [320, 360, 390]) test(`directional insertion stays usable at ${width}px`, async ({ page }) => {
-  await startController(page, { width }); await page.locator('[data-minimize]').click();
+  await startController(page, { width });
   const widget = page.locator('[data-movcues-experience] .movcues-widget'); await widget.locator('h2').click();
   await page.getByRole('button', { name: 'Add to the right', exact: true }).click(); await page.locator('[data-insert-block=icon]').click();
   await expect(widget.locator('.movcues-icon')).toBeVisible();
@@ -252,16 +255,16 @@ test('delete removes the selected block immediately and the editor remains inter
   await startController(page);const heading=page.locator('[data-movcues-experience] h2');await heading.click();
   await expect(page.locator('[data-command=delete]')).toBeEnabled();await page.locator('[data-command=delete]').click();
   await expect(heading).toHaveCount(0);const body=page.locator('[data-movcues-experience] [data-movcues-content=body]');await body.click();
-  await expect(page.locator('[data-inspector=block]')).toBeVisible();
+  await openDockPopup(page,'settings');await expect(page.locator('[data-inspector=block]')).toBeVisible();
 });
 
 test('structured editor keeps one compact toolbar outside a banner widget and clear of the inspector',async({page})=>{
   await startController(page,{widgetType:'banner'});
-  const toolbar=page.locator('[data-movcues-composition-toolbar]');const widget=page.locator('[data-movcues-experience] .movcues-widget');const inspector=page.locator('[data-movcues-editor] aside');
+  const toolbar=page.locator('[data-movcues-composition-toolbar]');const widget=page.locator('[data-movcues-experience] .movcues-widget');const dock=page.locator('[data-editor-dock]');
   await expect(toolbar).toBeVisible();await expect(page.locator('[data-movcues-breadcrumb]')).toHaveCount(0);
-  const [toolbarBox,widgetBox,inspectorBox]=await Promise.all([toolbar.boundingBox(),widget.boundingBox(),inspector.boundingBox()]);
+  const [toolbarBox,widgetBox,dockBox]=await Promise.all([toolbar.boundingBox(),widget.boundingBox(),dock.boundingBox()]);
   expect(toolbarBox!.y).toBeGreaterThanOrEqual(widgetBox!.y+widgetBox!.height-1);
-  expect(toolbarBox!.x+toolbarBox!.width).toBeLessThanOrEqual(inspectorBox!.x+1);
+  expect(toolbarBox!.y+toolbarBox!.height).toBeLessThanOrEqual(dockBox!.y);
 });
 
 test('nested cell insertion and one-transaction pointer resize stay within the widget',async({page})=>{
@@ -272,12 +275,12 @@ test('nested cell insertion and one-transaction pointer resize stay within the w
 });
 
 for(const width of [320,360,390])test(`structured rows stack without horizontal overflow at ${width}px`,async({page})=>{
-  await startController(page,{width});await page.locator('[data-minimize]').click();await page.locator('[data-movcues-experience] h2').click();await page.locator('[data-command=columns]').click();
+  await startController(page,{width});await page.locator('[data-movcues-experience] h2').click();await page.locator('[data-command=columns]').click();
   const layout=page.locator('[data-movcues-experience] .movcues-widget');const overflow=await layout.evaluate((node:HTMLElement)=>node.scrollWidth-node.clientWidth);expect(overflow).toBeLessThanOrEqual(1);await expect(page.locator('[data-movcues-experience] .movcues-button')).toBeVisible();
 });
 
  test('long content validates before save without truncating the visible text',async({page})=>{
-  const body=page.locator('#authoring [data-movcues-content=body]');await body.dblclick();await body.press('ControlOrMeta+a');await body.pressSequentially('x'.repeat(2001));
+  const body=page.locator('#authoring [data-movcues-content=body]');await body.dblclick();await body.press('ControlOrMeta+a');await page.keyboard.insertText('x'.repeat(2001));
   const state=await page.evaluate(()=>{const f=(window as any).fixture;f.editor.flush();return{body:f.content.body,errors:f.editor.getValidation(),html:f.builder.html};});
   expect(state.body.length).toBe(2001);expect(state.errors.join(' ')).toContain('2000');expect(state.html).toContain('x'.repeat(2001));
 });
@@ -287,14 +290,14 @@ test('structured formatting preserves a partial selection and the live text node
   await heading.press('Home'); await heading.press('ControlOrMeta+a'); await heading.press('ArrowLeft');
   await heading.press('Shift+ArrowRight'); await heading.press('Shift+ArrowRight'); await heading.press('Shift+ArrowRight');
   await heading.evaluate(node => { (window as any).originalHeading = node; });
-  await page.locator('[data-v2-format=strong]').click(); await expect(heading.locator('strong')).toHaveText('Wel');
+  await openDockPopup(page,'settings');await page.locator('[data-v2-format=strong]').click(); await expect(heading.locator('strong')).toHaveText('Wel');
   expect(await heading.evaluate(node => node === (window as any).originalHeading)).toBe(true);
-  await expect(heading).toBeFocused(); await page.locator('[data-global-undo]').click(); await expect(heading.locator('strong')).toHaveCount(0);
+  await expect(heading).toBeFocused(); await openDockPopup(page,'session');await page.locator('[data-global-undo]').click(); await expect(heading.locator('strong')).toHaveCount(0);
 });
 
 test('immediate keyboard undo captures typing before its history debounce', async ({ page }) => {
   await startController(page); const heading = page.locator('[data-movcues-experience] h2'); await heading.dblclick(); await heading.press('ControlOrMeta+a'); await heading.pressSequentially('Immediate change');
-  await heading.press('ControlOrMeta+z'); await expect(heading).toHaveText('Welcome'); await page.locator('[data-global-redo]').click(); await expect(heading).toHaveText('Immediate change');
+  await heading.press('ControlOrMeta+z'); await expect(heading).toHaveText('Welcome'); await openDockPopup(page,'session');await page.locator('[data-global-redo]').click(); await expect(heading).toHaveText('Immediate change');
 });
 
 test('empty cells, cross-parent drag movement, keyboard movement and persistence preserve IDs', async ({ page }) => {
@@ -307,8 +310,8 @@ test('empty cells, cross-parent drag movement, keyboard movement and persistence
   await widget.locator('h2').click(); await page.locator('[data-command=move]').dragTo(target, { targetPosition: { x: 20, y: 20 } });
   await expect(widget.locator(`h2[data-movcues-block-id="${headingId}"]`)).toBeVisible();
   expect(await widget.locator(`h2[data-movcues-block-id="${headingId}"]`).locator('..').getAttribute('data-movcues-node-id')).toBe(id);
-  await page.locator('[data-global-undo]').click(); await expect(widget.locator('[data-movcues-content=body]').locator('..').locator('..').locator(':scope > [data-movcues-node-id]')).toHaveCount(3);
-  await page.locator('[data-global-redo]').click();
+  await openDockPopup(page,'session');await page.locator('[data-global-undo]').click(); await expect(widget.locator('[data-movcues-content=body]').locator('..').locator('..').locator(':scope > [data-movcues-node-id]')).toHaveCount(3);
+  await openDockPopup(page,'session');await page.locator('[data-global-redo]').click();
   await page.locator('[data-command=move]').focus(); await page.locator('[data-command=move]').press('Enter');
   for (let index = 0; index < 70; index++) {
     if (await target.evaluate(node => (node.getRootNode() as ShadowRoot).activeElement === node)) break;
@@ -322,24 +325,24 @@ test('empty cells, cross-parent drag movement, keyboard movement and persistence
 
 test('Guide step dock supports add, edit, preview next/back and save/reopen', async ({ page }) => {
   await startController(page, { guide: true });
-  await page.locator('[data-add-step=modal]').click();
+  await openDockPopup(page,'steps');await page.locator('[data-add-step=modal]').click();
   await expect(page.locator('[data-step]')).toHaveCount(3); await expect(page.locator('[data-step="1"]')).toHaveClass(/active/);
   const heading = page.locator('[data-movcues-experience] h2'); await heading.dblclick(); await heading.press('ControlOrMeta+a'); await heading.pressSequentially('Added step');
   await page.locator('[data-movcues-insert-edge=right]').click(); await page.locator('[data-insert-block=button]').click();
-  await page.locator('[data-button-label]').fill('Go back'); await page.locator('[data-button-label]').press('Tab'); await page.locator('[data-button-action]').selectOption('previous_step');
-  await page.locator('[data-step="0"]').click(); await expect(heading).toHaveText('Welcome');
+  await openDockPopup(page,'settings');await page.locator('[data-button-label]').fill('Go back'); await page.locator('[data-button-label]').press('Tab'); await page.locator('[data-button-action]').selectOption('previous_step');
+  await openDockPopup(page,'steps');await page.locator('[data-step="0"]').click(); await expect(heading).toHaveText('Welcome');
   await page.locator('[data-mode=preview]').click(); await page.locator('[data-movcues-experience] .movcues-button').click(); await expect(heading).toHaveText('Added step');
   await page.locator('[data-movcues-experience]').getByRole('button', { name: 'Go back', exact: true }).click(); await expect(heading).toHaveText('Welcome');
-  await page.locator('[data-mode=design]').click(); await expect(page.locator('[data-save-state]')).toHaveText('Draft saved');
+  await page.locator('[data-exit-preview]').click(); await expect(page.locator('[data-save-state]')).toHaveText('Draft saved');
   await page.evaluate(async () => { const f=(window as any).fixture; f.controller.destroy(); f.controller=new f.Controller(location.origin); await f.controller.start('reopen-guide'); });
-  await expect(page.locator('[data-step]')).toHaveCount(3); await page.locator('[data-step="1"]').click(); await expect(heading).toHaveText('Added step');
+  await expect(page.locator('[data-step]')).toHaveCount(3); await openDockPopup(page,'steps');await page.locator('[data-step="1"]').click(); await expect(heading).toHaveText('Added step');
 });
 
 test('failed save preserves content, recovers on retry, and saves only the recovered revision', async ({ page }) => {
   const network = await startController(page, { failSave: true }); const heading = page.locator('[data-movcues-experience] h2');
-  await heading.dblclick(); await heading.press('ControlOrMeta+a'); await heading.pressSequentially('Recover this');
+  await heading.dblclick(); await heading.press('ControlOrMeta+a'); await page.keyboard.insertText('Recover this');
   await expect(page.locator('[data-save-state]')).toHaveText('Save failed'); await expect(heading).toHaveText('Recover this');
-  await page.locator('[data-retry-save]').click(); await expect(page.locator('[data-save-state]')).toHaveText('Draft saved'); expect(network.getSaves()).toBe(2);
+  await openDockPopup(page,'status');await page.locator('[data-retry-save]').click(); await expect(page.locator('[data-save-state]')).toHaveText('Draft saved'); expect(network.getSaves()).toBe(2);
 });
 
 test('an asynchronously inserted target mounts without a new editor session', async ({ page }) => {
@@ -353,6 +356,7 @@ test('an asynchronously inserted target mounts without a new editor session', as
 test('backdrop restores scroll styles when hidden, dismissed or closed and keeps target and shadow inputs interactive', async ({ page }) => {
   await startController(page, { widgetType: 'anchored_card' });
   await page.evaluate(() => { document.documentElement.style.setProperty('overflow', 'clip'); document.body.style.setProperty('overflow', 'auto', 'important'); (window as any).targetClicks = 0; document.querySelector('#anchor')!.addEventListener('click', () => (window as any).targetClicks++); });
+  await openDockPopup(page,'settings'); await page.locator('[data-placement-section] summary').click();
   await page.locator('[data-backdrop]').check(); await page.locator('#anchor').click(); expect(await page.evaluate(() => (window as any).targetClicks)).toBe(1);
   expect(await page.locator('[data-offset]').evaluate(node => { const event = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, composed: true, cancelable: true }); node.dispatchEvent(event); return event.defaultPrevented; })).toBe(false);
   await page.evaluate(() => { (document.querySelector('#anchor') as HTMLElement).hidden = true; });
@@ -360,11 +364,11 @@ test('backdrop restores scroll styles when hidden, dismissed or closed and keeps
   await expect(page.locator('[data-movcues-target-highlight]')).toBeHidden();
   await page.evaluate(() => { (document.querySelector('#anchor') as HTMLElement).hidden = false; });
   await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe('hidden');
-  await page.locator('[data-close-backdrop]').check(); await page.locator('[data-mode=preview]').click();
+  await openDockPopup(page, 'settings'); await page.locator('[data-close-backdrop]').check(); await page.locator('[data-mode=preview]').click();
   await page.locator('[data-movcues-target-backdrop=bottom]').click({ position: { x: 10, y: 400 } });
   await expect(page.locator('[data-movcues-target-backdrop]')).toHaveCount(0);
   expect(await page.evaluate(() => [document.documentElement.style.overflow, document.body.style.overflow, document.body.style.getPropertyPriority('overflow')])).toEqual(['clip', 'auto', 'important']);
-  await page.locator('[data-close]').click(); await expect(page.locator('[data-editor-toolbar]')).toHaveCount(0);
+  await page.locator('[data-close]').click(); await expect(page.locator('[data-editor-dock]')).toHaveCount(0);
 });
 
 test('compiled visitor content dispatches independent button actions once without authoring controls', async ({ page }) => {
@@ -380,26 +384,31 @@ test('compiled visitor content dispatches independent button actions once withou
   const runtime = page.locator('[data-movcues-experience=published-fixture]');
   await runtime.getByRole('button', { name: 'Track it', exact: true }).click(); await runtime.getByRole('button', { name: 'Next step', exact: true }).click();
   expect(await page.evaluate(() => { const f=(window as any).fixture; return { actions: f.actions.map((a: any) => a.type), advances: f.advances }; })).toEqual({ actions: ['track_event', 'next_step'], advances: 1 });
-  await expect(page.locator('[data-movcues-composition-toolbar],[data-movcues-insert-edge],[data-editor-toolbar]')).toHaveCount(0);
+  await expect(page.locator('[data-movcues-composition-toolbar],[data-movcues-insert-edge],[data-editor-dock]')).toHaveCount(0);
   await runtime.getByRole('button', { name: 'Dismiss it', exact: true }).click(); await expect(runtime).toHaveCount(0);
 });
 
 for (const width of [320, 360, 390]) test(`floating controls and Guide dock remain usable without inspector overlap at ${width}px`, async ({ page }) => {
   await startController(page, { width, guide: true });
   const widget = page.locator('[data-movcues-experience] .movcues-widget'); await widget.locator('h2').click();
-  const toolbar = page.locator('[data-movcues-composition-toolbar]'); const inspector = page.locator('[data-movcues-editor] aside');
-  const a = (await toolbar.boundingBox())!; const b = (await inspector.boundingBox())!;
+  const toolbar = page.locator('[data-movcues-composition-toolbar]'); const dock = page.locator('[data-editor-dock]');
+  const a = (await toolbar.boundingBox())!; const b = (await dock.boundingBox())!;
   expect(a.x).toBeGreaterThanOrEqual(0); expect(a.x+a.width).toBeLessThanOrEqual(width);
   expect(a.y+a.height <= b.y || a.y >= b.y+b.height || a.x+a.width <= b.x || a.x >= b.x+b.width).toBe(true);
   await page.locator('[data-movcues-insert-edge=left]').click(); await expect(page.locator('[data-insert-block=icon]')).toBeInViewport();
   await page.locator('[data-insert-block=icon]').click(); await expect(widget.locator('.movcues-icon')).toBeVisible();
-  await expect(page.locator('[data-step="1"]')).toBeInViewport();
-  await page.locator('[data-step="1"]').click(); await expect(widget.locator('h2')).toHaveText('Second');
+  await openDockPopup(page,'steps');await expect(page.locator('[data-step="1"]')).toBeInViewport();
+  await openDockPopup(page,'steps');await page.locator('[data-step="1"]').click(); await expect(widget.locator('h2')).toHaveText('Second');
   if (width === 320) await page.screenshot({ path: test.info().outputPath('mobile-editor.png') });
 });
 
-test('a dragged floating toolbar is clamped after the viewport shrinks', async ({ page }) => {
-  await startController(page); const header = page.locator('[data-drag-handle] .header-copy'); const rect = (await header.boundingBox())!;
-  await page.mouse.move(rect.x+15, rect.y+8); await page.mouse.down(); await page.mouse.move(rect.x+400, rect.y+150, { steps: 8 }); await page.mouse.up();
-  await page.setViewportSize({ width: 320, height: 300 }); await expect(page.locator('[data-close]')).toBeInViewport(); await expect(page.locator('[data-minimize]')).toBeInViewport();
+test('the floating dock stays bottom centered when the viewport shrinks', async ({ page }) => {
+  await startController(page);
+  await page.setViewportSize({ width: 320, height: 300 });
+  const dock = page.locator('[data-editor-dock]');
+  await expect(dock).toBeInViewport({ ratio: 1 });
+  await expect(page.locator('[data-close]')).toBeInViewport();
+  const bounds = (await dock.boundingBox())!;
+  expect(bounds.x + bounds.width / 2).toBeCloseTo(160, 0);
+  expect(bounds.y + bounds.height).toBeCloseTo(292, 0);
 });

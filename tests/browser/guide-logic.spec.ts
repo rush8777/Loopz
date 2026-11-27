@@ -1,3 +1,4 @@
+import { openDockPopup } from "../fixtures/openDockPopup";
 import { test, expect, type Page } from '@playwright/test';
 function guide() {
   const step = (id: string, pattern: 'modal' | 'anchored_card') => ({ id, label: id, pattern, content: { heading: id, body: 'Guide body', primaryAction: { label: id === 'Welcome' ? 'Get Started' : 'Next', type: 'next_step' } }, builder: { version: 1, projectData: {}, html: `<section class="movcues-widget"><h2 data-movcues-content="heading">${id}</h2><p data-movcues-content="body">Guide body</p><button data-movcues-action-id="primary">${id === 'Welcome' ? 'Get Started' : 'Next'}</button></section>`, css: '.movcues-widget{padding:16px;max-width:100%}' }, behavior: { dismissible: true, placement: 'bottom', alignment: 'center', offset: 8 }, advance: { type: 'button' } as any, presentation: { delayMs: 0 } as any, target: undefined as any });
@@ -60,7 +61,7 @@ test('full Guide preview tests website clicks and custom events without producti
 });
 
 test('Step Behavior config saves and restores independent trigger settings without replacing the anchor target', async ({ page }) => {
-  const network = await editor(page); await page.locator('[data-step="1"]').click();
+  const network = await editor(page); await openDockPopup(page, "steps"); await page.locator('[data-step="1"]').click(); await openDockPopup(page, "settings");
   await expect(page.locator('[data-guide-interaction-label]')).toContainText('#use-feature'); await page.locator('[data-guide-trigger]').selectOption('element_hover');
   await page.locator('[data-guide-hover]').fill('700'); await page.locator('[data-guide-hover]').press('Tab'); await page.locator('[data-guide-delay]').fill('150'); await page.locator('[data-guide-delay]').press('Tab');
   await page.locator('[data-guide-missing-action]').selectOption('skip'); await page.locator('[data-guide-timeout]').fill('900'); await page.locator('[data-guide-timeout]').press('Tab');
@@ -68,12 +69,12 @@ test('Step Behavior config saves and restores independent trigger settings witho
   expect(feature.target.primarySelector).toBe('#feature-card'); expect(feature.advance).toEqual({ type: 'element_hover', durationMs: 700, target: { primarySelector: '#use-feature', fallbackSelectors: [], reliability: 'reliable' } });
   expect(feature.presentation).toEqual({ delayMs: 150, missingTarget: { action: 'skip', timeoutMs: 900 } });
   await page.evaluate(async () => { const j=(window as any).journey; j.editor.destroy(); j.editor=new j.Controller(location.origin); await j.editor.start('reopen'); });
-  await page.locator('[data-step="1"]').click(); await expect(page.locator('[data-guide-hover]')).toHaveValue('700'); await expect(page.locator('[data-guide-timeout]')).toHaveValue('900');
-  await page.locator('[data-step="0"]').click(); await expect(page.locator('[data-guide-trigger] option[value=element_click]')).toHaveAttribute('disabled', ''); await expect(page.locator('[data-guide-missing]')).toBeHidden();
+  await openDockPopup(page, "steps"); await page.locator('[data-step="1"]').click(); await openDockPopup(page, "settings"); await expect(page.locator('[data-guide-hover]')).toHaveValue('700'); await expect(page.locator('[data-guide-timeout]')).toHaveValue('900');
+  await openDockPopup(page, "steps"); await page.locator('[data-step="0"]').click(); await openDockPopup(page, "settings"); await expect(page.locator('[data-guide-trigger] option[value=element_click]')).toHaveAttribute('disabled', ''); await expect(page.locator('[data-guide-missing]')).toBeHidden();
 });
 
 test('interaction picker changes only the advance target', async ({ page }) => {
-  const network = await editor(page); await page.locator('[data-step="1"]').click(); await page.locator('[data-guide-pick-interaction]').click();
+  const network = await editor(page); await openDockPopup(page, "steps"); await page.locator('[data-step="1"]').click(); await openDockPopup(page, "settings"); await page.locator('[data-guide-pick-interaction]').click();
   await page.locator('#hover-feature').click(); await expect(page.locator('[data-save-state]')).toHaveText('Draft saved');
   expect(network.getSaved().steps[1].target.primarySelector).toBe('#feature-card'); expect(network.getSaved().steps[1].advance.target.primarySelector).toContain('hover-feature');
 });
@@ -81,13 +82,30 @@ test('interaction picker changes only the advance target', async ({ page }) => {
 test('route trigger advances once after real React navigation, while simulation never redirects', async ({ page }) => {
   const definition = guide(); definition.steps[0].advance = { type: 'route', pageRules: [{ id: 'route', kind: 'include', operator: 'equals', value: '/journey/feature' }] };
   await editor(page, definition); await page.locator('[data-mode=preview]').click(); await page.evaluate(() => (window as any).guideReactApp.go('/journey/feature')); await expect(widgetHeading(page)).toHaveText('Feature'); await expect(page.locator('[data-preview-step]')).toHaveText('2/3');
-  await page.locator('[data-preview-reset]').click(); await expect(widgetHeading(page)).toHaveText('Welcome'); const url = page.url(); await page.locator('[data-preview-test]').click(); await expect(widgetHeading(page)).toHaveText('Feature'); expect(page.url()).toBe(url);
+  await page.addInitScript(() => {
+    addEventListener('DOMContentLoaded', async () => {
+      const stored = sessionStorage.getItem('__movcues_experience_editor_session__');
+      const fixture = (window as any).journey;
+      if (stored && fixture) await new fixture.Controller(location.origin).resume(JSON.parse(stored));
+    });
+  });
+  await page.locator('[data-preview-reset]').click();
+  const consent = page.getByRole('dialog', { name: 'Start Guide preview' });
+  await expect(consent).toBeVisible();
+  await expect(page).toHaveURL(/\/journey\/feature$/);
+  await consent.getByRole('button', { name: 'Go to start & preview' }).click();
+  await expect(page).toHaveURL(/\/journey\/start$/);
+  await expect(widgetHeading(page)).toHaveText('Welcome');
+  const url = page.url();
+  await page.locator('[data-preview-test]').click();
+  await expect(widgetHeading(page)).toHaveText('Feature');
+  expect(page.url()).toBe(url);
 });
 
 for (const width of [320, 360, 390]) test(`Guide behavior and preview controls fit a ${width}px React viewport`, async ({ page }) => {
-  await page.setViewportSize({ width, height: 700 }); await editor(page); await page.locator('[data-guide-trigger]').selectOption('custom_event');
+  await page.setViewportSize({ width, height: 700 }); await editor(page); await openDockPopup(page, "settings"); await page.locator('[data-guide-trigger]').selectOption('custom_event');
   await page.locator('[data-guide-event]').fill('ready'); await page.locator('[data-guide-event]').press('Tab'); await page.locator('[data-mode=preview]').click();
-  const toolbar = (await page.locator('[data-editor-toolbar]').boundingBox())!; expect(toolbar.x).toBeGreaterThanOrEqual(0); expect(toolbar.x+toolbar.width).toBeLessThanOrEqual(width);
+  const toolbar = (await page.locator('[data-editor-dock]').boundingBox())!; expect(toolbar.x).toBeGreaterThanOrEqual(0); expect(toolbar.x+toolbar.width).toBeLessThanOrEqual(width);
   await expect(page.locator('[data-preview-test]')).toBeInViewport(); await expect(page.locator('[data-close]')).toBeInViewport(); await page.locator('[data-preview-test]').click(); await expect(page.locator('[data-preview-step]')).toHaveText('2/3');
 });
 

@@ -41,14 +41,14 @@ test("icon navigation is accessible and the single-step progress card fits a nar
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/tests/browser/ai-progress.html");
   const editor = page.locator("[data-movcues-editor]");
-  const nav = editor.getByRole("navigation", { name: "Inspector mode" });
+  const nav = editor.getByRole("region", { name: "Movcues Live Editor" });
   await expect(nav.getByRole("button", { name: "Theme", exact: true })).toHaveCount(0);
+  await nav.getByRole("button", { name: "Properties", exact: true }).click();
   await expect(editor.getByRole("region", { name: "Appearance" }).getByLabel("Theme", { exact: true })).toBeVisible();
   await expect(editor.locator("[data-theme-primary]")).toBeHidden();
   await editor.getByText("Advanced customization", { exact: true }).click();
   await expect(editor.locator("[data-theme-primary]")).toBeVisible();
-  await nav.getByRole("button", { name: "Properties", exact: true }).click();
-  await expect(nav.getByRole("button", { name: "Properties", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(nav.getByRole("button", { name: "Properties", exact: true })).toHaveAttribute("aria-expanded", "true");
   await nav.getByRole("button", { name: "AI assistant", exact: true }).click();
   await editor.getByRole("textbox", { name: "Describe your design change" }).fill("Refine this welcome");
   await editor.getByRole("button", { name: "Send message", exact: true }).click();
@@ -58,7 +58,7 @@ test("icon navigation is accessible and the single-step progress card fits a nar
   await expect(editor.locator("[data-ai-progress-current]")).toHaveText("Adjusting the change after checks.");
   const send = await editor.locator("[data-ai-send]").boundingBox();
   expect(send!.y + send!.height).toBeLessThanOrEqual(844);
-  const aside = await editor.locator("aside").boundingBox();
+  const aside = await editor.locator("[data-dock-popup=geo]").boundingBox();
   expect(aside!.x).toBeGreaterThanOrEqual(0);
   expect(aside!.x + aside!.width).toBeLessThanOrEqual(390);
 });

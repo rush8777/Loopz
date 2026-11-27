@@ -1,3 +1,4 @@
+import { openDockPopup } from "../fixtures/openDockPopup";
 import { expect, test } from "@playwright/test";
 
 const api = "http://127.0.0.1:4310";
@@ -53,6 +54,7 @@ test("renders real SDK previews, edits a saved theme and preserves a published s
   expect(session.status(), await session.text()).toBe(201);
   const editor = await context.newPage();
   await editor.goto((await session.json()).launchUrl);
+  await openDockPopup(editor, "settings");
   const appearance = editor.getByRole("region", { name: "Appearance" });
   await expect(appearance.getByLabel("Theme", { exact: true })).toHaveValue("site");
   await expect(appearance.getByRole("link", { name: "Manage themes" })).toHaveAttribute("href", /\/experiences\/themes$/);
@@ -62,7 +64,9 @@ test("renders real SDK previews, edits a saved theme and preserves a published s
   await expect(editor.locator("[data-movcues-experience]").getByRole("heading", { name: "A helpful message" })).toBeVisible();
   await appearance.getByLabel("Theme", { exact: true }).selectOption({ label: "Dark" });
   await expect(editor.locator("[data-movcues-experience]").getByRole("button", { name: "Got it" })).toHaveCSS("background-color", "rgb(129, 140, 248)");
-  await editor.getByRole("button", { name: "Undo", exact: true }).first().click();
+  await openDockPopup(editor, "session");
+  await editor.locator("[data-global-undo]").click();
+  await openDockPopup(editor, "settings");
   await expect(appearance.getByLabel("Theme", { exact: true })).toHaveValue("site");
   await editor.close();
   await page.goto("/experiences/themes");

@@ -1,3 +1,4 @@
+import { closeDockPopup, openDockPopup } from "../fixtures/openDockPopup";
 import { test, expect } from "@playwright/test";
 import fixture from "../fixtures/source-editability.json" with { type: "json" };
 
@@ -29,36 +30,41 @@ test("AI redesign → live edits → save/reopen → second AI redesign retains 
   const requestAi = async (prompt: string, preview = false) => {
     await editor.locator('[data-inspector-tab="ai"]').click(); await editor.locator("[data-ai-prompt]").fill(prompt); await editor.locator("[data-ai-send]").click();
     await expect(editor.locator("[data-ai-proposal]")).toBeVisible();
-    if (preview) { await editor.locator("[data-ai-preview]").click(); await expect(editor.locator('[data-mode="preview"]')).toHaveClass(/active/); }
+    if (preview) { await editor.locator("[data-ai-preview]").click(); await expect(editor.locator("[data-exit-preview]")).toBeVisible(); await openDockPopup(page, "geo"); }
     await editor.locator("[data-ai-apply]").click(); await expect(editor.locator('[data-mode="design"]')).toHaveClass(/active/);
-    await editor.locator('[data-inspector-tab="properties"]').click();
   };
   await start();
   await widget.locator("h2").dblclick(); await widget.locator("h2").press("ControlOrMeta+a"); await widget.locator("h2").pressSequentially("Before AI");
   await requestAi("Create a richer onboarding modal", true);
   await expect(widget.locator(".hero-title")).toBeVisible();
   await widget.getByRole("button", { name: "Start" }).click();
+  await openDockPopup(page, "settings");
   await editor.locator("[data-button-action]").selectOption("track_event");
   await expect(editor.locator("[data-action-status]")).toContainText("Enter an event name");
   await editor.locator("[data-button-event]").fill("onboarding_started"); await editor.locator("[data-button-event]").dispatchEvent("change");
   await expect.poll(() => definition.builder.projectData.movcues.actionBindings.start_now).toEqual({ type: "track_event", eventName: "onboarding_started" });
   await editor.locator('[data-mode="preview"]').click(); await widget.locator(".button-label").click(); await expect(widget).toBeVisible();
-  await editor.locator('[data-mode="design"]').click(); await expect.poll(() => saves).toBeGreaterThan(0);
+  await editor.locator("[data-exit-preview]").click(); await expect.poll(() => saves).toBeGreaterThan(0);
   await widget.locator(".hero-title").dblclick(); await widget.locator(".hero-title").press("ControlOrMeta+a"); await widget.locator(".hero-title").pressSequentially("Manual welcome");
   await widget.locator(".hero-title").press("Enter"); await widget.locator(".hero-title").pressSequentially("Second line"); await expect(widget.locator(".hero-title br")).toHaveCount(1);
+  await openDockPopup(page, "settings");
   await editor.getByText("Advanced text styles", { exact: true }).click();
   await editor.locator("[data-block-font-size]").fill("40"); await editor.locator("[data-block-font-size]").dispatchEvent("change");
   await expect(widget.locator(".hero-title")).toHaveCSS("font-size", "40px");
+  await closeDockPopup(page);
   await widget.locator('[data-command="parent"]').click();
+  await openDockPopup(page, "settings");
   await editor.locator("[data-cell-size]").selectOption("fixed"); await editor.locator("[data-cell-fixed]").fill("350"); await editor.locator("[data-cell-fixed]").dispatchEvent("change");
   await expect(widget.locator(".hero")).toHaveCSS("width", "350px");
+  await closeDockPopup(page);
   await widget.locator(".hero-title").click(); await widget.locator('[data-command="move-down"]').click();
   await widget.locator('[data-command="add"]').click(); await widget.locator('[data-insert-block="image"]').click();
+  await openDockPopup(page, "settings");
   await editor.locator("[data-v2-image-src]").fill("https://example.com/welcome.png"); await editor.locator("[data-v2-image-src]").dispatchEvent("change");
   await expect(widget.locator("img")).toHaveAttribute("src", "https://example.com/welcome.png");
   await expect.poll(() => definition.builder.html).toContain("welcome.png");
   await expect.poll(() => saves).toBeGreaterThan(0);
-  await start(); await widget.locator(".hero-title").click();
+  await start(); await widget.locator(".hero-title").click(); await openDockPopup(page, "settings");
   await expect(editor.locator("[data-block-font-size]")).toHaveValue("40"); await expect(widget.locator("img")).toHaveAttribute("src", "https://example.com/welcome.png");
   await page.evaluate((savedDefinition: any) => {
     const f = (window as any).fixture; f.controller.destroy(); f.runtime = new f.ExperienceRenderer(); f.runtimeActions = [];
@@ -71,12 +77,13 @@ test("AI redesign → live edits → save/reopen → second AI redesign retains 
   expect(latestSource?.html).toContain("Manual welcome"); expect(latestSource?.css).toContain("40px");
   await expect(widget.locator(".hero-title")).toContainText("AI refined welcome");
   await widget.locator(".hero-title").click();
+  await openDockPopup(page, "settings");
   await editor.getByText("Advanced text styles", { exact: true }).click();
   await editor.locator("[data-block-font-size]").fill("44"); await editor.locator("[data-block-font-size]").dispatchEvent("change");
   await expect(widget.locator(".hero-title")).toHaveCSS("font-size", "44px");
-  await editor.locator("[data-global-undo]").click(); await expect(widget.locator(".hero-title")).toHaveCSS("font-size", "40px");
-  await editor.locator("[data-global-undo]").click(); await expect(widget.locator(".hero-title")).toContainText("Manual welcome");
-  await editor.locator("[data-global-redo]").click(); await expect(widget.locator(".hero-title")).toContainText("AI refined welcome");
+  await openDockPopup(page, "session"); await editor.locator("[data-global-undo]").click(); await expect(widget.locator(".hero-title")).toHaveCSS("font-size", "40px");
+  await openDockPopup(page, "session"); await editor.locator("[data-global-undo]").click(); await expect(widget.locator(".hero-title")).toContainText("Manual welcome");
+  await openDockPopup(page, "session"); await editor.locator("[data-global-redo]").click(); await expect(widget.locator(".hero-title")).toContainText("AI refined welcome");
   expect(definition.builder.projectData.movcues.authoringSurface).toBe("source");
   expect(definition.builder.projectData.movcues.actionBindings.start_now).toEqual({ type: "track_event", eventName: "onboarding_started" });
 });
