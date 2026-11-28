@@ -56,6 +56,9 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   const opened = context.waitForEvent("page");
   await dialog.getByRole("button", { name: "Begin Guided Capture" }).click();
   const editor = await opened;
+  const flow = page.getByRole("region", { name: "Experience flow canvas" });
+  await expect(flow.getByRole("heading", { name: "Finish capturing your guide" })).toBeVisible();
+  if (process.env.MOVCUES_FLOW_EVIDENCE) await page.screenshot({ path: process.env.MOVCUES_FLOW_EVIDENCE + "/08-pending-capture.png", animations: "disabled" });
   const panel = capture(editor);
   const timeline = panel.getByRole("list", { name: "Captured elements" });
   const rows = timeline.locator("[data-remove]");
@@ -116,7 +119,8 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   await panel.getByRole("button", { name: "Plan with Geo" }).click();
   await expect(panel.getByRole("heading", { name: "Review the plan" })).toBeVisible();
   await panel.getByRole("button", { name: "Generate preview" }).click();
-  await expect(panel.getByText(/Choose how to advance each step marked/)).toBeVisible();
+  await expect(panel.getByRole("region", { name: "Generate a guide" }).locator("[data-workflow-message]"))
+    .toContainText("Choose how to advance each step marked");
   if (process.env.MOVCUES_DOCK_EVIDENCE) {
     await editor.screenshot({ path: process.env.MOVCUES_DOCK_EVIDENCE + "/after-capture-plan.png", animations: "disabled" });
   }
@@ -228,7 +232,9 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   await editor.locator("[data-mode=navigate]").click();
   await editor.locator("#nav-start").click();
   await editor.locator("[data-mode=preview]").click();
-  await editor.locator("[data-preview-start]").click();
+  const start = editor.getByRole("button", { name: "Go to start & preview" });
+  await expect(currentHeading(editor).filter({ hasText: "Create your first project" }).or(start).first()).toBeVisible();
+  if (await start.isVisible()) await start.click();
   await expect(currentHeading(editor)).toHaveText("Create your first project");
   await widget(editor).getByRole("button", { name: "Next", exact: true }).click();
   await expect(currentHeading(editor)).toHaveText("Open Features");
@@ -244,7 +250,19 @@ test("captures across pages, edits generated widgets and verifies reviewed visit
   await expect(editor.locator("[data-preview-step]")).toContainText("Complete");
   await editor.close();
 
-  await page.reload();
+  await page.bringToFront();
+  await expect(flow.locator(".flow-card")).toHaveCount(6);
+  await expect(flow.locator('.flow-preview[data-rendered="true"]')).toHaveCount(6);
+  await expect(flow.frameLocator("iframe").first().locator("h2")).toHaveText("Create your first project");
+  if (process.env.MOVCUES_FLOW_EVIDENCE) await page.screenshot({ path: process.env.MOVCUES_FLOW_EVIDENCE + "/09-returned-from-guided-capture.png", animations: "disabled" });
+  await flow.locator(`.react-flow__node[data-id="step:${draft.definition.steps[2].id}"] .flow-card`).click();
+  const nextEditor = page.waitForEvent("popup");
+  await flow.getByRole("button", { name: "Edit on site" }).click();
+  const reopened = await nextEditor;
+  await expect(reopened).toHaveURL(/\/integration\/feature/);
+  await expect(currentHeading(reopened)).toHaveText("Review project details");
+  await reopened.close();
+  await page.bringToFront();
   await page.getByRole("button", { name: "Review & publish", exact: true }).click();
   for (let index = 0; index < 5; index++) await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page.getByText("Selected page rules", { exact: true })).toBeVisible();
