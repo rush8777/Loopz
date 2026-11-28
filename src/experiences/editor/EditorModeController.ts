@@ -37,7 +37,7 @@ import { OnsiteCompositionEditor, type CompositionSelection } from "./OnsiteComp
 import { applyOnsiteDocument, cloneOnsite, createOnsiteDocument, duplicateDocument, listBlocks, onsiteDocumentFromBuilder, type OnsiteBlock, type OnsiteCell } from "../onsite/OnsiteDocument";
 import { guideInteractionTarget, guideStepConfigurationErrors, matchesGuideRoute, matchesGuideTargetPage } from "../runtime/GuideStepLogic";
 import type { VisualPresetId, VisualThemeState } from "../../themes/types";
-import { EXPERIENCE_PRESETS, resolvedTheme, snapshotTheme } from "../../themes/ExperienceTheme";
+import { EXPERIENCE_PRESETS, resolvedTheme, authoringThemeSnapshot } from "../../themes/ExperienceTheme";
 import { applyEditorAiProposal, applyGuideAiProposal, editorAiContext, guideAiContext, type EditorAiProposal } from "./AiEditing";
 import { applySurveyAiProposal, surveyAiContext, type SurveyAiProposal } from "./SurveyAiEditing";
 import { applyChecklistAiProposal, checklistAiContext, type ChecklistAiProposal } from "./ChecklistAiEditing";
@@ -640,10 +640,10 @@ export class EditorModeController {
       if (style) {
         state.source = "preset";
         state.savedStyleId = style.id;
-        state.baseTokens = snapshotTheme(style.tokens, component);
+        state.baseTokens = authoringThemeSnapshot(style.tokens, component);
       } else if (value === "site" && site) {
         state.source = "site";
-        state.baseTokens = snapshotTheme(site, component);
+        state.baseTokens = authoringThemeSnapshot(site, component);
       } else if (Object.prototype.hasOwnProperty.call(EXPERIENCE_PRESETS, value)) {
         state.source = "preset";
         state.preset = value as VisualPresetId;

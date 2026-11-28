@@ -1442,143 +1442,190 @@ async function prefetchEditorDraft(apiBase, session) {
     return null;
   }
 }
-const TRANSPARENT = /* @__PURE__ */ new Set(["transparent", "rgba(0, 0, 0, 0)", "rgba(0,0,0,0)"]);
-function visible(element) {
-  if (!(element instanceof HTMLElement)) return false;
-  const style = getComputedStyle(element);
-  return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
-}
-function firstVisible(selectors) {
-  return Array.from(document.querySelectorAll(selectors)).find(visible) ?? null;
-}
-function visibleElements(selectors) {
-  return Array.from(document.querySelectorAll(selectors)).filter(visible);
-}
-function px(value, fallback) {
+const rules = [
+  ["navigation", "nav,[role=navigation]"],
+  ["heading", "h1,h2,h3,h4,[role=heading]"],
+  ["dialog", "dialog,[role=dialog],[aria-modal=true]"],
+  ["card", "article,[class~='card'],[data-slot=card],[class~='panel']"],
+  ["button", "button,[role=button],input[type=button],input[type=submit],a[class*='btn'],a[class*='button']"],
+  ["input", "input:not([type=hidden]),textarea,select,[role=combobox]"],
+  ["label", "label,legend"],
+  ["badge", "[class~='badge'],[data-slot=badge]"],
+  ["notification", "[role=alert],[role=status],[class~='toast']"],
+  ["popover", "[popover],[role=menu],[role=listbox],[data-slot=popover-content]"],
+  ["tooltip", "[role=tooltip]"],
+  ["body", "p,small"]
+];
+const excluded = "[hidden],[inert],[aria-hidden=true],iframe,svg,script,style,[data-movcues-experience],[data-movcues-experience-root],[data-movcues-checklist],[id^=movcues],[data-movcues-editor],[class*='intercom-'],[id*=onetrust],[id*=hubspot],[id*=cookie-banner],[id*=crisp-chatbox]";
+const variableNames = {
+  "--primary": "primary",
+  "--brand": "primary",
+  "--brand-color": "primary",
+  "--color-primary": "primary",
+  "--primary-foreground": "primaryForeground",
+  "--background": "background",
+  "--foreground": "text",
+  "--ink": "text",
+  "--card": "surface",
+  "--surface": "surface",
+  "--soft": "surface",
+  "--muted-foreground": "mutedText",
+  "--muted": "mutedText",
+  "--border": "border",
+  "--line": "border"
+};
+const colorPattern = /^(?:#[0-9a-f]{3,8}|rgba?\([\d.,%\s]+\)|hsla?\([\d.,%\s-]+\))$/i;
+const fontPattern = /^[\p{L}\p{N} _,'"-]{1,140}$/u;
+function number(value, fallback, max = 160) {
   const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : fallback;
+  return Number.isFinite(parsed) ? Math.round(Math.min(max, Math.max(0, parsed)) * 100) / 100 : fallback;
 }
-function weight(value, fallback) {
-  if (value === "normal") return 400;
-  if (value === "bold") return 700;
-  return Math.min(900, Math.max(100, Math.round(px(value, fallback) / 100) * 100));
+function color(value) {
+  return colorPattern.test(value) && !/^rgba\([^)]*,\s*0(?:\.0+)?\)$/.test(value) ? value : void 0;
 }
-function lineHeight(value, fontSize, fallback) {
-  if (value === "normal") return fallback;
-  const parsed = px(value, 0);
-  if (!parsed) return fallback;
-  return Math.round((value.includes("px") ? parsed / fontSize : parsed) * 100) / 100;
-}
-function color(value, fallback) {
-  return value && !TRANSPARENT.has(value) ? value : fallback;
-}
-function isOpaqueColor(value) {
-  return Boolean(value) && !TRANSPARENT.has(value);
-}
-function recurringStyle(elements, read2, accept = (value) => Boolean(value)) {
-  const grouped = /* @__PURE__ */ new Map();
-  elements.forEach((element) => {
-    const style = getComputedStyle(element);
-    const value = read2(style).trim();
-    if (!accept(value, style, element)) return;
-    const current = grouped.get(value);
-    grouped.set(value, current ? { ...current, count: current.count + 1 } : { element, count: 1 });
-  });
-  const best = [...grouped.entries()].sort((a, b) => b[1].count - a[1].count)[0];
-  return best ? { value: best[0], ...best[1] } : null;
-}
-function shadow(value) {
-  var _a;
-  if (!value || value === "none") return { x: 0, y: 0, blur: 0, spread: 0, color: "rgba(0, 0, 0, 0)" };
-  const lengths = [];
-  const lengthPattern = /(-?\d+(?:\.\d+)?)px/g;
-  let lengthMatch;
-  while (lengths.length < 4 && (lengthMatch = lengthPattern.exec(value))) lengths.push(Number(lengthMatch[1]));
-  const foundColor = ((_a = value.match(/rgba?\([^)]*\)|hsla?\([^)]*\)|#[0-9a-f]{3,8}/i)) == null ? void 0 : _a[0]) ?? "rgba(0, 0, 0, 0.2)";
-  return { x: lengths[0] ?? 0, y: lengths[1] ?? 0, blur: Math.max(0, lengths[2] ?? 0), spread: lengths[3] ?? 0, color: foundColor };
-}
-function cssVariables() {
-  const result = {};
-  const style = getComputedStyle(document.documentElement);
-  for (let index = 0; index < style.length && Object.keys(result).length < 100; index += 1) {
-    const name = style.item(index);
-    if (!name.startsWith("--") || !/(color|font|radius|shadow|background|surface|border|primary|text|brand|accent|ink|muted|line|soft|canvas|panel)/i.test(name)) continue;
-    const value = style.getPropertyValue(name).trim();
-    if (value && value.length <= 300 && !/[{}]|url\s*\(|javascript\s*:/i.test(value)) result[name] = value;
+function shadow$1(value) {
+  var _a, _b, _c;
+  if (!value || value === "none" || value.includes("inset")) return;
+  const first = ((_a = value.match(/^(?:[^,(]|\([^)]*\))+/)) == null ? void 0 : _a[0]) ?? "";
+  const paint = (_b = first.match(/rgba?\([^)]*\)|#[0-9a-f]+/i)) == null ? void 0 : _b[0];
+  const lengths = (_c = first.match(/-?\d+(?:\.\d+)?px/g)) == null ? void 0 : _c.map(parseFloat);
+  if (lengths && lengths.length >= 2 && paint && color(paint)) {
+    const [x, y, blur = 0, spread = 0] = lengths;
+    if ([x, y, blur, spread].every((value2) => Math.abs(value2) <= 100)) return { x, y, blur, spread, color: paint };
   }
-  return result;
 }
-function semanticVariable(variables, pattern) {
+function chromatic(value) {
   var _a;
-  return (_a = Object.entries(variables).find(([name, value]) => pattern.test(name) && isOpaqueColor(value))) == null ? void 0 : _a[1];
+  const channels = (_a = value == null ? void 0 : value.match(/^rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/)) == null ? void 0 : _a.slice(1).map(Number);
+  return Boolean(channels && Math.max(...channels) - Math.min(...channels) >= 28);
 }
-function hasVisibleBorder(style) {
-  return style.borderTopStyle !== "none" && px(style.borderTopWidth, 0) > 0;
+async function readyForCapture() {
+  var _a;
+  if (document.readyState === "loading") await new Promise((resolve) => document.addEventListener("DOMContentLoaded", () => resolve(), { once: true }));
+  if ((_a = document.fonts) == null ? void 0 : _a.ready) {
+    let timer;
+    try {
+      await Promise.race([document.fonts.ready.catch(() => void 0), new Promise((resolve) => {
+        timer = setTimeout(resolve, 1e3);
+      })]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 }
-function readyForCapture() {
-  const domReady = document.readyState === "loading" ? new Promise((resolve) => document.addEventListener("DOMContentLoaded", () => resolve(), { once: true })) : Promise.resolve();
-  return domReady.then(async () => {
-    var _a;
-    const fonts = (_a = document.fonts) == null ? void 0 : _a.ready;
-    if (fonts) await Promise.race([fonts.catch(() => void 0), new Promise((resolve) => setTimeout(resolve, 1500))]);
-  });
-}
-async function extractDesignTokens() {
+async function collectDesignEvidence() {
   await readyForCapture();
-  const body = visible(document.body) ? document.body : document.documentElement;
-  const bodyStyle = getComputedStyle(body);
-  const heading = firstVisible("h1,h2,h3,h4") ?? body;
-  const headingStyle = getComputedStyle(heading);
-  const variables = cssVariables();
-  const actions = visibleElements("button,[role=button],a[href],input[type=button],input[type=submit]");
-  const actionBackground = recurringStyle(actions, (style) => style.backgroundColor, (value) => isOpaqueColor(value));
-  const action = (actionBackground == null ? void 0 : actionBackground.element) ?? null;
-  const actionStyle = action ? getComputedStyle(action) : bodyStyle;
-  const surfaces = visibleElements("dialog,[role=dialog],article,form,input,textarea,[class*=card],[class*=panel],[class*=surface]");
-  const surfaceBackground = recurringStyle(surfaces, (style) => style.backgroundColor, (value) => isOpaqueColor(value));
-  const surface = (surfaceBackground == null ? void 0 : surfaceBackground.element) ?? body;
-  const surfaceStyle = getComputedStyle(surface);
-  const muted = recurringStyle(visibleElements("p,small,[class*=muted],[class*=secondary],[class*=subtitle],[class*=description]"), (style) => style.color, (value) => isOpaqueColor(value) && value !== bodyStyle.color);
-  const bordered = recurringStyle(surfaces, (style) => style.borderColor, (_value, style) => hasVisibleBorder(style));
-  const shadowed = recurringStyle([...actions, ...surfaces], (style) => style.boxShadow, (value) => Boolean(value) && value !== "none");
-  const bodySize = px(bodyStyle.fontSize, 16);
-  const headingSize = px(headingStyle.fontSize, Math.max(20, bodySize * 1.5));
-  const background = color(bodyStyle.backgroundColor, "#ffffff");
-  const text = color(bodyStyle.color, "#111827");
-  const primary = (actionBackground == null ? void 0 : actionBackground.value) ?? semanticVariable(variables, /(?:primary|brand|accent|action)/i) ?? color(actionStyle.color, "#2563eb");
-  const primaryForeground = action ? color(actionStyle.color, "#ffffff") : semanticVariable(variables, /(?:primary|brand).*(?:foreground|contrast|on)/i) ?? "#ffffff";
-  const surfaceColor = (surfaceBackground == null ? void 0 : surfaceBackground.value) ?? semanticVariable(variables, /(?:surface|card|panel|soft)/i) ?? background;
-  const mutedText = (muted == null ? void 0 : muted.value) ?? semanticVariable(variables, /(?:muted|subtle|secondary).*(?:text|foreground)?|--muted$/i) ?? text;
-  const border = (bordered == null ? void 0 : bordered.value) ?? semanticVariable(variables, /(?:border|line|divider)/i) ?? "rgba(15, 23, 42, 0.12)";
-  const radius = px(actionStyle.borderRadius || surfaceStyle.borderRadius, 8);
-  const capturedShadow = shadow((shadowed == null ? void 0 : shadowed.value) ?? surfaceStyle.boxShadow);
-  const confidence = {
-    "colors.background": bodyStyle.backgroundColor && !TRANSPARENT.has(bodyStyle.backgroundColor) ? 0.95 : 0.35,
-    "colors.text": bodyStyle.color ? 0.95 : 0.35,
-    "colors.primary": actionBackground ? Math.min(0.98, 0.7 + actionBackground.count * 0.08) : semanticVariable(variables, /(?:primary|brand|accent|action)/i) ? 0.7 : 0.35,
-    "colors.mutedText": muted ? 0.85 : 0.5,
-    "colors.border": bordered ? 0.85 : 0.5,
-    "typography.bodyFontFamily": bodyStyle.fontFamily ? 0.95 : 0.35,
-    "typography.headingFontFamily": heading !== body ? 0.9 : 0.5,
-    "radii.md": action ? 0.75 : 0.4
+  const body = document.body ?? document.documentElement;
+  const rootStyle = getComputedStyle(document.documentElement);
+  const styleCache = new WeakMap([[document.documentElement, rootStyle]]);
+  const styleOf = (element) => {
+    const cached = styleCache.get(element);
+    if (cached) return cached;
+    const style = getComputedStyle(element);
+    styleCache.set(element, style);
+    return style;
   };
-  return {
-    tokens: {
-      version: 1,
-      colors: { background, surface: surfaceColor, text, mutedText, primary, primaryForeground, border },
-      typography: { bodyFontFamily: bodyStyle.fontFamily || "system-ui, sans-serif", headingFontFamily: headingStyle.fontFamily || bodyStyle.fontFamily || "system-ui, sans-serif", bodyFontSize: bodySize, headingFontSize: headingSize, bodyFontWeight: weight(bodyStyle.fontWeight, 400), headingFontWeight: weight(headingStyle.fontWeight, 700), bodyLineHeight: lineHeight(bodyStyle.lineHeight, bodySize, 1.5), headingLineHeight: lineHeight(headingStyle.lineHeight, headingSize, 1.25) },
-      radii: { sm: Math.max(0, Math.round(radius / 2)), md: radius, lg: Math.min(100, Math.round(radius * 2)) },
-      shadows: { sm: capturedShadow, md: capturedShadow }
-    },
-    evidence: { confidence, cssVariables: variables, sdkVersion: "0.1.0" }
+  const variables = {};
+  const colorProbe = document.createElement("span").style;
+  for (const [name, role] of Object.entries(variableNames)) {
+    const raw = rootStyle.getPropertyValue(name).trim();
+    const hslChannels = /^-?\d+(?:\.\d+)?\s+\d+(?:\.\d+)?%\s+\d+(?:\.\d+)?%$/.test(raw);
+    colorProbe.color = "";
+    colorProbe.color = hslChannels ? `hsl(${raw})` : raw;
+    const value = color(raw) ?? color(colorProbe.color);
+    if (value && !variables[role]) variables[role] = value;
+  }
+  const groups = /* @__PURE__ */ new Map();
+  function sample(element, role, box) {
+    var _a;
+    const style = styleOf(element);
+    if (style.visibility === "hidden" || style.visibility === "collapse" || style.display === "none" || style.opacity === "0") return;
+    const size = number(style.fontSize, 16, 200);
+    const paint = color(style.backgroundColor);
+    if (role === "heading" && size >= 38 && !element.closest("dialog,[role=dialog],article,[class~='card']")) role = "display";
+    if (role === "button") {
+      const secondary = element.matches("[class*=secondary],[class*=outline],[class*=ghost],[data-variant=secondary]");
+      const primary = element.matches("[class*=primary],[data-variant=primary],input[type=submit]");
+      role = !secondary && (primary || chromatic(paint)) ? "primaryButton" : "secondaryButton";
+    }
+    let backdrop;
+    for (let parent = element.parentElement, depth = 0; parent && depth < 8; parent = parent.parentElement, depth++) {
+      const parentStyle = styleOf(parent);
+      if (parentStyle.display === "none" || parentStyle.opacity === "0") return;
+      backdrop ?? (backdrop = color(parentStyle.backgroundColor));
+    }
+    const item = {
+      role,
+      count: 1,
+      fontFamily: fontPattern.test(style.fontFamily) ? style.fontFamily : void 0,
+      fontSize: size,
+      fontWeight: style.fontWeight === "bold" ? 700 : number(style.fontWeight, 400, 900),
+      lineHeight: ((_a = style.lineHeight) == null ? void 0 : _a.endsWith("px")) && size ? Math.min(4, number(style.lineHeight, size, 500) / size) : number(style.lineHeight || "", 1.5, 4),
+      letterSpacing: Math.max(-10, Math.min(20, parseFloat(style.letterSpacing) || 0)),
+      color: color(style.color),
+      background: paint,
+      backdrop,
+      borderColor: number(style.borderTopWidth, 0) ? color(style.borderTopColor) : void 0,
+      borderWidth: number(style.borderTopWidth, 0, 24),
+      radius: number(style.borderTopLeftRadius || style.borderRadius, 0, 100),
+      padding: number(style.paddingTop, 0, 80),
+      gap: number(style.gap, 0, 80),
+      width: box ? Math.min(1600, Math.round(box.width)) : void 0,
+      height: box ? Math.min(1200, Math.round(box.height)) : void 0,
+      shadow: shadow$1(style.boxShadow)
+    };
+    const { width: _width, height: _height, ...signature } = item;
+    const key = JSON.stringify(signature);
+    const group = groups.get(role) ?? /* @__PURE__ */ new Map();
+    groups.set(role, group);
+    const existing = group.get(key);
+    if (existing) existing.count = Math.min(100, existing.count + 1);
+    else if (group.size < 12) group.set(key, item);
+  }
+  sample(body, "page");
+  const walker = document.createTreeWalker(body, NodeFilter.SHOW_ELEMENT, {
+    acceptNode: (node) => node.matches(excluded) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+  });
+  let visited = 0;
+  let measured = 0;
+  for (let node = walker.nextNode(); node && visited < 1400 && measured < 180; node = walker.nextNode(), visited++) {
+    if (!(node instanceof HTMLElement)) continue;
+    const match = rules.find(([, selector]) => node.matches(selector));
+    if (!match) continue;
+    const box = node.getBoundingClientRect();
+    if (box.width < 2 || box.height < 2 || box.right <= 0 || box.bottom <= 0 || box.left >= innerWidth || box.top >= innerHeight) continue;
+    measured++;
+    sample(node, match[0], box);
+  }
+  const samples = [...groups.values()].flatMap((group) => [...group.values()].sort((a, b) => b.count - a.count).slice(0, 3));
+  const hasHeading = samples.some((item) => item.role === "heading");
+  const hasBrandButton = samples.some((item) => item.role === "primaryButton" && chromatic(item.background));
+  const hasSurface = samples.some((item) => ["card", "dialog", "popover"].includes(item.role) && item.background);
+  const confidence = { typography: hasHeading ? 0.85 : 0.5, primary: variables.primary ? 0.95 : hasBrandButton ? 0.8 : 0.3, surfaces: hasSurface ? 0.85 : 0.5 };
+  const provenance = {
+    typography: hasHeading ? "heading" : "page",
+    primary: variables.primary ? "variable" : hasBrandButton ? "button" : "default",
+    surfaces: hasSurface ? "component" : "page"
   };
+  return { evidence: { version: 2, samples, variables, confidence, provenance } };
 }
 async function processPendingSdkTasks(apiBase, siteId) {
   var _a, _b;
   if (!apiBase || !siteId || typeof fetch === "undefined") return;
   try {
+    const page = new URL(window.location.href);
+    const captureToken = page.searchParams.get("movcues_theme_capture");
+    const explicit = captureToken && /^themec_[A-Za-z0-9_-]{32}$/.test(captureToken) ? captureToken : null;
+    if (explicit) {
+      page.searchParams.delete("movcues_theme_capture");
+      try {
+        history.replaceState(history.state, "", page);
+      } catch {
+      }
+    }
+    const query = `sdkVerification=${Date.now()}${explicit ? `&themeCapture=${encodeURIComponent(explicit)}` : ""}`;
     const configResponse = await fetch(
-      `${apiBase}/public/config/${encodeURIComponent(siteId)}?sdkVerification=${Date.now()}`,
+      `${apiBase}/public/config/${encodeURIComponent(siteId)}?${query}`,
       { credentials: "omit", cache: "no-store" }
     );
     if (!configResponse.ok) return;
@@ -1586,8 +1633,8 @@ async function processPendingSdkTasks(apiBase, siteId) {
     const verificationId = (_a = config.sdkVerification) == null ? void 0 : _a.id;
     if (typeof verificationId === "string" && verificationId) await fetch(`${apiBase}/public/sites/${encodeURIComponent(siteId)}/sdk-verifications/${encodeURIComponent(verificationId)}/ack`, { method: "POST", credentials: "omit", keepalive: true });
     const captureId = (_b = config.themeCapture) == null ? void 0 : _b.id;
-    if (typeof captureId === "string" && captureId) {
-      const payload = await extractDesignTokens();
+    if (typeof captureId === "string" && captureId && (!explicit || captureId === explicit)) {
+      const payload = await collectDesignEvidence();
       await fetch(`${apiBase}/public/sites/${encodeURIComponent(siteId)}/theme-captures/${encodeURIComponent(captureId)}`, { method: "POST", credentials: "omit", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     }
   } catch {
@@ -1981,6 +2028,190 @@ class EligibilityEngine {
     return [...experiences].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))[0] ?? null;
   }
 }
+const shadow = (y, blur, color2) => ({ x: 0, y, blur, spread: 0, color: color2 });
+const EXPERIENCE_PRESETS = {
+  minimal: { version: 1, colors: { background: "#ffffff", surface: "#ffffff", text: "#111827", mutedText: "#64748b", primary: "#2563eb", primaryForeground: "#ffffff", border: "#e2e8f0" }, typography: { bodyFontFamily: "ui-sans-serif, system-ui, sans-serif", headingFontFamily: "ui-sans-serif, system-ui, sans-serif", bodyFontSize: 15, headingFontSize: 24, bodyFontWeight: 400, headingFontWeight: 700, bodyLineHeight: 1.5, headingLineHeight: 1.2 }, radii: { sm: 4, md: 8, lg: 12 }, shadows: { sm: shadow(2, 8, "rgba(15,23,42,.08)"), md: shadow(12, 36, "rgba(15,23,42,.16)") } },
+  modern: { version: 1, colors: { background: "#ffffff", surface: "#f8fafc", text: "#0f172a", mutedText: "#64748b", primary: "#4f46e5", primaryForeground: "#ffffff", border: "#e2e8f0" }, typography: { bodyFontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", headingFontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", bodyFontSize: 15, headingFontSize: 28, bodyFontWeight: 400, headingFontWeight: 700, bodyLineHeight: 1.55, headingLineHeight: 1.15 }, radii: { sm: 6, md: 12, lg: 20 }, shadows: { sm: shadow(4, 14, "rgba(15,23,42,.09)"), md: shadow(24, 70, "rgba(15,23,42,.20)") } },
+  soft: { version: 1, colors: { background: "#f8fafc", surface: "#ffffff", text: "#1e293b", mutedText: "#64748b", primary: "#0284c7", primaryForeground: "#ffffff", border: "#dbeafe" }, typography: { bodyFontFamily: "ui-rounded, ui-sans-serif, system-ui, sans-serif", headingFontFamily: "ui-rounded, ui-sans-serif, system-ui, sans-serif", bodyFontSize: 15, headingFontSize: 26, bodyFontWeight: 400, headingFontWeight: 700, bodyLineHeight: 1.6, headingLineHeight: 1.2 }, radii: { sm: 10, md: 16, lg: 24 }, shadows: { sm: shadow(6, 18, "rgba(14,116,144,.10)"), md: shadow(22, 58, "rgba(14,116,144,.16)") } },
+  dark: { version: 1, colors: { background: "#0f172a", surface: "#1e293b", text: "#f8fafc", mutedText: "#cbd5e1", primary: "#818cf8", primaryForeground: "#0f172a", border: "#334155" }, typography: { bodyFontFamily: "ui-sans-serif, system-ui, sans-serif", headingFontFamily: "ui-sans-serif, system-ui, sans-serif", bodyFontSize: 15, headingFontSize: 26, bodyFontWeight: 400, headingFontWeight: 700, bodyLineHeight: 1.55, headingLineHeight: 1.18 }, radii: { sm: 6, md: 12, lg: 18 }, shadows: { sm: shadow(5, 16, "rgba(0,0,0,.28)"), md: shadow(24, 70, "rgba(0,0,0,.42)") } }
+};
+function resolvedTheme(state) {
+  var _a, _b, _c;
+  const value = structuredClone(state.baseTokens), o = state.overrides;
+  if (o.primary) {
+    value.colors.primary = o.primary;
+    if ((_a = value.shared) == null ? void 0 : _a.primaryButton) value.shared.primaryButton.background = o.primary;
+  }
+  if (o.secondary) value.colors.surface = o.secondary;
+  if (o.background) value.colors.background = o.background;
+  if (o.text) value.colors.text = o.text;
+  if (o.bodyFontFamily) value.typography.bodyFontFamily = o.bodyFontFamily;
+  if (o.headingFontFamily) value.typography.headingFontFamily = o.headingFontFamily;
+  if (o.bodyFontSize) value.typography.bodyFontSize = o.bodyFontSize;
+  if (o.headingFontSize) value.typography.headingFontSize = o.headingFontSize;
+  if (o.radius !== void 0) value.radii = { sm: Math.max(0, o.radius / 2), md: o.radius, lg: Math.min(100, o.radius * 1.5) };
+  if (o.buttonRadius !== void 0) {
+    value.radii.md = o.buttonRadius;
+    if ((_b = value.shared) == null ? void 0 : _b.primaryButton) value.shared.primaryButton.radius = o.buttonRadius;
+    if ((_c = value.shared) == null ? void 0 : _c.secondaryButton) value.shared.secondaryButton.radius = o.buttonRadius;
+  }
+  if (o.shadow) value.shadows = { sm: o.shadow, md: o.shadow };
+  return value;
+}
+function snapshotTheme(tokens, component) {
+  var _a, _b;
+  const { components, ...base } = structuredClone(tokens);
+  const defaults = components == null ? void 0 : components[component];
+  if (!defaults) return base;
+  base.spacing = defaults.spacing ?? base.spacing;
+  base.width = defaults.width ?? base.width;
+  base.radii.lg = defaults.radius ?? base.radii.lg;
+  if (defaults.buttonRadius !== void 0) {
+    base.radii.md = defaults.buttonRadius;
+    if ((_a = base.shared) == null ? void 0 : _a.primaryButton) base.shared.primaryButton.radius = defaults.buttonRadius;
+    if ((_b = base.shared) == null ? void 0 : _b.secondaryButton) base.shared.secondaryButton.radius = defaults.buttonRadius;
+  }
+  if (defaults.bodyFontSize !== void 0) base.typography.bodyFontSize = defaults.bodyFontSize;
+  if (defaults.headingFontSize !== void 0) base.typography.headingFontSize = defaults.headingFontSize;
+  if (defaults.bodyLineHeight !== void 0) base.typography.bodyLineHeight = defaults.bodyLineHeight;
+  if (defaults.headingLineHeight !== void 0) base.typography.headingLineHeight = defaults.headingLineHeight;
+  if (defaults.background !== void 0) base.colors.background = defaults.background;
+  if (defaults.surface !== void 0) base.colors.surface = defaults.surface;
+  if (defaults.text !== void 0) base.colors.text = defaults.text;
+  if (defaults.shadow !== void 0) base.shadows.md = defaults.shadow;
+  return base;
+}
+function authoringThemeSnapshot(tokens, component) {
+  var _a, _b;
+  if (tokens.version !== 2 || component !== "guide") return snapshotTheme(tokens, component);
+  return structuredClone({ ...tokens, components: { guide: (_a = tokens.components) == null ? void 0 : _a.guide, modal: (_b = tokens.components) == null ? void 0 : _b.modal } });
+}
+const controlNames = {
+  primaryButton: "primary",
+  secondaryButton: "secondary",
+  input: "input",
+  selection: "selection",
+  progress: "progress",
+  closeButton: "close",
+  checklistItem: "checklist-item",
+  navigation: "navigation"
+};
+function setVariable(element, name, value, unit = "") {
+  if (value !== void 0) element.style.setProperty(`--movcues-${name}`, `${value}${unit}`);
+}
+function applyThemeStyles(element, design, checklist = false) {
+  var _a;
+  const { background, foreground, primary, spacing, siteTheme } = design.theme;
+  setVariable(element, "bg", background);
+  setVariable(element, "fg", foreground);
+  setVariable(element, "primary", primary);
+  setVariable(element, "theme-spacing", spacing, "px");
+  if (!siteTheme) return;
+  const { colors, typography, radii, shadows } = siteTheme;
+  setVariable(element, "surface", colors.surface);
+  setVariable(element, "muted", colors.mutedText);
+  setVariable(element, "border", colors.border);
+  setVariable(element, "primary-fg", colors.primaryForeground);
+  setVariable(element, "font-body", typography.bodyFontFamily);
+  setVariable(element, "font-heading", typography.headingFontFamily);
+  setVariable(element, "theme-radius", radii.lg, "px");
+  setVariable(element, "button-radius", radii.md, "px");
+  const { x, y, blur, spread, color: color2 } = shadows.md;
+  setVariable(element, "theme-shadow", `${x}px ${y}px ${blur}px ${spread}px ${color2}`);
+  if (!checklist || siteTheme.version === 2) {
+    setVariable(element, "font-body-size", typography.bodyFontSize, "px");
+    setVariable(element, "font-heading-size", typography.headingFontSize, "px");
+    setVariable(element, "font-body-weight", typography.bodyFontWeight);
+    setVariable(element, "font-heading-weight", typography.headingFontWeight);
+    setVariable(element, "font-body-line-height", typography.bodyLineHeight);
+    setVariable(element, "font-heading-line-height", typography.headingLineHeight);
+  }
+  if (siteTheme.version !== 2) return;
+  element.dataset.movcuesTheme = "2";
+  setVariable(element, "survey-body-size", typography.bodyFontSize, "px");
+  if (siteTheme.motion === "off") element.dataset.movcuesMotion = "off";
+  setVariable(element, "focus", siteTheme.focusColor ?? colors.primary);
+  if (siteTheme.width !== void 0) {
+    element.dataset.movcuesThemedWidth = "";
+    setVariable(element, "theme-width", siteTheme.width, "px");
+  }
+  for (const control of Object.keys(controlNames)) {
+    const settings = (_a = siteTheme.shared) == null ? void 0 : _a[control];
+    if (!settings) continue;
+    const name = controlNames[control];
+    setVariable(element, `${name}-radius`, settings.radius, "px");
+    setVariable(element, `${name}-height`, settings.minHeight, "px");
+    setVariable(element, `${name}-bg`, settings.background);
+    setVariable(element, name === "primary" ? "primary-fg" : `${name}-fg`, settings.foreground);
+  }
+}
+function styleRuntimeClose(button, theme) {
+  var _a;
+  const control = (theme == null ? void 0 : theme.version) === 2 ? (_a = theme.shared) == null ? void 0 : _a.closeButton : void 0;
+  if ((theme == null ? void 0 : theme.version) !== 2) return;
+  button.style.minHeight = `${(control == null ? void 0 : control.minHeight) ?? 24}px`;
+  button.style.minWidth = button.style.minHeight;
+  button.style.borderRadius = `${(control == null ? void 0 : control.radius) ?? 7}px`;
+  button.style.background = (control == null ? void 0 : control.background) ?? "transparent";
+  button.style.color = (control == null ? void 0 : control.foreground) ?? theme.colors.text;
+}
+const THEME_RUNTIME_CSS = `
+  .card[data-movcues-theme="2"]:not(.builder-card) {
+    padding:var(--movcues-theme-spacing,18px);border-radius:var(--movcues-theme-radius);border-color:var(--movcues-border);
+    box-shadow:var(--movcues-theme-shadow);font:var(--movcues-font-body-weight) var(--movcues-font-body-size)/var(--movcues-font-body-line-height) var(--movcues-font-body);
+  }
+  [data-movcues-theme="2"] .legacy-content h2,
+  .movcues-widget[data-movcues-theme="2"] :is([data-movcues-checklist-role="title"],[data-movcues-checklist-role="completion-title"]){
+    font:var(--movcues-font-heading-weight) var(--movcues-font-heading-size)/var(--movcues-font-heading-line-height) var(--movcues-font-heading);
+  }
+  .movcues-widget[data-movcues-theme="2"] :is([data-movcues-checklist-role="description"],[data-movcues-checklist-role="completion-description"]){
+    font:var(--movcues-font-body-weight) var(--movcues-font-body-size)/var(--movcues-font-body-line-height) var(--movcues-font-body);
+  }
+  .card[data-movcues-theme="2"] :is(.legacy-content,.builder-content) {overflow-wrap:anywhere}
+  .card[data-movcues-theme="2"]:not(.banner) .builder-content > .movcues-widget {max-height:calc(100dvh - 32px);overflow:auto;scrollbar-width:thin}
+  :where([data-movcues-theme="2"]) :is(button,input,textarea,select,[tabindex]):focus-visible {
+    outline:2px solid var(--movcues-focus);outline-offset:2px;
+  }
+  :where([data-movcues-theme="2"]) .legacy-content .primary {min-height:var(--movcues-primary-height,32px);border-radius:var(--movcues-primary-radius,var(--movcues-button-radius));background:var(--movcues-primary-bg,var(--movcues-primary));color:var(--movcues-primary-fg)}
+  :where([data-movcues-theme="2"]) .legacy-content .secondary {min-height:var(--movcues-secondary-height,32px);border-radius:var(--movcues-secondary-radius,var(--movcues-button-radius));background:var(--movcues-secondary-bg,transparent);color:var(--movcues-secondary-fg,inherit)}
+  [data-movcues-theme="2"] .movcues-widget .movcues-survey-input {
+    min-height:var(--movcues-input-height,36px);border-color:var(--movcues-border);border-radius:var(--movcues-input-radius,6px);
+    background:var(--movcues-input-bg,var(--movcues-surface));color:var(--movcues-input-fg,var(--movcues-fg));
+  }
+  [data-movcues-theme="2"] .movcues-widget textarea.movcues-survey-input {min-height:max(68px,var(--movcues-input-height,36px))}
+  [data-movcues-theme="2"] .movcues-widget .movcues-survey-option {
+    min-height:var(--movcues-selection-height,36px);border-color:var(--movcues-border);border-radius:var(--movcues-selection-radius,6px);
+    background:var(--movcues-selection-bg,var(--movcues-surface));color:var(--movcues-selection-fg,var(--movcues-fg));
+  }
+  [data-movcues-theme="2"] .movcues-widget .movcues-survey-option.is-selected {
+    border-color:var(--movcues-primary);background:var(--movcues-primary);color:var(--movcues-primary-fg);
+  }
+  [data-movcues-theme="2"] .movcues-widget [data-movcues-survey-action],.card[data-movcues-theme="2"] > footer .secondary {
+    min-height:var(--movcues-navigation-height,36px);border-radius:var(--movcues-navigation-radius,var(--movcues-button-radius));border-color:var(--movcues-border);
+    background:var(--movcues-navigation-bg,var(--movcues-surface));color:var(--movcues-navigation-fg,var(--movcues-fg));
+  }
+  [data-movcues-theme="2"] .movcues-widget [data-movcues-survey-progress-bar],
+  .movcues-widget[data-movcues-theme="2"] .movcues-checklist-progress-track {
+    height:var(--movcues-progress-height,4px);border-radius:var(--movcues-progress-radius,4px);background:var(--movcues-progress-bg,var(--movcues-border));
+  }
+  [data-movcues-theme="2"] .movcues-widget [data-movcues-survey-progress-bar],
+  .movcues-widget[data-movcues-theme="2"] .movcues-checklist-progress-fill {
+    background:var(--movcues-progress-fg,var(--movcues-primary));
+  }
+  .movcues-widget[data-movcues-theme="2"] .movcues-checklist__item {
+    min-height:var(--movcues-checklist-item-height,36px);border-radius:var(--movcues-checklist-item-radius,var(--movcues-button-radius));
+    background:var(--movcues-checklist-item-bg,var(--movcues-surface));color:var(--movcues-checklist-item-fg,var(--movcues-fg));
+  }
+  .movcues-widget[data-movcues-themed-width]:where(:not(:has([data-movcues-checklist-view="launcher"].is-active))) {
+    min-width:0;width:var(--movcues-theme-width,360px);
+  }
+  .movcues-widget[data-movcues-theme="2"] [data-movcues-checklist-role="dismiss"] {
+    min-height:var(--movcues-close-height,24px);border-radius:var(--movcues-close-radius,var(--movcues-button-radius));
+    background:var(--movcues-close-bg,transparent);color:var(--movcues-close-fg,var(--movcues-fg));
+  }
+  [data-movcues-motion="off"] *,[data-movcues-motion="off"]::after {animation:none!important;transition:none!important}
+  @media(prefers-reduced-motion:reduce){[data-movcues-theme="2"] *,[data-movcues-theme="2"]::after{animation:none!important;transition:none!important}}
+`;
 const BUILDER_ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "HEADER", "H1", "H2", "H3", "H4", "P", "SPAN", "BR", "BUTTON", "IMG", "HR", "LABEL", "STRONG", "EM", "U", "A", "UL", "OL", "LI"]);
 const BUILDER_SURVEY_INPUT_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA"]);
 const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "aria-required", "alt", "src", "href", "target", "rel", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-document-version", "data-movcues-node-id", "data-movcues-block-id", "data-movcues-sizing", "data-movcues-responsive-stack", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
@@ -2138,13 +2369,15 @@ const WIDGET_SIZE_CONSTRAINTS = {
   survey: { width: { default: 700, min: 320, max: 960, allowFull: true }, height: { allowFixed: true, allowViewport: true, min: 200, max: 900 }, viewportGutter: 24 }
 };
 function normalizeWidgetSize(widgetType, design) {
-  var _a, _b;
+  var _a, _b, _c;
   const constraint = WIDGET_SIZE_CONSTRAINTS[widgetType];
   if (widgetType === "banner") return { width: { mode: "full" }, height: { mode: "auto" } };
   const legacyValue = design.width === "sm" ? constraint.width.min : design.width === "lg" ? constraint.width.max : constraint.width.default;
   const requestedWidth = (_a = design.size) == null ? void 0 : _a.width;
-  const width = (requestedWidth == null ? void 0 : requestedWidth.mode) === "full" && constraint.width.allowFull ? { mode: "full" } : { mode: "fixed", value: clamp$1((requestedWidth == null ? void 0 : requestedWidth.value) ?? legacyValue, constraint.width.min, constraint.width.max) };
-  const requestedHeight = (_b = design.size) == null ? void 0 : _b.height;
+  const themeWidth = ((_b = design.theme.siteTheme) == null ? void 0 : _b.version) === 2 ? design.theme.siteTheme.width : void 0;
+  const inheritedWidth = (requestedWidth == null ? void 0 : requestedWidth.value) === void 0 || requestedWidth.value === constraint.width.default;
+  const width = (requestedWidth == null ? void 0 : requestedWidth.mode) === "full" && constraint.width.allowFull ? { mode: "full" } : { mode: "fixed", value: clamp$1((inheritedWidth ? themeWidth : requestedWidth == null ? void 0 : requestedWidth.value) ?? (requestedWidth == null ? void 0 : requestedWidth.value) ?? legacyValue, constraint.width.min, constraint.width.max) };
+  const requestedHeight = (_c = design.size) == null ? void 0 : _c.height;
   const height = (requestedHeight == null ? void 0 : requestedHeight.mode) === "fixed" && constraint.height.allowFixed ? { mode: "fixed", value: clamp$1(requestedHeight.value ?? constraint.height.min, constraint.height.min, constraint.height.max) } : (requestedHeight == null ? void 0 : requestedHeight.mode) === "viewport" && constraint.height.allowViewport ? { mode: "viewport" } : { mode: "auto" };
   return { width, height };
 }
@@ -2168,6 +2401,7 @@ function applyWidgetSizeEnvelope(card, widgetType, design) {
   card.style.overflow = "visible";
 }
 function applyBuilderSizeContent(card, widgetType, design) {
+  var _a;
   const content = card.querySelector(".builder-content");
   const widget = content == null ? void 0 : content.querySelector(":scope > .movcues-widget");
   if (!content || !widget) return;
@@ -2179,6 +2413,11 @@ function applyBuilderSizeContent(card, widgetType, design) {
   if (widgetType === "banner") widget.style.setProperty("width", "100%", "important");
   widget.style.setProperty("min-width", "0", "important");
   widget.style.setProperty("max-width", "100%", "important");
+  if (((_a = design.theme.siteTheme) == null ? void 0 : _a.version) === 2 && !fillsHeight && widgetType !== "banner") {
+    widget.style.setProperty("max-height", "calc(100dvh - 32px)", "important");
+    widget.style.setProperty("overflow", "auto");
+    return;
+  }
   widget.style.setProperty("height", fillsHeight ? "100%" : "auto", "important");
   widget.style.setProperty("max-height", fillsHeight ? "100%" : "none", "important");
 }
@@ -2366,29 +2605,7 @@ function buildCard(root, content, design, behavior, callbacks, builder, widgetTy
   var _a, _b;
   const card = document.createElement("section");
   card.className = "card";
-  card.style.setProperty("--movcues-bg", design.theme.background);
-  card.style.setProperty("--movcues-fg", design.theme.foreground);
-  card.style.setProperty("--movcues-primary", design.theme.primary);
-  if (design.theme.spacing !== void 0) card.style.setProperty("--movcues-theme-spacing", `${design.theme.spacing}px`);
-  const theme = design.theme.siteTheme;
-  if (theme) {
-    card.style.setProperty("--movcues-surface", theme.colors.surface);
-    card.style.setProperty("--movcues-muted", theme.colors.mutedText);
-    card.style.setProperty("--movcues-border", theme.colors.border);
-    card.style.setProperty("--movcues-primary-fg", theme.colors.primaryForeground);
-    card.style.setProperty("--movcues-font-body", theme.typography.bodyFontFamily);
-    card.style.setProperty("--movcues-font-heading", theme.typography.headingFontFamily);
-    card.style.setProperty("--movcues-font-body-size", `${theme.typography.bodyFontSize}px`);
-    card.style.setProperty("--movcues-font-heading-size", `${theme.typography.headingFontSize}px`);
-    card.style.setProperty("--movcues-font-body-weight", String(theme.typography.bodyFontWeight));
-    card.style.setProperty("--movcues-font-heading-weight", String(theme.typography.headingFontWeight));
-    card.style.setProperty("--movcues-font-body-line-height", String(theme.typography.bodyLineHeight));
-    card.style.setProperty("--movcues-font-heading-line-height", String(theme.typography.headingLineHeight));
-    card.style.setProperty("--movcues-theme-radius", `${theme.radii.lg}px`);
-    card.style.setProperty("--movcues-button-radius", `${theme.radii.md}px`);
-    const shadow2 = theme.shadows.md;
-    card.style.setProperty("--movcues-theme-shadow", `${shadow2.x}px ${shadow2.y}px ${shadow2.blur}px ${shadow2.spread}px ${shadow2.color}`);
-  }
+  applyThemeStyles(card, design);
   card.dataset.width = design.width;
   card.dataset.radius = design.theme.borderRadius;
   if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
@@ -2401,13 +2618,13 @@ function buildCard(root, content, design, behavior, callbacks, builder, widgetTy
     (_a = card.querySelector("[data-primary]")) == null ? void 0 : _a.addEventListener("click", callbacks.onPrimary);
     (_b = card.querySelector("[data-secondary]")) == null ? void 0 : _b.addEventListener("click", callbacks.onSecondary);
   }
-  if (behavior.dismissible && behavior.showCloseButton !== false) mountRuntimeDismissControl(card, callbacks.onDismiss);
+  if (behavior.dismissible && behavior.showCloseButton !== false) mountRuntimeDismissControl(card, callbacks.onDismiss, design.theme.siteTheme);
   root.appendChild(card);
   if (mountedBuilder && widgetType && widgetType !== "banner") fitBuilderWidthEnvelope(card);
   if (mountedBuilder && widgetType === "anchored_card") fitAnchoredBuilderEnvelope(card);
   return card;
 }
-function mountRuntimeDismissControl(card, onDismiss) {
+function mountRuntimeDismissControl(card, onDismiss, theme) {
   const chrome = document.createElement("div");
   chrome.className = "movcues-runtime-chrome";
   chrome.dataset.movcuesRuntimeChrome = "dismiss";
@@ -2424,6 +2641,11 @@ function mountRuntimeDismissControl(card, onDismiss) {
   close.dataset.dismiss = "";
   close.setAttribute("aria-label", "Dismiss");
   close.textContent = "×";
+  styleRuntimeClose(close, theme);
+  if ((theme == null ? void 0 : theme.version) === 2) {
+    chrome.style.setProperty("--movcues-focus", theme.focusColor ?? theme.colors.text);
+    style.textContent += "button:focus-visible{outline:2px solid var(--movcues-focus);outline-offset:2px}";
+  }
   close.addEventListener("click", onDismiss);
   chromeRoot.append(style, close);
   card.appendChild(chrome);
@@ -2728,11 +2950,13 @@ class HotspotRenderer {
     this.card = null;
   }
   render(root, target, content, design, behavior, callbacks, builder) {
+    var _a;
     this.destroy();
     const beacon = document.createElement("button");
     beacon.className = "hotspot";
     beacon.dataset.style = behavior.hotspotStyle ?? "pulse";
     beacon.style.setProperty("--movcues-hotspot", behavior.hotspotColor ?? design.theme.primary);
+    if (((_a = design.theme.siteTheme) == null ? void 0 : _a.motion) === "off") beacon.dataset.movcuesMotion = "off";
     beacon.type = "button";
     beacon.setAttribute("aria-label", `Open ${content.heading}`);
     if (beacon.dataset.style === "question") beacon.textContent = "?";
@@ -2749,8 +2973,8 @@ class HotspotRenderer {
       beacon.style.pointerEvents = hidden ? "none" : "";
     };
     const closeCard = () => {
-      var _a, _b;
-      (_a = this.cardRenderer) == null ? void 0 : _a.destroy();
+      var _a2, _b;
+      (_a2 = this.cardRenderer) == null ? void 0 : _a2.destroy();
       this.cardRenderer = null;
       (_b = this.card) == null ? void 0 : _b.remove();
       this.card = null;
@@ -3364,7 +3588,7 @@ function matchesGuideTargetPage(target, path) {
   const route = (hash == null ? void 0 : hash.startsWith("/")) ? `#${hash.split("?", 1)[0]}` : "";
   return context.pagePath === page.split("?", 1)[0] + route;
 }
-function matchesGuideRoute(path, rules) {
+function matchesGuideRoute(path, rules2) {
   const match = (rule) => {
     if (rule.operator === "equals") return path === rule.value;
     if (rule.operator === "starts_with") return path.startsWith(rule.value);
@@ -3377,7 +3601,7 @@ function matchesGuideRoute(path, rules) {
       return false;
     }
   };
-  return rules.some((rule) => rule.kind === "include" && match(rule)) && !rules.some((rule) => rule.kind === "exclude" && match(rule));
+  return rules2.some((rule) => rule.kind === "include" && match(rule)) && !rules2.some((rule) => rule.kind === "exclude" && match(rule));
 }
 function guideStepConfigurationErrors(step, index) {
   var _a, _b, _c;
@@ -3459,7 +3683,7 @@ class ExperienceRenderer {
     this.host.dataset.movcuesExperienceRoot = experienceId;
     const root = this.host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
-    style.textContent = STYLES;
+    style.textContent = STYLES + THEME_RUNTIME_CSS;
     root.appendChild(style);
     return root;
   }
@@ -3562,7 +3786,21 @@ class ExperienceRenderer {
       this.destroy();
     };
     const guarded = { ...callbacks, onGuideAdvance: advance, onGuideBack: back, onDismiss: dismiss };
-    const stepDesign = step.size ? { ...definition.design, size: step.size } : definition.design;
+    let stepDesign = step.size ? { ...definition.design, size: step.size } : definition.design;
+    const theme = stepDesign.theme.siteTheme;
+    if ((theme == null ? void 0 : theme.version) === 2 && theme.components) {
+      const state = definition.visualTheme;
+      const base = snapshotTheme((state == null ? void 0 : state.baseTokens) ?? theme, getGuideStepPattern(step) === "modal" ? "modal" : "guide");
+      const resolved = state ? resolvedTheme({ ...state, baseTokens: base }) : base;
+      stepDesign = { ...stepDesign, theme: {
+        ...stepDesign.theme,
+        background: resolved.colors.background,
+        foreground: resolved.colors.text,
+        primary: resolved.colors.primary,
+        spacing: (state == null ? void 0 : state.overrides.spacing) ?? resolved.spacing,
+        siteTheme: resolved
+      } };
+    }
     const stepCallbacks = {
       ordinaryActionContext: "guide",
       onDismiss: dismiss,
@@ -3578,7 +3816,7 @@ class ExperienceRenderer {
         if (generation === this.renderGeneration && (!finished || !["next_step", "previous_step"].includes(action.type))) this.dispatchBuilderAction(action, label, guarded);
       }
     };
-    const visible2 = () => {
+    const visible = () => {
       var _a2;
       if (!alive()) return;
       (_a2 = callbacks.onGuideStatus) == null ? void 0 : _a2.call(callbacks, "ready");
@@ -3606,7 +3844,7 @@ class ExperienceRenderer {
         this.renderer = renderer;
         const card = renderer.render(root, step.content, stepDesign, { dismissible: step.behavior.dismissible ?? true }, stepCallbacks, step.builder);
         addBack(card);
-        visible2();
+        visible();
         return;
       }
       const missing = (_b2 = step.presentation) == null ? void 0 : _b2.missingTarget;
@@ -3652,7 +3890,7 @@ class ExperienceRenderer {
           const card = renderer.render(root, target, step.content, stepDesign, behavior, { ...stepCallbacks, onTargetDetached: reconnect }, step.builder, "anchored_card");
           addBack(card);
           if (interaction2) this.listenForAdvance(interaction2, ((_d = step.advance) == null ? void 0 : _d.type) ?? "button", ((_e = step.advance) == null ? void 0 : _e.type) === "element_hover" ? step.advance.durationMs : void 0, advance);
-          visible2();
+          visible();
         };
         const interaction = guideInteractionTarget(step);
         if (interaction && interaction !== step.target) resolve(interaction, mount);
@@ -3853,7 +4091,7 @@ class ChecklistRenderer {
     this.host.style.cssText = `position:fixed;bottom:16px;${side};z-index:${zIndex};pointer-events:auto`;
     const root = this.host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
-    style.textContent = `:host{all:initial}.surface{position:relative;pointer-events:auto}.surface>.movcues-widget{position:relative!important;inset:auto!important}${css}`;
+    style.textContent = `:host{all:initial}.surface{position:relative;pointer-events:auto}.surface>.movcues-widget{position:relative!important;inset:auto!important}${css}${THEME_RUNTIME_CSS}`;
     root.appendChild(style);
     const surface = document.createElement("div");
     surface.className = "surface";
@@ -3864,25 +4102,8 @@ class ChecklistRenderer {
       this.destroy();
       return false;
     }
-    const design = checklist.definition.design, theme = design == null ? void 0 : design.theme.siteTheme;
-    if (design) {
-      authoredRoot.style.setProperty("--movcues-bg", design.theme.background);
-      authoredRoot.style.setProperty("--movcues-fg", design.theme.foreground);
-      authoredRoot.style.setProperty("--movcues-primary", design.theme.primary);
-      if (design.theme.spacing !== void 0) authoredRoot.style.setProperty("--movcues-theme-spacing", `${design.theme.spacing}px`);
-    }
-    if (theme) {
-      const shadow2 = theme.shadows.md;
-      authoredRoot.style.setProperty("--movcues-surface", theme.colors.surface);
-      authoredRoot.style.setProperty("--movcues-muted", theme.colors.mutedText);
-      authoredRoot.style.setProperty("--movcues-border", theme.colors.border);
-      authoredRoot.style.setProperty("--movcues-primary-fg", theme.colors.primaryForeground);
-      authoredRoot.style.setProperty("--movcues-font-body", theme.typography.bodyFontFamily);
-      authoredRoot.style.setProperty("--movcues-font-heading", theme.typography.headingFontFamily);
-      authoredRoot.style.setProperty("--movcues-theme-radius", `${theme.radii.lg}px`);
-      authoredRoot.style.setProperty("--movcues-button-radius", `${theme.radii.md}px`);
-      authoredRoot.style.setProperty("--movcues-theme-shadow", `${shadow2.x}px ${shadow2.y}px ${shadow2.blur}px ${shadow2.spread}px ${shadow2.color}`);
-    }
+    const design = checklist.definition.design;
+    if (design) applyThemeStyles(authoredRoot, design, true);
     const requiredRoles = ["title", "description", "progress", "items", "launcher-label", "remaining-count", "completion-title", "completion-description", "completion-acknowledge"];
     const requiredViews = ["expanded", "launcher", "completion"];
     if (requiredRoles.some((role) => authoredRoot.querySelectorAll(`[data-movcues-checklist-role="${role}"]`).length !== 1) || requiredViews.some((view2) => authoredRoot.querySelectorAll(`[data-movcues-checklist-view="${view2}"]`).length !== 1)) {
@@ -4722,12 +4943,12 @@ function currentPagePath() {
 const bundledRuntimeProviders = {
   experiences: {
     createLoader: (apiBase, siteId, session, trackEvent, geoAgent) => new ExperienceLoader(apiBase, siteId, session, trackEvent, geoAgent, async () => {
-      const { mountGeoAgent } = await import("./widget-Cw5CvE7p.js");
+      const { mountGeoAgent } = await import("./widget-BECBPZJl.js");
       return { mount: mountGeoAgent };
     })
   },
   loadEditor: async () => {
-    const { EditorModeController } = await import("./EditorModeController-W46NNaVE.js");
+    const { EditorModeController } = await import("./EditorModeController-LtQkZMYC.js");
     return { createController: (apiBase) => new EditorModeController(apiBase) };
   }
 };
@@ -4751,10 +4972,13 @@ function createAnalytics(config) {
   return analytics;
 }
 export {
-  Analytics2 as A,
+  matchesGuideRoute as A,
   BUILDER_ALLOWED_TAGS as B,
   ChecklistRenderer as C,
+  storeEditorContinuation as D,
   ExperienceRenderer as E,
+  Analytics2 as F,
+  createAnalytics as G,
   ORDINARY_ACTION_ID_PATTERN as O,
   RouteObserver as R,
   SensitiveElementDetector as S,
@@ -4778,11 +5002,11 @@ export {
   isChecklistDefinition as r,
   safeScopedBuilderCss as s,
   isGuideDefinition as t,
-  guideInteractionTarget as u,
-  matchesGuideTargetPage as v,
-  readEditorContinuation as w,
-  matchesGuideRoute as x,
-  storeEditorContinuation as y,
-  createAnalytics as z
+  EXPERIENCE_PRESETS as u,
+  resolvedTheme as v,
+  authoringThemeSnapshot as w,
+  guideInteractionTarget as x,
+  matchesGuideTargetPage as y,
+  readEditorContinuation as z
 };
-//# sourceMappingURL=module-AqNWCE0I.js.map
+//# sourceMappingURL=module-C96yO9Jg.js.map

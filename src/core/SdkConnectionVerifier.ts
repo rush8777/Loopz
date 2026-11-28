@@ -1,4 +1,4 @@
-import { extractDesignTokens } from "../themes/DesignTokenExtractor";
+import { collectDesignEvidence } from "../themes/DesignTokenExtractor";
 
 interface PublicConfigResponse {
   sdkVerification?: { id?: unknown } | null;
@@ -14,8 +14,16 @@ export async function processPendingSdkTasks(apiBase: string, siteId: string): P
   if (!apiBase || !siteId || typeof fetch === "undefined") return;
 
   try {
+    const page = new URL(window.location.href);
+    const captureToken = page.searchParams.get("movcues_theme_capture");
+    const explicit = captureToken && /^themec_[A-Za-z0-9_-]{32}$/.test(captureToken) ? captureToken : null;
+    if (explicit) {
+      page.searchParams.delete("movcues_theme_capture");
+      try { history.replaceState(history.state, "", page); } catch { /* The host may restrict URL updates. */ }
+    }
+    const query = `sdkVerification=${Date.now()}${explicit ? `&themeCapture=${encodeURIComponent(explicit)}` : ""}`;
     const configResponse = await fetch(
-      `${apiBase}/public/config/${encodeURIComponent(siteId)}?sdkVerification=${Date.now()}`,
+      `${apiBase}/public/config/${encodeURIComponent(siteId)}?${query}`,
       { credentials: "omit", cache: "no-store" }
     );
     if (!configResponse.ok) return;
@@ -23,8 +31,8 @@ export async function processPendingSdkTasks(apiBase: string, siteId: string): P
     const verificationId = config.sdkVerification?.id;
     if (typeof verificationId === "string" && verificationId) await fetch(`${apiBase}/public/sites/${encodeURIComponent(siteId)}/sdk-verifications/${encodeURIComponent(verificationId)}/ack`, { method: "POST", credentials: "omit", keepalive: true });
     const captureId = config.themeCapture?.id;
-    if (typeof captureId === "string" && captureId) {
-      const payload = await extractDesignTokens();
+    if (typeof captureId === "string" && captureId && (!explicit || captureId === explicit)) {
+      const payload = await collectDesignEvidence();
       await fetch(`${apiBase}/public/sites/${encodeURIComponent(siteId)}/theme-captures/${encodeURIComponent(captureId)}`, { method: "POST", credentials: "omit", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     }
   } catch {

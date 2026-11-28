@@ -1,3 +1,4 @@
+import { applyThemeStyles, THEME_RUNTIME_CSS } from "./ThemeStyles";
 import type { DeliveredChecklist } from "../types";
 import { sanitizeBuilderHtml, safeBuilderCss } from "./BuilderContent";
 import { ALWAYS_ON_TOP_Z_INDEX } from "./layering/LayerManager";
@@ -22,11 +23,12 @@ export class ChecklistRenderer {
     const zIndex = forceLauncher ? ALWAYS_ON_TOP_Z_INDEX - 1 : ALWAYS_ON_TOP_Z_INDEX + 1;
     this.host.style.cssText = `position:fixed;bottom:16px;${side};z-index:${zIndex};pointer-events:auto`;
     const root = this.host.attachShadow({ mode: "open" }); const style = document.createElement("style");
-    style.textContent = `:host{all:initial}.surface{position:relative;pointer-events:auto}.surface>.movcues-widget{position:relative!important;inset:auto!important}${css}`; root.appendChild(style);
+    style.textContent = `:host{all:initial}.surface{position:relative;pointer-events:auto}.surface>.movcues-widget{position:relative!important;inset:auto!important}${css}${THEME_RUNTIME_CSS}`; root.appendChild(style);
     const surface = document.createElement("div"); surface.className = "surface"; surface.append(...nodes); root.appendChild(surface);
     const authoredRoot = surface.querySelector<HTMLElement>('[data-movcues-checklist-role="root"]');
     if (!authoredRoot || surface.querySelectorAll('[data-movcues-checklist-role="root"]').length !== 1) { this.destroy(); return false; }
-    const design=checklist.definition.design,theme=design?.theme.siteTheme;if(design){authoredRoot.style.setProperty('--movcues-bg',design.theme.background);authoredRoot.style.setProperty('--movcues-fg',design.theme.foreground);authoredRoot.style.setProperty('--movcues-primary',design.theme.primary);if(design.theme.spacing!==undefined)authoredRoot.style.setProperty('--movcues-theme-spacing',`${design.theme.spacing}px`);}if(theme){const shadow=theme.shadows.md;authoredRoot.style.setProperty('--movcues-surface',theme.colors.surface);authoredRoot.style.setProperty('--movcues-muted',theme.colors.mutedText);authoredRoot.style.setProperty('--movcues-border',theme.colors.border);authoredRoot.style.setProperty('--movcues-primary-fg',theme.colors.primaryForeground);authoredRoot.style.setProperty('--movcues-font-body',theme.typography.bodyFontFamily);authoredRoot.style.setProperty('--movcues-font-heading',theme.typography.headingFontFamily);authoredRoot.style.setProperty('--movcues-theme-radius',`${theme.radii.lg}px`);authoredRoot.style.setProperty('--movcues-button-radius',`${theme.radii.md}px`);authoredRoot.style.setProperty('--movcues-theme-shadow',`${shadow.x}px ${shadow.y}px ${shadow.blur}px ${shadow.spread}px ${shadow.color}`);}
+    const design = checklist.definition.design;
+    if (design) applyThemeStyles(authoredRoot, design, true);
     const requiredRoles = ["title", "description", "progress", "items", "launcher-label", "remaining-count", "completion-title", "completion-description", "completion-acknowledge"];
     const requiredViews = ["expanded", "launcher", "completion"];
     if (requiredRoles.some(role => authoredRoot.querySelectorAll(`[data-movcues-checklist-role="${role}"]`).length !== 1) || requiredViews.some(view => authoredRoot.querySelectorAll(`[data-movcues-checklist-view="${view}"]`).length !== 1)) { this.destroy(); return false; }

@@ -5,8 +5,29 @@ export interface ThemeShadow {
     spread: number;
     color: string;
 }
+export type ThemeControl = "primaryButton" | "secondaryButton" | "input" | "selection" | "progress" | "closeButton" | "checklistItem" | "navigation";
+export interface ThemeControlStyle {
+    radius?: number;
+    minHeight?: number;
+    background?: string;
+    foreground?: string;
+}
+export interface ThemeComponentStyle {
+    spacing?: number;
+    radius?: number;
+    buttonRadius?: number;
+    width?: number;
+    bodyFontSize?: number;
+    headingFontSize?: number;
+    bodyLineHeight?: number;
+    headingLineHeight?: number;
+    background?: string;
+    surface?: string;
+    text?: string;
+    shadow?: ThemeShadow;
+}
 export interface SiteThemeTokens {
-    version: 1;
+    version: 1 | 2;
     colors: {
         background: string;
         surface: string;
@@ -36,19 +57,47 @@ export interface SiteThemeTokens {
         md: ThemeShadow;
     };
     spacing?: number;
-    components?: Partial<Record<ThemeComponent, {
-        spacing?: number;
-        radius?: number;
-        buttonRadius?: number;
-    }>>;
+    width?: number;
+    motion?: "system" | "off";
+    focusColor?: string;
+    shared?: Partial<Record<ThemeControl, ThemeControlStyle>>;
+    components?: Partial<Record<ThemeComponent, ThemeComponentStyle>>;
 }
 export type ThemeComponent = "modal" | "anchored_card" | "survey" | "checklist" | "banner" | "slideout" | "toast" | "hotspot" | "cursor_follow" | "guide";
-export interface ThemeCapturePayload {
-    tokens: SiteThemeTokens;
-    evidence: {
-        confidence: Record<string, number>;
-        cssVariables: Record<string, string>;
-        sdkVersion: string;
+export type DesignRole = "page" | "navigation" | "heading" | "display" | "dialog" | "card" | "button" | "primaryButton" | "secondaryButton" | "input" | "label" | "badge" | "notification" | "popover" | "tooltip" | "body";
+export interface DesignSample {
+    role: DesignRole;
+    count: number;
+    fontFamily?: string;
+    fontSize: number;
+    fontWeight: number;
+    lineHeight: number;
+    letterSpacing: number;
+    color?: string;
+    background?: string;
+    backdrop?: string;
+    borderColor?: string;
+    borderWidth: number;
+    radius: number;
+    padding: number;
+    gap: number;
+    width?: number;
+    height?: number;
+    shadow?: ThemeShadow;
+}
+export interface DesignEvidence {
+    version: 2;
+    samples: DesignSample[];
+    variables: Partial<Record<"primary" | "primaryForeground" | "text" | "mutedText" | "surface" | "background" | "border", string>>;
+    confidence: {
+        typography: number;
+        primary: number;
+        surfaces: number;
+    };
+    provenance?: {
+        typography: "heading" | "page";
+        primary: "variable" | "button" | "default";
+        surfaces: "component" | "page";
     };
 }
 export type VisualPresetId = "minimal" | "modern" | "soft" | "dark";

@@ -12,6 +12,7 @@ export class HotspotRenderer {
     beacon.className = "hotspot";
     beacon.dataset.style = behavior.hotspotStyle ?? "pulse";
     beacon.style.setProperty("--movcues-hotspot", behavior.hotspotColor ?? design.theme.primary);
+    if (design.theme.siteTheme?.motion === "off") beacon.dataset.movcuesMotion = "off";
     beacon.type = "button";
     beacon.setAttribute("aria-label", `Open ${content.heading}`);
     if (beacon.dataset.style === "question") beacon.textContent = "?";

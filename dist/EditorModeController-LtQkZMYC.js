@@ -1,4 +1,4 @@
-import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, S as SensitiveElementDetector, j as findTarget, R as RouteObserver, E as ExperienceRenderer, k as sanitizeBuilderHtml, l as getGuideStepPattern, m as guideStepRequiresTarget, n as guideStepConfigurationErrors, p as exchangeEditorSession, q as clearEditorContinuation, r as isChecklistDefinition, t as isGuideDefinition, u as guideInteractionTarget, v as matchesGuideTargetPage, w as readEditorContinuation, x as matchesGuideRoute, y as storeEditorContinuation } from "./module-AqNWCE0I.js";
+import { o as ordinaryButtonActionsFor, s as safeScopedBuilderCss, B as BUILDER_ALLOWED_TAGS, a as BUILDER_SURVEY_INPUT_TAGS, b as BUILDER_ALLOWED_ATTRIBUTES, c as builderImageUrlIsSafe, d as builderLinkUrlIsSafe, e as builderInputTypeIsSafe, O as ORDINARY_ACTION_ID_PATTERN, f as ordinaryButtonActionErrors, C as ChecklistRenderer, g as surveyBranchErrors, h as computeElementRole, i as computeElementLabel, S as SensitiveElementDetector, j as findTarget, R as RouteObserver, E as ExperienceRenderer, k as sanitizeBuilderHtml, l as getGuideStepPattern, m as guideStepRequiresTarget, n as guideStepConfigurationErrors, p as exchangeEditorSession, q as clearEditorContinuation, r as isChecklistDefinition, t as isGuideDefinition, u as EXPERIENCE_PRESETS, v as resolvedTheme, w as authoringThemeSnapshot, x as guideInteractionTarget, y as matchesGuideTargetPage, z as readEditorContinuation, A as matchesGuideRoute, D as storeEditorContinuation } from "./module-C96yO9Jg.js";
 class EditorDock {
   constructor() {
     this.host = document.createElement("div");
@@ -587,9 +587,11 @@ let CssSyntaxError$3 = class CssSyntaxError extends Error {
       if (number === this.line) {
         if (line.length > 160) {
           let padding = 20;
-          let endColumn = typeof this.endColumn === "number" ? this.endColumn : this.column;
           let subLineStart = Math.max(0, this.column - padding);
-          let subLineEnd = Math.max(this.column + padding, endColumn + padding);
+          let subLineEnd = Math.max(
+            this.column + padding,
+            this.endColumn + padding
+          );
           let subLine = line.slice(subLineStart, subLineEnd);
           let spacing2 = aside(gutter.replace(/\d/g, " ")) + line.slice(0, Math.min(this.column - 1, padding - 1)).replace(/[^\t]/g, " ");
           return mark(">") + aside(gutter) + highlight(subLine) + "\n " + spacing2 + mark("^");
@@ -2615,10 +2617,8 @@ let MapGenerator$2 = class MapGenerator {
       while ((startIndex = this.css.indexOf(annotation, cursor)) !== -1) {
         let endIndex = this.css.indexOf("*/", startIndex + annotation.length);
         if (endIndex === -1) break;
-        if (endIndex + 2 === this.css.length || /[\t\n\f\r ]/.test(this.css[endIndex + 2])) {
-          while (startIndex > cursor && (this.css[startIndex - 1] === "\n" || this.css[startIndex - 1] === "\r")) {
-            startIndex--;
-          }
+        while (startIndex > cursor && this.css[startIndex - 1] === "\n") {
+          startIndex--;
         }
         css += this.css.slice(cursor, startIndex);
         cursor = endIndex + 2;
@@ -2894,15 +2894,14 @@ const RE_AT_END = /[\t\n\f\r "#'()/;[\\\]{}]/g;
 const RE_WORD_END = /[\t\n\f\r !"#'():;@[\\\]{}]|\/(?=\*)/g;
 const RE_BAD_BRACKET = /.[\r\n"'(/\\]/;
 const RE_HEX_ESCAPE = /[\da-f]/i;
-const RE_URL_NAME = /(^|[\t\n\f\r "'(),/:;[\]{}])url$/i;
-const RE_QUOTED = /[\t\n\f\r ]*["']/y;
 var tokenize = function tokenizer(input2, options = {}) {
   let css = input2.css.valueOf();
   let ignore = options.ignoreErrors;
   let code, content, escape2, next, quote;
-  let currentToken, escaped, escapePos;
+  let currentToken, escaped, escapePos, n, prev;
   let length = css.length;
   let pos = 0;
+  let buffer = [];
   let returned = [];
   let lastBadParen = -1;
   function position() {
@@ -2946,8 +2945,9 @@ var tokenize = function tokenizer(input2, options = {}) {
         break;
       }
       case OPEN_PARENTHESES: {
-        RE_QUOTED.lastIndex = pos + 1;
-        if (RE_URL_NAME.test(css.substring(pos - 4, pos)) && !RE_QUOTED.test(css)) {
+        prev = buffer.length ? buffer.pop()[1] : "";
+        n = css.charCodeAt(pos + 1);
+        if (prev === "url" && n !== SINGLE_QUOTE && n !== DOUBLE_QUOTE && n !== SPACE && n !== NEWLINE && n !== TAB && n !== FEED && n !== CR) {
           next = pos;
           do {
             escaped = false;
@@ -3064,6 +3064,7 @@ var tokenize = function tokenizer(input2, options = {}) {
             next = RE_WORD_END.lastIndex - 2;
           }
           currentToken = ["word", css.slice(pos, next + 1), pos, next];
+          buffer.push(currentToken);
           pos = next;
         }
         break;
@@ -4354,7 +4355,7 @@ let NoWorkResult2 = noWorkResult;
 let Root$1 = root;
 let Processor$1 = class Processor {
   constructor(plugins = []) {
-    this.version = "8.5.33";
+    this.version = "8.5.32";
     this.plugins = this.normalize(plugins);
   }
   normalize(plugins) {
@@ -5240,9 +5241,9 @@ function compileOnsiteDocument(document2, widgetType, survey, checklist) {
     ".movcues-widget .movcues-block img{display:block;max-width:100%}",
     ".movcues-widget .movcues-heading{font-family:var(--movcues-font-heading,var(--movcues-font-body));font-size:var(--movcues-font-heading-size,inherit)}",
     ".movcues-widget .movcues-button{min-height:40px;border:0;border-radius:var(--movcues-button-radius,8px);font:600 14px/1.2 var(--movcues-font-body,ui-sans-serif,system-ui,sans-serif);cursor:pointer}",
-    ".movcues-widget .movcues-button--primary{background:var(--movcues-primary);color:var(--movcues-primary-fg,#fff)}",
-    ".movcues-widget .movcues-button--secondary{background:transparent;color:inherit}",
-    ".movcues-widget .movcues-button--outline{background:transparent;color:inherit;border:1px solid currentColor}",
+    ".movcues-widget .movcues-button--primary{min-height:var(--movcues-primary-height,40px);background:var(--movcues-primary-bg,var(--movcues-primary));color:var(--movcues-primary-fg,#fff)}",
+    ".movcues-widget .movcues-button--secondary{min-height:var(--movcues-secondary-height,40px);background:var(--movcues-secondary-bg,transparent);color:var(--movcues-secondary-fg,inherit)}",
+    ".movcues-widget .movcues-button--outline{min-height:var(--movcues-secondary-height,40px);background:var(--movcues-secondary-bg,transparent);color:var(--movcues-secondary-fg,inherit);border:1px solid currentColor}",
     ".movcues-widget .movcues-block--full{width:100%}"
   ];
   if (document2.schemaVersion === 3) css.push(SURVEY_CELL_CSS);
@@ -5269,7 +5270,7 @@ function renderCell(cell, css, depth, survey, checklist) {
   const sizing = cell.sizing.mode === "flexible" ? `flex:${round(cell.sizing.weight)} 1 0` : cell.sizing.mode === "hug" ? "flex:0 0 auto" : `flex:0 1 ${cell.sizing.value}px`;
   const style = cell.style ?? {};
   css.push(`${selector2}{${sizing};flex-direction:${cell.direction};align-items:${cell.align};justify-content:${cell.justify};gap:${cell.gap}px;padding:${cell.padding.top}px ${cell.padding.right}px ${cell.padding.bottom}px ${cell.padding.left}px;${style.background ? `background:${style.background};` : ""}${style.borderWidth ? `border:${style.borderWidth}px solid ${style.borderColor ?? "#dbe2ea"};` : ""}${style.borderRadius ? `border-radius:${style.borderRadius}px;` : ""}}`);
-  if (cell.checklistWidth !== void 0) css.push(`.movcues-widget--checklist:has([data-movcues-node-id="${cell.id}"].is-active){width:${cell.checklistWidth}px}`);
+  if (cell.checklistWidth !== void 0) css.push(`.movcues-widget--checklist:has([data-movcues-node-id="${cell.id}"].is-active){width:${cell.checklistWidth === 360 ? "var(--movcues-theme-width,360px)" : `${cell.checklistWidth}px`}}`);
   const children = ((_a = cell.children) == null ? void 0 : _a.map((child) => renderCell(child, css, depth + 1, survey, checklist)).join("")) ?? (cell.block ? renderBlock(cell.block, css, survey, checklist) : "");
   return `<div class="movcues-cell" data-movcues-node-id="${cell.id}"${cell.checklistRole ? cell.checklistRole === "items" ? ' data-movcues-checklist-role="items"' : ` data-movcues-checklist-view="${cell.checklistRole}"` : ""} data-movcues-sizing="${cell.sizing.mode}"${cell.responsiveStack ? ' data-movcues-responsive-stack="true"' : ""}>${children}</div>`;
 }
@@ -5290,7 +5291,7 @@ function renderBlock(block, css, survey, checklist) {
     return `<div ${attrs}><div data-movcues-checklist-role="progress"></div><div class="movcues-checklist-progress-track"><span class="movcues-checklist-progress-fill"></span></div></div>`;
   }
   if (block.type === "question") {
-    css.push(`${selector2}{font:${block.fontSize}px/1.5 var(--movcues-font-body,ui-sans-serif,system-ui,sans-serif);text-align:${align};${block.color ? `color:${block.color};` : ""}}`);
+    css.push(`${selector2}{font:${block.fontSize === 14 ? "var(--movcues-survey-body-size,14px)" : `${block.fontSize}px`}/1.5 var(--movcues-font-body,ui-sans-serif,system-ui,sans-serif);text-align:${align};${block.color ? `color:${block.color};` : ""}}`);
     return surveyQuestionMarkup(survey.questions.find((question) => question.id === block.questionId), block.id);
   }
   if (block.type === "survey_controls") return surveyControlsMarkup(block.id, (survey == null ? void 0 : survey.submitLabel) ?? "Submit");
@@ -5303,7 +5304,7 @@ function renderBlock(block, css, survey, checklist) {
     return `<div class="movcues-block movcues-text" data-movcues-block-id="${block.id}" data-movcues-content="body">${sanitizeRichText(block.html)}</div>`;
   }
   if (block.type === "button") {
-    css.push(`${selector2}{align-self:${align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center"};padding:${block.paddingY}px ${block.paddingX}px;border-radius:${block.inheritRadius ? `var(--movcues-button-radius,${block.radius}px)` : `${block.radius}px`};${block.width === "full" ? "width:100%;" : ""}${block.background ? `background:${block.background};` : ""}${block.color ? `color:${block.color};` : ""}}`);
+    css.push(`${selector2}{align-self:${align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center"};padding:${block.paddingY}px ${block.paddingX}px;border-radius:${block.inheritRadius ? `var(--movcues-${block.variant === "primary" ? "primary" : "secondary"}-radius,var(--movcues-button-radius,${block.radius}px))` : `${block.radius}px`};${block.width === "full" ? "width:100%;" : ""}${block.background ? `background:${block.background};` : ""}${block.color ? `color:${block.color};` : ""}}`);
     return `<button type="button" class="movcues-block movcues-button movcues-button--${block.variant}${block.width === "full" ? " movcues-block--full" : ""}" data-movcues-block-id="${block.id}" data-movcues-action-id="${block.action.id}">${escapeText$1(block.label)}</button>`;
   }
   if (block.type === "image") {
@@ -10562,38 +10563,6 @@ const AUTHORING_STYLE = `
 function escapeHtmlAttribute(value) {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
-const shadow = (y, blur, color) => ({ x: 0, y, blur, spread: 0, color });
-const EXPERIENCE_PRESETS = {
-  minimal: { version: 1, colors: { background: "#ffffff", surface: "#ffffff", text: "#111827", mutedText: "#64748b", primary: "#2563eb", primaryForeground: "#ffffff", border: "#e2e8f0" }, typography: { bodyFontFamily: "ui-sans-serif, system-ui, sans-serif", headingFontFamily: "ui-sans-serif, system-ui, sans-serif", bodyFontSize: 15, headingFontSize: 24, bodyFontWeight: 400, headingFontWeight: 700, bodyLineHeight: 1.5, headingLineHeight: 1.2 }, radii: { sm: 4, md: 8, lg: 12 }, shadows: { sm: shadow(2, 8, "rgba(15,23,42,.08)"), md: shadow(12, 36, "rgba(15,23,42,.16)") } },
-  modern: { version: 1, colors: { background: "#ffffff", surface: "#f8fafc", text: "#0f172a", mutedText: "#64748b", primary: "#4f46e5", primaryForeground: "#ffffff", border: "#e2e8f0" }, typography: { bodyFontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", headingFontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", bodyFontSize: 15, headingFontSize: 28, bodyFontWeight: 400, headingFontWeight: 700, bodyLineHeight: 1.55, headingLineHeight: 1.15 }, radii: { sm: 6, md: 12, lg: 20 }, shadows: { sm: shadow(4, 14, "rgba(15,23,42,.09)"), md: shadow(24, 70, "rgba(15,23,42,.20)") } },
-  soft: { version: 1, colors: { background: "#f8fafc", surface: "#ffffff", text: "#1e293b", mutedText: "#64748b", primary: "#0284c7", primaryForeground: "#ffffff", border: "#dbeafe" }, typography: { bodyFontFamily: "ui-rounded, ui-sans-serif, system-ui, sans-serif", headingFontFamily: "ui-rounded, ui-sans-serif, system-ui, sans-serif", bodyFontSize: 15, headingFontSize: 26, bodyFontWeight: 400, headingFontWeight: 700, bodyLineHeight: 1.6, headingLineHeight: 1.2 }, radii: { sm: 10, md: 16, lg: 24 }, shadows: { sm: shadow(6, 18, "rgba(14,116,144,.10)"), md: shadow(22, 58, "rgba(14,116,144,.16)") } },
-  dark: { version: 1, colors: { background: "#0f172a", surface: "#1e293b", text: "#f8fafc", mutedText: "#cbd5e1", primary: "#818cf8", primaryForeground: "#0f172a", border: "#334155" }, typography: { bodyFontFamily: "ui-sans-serif, system-ui, sans-serif", headingFontFamily: "ui-sans-serif, system-ui, sans-serif", bodyFontSize: 15, headingFontSize: 26, bodyFontWeight: 400, headingFontWeight: 700, bodyLineHeight: 1.55, headingLineHeight: 1.18 }, radii: { sm: 6, md: 12, lg: 18 }, shadows: { sm: shadow(5, 16, "rgba(0,0,0,.28)"), md: shadow(24, 70, "rgba(0,0,0,.42)") } }
-};
-function resolvedTheme(state) {
-  const value = structuredClone(state.baseTokens), o = state.overrides;
-  if (o.primary) value.colors.primary = o.primary;
-  if (o.secondary) value.colors.surface = o.secondary;
-  if (o.background) value.colors.background = o.background;
-  if (o.text) value.colors.text = o.text;
-  if (o.bodyFontFamily) value.typography.bodyFontFamily = o.bodyFontFamily;
-  if (o.headingFontFamily) value.typography.headingFontFamily = o.headingFontFamily;
-  if (o.bodyFontSize) value.typography.bodyFontSize = o.bodyFontSize;
-  if (o.headingFontSize) value.typography.headingFontSize = o.headingFontSize;
-  if (o.radius !== void 0) value.radii = { sm: Math.max(0, o.radius / 2), md: o.radius, lg: Math.min(100, o.radius * 1.5) };
-  if (o.buttonRadius !== void 0) value.radii.md = o.buttonRadius;
-  if (o.shadow) value.shadows = { sm: o.shadow, md: o.shadow };
-  return value;
-}
-function snapshotTheme(tokens, component) {
-  const { components: components2, ...base } = structuredClone(tokens);
-  const defaults = components2 == null ? void 0 : components2[component];
-  if (defaults) {
-    base.spacing = defaults.spacing ?? base.spacing;
-    base.radii.lg = defaults.radius ?? base.radii.lg;
-    base.radii.md = defaults.buttonRadius ?? base.radii.md;
-  }
-  return base;
-}
 const text = (value, max) => sanitizeRichText(value.trim().slice(0, max).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]));
 const isDocumentOperation$1 = (operation) => ["update_text", "update_block", "update_cell", "update_button_action", "insert_block", "remove_cell", "duplicate_cell", "move_cell"].includes(operation.type);
 function questionFromInput(input2, id = onsiteId("question")) {
@@ -12030,10 +11999,10 @@ class EditorModeController {
       if (style) {
         state.source = "preset";
         state.savedStyleId = style.id;
-        state.baseTokens = snapshotTheme(style.tokens, component);
+        state.baseTokens = authoringThemeSnapshot(style.tokens, component);
       } else if (value === "site" && site) {
         state.source = "site";
-        state.baseTokens = snapshotTheme(site, component);
+        state.baseTokens = authoringThemeSnapshot(site, component);
       } else if (Object.prototype.hasOwnProperty.call(EXPERIENCE_PRESETS, value)) {
         state.source = "preset";
         state.preset = value;
@@ -14304,4 +14273,4 @@ function checklistEditorAdapter(value) {
 export {
   EditorModeController
 };
-//# sourceMappingURL=EditorModeController-W46NNaVE.js.map
+//# sourceMappingURL=EditorModeController-LtQkZMYC.js.map

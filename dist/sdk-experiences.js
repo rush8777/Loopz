@@ -73,6 +73,178 @@
       return [...experiences].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))[0] ?? null;
     }
   }
+  function resolvedTheme(state) {
+    var _a, _b, _c;
+    const value = structuredClone(state.baseTokens), o = state.overrides;
+    if (o.primary) {
+      value.colors.primary = o.primary;
+      if ((_a = value.shared) == null ? void 0 : _a.primaryButton) value.shared.primaryButton.background = o.primary;
+    }
+    if (o.secondary) value.colors.surface = o.secondary;
+    if (o.background) value.colors.background = o.background;
+    if (o.text) value.colors.text = o.text;
+    if (o.bodyFontFamily) value.typography.bodyFontFamily = o.bodyFontFamily;
+    if (o.headingFontFamily) value.typography.headingFontFamily = o.headingFontFamily;
+    if (o.bodyFontSize) value.typography.bodyFontSize = o.bodyFontSize;
+    if (o.headingFontSize) value.typography.headingFontSize = o.headingFontSize;
+    if (o.radius !== void 0) value.radii = { sm: Math.max(0, o.radius / 2), md: o.radius, lg: Math.min(100, o.radius * 1.5) };
+    if (o.buttonRadius !== void 0) {
+      value.radii.md = o.buttonRadius;
+      if ((_b = value.shared) == null ? void 0 : _b.primaryButton) value.shared.primaryButton.radius = o.buttonRadius;
+      if ((_c = value.shared) == null ? void 0 : _c.secondaryButton) value.shared.secondaryButton.radius = o.buttonRadius;
+    }
+    if (o.shadow) value.shadows = { sm: o.shadow, md: o.shadow };
+    return value;
+  }
+  function snapshotTheme(tokens, component) {
+    var _a, _b;
+    const { components, ...base } = structuredClone(tokens);
+    const defaults = components == null ? void 0 : components[component];
+    if (!defaults) return base;
+    base.spacing = defaults.spacing ?? base.spacing;
+    base.width = defaults.width ?? base.width;
+    base.radii.lg = defaults.radius ?? base.radii.lg;
+    if (defaults.buttonRadius !== void 0) {
+      base.radii.md = defaults.buttonRadius;
+      if ((_a = base.shared) == null ? void 0 : _a.primaryButton) base.shared.primaryButton.radius = defaults.buttonRadius;
+      if ((_b = base.shared) == null ? void 0 : _b.secondaryButton) base.shared.secondaryButton.radius = defaults.buttonRadius;
+    }
+    if (defaults.bodyFontSize !== void 0) base.typography.bodyFontSize = defaults.bodyFontSize;
+    if (defaults.headingFontSize !== void 0) base.typography.headingFontSize = defaults.headingFontSize;
+    if (defaults.bodyLineHeight !== void 0) base.typography.bodyLineHeight = defaults.bodyLineHeight;
+    if (defaults.headingLineHeight !== void 0) base.typography.headingLineHeight = defaults.headingLineHeight;
+    if (defaults.background !== void 0) base.colors.background = defaults.background;
+    if (defaults.surface !== void 0) base.colors.surface = defaults.surface;
+    if (defaults.text !== void 0) base.colors.text = defaults.text;
+    if (defaults.shadow !== void 0) base.shadows.md = defaults.shadow;
+    return base;
+  }
+  const controlNames = {
+    primaryButton: "primary",
+    secondaryButton: "secondary",
+    input: "input",
+    selection: "selection",
+    progress: "progress",
+    closeButton: "close",
+    checklistItem: "checklist-item",
+    navigation: "navigation"
+  };
+  function setVariable(element, name, value, unit = "") {
+    if (value !== void 0) element.style.setProperty(`--movcues-${name}`, `${value}${unit}`);
+  }
+  function applyThemeStyles(element, design, checklist = false) {
+    var _a;
+    const { background, foreground, primary, spacing, siteTheme } = design.theme;
+    setVariable(element, "bg", background);
+    setVariable(element, "fg", foreground);
+    setVariable(element, "primary", primary);
+    setVariable(element, "theme-spacing", spacing, "px");
+    if (!siteTheme) return;
+    const { colors, typography, radii, shadows } = siteTheme;
+    setVariable(element, "surface", colors.surface);
+    setVariable(element, "muted", colors.mutedText);
+    setVariable(element, "border", colors.border);
+    setVariable(element, "primary-fg", colors.primaryForeground);
+    setVariable(element, "font-body", typography.bodyFontFamily);
+    setVariable(element, "font-heading", typography.headingFontFamily);
+    setVariable(element, "theme-radius", radii.lg, "px");
+    setVariable(element, "button-radius", radii.md, "px");
+    const { x, y, blur, spread, color } = shadows.md;
+    setVariable(element, "theme-shadow", `${x}px ${y}px ${blur}px ${spread}px ${color}`);
+    if (!checklist || siteTheme.version === 2) {
+      setVariable(element, "font-body-size", typography.bodyFontSize, "px");
+      setVariable(element, "font-heading-size", typography.headingFontSize, "px");
+      setVariable(element, "font-body-weight", typography.bodyFontWeight);
+      setVariable(element, "font-heading-weight", typography.headingFontWeight);
+      setVariable(element, "font-body-line-height", typography.bodyLineHeight);
+      setVariable(element, "font-heading-line-height", typography.headingLineHeight);
+    }
+    if (siteTheme.version !== 2) return;
+    element.dataset.movcuesTheme = "2";
+    setVariable(element, "survey-body-size", typography.bodyFontSize, "px");
+    if (siteTheme.motion === "off") element.dataset.movcuesMotion = "off";
+    setVariable(element, "focus", siteTheme.focusColor ?? colors.primary);
+    if (siteTheme.width !== void 0) {
+      element.dataset.movcuesThemedWidth = "";
+      setVariable(element, "theme-width", siteTheme.width, "px");
+    }
+    for (const control of Object.keys(controlNames)) {
+      const settings = (_a = siteTheme.shared) == null ? void 0 : _a[control];
+      if (!settings) continue;
+      const name = controlNames[control];
+      setVariable(element, `${name}-radius`, settings.radius, "px");
+      setVariable(element, `${name}-height`, settings.minHeight, "px");
+      setVariable(element, `${name}-bg`, settings.background);
+      setVariable(element, name === "primary" ? "primary-fg" : `${name}-fg`, settings.foreground);
+    }
+  }
+  function styleRuntimeClose(button, theme) {
+    var _a;
+    const control = (theme == null ? void 0 : theme.version) === 2 ? (_a = theme.shared) == null ? void 0 : _a.closeButton : void 0;
+    if ((theme == null ? void 0 : theme.version) !== 2) return;
+    button.style.minHeight = `${(control == null ? void 0 : control.minHeight) ?? 24}px`;
+    button.style.minWidth = button.style.minHeight;
+    button.style.borderRadius = `${(control == null ? void 0 : control.radius) ?? 7}px`;
+    button.style.background = (control == null ? void 0 : control.background) ?? "transparent";
+    button.style.color = (control == null ? void 0 : control.foreground) ?? theme.colors.text;
+  }
+  const THEME_RUNTIME_CSS = `
+  .card[data-movcues-theme="2"]:not(.builder-card) {
+    padding:var(--movcues-theme-spacing,18px);border-radius:var(--movcues-theme-radius);border-color:var(--movcues-border);
+    box-shadow:var(--movcues-theme-shadow);font:var(--movcues-font-body-weight) var(--movcues-font-body-size)/var(--movcues-font-body-line-height) var(--movcues-font-body);
+  }
+  [data-movcues-theme="2"] .legacy-content h2,
+  .movcues-widget[data-movcues-theme="2"] :is([data-movcues-checklist-role="title"],[data-movcues-checklist-role="completion-title"]){
+    font:var(--movcues-font-heading-weight) var(--movcues-font-heading-size)/var(--movcues-font-heading-line-height) var(--movcues-font-heading);
+  }
+  .movcues-widget[data-movcues-theme="2"] :is([data-movcues-checklist-role="description"],[data-movcues-checklist-role="completion-description"]){
+    font:var(--movcues-font-body-weight) var(--movcues-font-body-size)/var(--movcues-font-body-line-height) var(--movcues-font-body);
+  }
+  .card[data-movcues-theme="2"] :is(.legacy-content,.builder-content) {overflow-wrap:anywhere}
+  .card[data-movcues-theme="2"]:not(.banner) .builder-content > .movcues-widget {max-height:calc(100dvh - 32px);overflow:auto;scrollbar-width:thin}
+  :where([data-movcues-theme="2"]) :is(button,input,textarea,select,[tabindex]):focus-visible {
+    outline:2px solid var(--movcues-focus);outline-offset:2px;
+  }
+  :where([data-movcues-theme="2"]) .legacy-content .primary {min-height:var(--movcues-primary-height,32px);border-radius:var(--movcues-primary-radius,var(--movcues-button-radius));background:var(--movcues-primary-bg,var(--movcues-primary));color:var(--movcues-primary-fg)}
+  :where([data-movcues-theme="2"]) .legacy-content .secondary {min-height:var(--movcues-secondary-height,32px);border-radius:var(--movcues-secondary-radius,var(--movcues-button-radius));background:var(--movcues-secondary-bg,transparent);color:var(--movcues-secondary-fg,inherit)}
+  [data-movcues-theme="2"] .movcues-widget .movcues-survey-input {
+    min-height:var(--movcues-input-height,36px);border-color:var(--movcues-border);border-radius:var(--movcues-input-radius,6px);
+    background:var(--movcues-input-bg,var(--movcues-surface));color:var(--movcues-input-fg,var(--movcues-fg));
+  }
+  [data-movcues-theme="2"] .movcues-widget textarea.movcues-survey-input {min-height:max(68px,var(--movcues-input-height,36px))}
+  [data-movcues-theme="2"] .movcues-widget .movcues-survey-option {
+    min-height:var(--movcues-selection-height,36px);border-color:var(--movcues-border);border-radius:var(--movcues-selection-radius,6px);
+    background:var(--movcues-selection-bg,var(--movcues-surface));color:var(--movcues-selection-fg,var(--movcues-fg));
+  }
+  [data-movcues-theme="2"] .movcues-widget .movcues-survey-option.is-selected {
+    border-color:var(--movcues-primary);background:var(--movcues-primary);color:var(--movcues-primary-fg);
+  }
+  [data-movcues-theme="2"] .movcues-widget [data-movcues-survey-action],.card[data-movcues-theme="2"] > footer .secondary {
+    min-height:var(--movcues-navigation-height,36px);border-radius:var(--movcues-navigation-radius,var(--movcues-button-radius));border-color:var(--movcues-border);
+    background:var(--movcues-navigation-bg,var(--movcues-surface));color:var(--movcues-navigation-fg,var(--movcues-fg));
+  }
+  [data-movcues-theme="2"] .movcues-widget [data-movcues-survey-progress-bar],
+  .movcues-widget[data-movcues-theme="2"] .movcues-checklist-progress-track {
+    height:var(--movcues-progress-height,4px);border-radius:var(--movcues-progress-radius,4px);background:var(--movcues-progress-bg,var(--movcues-border));
+  }
+  [data-movcues-theme="2"] .movcues-widget [data-movcues-survey-progress-bar],
+  .movcues-widget[data-movcues-theme="2"] .movcues-checklist-progress-fill {
+    background:var(--movcues-progress-fg,var(--movcues-primary));
+  }
+  .movcues-widget[data-movcues-theme="2"] .movcues-checklist__item {
+    min-height:var(--movcues-checklist-item-height,36px);border-radius:var(--movcues-checklist-item-radius,var(--movcues-button-radius));
+    background:var(--movcues-checklist-item-bg,var(--movcues-surface));color:var(--movcues-checklist-item-fg,var(--movcues-fg));
+  }
+  .movcues-widget[data-movcues-themed-width]:where(:not(:has([data-movcues-checklist-view="launcher"].is-active))) {
+    min-width:0;width:var(--movcues-theme-width,360px);
+  }
+  .movcues-widget[data-movcues-theme="2"] [data-movcues-checklist-role="dismiss"] {
+    min-height:var(--movcues-close-height,24px);border-radius:var(--movcues-close-radius,var(--movcues-button-radius));
+    background:var(--movcues-close-bg,transparent);color:var(--movcues-close-fg,var(--movcues-fg));
+  }
+  [data-movcues-motion="off"] *,[data-movcues-motion="off"]::after {animation:none!important;transition:none!important}
+  @media(prefers-reduced-motion:reduce){[data-movcues-theme="2"] *,[data-movcues-theme="2"]::after{animation:none!important;transition:none!important}}
+`;
   const BUILDER_ALLOWED_TAGS = /* @__PURE__ */ new Set(["DIV", "SECTION", "HEADER", "H1", "H2", "H3", "H4", "P", "SPAN", "BR", "BUTTON", "IMG", "HR", "LABEL", "STRONG", "EM", "U", "A", "UL", "OL", "LI"]);
   const BUILDER_SURVEY_INPUT_TAGS = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA"]);
   const BUILDER_ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "id", "title", "role", "aria-label", "aria-live", "aria-hidden", "aria-pressed", "aria-required", "alt", "src", "href", "target", "rel", "width", "height", "type", "placeholder", "maxlength", "data-movcues-action-id", "data-movcues-content", "data-movcues-widget-type", "data-movcues-document-version", "data-movcues-node-id", "data-movcues-block-id", "data-movcues-sizing", "data-movcues-responsive-stack", "data-movcues-question-id", "data-movcues-question-type", "data-movcues-question-input", "data-movcues-option-id", "data-movcues-survey-action", "data-movcues-survey-controls", "data-movcues-survey-progress", "data-movcues-survey-progress-bar", "data-movcues-survey-step-id", "data-movcues-checklist-role", "data-movcues-checklist-item-id", "data-movcues-checklist-item-role", "data-movcues-checklist-view"]);
@@ -227,13 +399,15 @@ ${ISOLATION_CSS}`;
     survey: { width: { default: 700, min: 320, max: 960, allowFull: true }, height: { allowFixed: true, allowViewport: true, min: 200, max: 900 }, viewportGutter: 24 }
   };
   function normalizeWidgetSize(widgetType, design) {
-    var _a, _b;
+    var _a, _b, _c;
     const constraint = WIDGET_SIZE_CONSTRAINTS[widgetType];
     if (widgetType === "banner") return { width: { mode: "full" }, height: { mode: "auto" } };
     const legacyValue = design.width === "sm" ? constraint.width.min : design.width === "lg" ? constraint.width.max : constraint.width.default;
     const requestedWidth = (_a = design.size) == null ? void 0 : _a.width;
-    const width = (requestedWidth == null ? void 0 : requestedWidth.mode) === "full" && constraint.width.allowFull ? { mode: "full" } : { mode: "fixed", value: clamp$1((requestedWidth == null ? void 0 : requestedWidth.value) ?? legacyValue, constraint.width.min, constraint.width.max) };
-    const requestedHeight = (_b = design.size) == null ? void 0 : _b.height;
+    const themeWidth = ((_b = design.theme.siteTheme) == null ? void 0 : _b.version) === 2 ? design.theme.siteTheme.width : void 0;
+    const inheritedWidth = (requestedWidth == null ? void 0 : requestedWidth.value) === void 0 || requestedWidth.value === constraint.width.default;
+    const width = (requestedWidth == null ? void 0 : requestedWidth.mode) === "full" && constraint.width.allowFull ? { mode: "full" } : { mode: "fixed", value: clamp$1((inheritedWidth ? themeWidth : requestedWidth == null ? void 0 : requestedWidth.value) ?? (requestedWidth == null ? void 0 : requestedWidth.value) ?? legacyValue, constraint.width.min, constraint.width.max) };
+    const requestedHeight = (_c = design.size) == null ? void 0 : _c.height;
     const height = (requestedHeight == null ? void 0 : requestedHeight.mode) === "fixed" && constraint.height.allowFixed ? { mode: "fixed", value: clamp$1(requestedHeight.value ?? constraint.height.min, constraint.height.min, constraint.height.max) } : (requestedHeight == null ? void 0 : requestedHeight.mode) === "viewport" && constraint.height.allowViewport ? { mode: "viewport" } : { mode: "auto" };
     return { width, height };
   }
@@ -257,6 +431,7 @@ ${ISOLATION_CSS}`;
     card.style.overflow = "visible";
   }
   function applyBuilderSizeContent(card, widgetType, design) {
+    var _a;
     const content = card.querySelector(".builder-content");
     const widget = content == null ? void 0 : content.querySelector(":scope > .movcues-widget");
     if (!content || !widget) return;
@@ -268,6 +443,11 @@ ${ISOLATION_CSS}`;
     if (widgetType === "banner") widget.style.setProperty("width", "100%", "important");
     widget.style.setProperty("min-width", "0", "important");
     widget.style.setProperty("max-width", "100%", "important");
+    if (((_a = design.theme.siteTheme) == null ? void 0 : _a.version) === 2 && !fillsHeight && widgetType !== "banner") {
+      widget.style.setProperty("max-height", "calc(100dvh - 32px)", "important");
+      widget.style.setProperty("overflow", "auto");
+      return;
+    }
     widget.style.setProperty("height", fillsHeight ? "100%" : "auto", "important");
     widget.style.setProperty("max-height", fillsHeight ? "100%" : "none", "important");
   }
@@ -455,29 +635,7 @@ ${ISOLATION_CSS}`;
     var _a, _b;
     const card = document.createElement("section");
     card.className = "card";
-    card.style.setProperty("--movcues-bg", design.theme.background);
-    card.style.setProperty("--movcues-fg", design.theme.foreground);
-    card.style.setProperty("--movcues-primary", design.theme.primary);
-    if (design.theme.spacing !== void 0) card.style.setProperty("--movcues-theme-spacing", `${design.theme.spacing}px`);
-    const theme = design.theme.siteTheme;
-    if (theme) {
-      card.style.setProperty("--movcues-surface", theme.colors.surface);
-      card.style.setProperty("--movcues-muted", theme.colors.mutedText);
-      card.style.setProperty("--movcues-border", theme.colors.border);
-      card.style.setProperty("--movcues-primary-fg", theme.colors.primaryForeground);
-      card.style.setProperty("--movcues-font-body", theme.typography.bodyFontFamily);
-      card.style.setProperty("--movcues-font-heading", theme.typography.headingFontFamily);
-      card.style.setProperty("--movcues-font-body-size", `${theme.typography.bodyFontSize}px`);
-      card.style.setProperty("--movcues-font-heading-size", `${theme.typography.headingFontSize}px`);
-      card.style.setProperty("--movcues-font-body-weight", String(theme.typography.bodyFontWeight));
-      card.style.setProperty("--movcues-font-heading-weight", String(theme.typography.headingFontWeight));
-      card.style.setProperty("--movcues-font-body-line-height", String(theme.typography.bodyLineHeight));
-      card.style.setProperty("--movcues-font-heading-line-height", String(theme.typography.headingLineHeight));
-      card.style.setProperty("--movcues-theme-radius", `${theme.radii.lg}px`);
-      card.style.setProperty("--movcues-button-radius", `${theme.radii.md}px`);
-      const shadow = theme.shadows.md;
-      card.style.setProperty("--movcues-theme-shadow", `${shadow.x}px ${shadow.y}px ${shadow.blur}px ${shadow.spread}px ${shadow.color}`);
-    }
+    applyThemeStyles(card, design);
     card.dataset.width = design.width;
     card.dataset.radius = design.theme.borderRadius;
     if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
@@ -490,13 +648,13 @@ ${ISOLATION_CSS}`;
       (_a = card.querySelector("[data-primary]")) == null ? void 0 : _a.addEventListener("click", callbacks.onPrimary);
       (_b = card.querySelector("[data-secondary]")) == null ? void 0 : _b.addEventListener("click", callbacks.onSecondary);
     }
-    if (behavior.dismissible && behavior.showCloseButton !== false) mountRuntimeDismissControl(card, callbacks.onDismiss);
+    if (behavior.dismissible && behavior.showCloseButton !== false) mountRuntimeDismissControl(card, callbacks.onDismiss, design.theme.siteTheme);
     root.appendChild(card);
     if (mountedBuilder && widgetType && widgetType !== "banner") fitBuilderWidthEnvelope(card);
     if (mountedBuilder && widgetType === "anchored_card") fitAnchoredBuilderEnvelope(card);
     return card;
   }
-  function mountRuntimeDismissControl(card, onDismiss) {
+  function mountRuntimeDismissControl(card, onDismiss, theme) {
     const chrome = document.createElement("div");
     chrome.className = "movcues-runtime-chrome";
     chrome.dataset.movcuesRuntimeChrome = "dismiss";
@@ -513,6 +671,11 @@ ${ISOLATION_CSS}`;
     close.dataset.dismiss = "";
     close.setAttribute("aria-label", "Dismiss");
     close.textContent = "×";
+    styleRuntimeClose(close, theme);
+    if ((theme == null ? void 0 : theme.version) === 2) {
+      chrome.style.setProperty("--movcues-focus", theme.focusColor ?? theme.colors.text);
+      style.textContent += "button:focus-visible{outline:2px solid var(--movcues-focus);outline-offset:2px}";
+    }
     close.addEventListener("click", onDismiss);
     chromeRoot.append(style, close);
     card.appendChild(chrome);
@@ -817,11 +980,13 @@ ${ISOLATION_CSS}`;
       this.card = null;
     }
     render(root, target, content, design, behavior, callbacks, builder) {
+      var _a;
       this.destroy();
       const beacon = document.createElement("button");
       beacon.className = "hotspot";
       beacon.dataset.style = behavior.hotspotStyle ?? "pulse";
       beacon.style.setProperty("--movcues-hotspot", behavior.hotspotColor ?? design.theme.primary);
+      if (((_a = design.theme.siteTheme) == null ? void 0 : _a.motion) === "off") beacon.dataset.movcuesMotion = "off";
       beacon.type = "button";
       beacon.setAttribute("aria-label", `Open ${content.heading}`);
       if (beacon.dataset.style === "question") beacon.textContent = "?";
@@ -838,8 +1003,8 @@ ${ISOLATION_CSS}`;
         beacon.style.pointerEvents = hidden ? "none" : "";
       };
       const closeCard = () => {
-        var _a, _b;
-        (_a = this.cardRenderer) == null ? void 0 : _a.destroy();
+        var _a2, _b;
+        (_a2 = this.cardRenderer) == null ? void 0 : _a2.destroy();
         this.cardRenderer = null;
         (_b = this.card) == null ? void 0 : _b.remove();
         this.card = null;
@@ -1499,7 +1664,7 @@ ${ISOLATION_CSS}`;
       this.host.dataset.movcuesExperienceRoot = experienceId;
       const root = this.host.attachShadow({ mode: "open" });
       const style = document.createElement("style");
-      style.textContent = STYLES;
+      style.textContent = STYLES + THEME_RUNTIME_CSS;
       root.appendChild(style);
       return root;
     }
@@ -1602,7 +1767,21 @@ ${ISOLATION_CSS}`;
         this.destroy();
       };
       const guarded = { ...callbacks, onGuideAdvance: advance, onGuideBack: back, onDismiss: dismiss };
-      const stepDesign = step.size ? { ...definition.design, size: step.size } : definition.design;
+      let stepDesign = step.size ? { ...definition.design, size: step.size } : definition.design;
+      const theme = stepDesign.theme.siteTheme;
+      if ((theme == null ? void 0 : theme.version) === 2 && theme.components) {
+        const state = definition.visualTheme;
+        const base = snapshotTheme((state == null ? void 0 : state.baseTokens) ?? theme, getGuideStepPattern(step) === "modal" ? "modal" : "guide");
+        const resolved = state ? resolvedTheme({ ...state, baseTokens: base }) : base;
+        stepDesign = { ...stepDesign, theme: {
+          ...stepDesign.theme,
+          background: resolved.colors.background,
+          foreground: resolved.colors.text,
+          primary: resolved.colors.primary,
+          spacing: (state == null ? void 0 : state.overrides.spacing) ?? resolved.spacing,
+          siteTheme: resolved
+        } };
+      }
       const stepCallbacks = {
         ordinaryActionContext: "guide",
         onDismiss: dismiss,
@@ -1893,7 +2072,7 @@ ${ISOLATION_CSS}`;
       this.host.style.cssText = `position:fixed;bottom:16px;${side};z-index:${zIndex};pointer-events:auto`;
       const root = this.host.attachShadow({ mode: "open" });
       const style = document.createElement("style");
-      style.textContent = `:host{all:initial}.surface{position:relative;pointer-events:auto}.surface>.movcues-widget{position:relative!important;inset:auto!important}${css}`;
+      style.textContent = `:host{all:initial}.surface{position:relative;pointer-events:auto}.surface>.movcues-widget{position:relative!important;inset:auto!important}${css}${THEME_RUNTIME_CSS}`;
       root.appendChild(style);
       const surface = document.createElement("div");
       surface.className = "surface";
@@ -1904,25 +2083,8 @@ ${ISOLATION_CSS}`;
         this.destroy();
         return false;
       }
-      const design = checklist.definition.design, theme = design == null ? void 0 : design.theme.siteTheme;
-      if (design) {
-        authoredRoot.style.setProperty("--movcues-bg", design.theme.background);
-        authoredRoot.style.setProperty("--movcues-fg", design.theme.foreground);
-        authoredRoot.style.setProperty("--movcues-primary", design.theme.primary);
-        if (design.theme.spacing !== void 0) authoredRoot.style.setProperty("--movcues-theme-spacing", `${design.theme.spacing}px`);
-      }
-      if (theme) {
-        const shadow = theme.shadows.md;
-        authoredRoot.style.setProperty("--movcues-surface", theme.colors.surface);
-        authoredRoot.style.setProperty("--movcues-muted", theme.colors.mutedText);
-        authoredRoot.style.setProperty("--movcues-border", theme.colors.border);
-        authoredRoot.style.setProperty("--movcues-primary-fg", theme.colors.primaryForeground);
-        authoredRoot.style.setProperty("--movcues-font-body", theme.typography.bodyFontFamily);
-        authoredRoot.style.setProperty("--movcues-font-heading", theme.typography.headingFontFamily);
-        authoredRoot.style.setProperty("--movcues-theme-radius", `${theme.radii.lg}px`);
-        authoredRoot.style.setProperty("--movcues-button-radius", `${theme.radii.md}px`);
-        authoredRoot.style.setProperty("--movcues-theme-shadow", `${shadow.x}px ${shadow.y}px ${shadow.blur}px ${shadow.spread}px ${shadow.color}`);
-      }
+      const design = checklist.definition.design;
+      if (design) applyThemeStyles(authoredRoot, design, true);
       const requiredRoles = ["title", "description", "progress", "items", "launcher-label", "remaining-count", "completion-title", "completion-description", "completion-acknowledge"];
       const requiredViews = ["expanded", "launcher", "completion"];
       if (requiredRoles.some((role) => authoredRoot.querySelectorAll(`[data-movcues-checklist-role="${role}"]`).length !== 1) || requiredViews.some((view2) => authoredRoot.querySelectorAll(`[data-movcues-checklist-view="${view2}"]`).length !== 1)) {

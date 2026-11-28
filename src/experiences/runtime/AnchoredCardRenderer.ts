@@ -1,3 +1,4 @@
+import { applyThemeStyles, styleRuntimeClose } from "./ThemeStyles";
 import type { ExperienceBehavior, ExperienceContent, ExperienceDesign, ExperienceTarget, WidgetBuilderState, WidgetType } from "../types";
 import { mountBuilderContent } from "./BuilderContent";
 import { applyBuilderSizeContent, applyWidgetSizeEnvelope } from "./WidgetSizing";
@@ -37,29 +38,7 @@ export function waitForTarget(target: ExperienceTarget | undefined, onFound: (el
 export function buildCard(root: ShadowRoot, content: ExperienceContent, design: ExperienceDesign, behavior: ExperienceBehavior, callbacks: RenderCallbacks, builder?: WidgetBuilderState, widgetType?: WidgetType): HTMLElement {
   const card = document.createElement("section");
   card.className = "card";
-  card.style.setProperty("--movcues-bg", design.theme.background);
-  card.style.setProperty("--movcues-fg", design.theme.foreground);
-  card.style.setProperty("--movcues-primary", design.theme.primary);
-  if (design.theme.spacing !== undefined) card.style.setProperty("--movcues-theme-spacing", `${design.theme.spacing}px`);
-  const theme = design.theme.siteTheme;
-  if (theme) {
-    card.style.setProperty("--movcues-surface", theme.colors.surface);
-    card.style.setProperty("--movcues-muted", theme.colors.mutedText);
-    card.style.setProperty("--movcues-border", theme.colors.border);
-    card.style.setProperty("--movcues-primary-fg", theme.colors.primaryForeground);
-    card.style.setProperty("--movcues-font-body", theme.typography.bodyFontFamily);
-    card.style.setProperty("--movcues-font-heading", theme.typography.headingFontFamily);
-    card.style.setProperty("--movcues-font-body-size", `${theme.typography.bodyFontSize}px`);
-    card.style.setProperty("--movcues-font-heading-size", `${theme.typography.headingFontSize}px`);
-    card.style.setProperty("--movcues-font-body-weight", String(theme.typography.bodyFontWeight));
-    card.style.setProperty("--movcues-font-heading-weight", String(theme.typography.headingFontWeight));
-    card.style.setProperty("--movcues-font-body-line-height", String(theme.typography.bodyLineHeight));
-    card.style.setProperty("--movcues-font-heading-line-height", String(theme.typography.headingLineHeight));
-    card.style.setProperty("--movcues-theme-radius", `${theme.radii.lg}px`);
-    card.style.setProperty("--movcues-button-radius", `${theme.radii.md}px`);
-    const shadow = theme.shadows.md;
-    card.style.setProperty("--movcues-theme-shadow", `${shadow.x}px ${shadow.y}px ${shadow.blur}px ${shadow.spread}px ${shadow.color}`);
-  }
+  applyThemeStyles(card, design);
   card.dataset.width = design.width; card.dataset.radius = design.theme.borderRadius;
   if (widgetType) applyWidgetSizeEnvelope(card, widgetType, design);
   const mountedBuilder = Boolean(builder && mountBuilderContent(root, card, builder, callbacks, widgetType === "survey", callbacks.ordinaryActionContext ?? "widget"));
@@ -71,7 +50,7 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
     card.querySelector("[data-primary]")?.addEventListener("click", callbacks.onPrimary);
     card.querySelector("[data-secondary]")?.addEventListener("click", callbacks.onSecondary);
   }
-  if (behavior.dismissible && behavior.showCloseButton !== false) mountRuntimeDismissControl(card, callbacks.onDismiss);
+  if (behavior.dismissible && behavior.showCloseButton !== false) mountRuntimeDismissControl(card, callbacks.onDismiss, design.theme.siteTheme);
   root.appendChild(card);
   if (mountedBuilder && widgetType && widgetType !== "banner") fitBuilderWidthEnvelope(card);
   if (mountedBuilder && widgetType === "anchored_card") fitAnchoredBuilderEnvelope(card);
@@ -84,7 +63,7 @@ export function buildCard(root: ShadowRoot, content: ExperienceContent, design: 
  * content, while it cannot accidentally turn a dismiss control into part of an
  * authored flex or grid layout.
  */
-function mountRuntimeDismissControl(card: HTMLElement, onDismiss: () => void): void {
+function mountRuntimeDismissControl(card: HTMLElement, onDismiss: () => void, theme: ExperienceDesign["theme"]["siteTheme"]): void {
   const chrome = document.createElement("div");
   chrome.className = "movcues-runtime-chrome";
   chrome.dataset.movcuesRuntimeChrome = "dismiss";
@@ -101,6 +80,11 @@ function mountRuntimeDismissControl(card: HTMLElement, onDismiss: () => void): v
   close.dataset.dismiss = "";
   close.setAttribute("aria-label", "Dismiss");
   close.textContent = "×";
+  styleRuntimeClose(close, theme);
+  if (theme?.version === 2) {
+    chrome.style.setProperty("--movcues-focus", theme.focusColor ?? theme.colors.text);
+    style.textContent += "button:focus-visible{outline:2px solid var(--movcues-focus);outline-offset:2px}";
+  }
   close.addEventListener("click", onDismiss);
   chromeRoot.append(style, close);
   card.appendChild(chrome);

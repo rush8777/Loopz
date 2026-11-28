@@ -22,9 +22,11 @@ export function normalizeWidgetSize(widgetType: WidgetType, design: ExperienceDe
   if (widgetType === "banner") return { width: { mode: "full" }, height: { mode: "auto" } };
   const legacyValue = design.width === "sm" ? constraint.width.min! : design.width === "lg" ? constraint.width.max! : constraint.width.default as number;
   const requestedWidth = design.size?.width;
+  const themeWidth = design.theme.siteTheme?.version === 2 ? design.theme.siteTheme.width : undefined;
+  const inheritedWidth = requestedWidth?.value === undefined || requestedWidth.value === constraint.width.default;
   const width = requestedWidth?.mode === "full" && constraint.width.allowFull
     ? { mode: "full" as const }
-    : { mode: "fixed" as const, value: clamp(requestedWidth?.value ?? legacyValue, constraint.width.min!, constraint.width.max!) };
+    : { mode: "fixed" as const, value: clamp((inheritedWidth ? themeWidth : requestedWidth?.value) ?? requestedWidth?.value ?? legacyValue, constraint.width.min!, constraint.width.max!) };
   const requestedHeight = design.size?.height;
   const height = requestedHeight?.mode === "fixed" && constraint.height.allowFixed
     ? { mode: "fixed" as const, value: clamp(requestedHeight.value ?? constraint.height.min!, constraint.height.min!, constraint.height.max!) }
@@ -62,6 +64,11 @@ export function applyBuilderSizeContent(card: HTMLElement, widgetType: WidgetTyp
   // owns the visual width for compact widget types; forcing those children to
   // 100% would expand cards, toasts and slideouts to generic runtime defaults.
   widget.style.setProperty("min-width", "0", "important"); widget.style.setProperty("max-width", "100%", "important");
+  if (design.theme.siteTheme?.version === 2 && !fillsHeight && widgetType !== "banner") {
+    widget.style.setProperty("max-height", "calc(100dvh - 32px)", "important");
+    widget.style.setProperty("overflow", "auto");
+    return;
+  }
   widget.style.setProperty("height", fillsHeight ? "100%" : "auto", "important"); widget.style.setProperty("max-height", fillsHeight ? "100%" : "none", "important");
 }
 

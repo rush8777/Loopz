@@ -1,2 +1,4 @@
-import type { ThemeCapturePayload } from "./types";
-export declare function extractDesignTokens(): Promise<ThemeCapturePayload>;
+import type { DesignEvidence } from "./types";
+export declare function collectDesignEvidence(): Promise<{
+    evidence: DesignEvidence;
+}>;

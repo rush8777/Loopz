@@ -1438,143 +1438,190 @@
       return null;
     }
   }
-  const TRANSPARENT = /* @__PURE__ */ new Set(["transparent", "rgba(0, 0, 0, 0)", "rgba(0,0,0,0)"]);
-  function visible(element) {
-    if (!(element instanceof HTMLElement)) return false;
-    const style = getComputedStyle(element);
-    return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
-  }
-  function firstVisible(selectors) {
-    return Array.from(document.querySelectorAll(selectors)).find(visible) ?? null;
-  }
-  function visibleElements(selectors) {
-    return Array.from(document.querySelectorAll(selectors)).filter(visible);
-  }
-  function px(value, fallback) {
+  const rules = [
+    ["navigation", "nav,[role=navigation]"],
+    ["heading", "h1,h2,h3,h4,[role=heading]"],
+    ["dialog", "dialog,[role=dialog],[aria-modal=true]"],
+    ["card", "article,[class~='card'],[data-slot=card],[class~='panel']"],
+    ["button", "button,[role=button],input[type=button],input[type=submit],a[class*='btn'],a[class*='button']"],
+    ["input", "input:not([type=hidden]),textarea,select,[role=combobox]"],
+    ["label", "label,legend"],
+    ["badge", "[class~='badge'],[data-slot=badge]"],
+    ["notification", "[role=alert],[role=status],[class~='toast']"],
+    ["popover", "[popover],[role=menu],[role=listbox],[data-slot=popover-content]"],
+    ["tooltip", "[role=tooltip]"],
+    ["body", "p,small"]
+  ];
+  const excluded = "[hidden],[inert],[aria-hidden=true],iframe,svg,script,style,[data-movcues-experience],[data-movcues-experience-root],[data-movcues-checklist],[id^=movcues],[data-movcues-editor],[class*='intercom-'],[id*=onetrust],[id*=hubspot],[id*=cookie-banner],[id*=crisp-chatbox]";
+  const variableNames = {
+    "--primary": "primary",
+    "--brand": "primary",
+    "--brand-color": "primary",
+    "--color-primary": "primary",
+    "--primary-foreground": "primaryForeground",
+    "--background": "background",
+    "--foreground": "text",
+    "--ink": "text",
+    "--card": "surface",
+    "--surface": "surface",
+    "--soft": "surface",
+    "--muted-foreground": "mutedText",
+    "--muted": "mutedText",
+    "--border": "border",
+    "--line": "border"
+  };
+  const colorPattern = /^(?:#[0-9a-f]{3,8}|rgba?\([\d.,%\s]+\)|hsla?\([\d.,%\s-]+\))$/i;
+  const fontPattern = /^[\p{L}\p{N} _,'"-]{1,140}$/u;
+  function number(value, fallback, max = 160) {
     const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : fallback;
+    return Number.isFinite(parsed) ? Math.round(Math.min(max, Math.max(0, parsed)) * 100) / 100 : fallback;
   }
-  function weight(value, fallback) {
-    if (value === "normal") return 400;
-    if (value === "bold") return 700;
-    return Math.min(900, Math.max(100, Math.round(px(value, fallback) / 100) * 100));
-  }
-  function lineHeight(value, fontSize, fallback) {
-    if (value === "normal") return fallback;
-    const parsed = px(value, 0);
-    if (!parsed) return fallback;
-    return Math.round((value.includes("px") ? parsed / fontSize : parsed) * 100) / 100;
-  }
-  function color(value, fallback) {
-    return value && !TRANSPARENT.has(value) ? value : fallback;
-  }
-  function isOpaqueColor(value) {
-    return Boolean(value) && !TRANSPARENT.has(value);
-  }
-  function recurringStyle(elements, read, accept = (value) => Boolean(value)) {
-    const grouped = /* @__PURE__ */ new Map();
-    elements.forEach((element) => {
-      const style = getComputedStyle(element);
-      const value = read(style).trim();
-      if (!accept(value, style, element)) return;
-      const current = grouped.get(value);
-      grouped.set(value, current ? { ...current, count: current.count + 1 } : { element, count: 1 });
-    });
-    const best = [...grouped.entries()].sort((a, b) => b[1].count - a[1].count)[0];
-    return best ? { value: best[0], ...best[1] } : null;
+  function color(value) {
+    return colorPattern.test(value) && !/^rgba\([^)]*,\s*0(?:\.0+)?\)$/.test(value) ? value : void 0;
   }
   function shadow(value) {
-    var _a;
-    if (!value || value === "none") return { x: 0, y: 0, blur: 0, spread: 0, color: "rgba(0, 0, 0, 0)" };
-    const lengths = [];
-    const lengthPattern = /(-?\d+(?:\.\d+)?)px/g;
-    let lengthMatch;
-    while (lengths.length < 4 && (lengthMatch = lengthPattern.exec(value))) lengths.push(Number(lengthMatch[1]));
-    const foundColor = ((_a = value.match(/rgba?\([^)]*\)|hsla?\([^)]*\)|#[0-9a-f]{3,8}/i)) == null ? void 0 : _a[0]) ?? "rgba(0, 0, 0, 0.2)";
-    return { x: lengths[0] ?? 0, y: lengths[1] ?? 0, blur: Math.max(0, lengths[2] ?? 0), spread: lengths[3] ?? 0, color: foundColor };
-  }
-  function cssVariables() {
-    const result = {};
-    const style = getComputedStyle(document.documentElement);
-    for (let index = 0; index < style.length && Object.keys(result).length < 100; index += 1) {
-      const name = style.item(index);
-      if (!name.startsWith("--") || !/(color|font|radius|shadow|background|surface|border|primary|text|brand|accent|ink|muted|line|soft|canvas|panel)/i.test(name)) continue;
-      const value = style.getPropertyValue(name).trim();
-      if (value && value.length <= 300 && !/[{}]|url\s*\(|javascript\s*:/i.test(value)) result[name] = value;
+    var _a, _b, _c;
+    if (!value || value === "none" || value.includes("inset")) return;
+    const first = ((_a = value.match(/^(?:[^,(]|\([^)]*\))+/)) == null ? void 0 : _a[0]) ?? "";
+    const paint = (_b = first.match(/rgba?\([^)]*\)|#[0-9a-f]+/i)) == null ? void 0 : _b[0];
+    const lengths = (_c = first.match(/-?\d+(?:\.\d+)?px/g)) == null ? void 0 : _c.map(parseFloat);
+    if (lengths && lengths.length >= 2 && paint && color(paint)) {
+      const [x, y, blur = 0, spread = 0] = lengths;
+      if ([x, y, blur, spread].every((value2) => Math.abs(value2) <= 100)) return { x, y, blur, spread, color: paint };
     }
-    return result;
   }
-  function semanticVariable(variables, pattern) {
+  function chromatic(value) {
     var _a;
-    return (_a = Object.entries(variables).find(([name, value]) => pattern.test(name) && isOpaqueColor(value))) == null ? void 0 : _a[1];
+    const channels = (_a = value == null ? void 0 : value.match(/^rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/)) == null ? void 0 : _a.slice(1).map(Number);
+    return Boolean(channels && Math.max(...channels) - Math.min(...channels) >= 28);
   }
-  function hasVisibleBorder(style) {
-    return style.borderTopStyle !== "none" && px(style.borderTopWidth, 0) > 0;
+  async function readyForCapture() {
+    var _a;
+    if (document.readyState === "loading") await new Promise((resolve) => document.addEventListener("DOMContentLoaded", () => resolve(), { once: true }));
+    if ((_a = document.fonts) == null ? void 0 : _a.ready) {
+      let timer;
+      try {
+        await Promise.race([document.fonts.ready.catch(() => void 0), new Promise((resolve) => {
+          timer = setTimeout(resolve, 1e3);
+        })]);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
   }
-  function readyForCapture() {
-    const domReady = document.readyState === "loading" ? new Promise((resolve) => document.addEventListener("DOMContentLoaded", () => resolve(), { once: true })) : Promise.resolve();
-    return domReady.then(async () => {
-      var _a;
-      const fonts = (_a = document.fonts) == null ? void 0 : _a.ready;
-      if (fonts) await Promise.race([fonts.catch(() => void 0), new Promise((resolve) => setTimeout(resolve, 1500))]);
-    });
-  }
-  async function extractDesignTokens() {
+  async function collectDesignEvidence() {
     await readyForCapture();
-    const body = visible(document.body) ? document.body : document.documentElement;
-    const bodyStyle = getComputedStyle(body);
-    const heading = firstVisible("h1,h2,h3,h4") ?? body;
-    const headingStyle = getComputedStyle(heading);
-    const variables = cssVariables();
-    const actions = visibleElements("button,[role=button],a[href],input[type=button],input[type=submit]");
-    const actionBackground = recurringStyle(actions, (style) => style.backgroundColor, (value) => isOpaqueColor(value));
-    const action = (actionBackground == null ? void 0 : actionBackground.element) ?? null;
-    const actionStyle = action ? getComputedStyle(action) : bodyStyle;
-    const surfaces = visibleElements("dialog,[role=dialog],article,form,input,textarea,[class*=card],[class*=panel],[class*=surface]");
-    const surfaceBackground = recurringStyle(surfaces, (style) => style.backgroundColor, (value) => isOpaqueColor(value));
-    const surface = (surfaceBackground == null ? void 0 : surfaceBackground.element) ?? body;
-    const surfaceStyle = getComputedStyle(surface);
-    const muted = recurringStyle(visibleElements("p,small,[class*=muted],[class*=secondary],[class*=subtitle],[class*=description]"), (style) => style.color, (value) => isOpaqueColor(value) && value !== bodyStyle.color);
-    const bordered = recurringStyle(surfaces, (style) => style.borderColor, (_value, style) => hasVisibleBorder(style));
-    const shadowed = recurringStyle([...actions, ...surfaces], (style) => style.boxShadow, (value) => Boolean(value) && value !== "none");
-    const bodySize = px(bodyStyle.fontSize, 16);
-    const headingSize = px(headingStyle.fontSize, Math.max(20, bodySize * 1.5));
-    const background = color(bodyStyle.backgroundColor, "#ffffff");
-    const text = color(bodyStyle.color, "#111827");
-    const primary = (actionBackground == null ? void 0 : actionBackground.value) ?? semanticVariable(variables, /(?:primary|brand|accent|action)/i) ?? color(actionStyle.color, "#2563eb");
-    const primaryForeground = action ? color(actionStyle.color, "#ffffff") : semanticVariable(variables, /(?:primary|brand).*(?:foreground|contrast|on)/i) ?? "#ffffff";
-    const surfaceColor = (surfaceBackground == null ? void 0 : surfaceBackground.value) ?? semanticVariable(variables, /(?:surface|card|panel|soft)/i) ?? background;
-    const mutedText = (muted == null ? void 0 : muted.value) ?? semanticVariable(variables, /(?:muted|subtle|secondary).*(?:text|foreground)?|--muted$/i) ?? text;
-    const border = (bordered == null ? void 0 : bordered.value) ?? semanticVariable(variables, /(?:border|line|divider)/i) ?? "rgba(15, 23, 42, 0.12)";
-    const radius = px(actionStyle.borderRadius || surfaceStyle.borderRadius, 8);
-    const capturedShadow = shadow((shadowed == null ? void 0 : shadowed.value) ?? surfaceStyle.boxShadow);
-    const confidence = {
-      "colors.background": bodyStyle.backgroundColor && !TRANSPARENT.has(bodyStyle.backgroundColor) ? 0.95 : 0.35,
-      "colors.text": bodyStyle.color ? 0.95 : 0.35,
-      "colors.primary": actionBackground ? Math.min(0.98, 0.7 + actionBackground.count * 0.08) : semanticVariable(variables, /(?:primary|brand|accent|action)/i) ? 0.7 : 0.35,
-      "colors.mutedText": muted ? 0.85 : 0.5,
-      "colors.border": bordered ? 0.85 : 0.5,
-      "typography.bodyFontFamily": bodyStyle.fontFamily ? 0.95 : 0.35,
-      "typography.headingFontFamily": heading !== body ? 0.9 : 0.5,
-      "radii.md": action ? 0.75 : 0.4
+    const body = document.body ?? document.documentElement;
+    const rootStyle = getComputedStyle(document.documentElement);
+    const styleCache = new WeakMap([[document.documentElement, rootStyle]]);
+    const styleOf = (element) => {
+      const cached = styleCache.get(element);
+      if (cached) return cached;
+      const style = getComputedStyle(element);
+      styleCache.set(element, style);
+      return style;
     };
-    return {
-      tokens: {
-        version: 1,
-        colors: { background, surface: surfaceColor, text, mutedText, primary, primaryForeground, border },
-        typography: { bodyFontFamily: bodyStyle.fontFamily || "system-ui, sans-serif", headingFontFamily: headingStyle.fontFamily || bodyStyle.fontFamily || "system-ui, sans-serif", bodyFontSize: bodySize, headingFontSize: headingSize, bodyFontWeight: weight(bodyStyle.fontWeight, 400), headingFontWeight: weight(headingStyle.fontWeight, 700), bodyLineHeight: lineHeight(bodyStyle.lineHeight, bodySize, 1.5), headingLineHeight: lineHeight(headingStyle.lineHeight, headingSize, 1.25) },
-        radii: { sm: Math.max(0, Math.round(radius / 2)), md: radius, lg: Math.min(100, Math.round(radius * 2)) },
-        shadows: { sm: capturedShadow, md: capturedShadow }
-      },
-      evidence: { confidence, cssVariables: variables, sdkVersion: "0.1.0" }
+    const variables = {};
+    const colorProbe = document.createElement("span").style;
+    for (const [name, role] of Object.entries(variableNames)) {
+      const raw = rootStyle.getPropertyValue(name).trim();
+      const hslChannels = /^-?\d+(?:\.\d+)?\s+\d+(?:\.\d+)?%\s+\d+(?:\.\d+)?%$/.test(raw);
+      colorProbe.color = "";
+      colorProbe.color = hslChannels ? `hsl(${raw})` : raw;
+      const value = color(raw) ?? color(colorProbe.color);
+      if (value && !variables[role]) variables[role] = value;
+    }
+    const groups = /* @__PURE__ */ new Map();
+    function sample(element, role, box) {
+      var _a;
+      const style = styleOf(element);
+      if (style.visibility === "hidden" || style.visibility === "collapse" || style.display === "none" || style.opacity === "0") return;
+      const size = number(style.fontSize, 16, 200);
+      const paint = color(style.backgroundColor);
+      if (role === "heading" && size >= 38 && !element.closest("dialog,[role=dialog],article,[class~='card']")) role = "display";
+      if (role === "button") {
+        const secondary = element.matches("[class*=secondary],[class*=outline],[class*=ghost],[data-variant=secondary]");
+        const primary = element.matches("[class*=primary],[data-variant=primary],input[type=submit]");
+        role = !secondary && (primary || chromatic(paint)) ? "primaryButton" : "secondaryButton";
+      }
+      let backdrop;
+      for (let parent = element.parentElement, depth = 0; parent && depth < 8; parent = parent.parentElement, depth++) {
+        const parentStyle = styleOf(parent);
+        if (parentStyle.display === "none" || parentStyle.opacity === "0") return;
+        backdrop ?? (backdrop = color(parentStyle.backgroundColor));
+      }
+      const item = {
+        role,
+        count: 1,
+        fontFamily: fontPattern.test(style.fontFamily) ? style.fontFamily : void 0,
+        fontSize: size,
+        fontWeight: style.fontWeight === "bold" ? 700 : number(style.fontWeight, 400, 900),
+        lineHeight: ((_a = style.lineHeight) == null ? void 0 : _a.endsWith("px")) && size ? Math.min(4, number(style.lineHeight, size, 500) / size) : number(style.lineHeight || "", 1.5, 4),
+        letterSpacing: Math.max(-10, Math.min(20, parseFloat(style.letterSpacing) || 0)),
+        color: color(style.color),
+        background: paint,
+        backdrop,
+        borderColor: number(style.borderTopWidth, 0) ? color(style.borderTopColor) : void 0,
+        borderWidth: number(style.borderTopWidth, 0, 24),
+        radius: number(style.borderTopLeftRadius || style.borderRadius, 0, 100),
+        padding: number(style.paddingTop, 0, 80),
+        gap: number(style.gap, 0, 80),
+        width: box ? Math.min(1600, Math.round(box.width)) : void 0,
+        height: box ? Math.min(1200, Math.round(box.height)) : void 0,
+        shadow: shadow(style.boxShadow)
+      };
+      const { width: _width, height: _height, ...signature } = item;
+      const key = JSON.stringify(signature);
+      const group = groups.get(role) ?? /* @__PURE__ */ new Map();
+      groups.set(role, group);
+      const existing = group.get(key);
+      if (existing) existing.count = Math.min(100, existing.count + 1);
+      else if (group.size < 12) group.set(key, item);
+    }
+    sample(body, "page");
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_ELEMENT, {
+      acceptNode: (node) => node.matches(excluded) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+    });
+    let visited = 0;
+    let measured = 0;
+    for (let node = walker.nextNode(); node && visited < 1400 && measured < 180; node = walker.nextNode(), visited++) {
+      if (!(node instanceof HTMLElement)) continue;
+      const match = rules.find(([, selector]) => node.matches(selector));
+      if (!match) continue;
+      const box = node.getBoundingClientRect();
+      if (box.width < 2 || box.height < 2 || box.right <= 0 || box.bottom <= 0 || box.left >= innerWidth || box.top >= innerHeight) continue;
+      measured++;
+      sample(node, match[0], box);
+    }
+    const samples = [...groups.values()].flatMap((group) => [...group.values()].sort((a, b) => b.count - a.count).slice(0, 3));
+    const hasHeading = samples.some((item) => item.role === "heading");
+    const hasBrandButton = samples.some((item) => item.role === "primaryButton" && chromatic(item.background));
+    const hasSurface = samples.some((item) => ["card", "dialog", "popover"].includes(item.role) && item.background);
+    const confidence = { typography: hasHeading ? 0.85 : 0.5, primary: variables.primary ? 0.95 : hasBrandButton ? 0.8 : 0.3, surfaces: hasSurface ? 0.85 : 0.5 };
+    const provenance = {
+      typography: hasHeading ? "heading" : "page",
+      primary: variables.primary ? "variable" : hasBrandButton ? "button" : "default",
+      surfaces: hasSurface ? "component" : "page"
     };
+    return { evidence: { version: 2, samples, variables, confidence, provenance } };
   }
   async function processPendingSdkTasks(apiBase, siteId) {
     var _a, _b;
     if (!apiBase || !siteId || typeof fetch === "undefined") return;
     try {
+      const page = new URL(window.location.href);
+      const captureToken = page.searchParams.get("movcues_theme_capture");
+      const explicit = captureToken && /^themec_[A-Za-z0-9_-]{32}$/.test(captureToken) ? captureToken : null;
+      if (explicit) {
+        page.searchParams.delete("movcues_theme_capture");
+        try {
+          history.replaceState(history.state, "", page);
+        } catch {
+        }
+      }
+      const query = `sdkVerification=${Date.now()}${explicit ? `&themeCapture=${encodeURIComponent(explicit)}` : ""}`;
       const configResponse = await fetch(
-        `${apiBase}/public/config/${encodeURIComponent(siteId)}?sdkVerification=${Date.now()}`,
+        `${apiBase}/public/config/${encodeURIComponent(siteId)}?${query}`,
         { credentials: "omit", cache: "no-store" }
       );
       if (!configResponse.ok) return;
@@ -1582,8 +1629,8 @@
       const verificationId = (_a = config.sdkVerification) == null ? void 0 : _a.id;
       if (typeof verificationId === "string" && verificationId) await fetch(`${apiBase}/public/sites/${encodeURIComponent(siteId)}/sdk-verifications/${encodeURIComponent(verificationId)}/ack`, { method: "POST", credentials: "omit", keepalive: true });
       const captureId = (_b = config.themeCapture) == null ? void 0 : _b.id;
-      if (typeof captureId === "string" && captureId) {
-        const payload = await extractDesignTokens();
+      if (typeof captureId === "string" && captureId && (!explicit || captureId === explicit)) {
+        const payload = await collectDesignEvidence();
         await fetch(`${apiBase}/public/sites/${encodeURIComponent(siteId)}/theme-captures/${encodeURIComponent(captureId)}`, { method: "POST", credentials: "omit", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       }
     } catch {

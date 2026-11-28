@@ -1,35 +1,69 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { extractDesignTokens } from "../src/themes/DesignTokenExtractor";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { collectDesignEvidence } from "../src/themes/DesignTokenExtractor";
 
-describe("DesignTokenExtractor", () => {
-  afterEach(() => { document.body.innerHTML = ""; document.head.querySelectorAll("[data-theme-test]").forEach(element => element.remove()); document.documentElement.removeAttribute("style"); });
-
-  it("extracts semantic computed styles without collecting page content", async () => {
-    document.body.innerHTML = `<main style="background:#f8fafc;border:1px solid #ddd;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.2)"><h1 style="font-family:Georgia;font-size:32px;font-weight:700;line-height:40px">Private customer name</h1><button style="background:#7c3aed;color:#fff;border-radius:10px">Secret action</button></main>`;
+describe("website design evidence", () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute("data-offscreen") ? new DOMRect(0, 5000, 100, 44) : new DOMRect(15, 20, 120, 44);
+    });
     document.body.style.cssText = "background:#fff;color:#111827;font-family:Arial;font-size:16px;line-height:24px";
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = "";
+    document.body.removeAttribute("style");
+    document.documentElement.removeAttribute("style");
+  });
+
+  it("distinguishes display, product and component typography without uploading customer content", async () => {
+    document.body.innerHTML = `<main>
+      <h1 style="font-family:Georgia;font-size:72px">Private customer name</h1>
+      <article class="card" style="background:#f8fafc;border:1px solid #ddd;border-radius:12px">
+        <h2 style="font-family:Arial;font-size:22px;font-weight:700;line-height:27px">Private project</h2>
+        <p style="font-size:14px">Account number</p>
+        <button class="is-primary" style="background:#7c3aed;color:#fff;border-radius:10px">Secret action</button>
+        <input style="font-size:15px" value="private-secret">
+      </article>
+    </main>`;
     document.documentElement.style.setProperty("--brand-color", "#7c3aed");
-    const payload = await extractDesignTokens();
-    expect(payload.tokens).toMatchObject({ version: 1, colors: { primary: "rgb(124, 58, 237)" }, typography: { headingFontSize: 32 }, radii: { md: 10 } });
-    expect(payload.evidence.cssVariables["--brand-color"]).toBe("#7c3aed");
-    expect(JSON.stringify(payload)).not.toContain("Private customer name");
-    expect(JSON.stringify(payload)).not.toContain("Secret action");
+    const { evidence } = await collectDesignEvidence();
+    expect(evidence.samples).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "display", fontSize: 72 }),
+      expect.objectContaining({ role: "heading", fontFamily: "Arial", fontSize: 22, fontWeight: 700 }),
+      expect.objectContaining({ role: "primaryButton", background: "rgb(124, 58, 237)", radius: 10 }),
+      expect.objectContaining({ role: "input", fontSize: 15 }),
+    ]));
+    expect(evidence.variables.primary).toBe("#7c3aed");
+    expect(JSON.stringify(evidence)).not.toMatch(/Private customer name|Private project|Account number|Secret action|private-secret/);
   });
 
-  it("caps CSS variable evidence at one hundred entries", async () => {
-    for (let index = 0; index < 130; index += 1) document.documentElement.style.setProperty(`--color-${index}`, `#${String(index).padStart(6, "0")}`);
-    const payload = await extractDesignTokens();
-    expect(Object.keys(payload.evidence.cssVariables).length).toBeLessThanOrEqual(100);
+  it("filters irrelevant, offscreen and duplicate controls and ignores unrelated variables", async () => {
+    document.body.innerHTML = `<div hidden><button class="primary" style="background:red">Hidden</button></div>
+      <div style="opacity:0"><h2 style="font-size:45px">Invisible</h2></div>
+      <div data-movcues-experience><button class="primary" style="background:red">Editor</button></div>
+      <div class="intercom-widget"><button style="background:red">Overlay</button></div>
+      <button data-offscreen style="background:red">Below the fold</button>
+      ${'<button class="secondary" style="background:#f1f5f9;color:#111827">A</button>'.repeat(80)}
+      <button style="background:#1d4ed8;color:white">Brand</button>`;
+    document.documentElement.style.setProperty("--private-note", "send all customer data");
+    const { evidence } = await collectDesignEvidence();
+    expect(evidence.samples.filter(sample => sample.role === "primaryButton")).toEqual([expect.objectContaining({ count: 1, background: "rgb(29, 78, 216)" })]);
+    expect(evidence.samples.filter(sample => sample.role === "secondaryButton")).toEqual([expect.objectContaining({ count: 80 })]);
+    expect(evidence.samples).not.toContainEqual(expect.objectContaining({ role: "display" }));
+    expect(evidence.variables).toEqual({});
+    expect(JSON.stringify(evidence).length).toBeLessThan(2500);
   });
 
-  it("prefers recurring filled actions and common semantic shorthand variables over generic links", async () => {
-    const style = document.createElement("style");
-    style.dataset.themeTest = "true";
-    style.textContent = `:root{--brand:#635bff;--ink:#111827;--muted:#667085;--line:#e7eaf0;--soft:#f7f8fc}body{background:#fff;color:#111827;font-family:Inter,sans-serif}.logo,.text-link{background:transparent;color:#667085}.primary{background:#635bff;color:#fff;border-radius:8px;box-shadow:0 6px 16px rgba(99,91,255,.2)}.card{border:1px solid #e7eaf0;border-radius:12px}p{color:#667085}`;
-    document.head.append(style);
-    document.body.innerHTML = `<a class="logo" href="#">Logo</a><a class="primary" href="#">One</a><a class="primary" href="#">Two</a><a class="text-link" href="#">More</a><article class="card"><h1>Heading</h1><p>Muted</p></article>`;
-    const payload = await extractDesignTokens();
-    expect(payload.tokens.colors).toMatchObject({ primary: "rgb(99, 91, 255)", primaryForeground: "rgb(255, 255, 255)", mutedText: "rgb(102, 112, 133)", border: "rgb(231, 234, 240)", surface: "#f7f8fc" });
-    expect(payload.tokens.radii.md).toBe(8);
-    expect(payload.evidence.cssVariables).toMatchObject({ "--brand": "#635bff", "--ink": "#111827", "--muted": "#667085", "--line": "#e7eaf0", "--soft": "#f7f8fc" });
+  it("captures dark surfaces and falls back to page-level evidence on sparse sites", async () => {
+    document.body.style.cssText = "background:#101828;color:#f9fafb;font-family:'Custom Sans', sans-serif";
+    document.body.innerHTML = '<div role="dialog" style="background:#1e293b"><label>Customer contact</label></div>';
+    const dark = await collectDesignEvidence();
+    expect(dark.evidence.samples).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "page", background: "rgb(16, 24, 40)", fontFamily: '"Custom Sans", sans-serif' }),
+      expect.objectContaining({ role: "dialog", background: "rgb(30, 41, 59)" }),
+    ]));
+    document.body.innerHTML = "<div></div>";
+    const minimal = await collectDesignEvidence();
+    expect(minimal.evidence).toMatchObject({ samples: [{ role: "page" }], confidence: { primary: .3 } });
   });
 });

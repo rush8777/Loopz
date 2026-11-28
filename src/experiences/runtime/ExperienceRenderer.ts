@@ -1,3 +1,5 @@
+import { resolvedTheme, snapshotTheme } from "../../themes/ExperienceTheme";
+import { THEME_RUNTIME_CSS } from "./ThemeStyles";
 import type { DeliveredExperience, ExperienceAction, ExperienceBehavior, ExperienceContent, RuntimeGuideDefinition, RuntimeWidgetDefinition, SurveyAnswers } from "../types";
 import { getGuideStepPattern, isGuideDefinition } from "../types";
 import { AnchoredCardRenderer, findTarget, waitForTarget, type RenderCallbacks } from "./AnchoredCardRenderer";
@@ -62,7 +64,7 @@ export class ExperienceRenderer {
 
   private createRoot(experienceId: string): ShadowRoot {
     this.host = document.createElement("div"); this.host.dataset.movcuesExperience = experienceId; this.host.dataset.movcuesExperienceRoot = experienceId;
-    const root = this.host.attachShadow({ mode: "open" }); const style = document.createElement("style"); style.textContent = STYLES; root.appendChild(style);
+    const root = this.host.attachShadow({ mode: "open" }); const style = document.createElement("style"); style.textContent = STYLES + THEME_RUNTIME_CSS; root.appendChild(style);
     return root;
   }
 
@@ -110,7 +112,15 @@ export class ExperienceRenderer {
     const back = () => once(() => callbacks.onGuideBack?.());
     const dismiss = () => { if (generation !== this.renderGeneration) return; finished = true; callbacks.onDismiss(); this.destroy(); };
     const guarded = { ...callbacks, onGuideAdvance: advance, onGuideBack: back, onDismiss: dismiss };
-    const stepDesign = step.size ? { ...definition.design, size: step.size } : definition.design;
+    let stepDesign = step.size ? { ...definition.design, size: step.size } : definition.design;
+    const theme = stepDesign.theme.siteTheme;
+    if (theme?.version === 2 && theme.components) {
+      const state = definition.visualTheme;
+      const base = snapshotTheme(state?.baseTokens ?? theme, getGuideStepPattern(step) === "modal" ? "modal" : "guide");
+      const resolved = state ? resolvedTheme({ ...state, baseTokens: base }) : base;
+      stepDesign = { ...stepDesign, theme: { ...stepDesign.theme, background: resolved.colors.background,
+        foreground: resolved.colors.text, primary: resolved.colors.primary, spacing: state?.overrides.spacing ?? resolved.spacing, siteTheme: resolved } };
+    }
     const stepCallbacks: BuilderRenderCallbacks = {
       ordinaryActionContext: "guide",
       onDismiss: dismiss, onSecondary: dismiss,

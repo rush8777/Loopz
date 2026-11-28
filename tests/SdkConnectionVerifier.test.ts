@@ -45,7 +45,23 @@ describe("SDK connection verification", () => {
     expect(fetchMock.mock.calls[1][0]).toBe("https://api.example.com/public/sites/site_1/theme-captures/themec_1");
     const options = fetchMock.mock.calls[1][1];
     expect(options).toMatchObject({ method: "POST", credentials: "omit", headers: { "Content-Type": "application/json" } });
-    expect(JSON.parse(options.body).tokens.version).toBe(1);
+    expect(JSON.parse(options.body)).toEqual({ evidence: expect.objectContaining({
+      version: 2, samples: [expect.objectContaining({ role: "page", fontFamily: "Arial" })],
+    }) });
+  });
+
+  it("requests an explicit capture from the link and clears the token before tracking", async () => {
+    const capture = "themec_" + "a".repeat(32);
+    window.history.replaceState(null, "", `/?tab=setup&movcues_theme_capture=${capture}#tools`);
+    try {
+      const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ themeCapture: { id: capture } }) }).mockResolvedValueOnce({ ok: true });
+      vi.stubGlobal("fetch", fetchMock);
+      await acknowledgePendingSdkVerification("https://api.example.com", "site_1");
+      expect(fetchMock.mock.calls[0][0]).toContain(`&themeCapture=${capture}`);
+      expect(fetchMock.mock.calls[1][0]).toContain(capture);
+      expect(location.search).toBe("?tab=setup");
+      expect(location.hash).toBe("#tools");
+    } finally { window.history.replaceState(null, "", "/"); }
   });
 
   it("does not let verification failures interrupt SDK initialization", async () => {
